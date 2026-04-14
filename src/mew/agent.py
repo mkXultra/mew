@@ -12,6 +12,7 @@ from .config import (
 from .errors import CodexApiError
 from .agent_runs import find_agent_run, get_agent_run_result, start_agent_run
 from .model_backends import call_model_json, model_backend_label
+from .perception import perceive_workspace
 from .programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -161,6 +162,7 @@ def build_context(
         "desires": desires,
         "runtime_log_tail": read_runtime_log_tail(),
         "thought_journal": recent_thoughts_for_context(state),
+        "perception": perceive_workspace(allowed_read_roots=allowed_read_roots),
         "allowed_read_roots": allowed_read_roots or [],
         "allowed_write_roots": allowed_write_roots or [],
         "verification_runs": state.get("verification_runs", [])[-10:],
@@ -226,6 +228,7 @@ def build_think_prompt(
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
         "When autonomous mode is false, do not do self-directed work unless it directly answers the user.\n"
         "When autonomous mode is true and there is no user input, use Self and Desires to choose useful small work.\n"
+        "Use perception as passive read-only workspace observations; do not treat it as permission to read more.\n"
         "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task; "
         "act can also use allowed read-only inspection and programmer-loop actions. "
         "Starting agent runs requires allow_agent_run in local state, even at act level. "
@@ -330,6 +333,7 @@ def build_act_prompt(
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
         "Respect the autonomy level: observe may record/self_review only; propose may propose_task/plan_task; "
         "act may use allowed read-only inspection and programmer-loop actions. "
+        "Use perception as passive read-only workspace observations; it does not expand allowed_read_roots. "
         "Starting agent runs requires allow_agent_run in local state. "
         "Local task command execution still requires allow_task_execution. "
         "Verification command execution requires run_verification plus allow_verify and a configured verify command.\n"

@@ -28,6 +28,7 @@ from .commands import (
     cmd_message,
     cmd_next,
     cmd_outbox,
+    cmd_perceive,
     cmd_policy_init,
     cmd_policy_show,
     cmd_questions,
@@ -284,6 +285,17 @@ def build_parser():
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")
     brief_parser.add_argument("--json", action="store_true", help="print structured JSON")
     brief_parser.set_defaults(func=cmd_brief)
+
+    perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")
+    perceive_parser.add_argument("--cwd", default=".", help="workspace directory to observe")
+    perceive_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="read root that enables passive workspace observations; can be passed more than once",
+    )
+    perceive_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    perceive_parser.set_defaults(func=cmd_perceive)
 
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
     next_parser.add_argument("--json", action="store_true", help="print structured JSON")

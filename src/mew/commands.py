@@ -23,6 +23,7 @@ from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
 from .errors import MewError
 from .memory import compact_memory
+from .perception import format_perception, perceive_workspace
 from .programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -520,6 +521,15 @@ def cmd_brief(args):
         print(json.dumps(build_brief_data(state, limit=args.limit), ensure_ascii=False, indent=2))
         return 0
     print(build_brief(state, limit=args.limit))
+    return 0
+
+def cmd_perceive(args):
+    roots = args.allow_read or []
+    perception = perceive_workspace(allowed_read_roots=roots, cwd=args.cwd)
+    if args.json:
+        print(json.dumps(perception, ensure_ascii=False, indent=2))
+        return 0
+    print(format_perception(perception))
     return 0
 
 def cmd_next(args):
@@ -1626,6 +1636,7 @@ CHAT_HELP = """Commands:
 /brief                show the current operational brief
 /next                 show the next useful move
 /status               show compact runtime status
+/perception           show passive workspace observations
 /add <title> [| desc] create a task from chat
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
@@ -1687,6 +1698,10 @@ def print_chat_status():
         f"attention={len(open_attention_items(state))} unread={len(unread)} running_agents={len(running_agents)}"
     )
     print(f"next: {next_move(state)}")
+
+
+def print_chat_perception():
+    print(format_perception(perceive_workspace(allowed_read_roots=["."], cwd=".")))
 
 
 def print_chat_tasks(show_all=False):
@@ -2462,6 +2477,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "status":
         print_chat_status()
+        return "continue"
+    if command in ("perception", "perceive"):
+        print_chat_perception()
         return "continue"
     if command == "add":
         chat_add_task(rest)

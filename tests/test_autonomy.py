@@ -92,6 +92,7 @@ class AutonomyTests(unittest.TestCase):
 
         context = build_context(state, event, "later")
         self.assertEqual(context["thought_journal"][0]["summary"], "Recorded continuity.")
+        self.assertEqual(context["perception"]["observations"][1]["status"], "disabled")
 
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()

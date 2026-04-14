@@ -79,6 +79,7 @@ uv run mew message "今日のタスクは何？" --wait
 uv run mew chat
 uv run mew brief
 uv run mew brief --json
+uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json
 uv run mew verification
@@ -120,6 +121,7 @@ state without leaving the session:
 ```text
 /brief
 /next
+/perception
 /tasks
 /questions
 /add "調査する" | "対象を小さく確認する"
@@ -157,6 +159,14 @@ state without leaving the session:
 ```
 
 ## Safe Tools
+
+`mew perceive` shows the small passive workspace observations that are injected
+into the model context when a read root is allowed:
+
+```sh
+uv run mew perceive --allow-read .
+uv run mew perceive --allow-read . --json
+```
 
 `mew tool` gives AI-facing workspace tools with bounded read, write-preview,
 verification, and read-only git helpers:
