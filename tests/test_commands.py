@@ -9,7 +9,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from mew.cli import main
 from mew.errors import MewError
@@ -108,6 +108,30 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue((Path(".mew") / "policy.md").exists())
                 self.assertTrue((Path(".mew") / "self.md").exists())
                 self.assertTrue((Path(".mew") / "desires.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_start_spawns_background_runtime_and_waits(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                process = Mock()
+                process.pid = 456
+                process.poll.return_value = None
+                with (
+                    patch("mew.commands.runtime_is_active", side_effect=[False, True]),
+                    patch("mew.commands.subprocess.Popen", return_value=process) as popen,
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["start", "--", "--autonomous"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("started runtime pid=456", stdout.getvalue())
+                self.assertIn("runtime is active", stdout.getvalue())
+                command = popen.call_args.args[0]
+                self.assertEqual(command[-2:], ["run", "--autonomous"])
+                self.assertTrue((Path(".mew") / "runtime.out").exists())
             finally:
                 os.chdir(old_cwd)
 

@@ -10,6 +10,8 @@ It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, a
 uv run mew doctor --auth auth.json
 uv run mew task add "Improve mew" --description "Pick one small useful improvement"
 uv run mew run --autonomous --autonomy-level propose --echo-outbox
+# or run it in the background:
+uv run mew start -- --autonomous --autonomy-level propose
 ```
 
 In another shell:
@@ -64,6 +66,7 @@ uv run mew run --autonomous --autonomy-level act \
 
 ```sh
 uv run mew status
+uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
 uv run mew brief

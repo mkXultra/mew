@@ -3,6 +3,7 @@ import os
 import select
 import signal
 import shutil
+import subprocess
 import sys
 import time
 
@@ -17,7 +18,7 @@ from .agent_runs import (
 )
 from .brief import build_brief, next_move, verification_outcome
 from .codex_api import load_codex_oauth
-from .config import LOG_FILE
+from .config import LOG_FILE, STATE_DIR
 from .errors import MewError
 from .memory import compact_memory
 from .programmer import (
@@ -38,6 +39,7 @@ from .state import (
     ensure_guidance,
     ensure_policy,
     ensure_self,
+    ensure_state_dir,
     find_question,
     load_state,
     mark_message_read,
@@ -360,6 +362,47 @@ def cmd_status(args):
     print(f"latest_summary: {latest_summary}")
     print(f"next_move: {next_move(state)}")
     return 0
+
+def cmd_start(args):
+    if runtime_is_active():
+        lock = read_lock()
+        print(f"mew: runtime is already running pid={lock.get('pid')}", file=sys.stderr)
+        return 1
+
+    ensure_state_dir()
+    run_args = list(args.run_args or [])
+    if run_args and run_args[0] == "--":
+        run_args = run_args[1:]
+    command = [sys.executable, "-m", "mew", "run", *run_args]
+    output_path = STATE_DIR / "runtime.out"
+    with output_path.open("ab") as output:
+        process = subprocess.Popen(
+            command,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    print(f"started runtime pid={process.pid} output={output_path}")
+    print("command: " + " ".join(command))
+    if not args.wait:
+        return 0
+
+    deadline = time.monotonic() + max(0.0, args.timeout)
+    while time.monotonic() < deadline:
+        if runtime_is_active():
+            print("runtime is active")
+            return 0
+        if process.poll() is not None:
+            print(
+                f"mew: runtime exited before becoming active exit_code={process.returncode}",
+                file=sys.stderr,
+            )
+            return 1
+        time.sleep(max(0.01, args.poll_interval))
+
+    print("mew: timed out waiting for runtime to become active", file=sys.stderr)
+    return 1
 
 def cmd_stop(args):
     lock = read_lock()

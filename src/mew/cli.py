@@ -33,6 +33,7 @@ from .commands import (
     cmd_self_init,
     cmd_self_improve,
     cmd_self_show,
+    cmd_start,
     cmd_status,
     cmd_stop,
     cmd_task_add,
@@ -202,6 +203,18 @@ def build_parser():
         help="Codex Web API request timeout in seconds",
     )
     run_parser.set_defaults(func=run_runtime)
+
+    start_parser = subparsers.add_parser("start", help="start the runtime in the background")
+    start_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after spawning")
+    start_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for startup")
+    start_parser.add_argument("--poll-interval", type=float, default=0.1, help="startup poll interval in seconds")
+    start_parser.add_argument(
+        "run_args",
+        nargs=argparse.REMAINDER,
+        help="arguments passed to `mew run`; use `mew start -- --autonomous`",
+    )
+    start_parser.set_defaults(wait=True)
+    start_parser.set_defaults(func=cmd_start)
 
     status_parser = subparsers.add_parser("status", help="show runtime status")
     status_parser.set_defaults(func=cmd_status)
