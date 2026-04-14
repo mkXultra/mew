@@ -17,6 +17,7 @@ uv run mew start -- --autonomous --autonomy-level propose
 In another shell:
 
 ```sh
+uv run mew chat
 uv run mew attach -m "今日のタスクは何？"
 uv run mew message "今日のタスクは何？" --wait
 uv run mew brief
@@ -74,6 +75,7 @@ uv run mew status --json
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
+uv run mew chat
 uv run mew brief
 uv run mew brief --json
 uv run mew next
@@ -91,6 +93,24 @@ uv run mew archive
 uv run mew archive --apply
 uv run mew run --auto-archive
 uv run mew memory --compact
+```
+
+## Chat
+
+`mew chat` is the human-facing REPL for a running runtime. Non-slash input is
+sent to mew as a user message, and slash commands let you inspect or update
+state without leaving the session:
+
+```text
+/brief
+/next
+/tasks
+/questions
+/reply 3 それで進めて
+/attention
+/ack all
+/activity off
+/exit
 ```
 
 ## Safe Tools

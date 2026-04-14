@@ -290,6 +290,58 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_handles_slash_commands_and_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Chat interface",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    save_state(state)
+
+                stdin = StringIO("/next\nhello mew\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("mew chat", output)
+                self.assertIn("mew task plan 1", output)
+                self.assertIn("queued message event", output)
+
+                state = load_state()
+                self.assertEqual(state["inbox"][0]["payload"]["text"], "hello mew")
+            finally:
+                os.chdir(old_cwd)
+
     def test_tool_read_prints_non_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,6 +16,7 @@ from .commands import (
     cmd_archive,
     cmd_attention,
     cmd_brief,
+    cmd_chat,
     cmd_desires_init,
     cmd_desires_show,
     cmd_doctor,
@@ -477,6 +478,22 @@ def build_parser():
     attach_parser.add_argument("--timeout", type=float, help="detach after this many seconds")
     attach_parser.set_defaults(activity=True)
     attach_parser.set_defaults(func=cmd_attach)
+
+    chat_parser = subparsers.add_parser("chat", help="human-friendly chat REPL for mew")
+    chat_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
+        help=f"poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
+    )
+    chat_parser.add_argument("--limit", type=int, default=5, help="maximum items in the startup brief")
+    chat_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
+    chat_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
+    chat_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
+    chat_parser.add_argument("--no-unread", action="store_true", help="do not print unread messages on startup")
+    chat_parser.add_argument("--timeout", type=float, help="leave chat after this many seconds")
+    chat_parser.set_defaults(activity=True)
+    chat_parser.set_defaults(func=cmd_chat)
 
     log_parser = subparsers.add_parser("log", help="show runtime log")
     log_parser.set_defaults(func=cmd_log)

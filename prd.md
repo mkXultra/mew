@@ -670,6 +670,7 @@ The first user-facing version should likely include:
 - `mew listen`: stream newly created outbox messages.
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
+- `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
 - `mew questions`: show open questions that block progress.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.
 - `mew ack <message-id...>`: mark one or more outbox messages as read.

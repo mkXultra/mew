@@ -1,6 +1,7 @@
 import json
 import os
 import select
+import shlex
 import signal
 import shutil
 import subprocess
@@ -1596,6 +1597,241 @@ def cmd_listen(args):
         return stream_outbox_and_input(args, allow_input=False)
     except KeyboardInterrupt:
         print("\nstopped listening")
+        return 0
+
+CHAT_HELP = """Commands:
+/help                 show this help
+/brief                show the current operational brief
+/next                 show the next useful move
+/status               show compact runtime status
+/tasks [all]          list open tasks, or all tasks
+/questions [all]      list open questions, or all questions
+/attention [all]      list open attention items, or all attention items
+/outbox [all]         list unread outbox messages, or all messages
+/ack all|<ids...>     mark outbox messages as read
+/reply <id> <text>    answer an open question
+/activity on|off      toggle runtime activity lines
+/history              print all outbox messages
+/exit                 leave chat
+Any non-slash line is sent to mew as a user message."""
+
+CHAT_EOF = object()
+
+
+def print_chat_status():
+    state = load_state()
+    lock = read_lock()
+    lock_state = "none"
+    if lock:
+        lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
+    unread = [message for message in state["outbox"] if not message.get("read_at")]
+    running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    print(f"runtime: {state['runtime_status'].get('state')} lock={lock_state} pid={state['runtime_status'].get('pid')}")
+    print(f"agent: {state['agent_status'].get('mode')} focus={state['agent_status'].get('current_focus') or '(none)'}")
+    print(
+        f"counts: tasks={len(open_tasks(state))} questions={len(open_questions(state))} "
+        f"attention={len(open_attention_items(state))} unread={len(unread)} running_agents={len(running_agents)}"
+    )
+    print(f"next: {next_move(state)}")
+
+
+def print_chat_tasks(show_all=False):
+    state = load_state()
+    tasks = state["tasks"] if show_all else open_tasks(state)
+    tasks = sorted(tasks, key=task_sort_key)
+    if not tasks:
+        print("No tasks.")
+        return
+    for task in tasks:
+        print(format_task(task))
+
+
+def print_chat_questions(show_all=False):
+    state = load_state()
+    questions = state["questions"] if show_all else open_questions(state)
+    if not questions:
+        print("No questions.")
+        return
+    for question in questions:
+        status = question.get("status")
+        task = question.get("related_task_id")
+        task_text = f" task=#{task}" if task else ""
+        print(f"#{question['id']} [{status}]{task_text} {question['text']}")
+
+
+def print_chat_attention(show_all=False):
+    state = load_state()
+    items = state["attention"]["items"] if show_all else open_attention_items(state)
+    if not items:
+        print("No attention items.")
+        return
+    for item in items:
+        print(f"#{item['id']} [{item.get('status')}/{item.get('priority')}] {item.get('title')}: {item.get('reason')}")
+
+
+def print_chat_outbox(show_all=False):
+    state = load_state()
+    messages = state["outbox"] if show_all else [message for message in state["outbox"] if not message.get("read_at")]
+    if not messages:
+        print("No messages.")
+        return
+    print_outbox_messages(messages)
+
+
+def run_chat_slash_command(line, chat_state):
+    body = line[1:].strip()
+    command, _, rest = body.partition(" ")
+    command = command.casefold()
+    rest = rest.strip()
+
+    if command in ("exit", "quit", "q"):
+        return "exit"
+    if command in ("help", "?"):
+        print(CHAT_HELP)
+        return "continue"
+    if command == "brief":
+        print(build_brief(load_state()))
+        return "continue"
+    if command == "next":
+        print(next_move(load_state()))
+        return "continue"
+    if command == "status":
+        print_chat_status()
+        return "continue"
+    if command in ("tasks", "task"):
+        print_chat_tasks(show_all=rest.casefold() == "all")
+        return "continue"
+    if command in ("questions", "question"):
+        print_chat_questions(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "attention":
+        print_chat_attention(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "outbox":
+        print_chat_outbox(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "history":
+        print_chat_outbox(show_all=True)
+        return "continue"
+    if command == "activity":
+        value = rest.casefold()
+        if value in ("on", "true", "1"):
+            chat_state["activity"] = True
+            chat_state["activity_offset"] = current_log_offset()
+            print("activity: on")
+        elif value in ("off", "false", "0"):
+            chat_state["activity"] = False
+            print("activity: off")
+        else:
+            print("usage: /activity on|off")
+        return "continue"
+    if command == "ack":
+        if not rest:
+            print("usage: /ack all|<ids...>")
+            return "continue"
+        if rest.casefold() == "all":
+            with state_lock():
+                state = load_state()
+                ids = [message.get("id") for message in state["outbox"] if not message.get("read_at")]
+            mark_outbox_read(ids)
+            print(f"acknowledged {len(ids)} message(s)")
+            return "continue"
+        try:
+            ids = shlex.split(rest)
+        except ValueError as exc:
+            print(f"mew: {exc}")
+            return "continue"
+        mark_outbox_read(ids)
+        print(f"acknowledged {len(ids)} message(s)")
+        return "continue"
+    if command == "reply":
+        question_id, _, text = rest.partition(" ")
+        if not question_id or not text.strip():
+            print("usage: /reply <question-id> <text>")
+            return "continue"
+        with state_lock():
+            state = load_state()
+            question = find_question(state, question_id)
+            if not question:
+                print(f"mew: question not found: {question_id}")
+                return "continue"
+        event = queue_user_message(text.strip(), reply_to_question_id=question_id)
+        print(f"answered question #{question_id} with event #{event['id']}")
+        return "continue"
+
+    print(f"unknown command: /{command}. Type /help.")
+    return "continue"
+
+
+def read_chat_line(poll_interval, prompt_state):
+    if not sys.stdin.isatty():
+        line = sys.stdin.readline()
+        if line == "":
+            return CHAT_EOF
+        return line.rstrip("\n")
+
+    if prompt_state.get("needed", True):
+        print("mew> ", end="", flush=True)
+        prompt_state["needed"] = False
+
+    readable, _, _ = select.select([sys.stdin], [], [], poll_interval)
+    if not readable:
+        return None
+    line = sys.stdin.readline()
+    prompt_state["needed"] = True
+    if line == "":
+        return CHAT_EOF
+    return line.rstrip("\n")
+
+
+def cmd_chat(args):
+    warn_if_runtime_inactive()
+    print("mew chat. Type /help for commands, /exit to leave.", flush=True)
+    if not args.no_brief:
+        print(build_brief(load_state(), limit=args.limit), flush=True)
+
+    seen_ids = emit_initial_outbox(
+        history=False,
+        unread=not args.no_unread,
+        mark_read=args.mark_read,
+    )
+    chat_state = {
+        "activity": bool(args.activity),
+        "activity_offset": current_log_offset() if args.activity else None,
+    }
+    prompt_state = {"needed": True}
+    deadline = time.monotonic() + max(0.0, args.timeout) if args.timeout is not None else None
+
+    try:
+        while True:
+            emit_new_outbox(seen_ids, args.mark_read)
+            if chat_state["activity"]:
+                chat_state["activity_offset"] = emit_new_activity(chat_state["activity_offset"])
+            if deadline is not None and time.monotonic() >= deadline:
+                return 0
+
+            poll_interval = args.poll_interval
+            if deadline is not None:
+                poll_interval = min(poll_interval, max(0.0, deadline - time.monotonic()))
+
+            line = read_chat_line(poll_interval, prompt_state)
+            if line is None:
+                continue
+            if line is CHAT_EOF:
+                return 0
+            text = line.strip()
+            if not text:
+                continue
+            if text.startswith("/"):
+                result = run_chat_slash_command(text, chat_state)
+                if result == "exit":
+                    return 0
+                continue
+
+            event = queue_user_message(text)
+            print(f"queued message event #{event['id']}", flush=True)
+    except KeyboardInterrupt:
+        print("\nleft chat")
         return 0
 
 def cmd_log(args):
