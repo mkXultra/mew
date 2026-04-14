@@ -1616,6 +1616,9 @@ CHAT_HELP = """Commands:
 /why                  explain the latest processed think/act decision
 /digest               summarize activity since the last user message
 /approve <task-id>    mark a task ready and auto_execute=true
+/ready <task-id>      mark a task ready without changing auto_execute
+/done <task-id>       mark a task done
+/block <task-id>      mark a task blocked
 /dispatch <task-id>   start an implementation run; add dry-run to preview
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
@@ -1877,6 +1880,19 @@ def chat_approve_task(task_id):
     print(f"approved task #{task_id}: ready auto_execute=true")
 
 
+def chat_set_task_status(task_id, status):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        task["status"] = status
+        task["updated_at"] = now_iso()
+        save_state(state)
+    print(f"task #{task_id} status={status}")
+
+
 def chat_dispatch_task(rest):
     try:
         parts = shlex.split(rest)
@@ -1969,6 +1985,24 @@ def run_chat_slash_command(line, chat_state):
             print("usage: /approve <task-id>")
         else:
             chat_approve_task(rest)
+        return "continue"
+    if command == "ready":
+        if not rest:
+            print("usage: /ready <task-id>")
+        else:
+            chat_set_task_status(rest, "ready")
+        return "continue"
+    if command == "done":
+        if not rest:
+            print("usage: /done <task-id>")
+        else:
+            chat_set_task_status(rest, "done")
+        return "continue"
+    if command in ("block", "blocked"):
+        if not rest:
+            print("usage: /block <task-id>")
+        else:
+            chat_set_task_status(rest, "blocked")
         return "continue"
     if command == "dispatch":
         chat_dispatch_task(rest)

@@ -422,8 +422,11 @@ class CommandTests(unittest.TestCase):
                     "/digest\n"
                     "/pause testing\n"
                     "/mode act\n"
+                    "/ready 1\n"
                     "/approve 1\n"
                     "/dispatch 1 dry-run\n"
+                    "/block 1\n"
+                    "/done 1\n"
                     "/resume\n"
                     "/exit\n"
                 )
@@ -440,14 +443,17 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("Digest since", output)
                 self.assertIn("autonomy paused", output)
                 self.assertIn("mode override: act", output)
+                self.assertIn("task #1 status=ready", output)
                 self.assertIn("approved task #1", output)
                 self.assertIn("created dry-run implementation run", output)
+                self.assertIn("task #1 status=blocked", output)
+                self.assertIn("task #1 status=done", output)
                 self.assertIn("autonomy resumed", output)
 
                 state = load_state()
                 self.assertFalse(state["autonomy"]["paused"])
                 self.assertEqual(state["autonomy"]["level_override"], "act")
-                self.assertEqual(state["tasks"][0]["status"], "ready")
+                self.assertEqual(state["tasks"][0]["status"], "done")
                 self.assertTrue(state["tasks"][0]["auto_execute"])
                 self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
             finally:

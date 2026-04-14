@@ -114,7 +114,10 @@ state without leaving the session:
 /why
 /digest
 /approve 4
+/ready 4
 /dispatch 4 dry-run
+/done 4
+/block 4
 /pause
 /resume
 /mode act
