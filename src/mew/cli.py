@@ -229,6 +229,7 @@ def build_parser():
     start_parser.set_defaults(func=cmd_start)
 
     status_parser = subparsers.add_parser("status", help="show runtime status")
+    status_parser.add_argument("--json", action="store_true", help="print structured JSON")
     status_parser.set_defaults(func=cmd_status)
 
     stop_parser = subparsers.add_parser("stop", help="stop the active runtime")
@@ -263,9 +264,11 @@ def build_parser():
 
     brief_parser = subparsers.add_parser("brief", help="show a compact operational brief")
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")
+    brief_parser.add_argument("--json", action="store_true", help="print structured JSON")
     brief_parser.set_defaults(func=cmd_brief)
 
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
+    next_parser.add_argument("--json", action="store_true", help="print structured JSON")
     next_parser.set_defaults(func=cmd_next)
 
     verification_parser = subparsers.add_parser("verification", help="show runtime verification runs")

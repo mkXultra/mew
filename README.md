@@ -70,11 +70,14 @@ passive alert.
 
 ```sh
 uv run mew status
+uv run mew status --json
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
 uv run mew brief
+uv run mew brief --json
 uv run mew next
+uv run mew next --json
 uv run mew verification
 uv run mew writes
 uv run mew self-improve --focus "Make one small mew improvement"

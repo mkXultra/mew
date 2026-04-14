@@ -237,6 +237,59 @@ class CommandTests(unittest.TestCase):
         kill.assert_called_once_with(123, signal.SIGTERM)
         self.assertIn("runtime stopped", stdout.getvalue())
 
+    def test_status_brief_and_next_support_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "JSON interface",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["status", "--json"]), 0)
+                status = json.loads(stdout.getvalue())
+                self.assertEqual(status["counts"]["open_tasks"], 1)
+                self.assertIn("next_move", status)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["brief", "--json"]), 0)
+                brief = json.loads(stdout.getvalue())
+                self.assertEqual(brief["open_tasks"][0]["title"], "JSON interface")
+                self.assertIn("programmer_queue", brief)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["next", "--json"]), 0)
+                next_data = json.loads(stdout.getvalue())
+                self.assertIn("next_move", next_data)
+                self.assertEqual(next_data["command"], "mew task plan 1")
+            finally:
+                os.chdir(old_cwd)
+
     def test_tool_read_prints_non_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

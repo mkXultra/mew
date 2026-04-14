@@ -654,10 +654,13 @@ The first user-facing version should likely include:
 - `mew run --echo-outbox`: print newly created outbox messages in the runtime terminal for debugging.
 - `mew start -- <run-args>`: start `mew run` in the background and write process output to `.mew/runtime.out`.
 - `mew status`: show whether the background AI is running and what it last did.
+- `mew status --json`: show runtime status and counters as structured JSON.
 - `mew stop`: stop the active background runtime and wait for shutdown.
 - `mew doctor`: check local state, runtime lock, and required local tools.
 - `mew brief`: show the current operational summary and next useful move.
+- `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew next`: print the single next useful command or move.
+- `mew next --json`: print the next move and extracted command as structured JSON.
 - `mew verification`: show recent runtime verification runs.
 - `mew writes`: show recent runtime write/edit runs and optional diffs.
 - `mew tool`: expose safe AI-facing workspace inspection, write/edit, search, test, and read-only git helpers.

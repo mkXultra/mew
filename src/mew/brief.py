@@ -77,6 +77,131 @@ def recent_verification_runs(state, limit=5):
     return list(reversed(runs[-limit:]))
 
 
+def _message_item(message):
+    return {
+        "id": message.get("id"),
+        "type": message.get("type"),
+        "text": message.get("text") or "",
+        "event_id": message.get("event_id"),
+        "related_task_id": message.get("related_task_id"),
+        "created_at": message.get("created_at"),
+        "read_at": message.get("read_at"),
+    }
+
+
+def _attention_item(item):
+    return {
+        "id": item.get("id"),
+        "kind": item.get("kind"),
+        "title": item.get("title"),
+        "reason": item.get("reason"),
+        "priority": item.get("priority"),
+        "related_task_id": item.get("related_task_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _question_item(question):
+    return {
+        "id": question.get("id"),
+        "text": question.get("text"),
+        "related_task_id": question.get("related_task_id"),
+        "status": question.get("status"),
+        "created_at": question.get("created_at"),
+        "acknowledged_at": question.get("acknowledged_at"),
+    }
+
+
+def _task_item(task):
+    return {
+        "id": task.get("id"),
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "priority": task.get("priority"),
+        "auto_execute": task.get("auto_execute"),
+        "cwd": task.get("cwd"),
+        "agent_run_id": task.get("agent_run_id"),
+        "latest_plan_id": task.get("latest_plan_id"),
+        "updated_at": task.get("updated_at"),
+    }
+
+
+def _agent_run_item(run):
+    return {
+        "id": run.get("id"),
+        "task_id": run.get("task_id"),
+        "purpose": run.get("purpose") or "implementation",
+        "backend": run.get("backend"),
+        "model": run.get("model"),
+        "status": run.get("status"),
+        "external_pid": run.get("external_pid"),
+        "plan_id": run.get("plan_id"),
+        "review_of_run_id": run.get("review_of_run_id"),
+        "updated_at": run.get("updated_at"),
+    }
+
+
+def _verification_item(run):
+    return {
+        "id": run.get("id"),
+        "outcome": verification_outcome(run),
+        "exit_code": run.get("exit_code"),
+        "command": run.get("command"),
+        "reason": run.get("reason"),
+        "finished_at": run.get("finished_at") or run.get("updated_at") or run.get("created_at"),
+    }
+
+
+def build_brief_data(state, limit=5):
+    memory = state.get("memory", {})
+    shallow = memory.get("shallow", {})
+    attention = [
+        item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
+    ]
+    questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
+    tasks = sorted(open_tasks(state), key=task_sort_key)
+    unread = open_unread_messages(state)
+    running_runs = running_agent_runs(state)
+    review_waiting = implementation_runs_needing_review(state)
+    followup_waiting = review_runs_needing_followup(state)
+    dispatchable = dispatchable_planned_tasks(tasks)
+    plan_needed = tasks_needing_plan(tasks)
+
+    return {
+        "generated_at": now_iso(),
+        "runtime": state.get("runtime_status", {}),
+        "agent": state.get("agent_status", {}),
+        "autonomy": state.get("autonomy", {}),
+        "user": state.get("user_status", {}),
+        "unread_outbox": [_message_item(message) for message in unread[:limit]],
+        "unread_outbox_count": len(unread),
+        "memory": {
+            "current_context": _first_nonempty(shallow.get("current_context"), ""),
+            "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
+        },
+        "attention": [_attention_item(item) for item in attention[:limit]],
+        "open_questions": [_question_item(question) for question in questions[:limit]],
+        "open_tasks": [_task_item(task) for task in tasks[:limit]],
+        "open_task_count": len(tasks),
+        "running_agents": [_agent_run_item(run) for run in running_runs[:limit]],
+        "recent_verification": [
+            _verification_item(run) for run in recent_verification_runs(state, limit=limit)
+        ],
+        "programmer_queue": {
+            "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
+            "followup_needed": [_agent_run_item(run) for run in followup_waiting[:limit]],
+            "dispatchable": [
+                {"task": _task_item(task), "plan_id": plan.get("id")}
+                for task, plan in dispatchable[:limit]
+            ],
+            "plan_needed": [_task_item(task) for task in plan_needed[:limit]],
+        },
+        "next_move": next_move(state),
+    }
+
+
 def next_move(state):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
     tasks = sorted(open_tasks(state), key=task_sort_key)

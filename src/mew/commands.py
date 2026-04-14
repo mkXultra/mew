@@ -17,7 +17,7 @@ from .agent_runs import (
     wait_agent_run,
 )
 from .archive import archive_state_records, format_archive_result
-from .brief import build_brief, next_move, verification_outcome
+from .brief import build_brief, build_brief_data, next_move, verification_outcome
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
 from .errors import MewError
@@ -334,6 +334,38 @@ def cmd_status(args):
     questions = open_questions(state)
     attention = open_attention_items(state)
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "runtime_status": runtime,
+                    "agent_status": agent,
+                    "user_status": user,
+                    "autonomy": autonomy,
+                    "lock": {
+                        "state": lock_state,
+                        "pid": (lock or {}).get("pid") if lock else None,
+                        "started_at": (lock or {}).get("started_at") if lock else None,
+                    },
+                    "counts": {
+                        "open_tasks": len(open_tasks(state)),
+                        "open_questions": len(questions),
+                        "open_attention": len(attention),
+                        "running_agent_runs": len(running_agents),
+                        "unread_outbox": len(unread),
+                    },
+                    "top_attention": attention[0] if attention else None,
+                    "latest_summary": (
+                        state.get("memory", {}).get("shallow", {}).get("current_context")
+                        or state["knowledge"]["shallow"].get("latest_task_summary")
+                    ),
+                    "next_move": next_move(state),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     print(f"runtime_status: {runtime.get('state')}")
     print(f"pid: {runtime.get('pid')}")
     print(f"lock: {lock_state}")
@@ -479,13 +511,34 @@ def cmd_doctor(args):
 
 def cmd_brief(args):
     state = load_state()
+    if args.json:
+        print(json.dumps(build_brief_data(state, limit=args.limit), ensure_ascii=False, indent=2))
+        return 0
     print(build_brief(state, limit=args.limit))
     return 0
 
 def cmd_next(args):
     state = load_state()
-    print(next_move(state))
+    move = next_move(state)
+    if args.json:
+        print(
+            json.dumps(
+                {"next_move": move, "command": command_from_next_move(move)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(move)
     return 0
+
+def command_from_next_move(move):
+    parts = (move or "").split("`")
+    for index in range(1, len(parts), 2):
+        candidate = parts[index].strip()
+        if candidate.startswith("mew ") or candidate.startswith("uv run mew "):
+            return candidate
+    return ""
 
 def format_verification_run(run):
     return (
