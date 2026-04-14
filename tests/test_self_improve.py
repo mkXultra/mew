@@ -123,6 +123,13 @@ class SelfImproveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                verify_calls = []
+
+                class VerifyResult:
+                    returncode = 0
+                    stdout = "verified"
+                    stderr = ""
+
                 def fake_start_agent_run(state, run):
                     run["status"] = "running"
                     run["external_pid"] = 1000 + run["id"]
@@ -159,33 +166,93 @@ class SelfImproveTests(unittest.TestCase):
                     sync_task_with_agent_run(state, run, run["updated_at"])
                     return run
 
+                def fake_verify_run(argv, **kwargs):
+                    verify_calls.append((argv, kwargs))
+                    return VerifyResult()
+
                 with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
                     with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
-                        with redirect_stdout(StringIO()) as stdout:
-                            code = main(
-                                [
-                                    "self-improve",
-                                    "--cycle",
-                                    "--focus",
-                                    "Run a supervised cycle",
-                                    "--timeout",
-                                    "1",
-                                ]
-                            )
+                        with patch("mew.commands.subprocess.run", side_effect=fake_verify_run):
+                            with redirect_stdout(StringIO()) as stdout:
+                                code = main(
+                                    [
+                                        "self-improve",
+                                        "--cycle",
+                                        "--focus",
+                                        "Run a supervised cycle",
+                                        "--timeout",
+                                        "1",
+                                        "--verify-command",
+                                        "CHECK=1 verifier --ok",
+                                    ]
+                                )
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("implementation run #1 status=completed", output)
+                self.assertIn("verification exit_code=0", output)
                 self.assertIn("review run #2 status=completed", output)
                 self.assertIn("review status=pass", output)
+                self.assertEqual(verify_calls[0][0], ["verifier", "--ok"])
+                self.assertEqual(verify_calls[0][1]["env"]["CHECK"], "1")
 
                 state = load_state()
                 self.assertEqual(len(state["tasks"]), 1)
                 self.assertEqual(state["tasks"][0]["status"], "done")
                 self.assertEqual(len(state["agent_runs"]), 2)
+                self.assertEqual(state["agent_runs"][0]["supervisor_verification"]["exit_code"], 0)
+                self.assertEqual(state["agent_runs"][0]["supervisor_verification"]["stdout"], "verified")
                 self.assertEqual(state["agent_runs"][1]["purpose"], "review")
                 self.assertEqual(state["agent_runs"][1]["review_status"], "pass")
                 self.assertTrue(state["agent_runs"][1]["followup_processed_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_cycle_stops_when_verification_fails(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                class VerifyResult:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "failed"
+
+                def fake_start_agent_run(state, run):
+                    run["status"] = "running"
+                    run["external_pid"] = 3000 + run["id"]
+                    return run
+
+                def fake_wait_agent_run(state, run, timeout=None):
+                    run["status"] = "completed"
+                    run["finished_at"] = now_iso()
+                    run["updated_at"] = run["finished_at"]
+                    run["result"] = json.dumps(
+                        [{"status": "completed", "agentOutput": {"message": "implemented"}}]
+                    )
+                    sync_task_with_agent_run(state, run, run["updated_at"])
+                    return run
+
+                with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
+                    with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
+                        with patch("mew.commands.subprocess.run", return_value=VerifyResult()):
+                            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                                code = main(
+                                    [
+                                        "self-improve",
+                                        "--cycle",
+                                        "--focus",
+                                        "Stop on failed verification",
+                                        "--verify-command",
+                                        "verifier",
+                                    ]
+                                )
+
+                self.assertEqual(code, 1)
+                state = load_state()
+                self.assertEqual(len(state["agent_runs"]), 1)
+                self.assertEqual(state["agent_runs"][0]["supervisor_verification"]["exit_code"], 1)
+                self.assertEqual(state["tasks"][0]["status"], "blocked")
             finally:
                 os.chdir(old_cwd)
 

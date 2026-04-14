@@ -208,6 +208,16 @@ def build_parser():
     )
     self_improve_parser.add_argument("--timeout", type=float, default=900.0, help="agent wait timeout per run")
     self_improve_parser.add_argument(
+        "--verify-command",
+        help="command to run after implementation and before review in --cycle mode",
+    )
+    self_improve_parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=300.0,
+        help="verification command timeout in seconds",
+    )
+    self_improve_parser.add_argument(
         "--allow-unknown-review",
         action="store_true",
         help="continue supervised cycles when a review returns unknown",

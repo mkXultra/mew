@@ -1,5 +1,8 @@
+import os
 import select
+import shlex
 import shutil
+import subprocess
 import sys
 import time
 
@@ -29,6 +32,7 @@ from .programmer import (
 )
 from .self_improve import create_self_improve_task, ensure_self_improve_plan
 from .state import (
+    add_outbox_message,
     add_event,
     ensure_desires,
     ensure_guidance,
@@ -51,7 +55,7 @@ from .state import (
     state_lock,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
-from .tasks import find_task, format_task, open_tasks, task_sort_key
+from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_key
 from .timeutil import now_iso
 
 
@@ -494,6 +498,104 @@ def _wait_cycle_run(args, run_id):
         save_state(state)
     return run
 
+def _split_command_env(command):
+    parts = shlex.split(command or "")
+    env_overrides = {}
+    while parts:
+        head = parts[0]
+        if "=" not in head:
+            break
+        key, value = head.split("=", 1)
+        if not key.replace("_", "").isalnum() or key[:1].isdigit():
+            break
+        env_overrides[key] = value
+        parts = parts[1:]
+    return parts, env_overrides
+
+def _run_verification_command(command, cwd, timeout):
+    argv, env_overrides = _split_command_env(command)
+    if not argv:
+        raise MewError("verify command is empty")
+
+    started_at = now_iso()
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            shell=False,
+            env={**os.environ, **env_overrides},
+        )
+        return {
+            "command": command,
+            "cwd": cwd,
+            "started_at": started_at,
+            "finished_at": now_iso(),
+            "exit_code": result.returncode,
+            "stdout": clip_output(result.stdout),
+            "stderr": clip_output(result.stderr),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": command,
+            "cwd": cwd,
+            "started_at": started_at,
+            "finished_at": now_iso(),
+            "exit_code": None,
+            "stdout": clip_output(exc.stdout if isinstance(exc.stdout, str) else ""),
+            "stderr": f"verification timed out after {timeout} second(s)",
+        }
+    except OSError as exc:
+        return {
+            "command": command,
+            "cwd": cwd,
+            "started_at": started_at,
+            "finished_at": now_iso(),
+            "exit_code": None,
+            "stdout": "",
+            "stderr": str(exc),
+        }
+
+def _verify_cycle_implementation(args, run_id):
+    if not args.verify_command:
+        return None
+
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, run_id)
+        if not run:
+            raise MewError(f"agent run not found: {run_id}")
+        cwd = run.get("cwd") or args.cwd or "."
+
+    verification = _run_verification_command(args.verify_command, cwd, args.verify_timeout)
+
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, run_id)
+        if not run:
+            raise MewError(f"agent run not found: {run_id}")
+        task = find_task(state, run.get("task_id"))
+        run["supervisor_verification"] = verification
+        run["updated_at"] = now_iso()
+        if verification.get("exit_code") != 0:
+            if task:
+                task["status"] = "blocked"
+                task["updated_at"] = run["updated_at"]
+            add_outbox_message(
+                state,
+                "warning",
+                f"Verification failed for agent run #{run['id']}: {args.verify_command}",
+                related_task_id=run.get("task_id"),
+                agent_run_id=run["id"],
+            )
+        save_state(state)
+
+    if verification.get("exit_code") != 0:
+        raise MewError(f"verification failed for run #{run_id}: exit_code={verification.get('exit_code')}")
+    return verification
+
 def _start_cycle_review(args, implementation_run_id):
     with state_lock():
         state = load_state()
@@ -568,6 +670,17 @@ def cmd_self_improve_cycle(args):
         print(f"{cycle_label}: implementation run #{implementation_run['id']} status={implementation_run.get('status')}")
         if implementation_run.get("status") != "completed":
             return 1
+
+        try:
+            verification = _verify_cycle_implementation(args, implementation_run["id"])
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        if verification:
+            print(
+                f"{cycle_label}: verification exit_code={verification.get('exit_code')} "
+                f"command={verification.get('command')}"
+            )
 
         try:
             review_run = _start_cycle_review(args, implementation_run["id"])
@@ -828,6 +941,7 @@ def cmd_agent_show(args):
         "status",
         "external_pid",
         "session_id",
+        "supervisor_verification",
         "created_at",
         "started_at",
         "finished_at",

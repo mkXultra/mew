@@ -91,6 +91,12 @@ The cycle waits for implementation, starts a review, processes follow-up, and
 stops unless the review returns `STATUS: pass`. Use `--cycles N` to repeat that
 guarded loop.
 
+Add a supervisor-owned verification gate before review:
+
+```sh
+uv run mew self-improve --cycle --verify-command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
+```
+
 Let passive mode dispatch ready self-improvement tasks:
 
 ```sh

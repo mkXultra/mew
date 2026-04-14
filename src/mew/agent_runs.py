@@ -70,6 +70,7 @@ def create_agent_run(
         "stdout": "",
         "stderr": "",
         "result": "",
+        "supervisor_verification": None,
         "created_at": current_time,
         "updated_at": current_time,
     }

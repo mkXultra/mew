@@ -819,6 +819,8 @@ It should:
 - Optionally dispatch an implementation run when explicitly requested.
 - Optionally run a supervised cycle that dispatches implementation, waits for
   completion, starts review, processes follow-up, and stops unless review passes.
+- Optionally run a supervisor-owned verification command after implementation
+  and before review, stopping the cycle when verification fails.
 
 This keeps self-improvement supervised by default while making it easy to hand a
 small, reviewable improvement to the programmer loop.

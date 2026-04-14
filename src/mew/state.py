@@ -245,6 +245,7 @@ def migrate_state(state):
         run.setdefault("followup_task_id", None)
         run.setdefault("followup_processed_at", None)
         run.setdefault("prompt_file", "")
+        run.setdefault("supervisor_verification", None)
         if (
             run.get("status") == "created"
             and run.get("command")
