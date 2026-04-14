@@ -1,7 +1,8 @@
 import os
+import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,67 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue((Path(".mew") / "policy.md").exists())
                 self.assertTrue((Path(".mew") / "self.md").exists())
                 self.assertTrue((Path(".mew") / "desires.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_read_prints_non_sensitive_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("notes.md").write_text("hello from mew tools", encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "read", "notes.md"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("hello from mew tools", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_read_refuses_sensitive_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("auth.json").write_text('{"token":"secret"}', encoding="utf-8")
+
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["tool", "read", "auth.json"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("sensitive path", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_test_runs_bounded_command_with_env(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f'FLAG=ok {sys.executable} -c "import os; print(os.environ[\\"FLAG\\"])"'
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "test", "--command", command, "--timeout", "5"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("exit_code: 0", stdout.getvalue())
+                self.assertIn("ok", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_test_returns_failure_status(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f'{sys.executable} -c "raise SystemExit(7)"'
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "test", "--command", command, "--timeout", "5"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("exit_code: 7", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

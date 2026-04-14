@@ -49,6 +49,11 @@ def build_review_prompt(task, implementation_run, plan=None):
             f"Done criteria:\n{criteria or '(none)'}\n\n"
         )
 
+    verification = implementation_run.get("supervisor_verification")
+    verification_text = "(none)"
+    if verification:
+        verification_text = json.dumps(verification, ensure_ascii=False, indent=2)
+
     return (
         "You are a review agent in mew's programmer loop.\n"
         "Review the implementation run result and the current workspace. "
@@ -64,6 +69,7 @@ def build_review_prompt(task, implementation_run, plan=None):
         f"{plan_text}"
         f"Implementation run #{implementation_run['id']} status={implementation_run.get('status')}\n"
         f"Implementation result:\n{implementation_run.get('result') or implementation_run.get('stdout') or '(none)'}\n"
+        f"Supervisor verification:\n{verification_text}\n"
         f"Implementation stderr:\n{implementation_run.get('stderr') or '(none)'}\n"
     )
 

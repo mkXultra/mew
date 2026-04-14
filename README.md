@@ -64,6 +64,22 @@ uv run mew attention --resolve-all
 uv run mew memory --compact
 ```
 
+## Safe Tools
+
+`mew tool` gives AI-facing read-only workspace tools and bounded verification:
+
+```sh
+uv run mew tool status
+uv run mew tool list src/mew
+uv run mew tool read src/mew/cli.py --max-chars 4000
+uv run mew tool search "self-improve" src
+uv run mew tool test --command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
+uv run mew tool git diff
+```
+
+Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
+read command. Tool commands do not provide file-writing operations.
+
 ## Self-Improvement
 
 Create a planned self-improvement task without starting an agent:

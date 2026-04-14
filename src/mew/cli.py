@@ -42,6 +42,12 @@ from .commands import (
     cmd_task_run,
     cmd_task_show,
     cmd_task_update,
+    cmd_tool_git,
+    cmd_tool_list,
+    cmd_tool_read,
+    cmd_tool_search,
+    cmd_tool_status,
+    cmd_tool_test,
 )
 from .config import (
     DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
@@ -179,6 +185,52 @@ def build_parser():
 
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
     next_parser.set_defaults(func=cmd_next)
+
+    tool_parser = subparsers.add_parser("tool", help="safe local tools for AI-facing inspection")
+    tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
+
+    tool_status_parser = tool_subparsers.add_parser("status", help="show read-only workspace status")
+    tool_status_parser.add_argument("--cwd", default=".")
+    tool_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_status_parser.set_defaults(func=cmd_tool_status)
+
+    tool_list_parser = tool_subparsers.add_parser("list", help="list a directory under an allowed root")
+    tool_list_parser.add_argument("path", nargs="?", default=".")
+    tool_list_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_list_parser.add_argument("--limit", type=int, default=50)
+    tool_list_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_list_parser.set_defaults(func=cmd_tool_list)
+
+    tool_read_parser = tool_subparsers.add_parser("read", help="read a non-sensitive file")
+    tool_read_parser.add_argument("path")
+    tool_read_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_read_parser.add_argument("--max-chars", type=int, default=6000)
+    tool_read_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_read_parser.set_defaults(func=cmd_tool_read)
+
+    tool_search_parser = tool_subparsers.add_parser("search", help="fixed-string search under an allowed root")
+    tool_search_parser.add_argument("query")
+    tool_search_parser.add_argument("path", nargs="?", default=".")
+    tool_search_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_search_parser.add_argument("--max-matches", type=int, default=50)
+    tool_search_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_search_parser.set_defaults(func=cmd_tool_search)
+
+    tool_test_parser = tool_subparsers.add_parser("test", help="run a bounded verification command")
+    tool_test_parser.add_argument("--command", required=True)
+    tool_test_parser.add_argument("--cwd", default=".")
+    tool_test_parser.add_argument("--timeout", type=float, default=300.0)
+    tool_test_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_test_parser.set_defaults(func=cmd_tool_test)
+
+    tool_git_parser = tool_subparsers.add_parser("git", help="read-only git helpers")
+    tool_git_subparsers = tool_git_parser.add_subparsers(dest="git_action")
+    for git_action in ("status", "diff", "log"):
+        git_action_parser = tool_git_subparsers.add_parser(git_action, help=f"git {git_action}")
+        git_action_parser.add_argument("--cwd", default=".")
+        git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
+        git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
+        git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
 
     self_improve_parser = subparsers.add_parser("self-improve", help="create and optionally dispatch a mew self-improvement task")
     self_improve_parser.add_argument("--title", help="task title")

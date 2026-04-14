@@ -17,6 +17,7 @@ from mew.agent_runs import (
 )
 from mew.cli import main
 from mew.programmer import (
+    build_review_prompt,
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
     create_retry_run_for_implementation,
@@ -96,6 +97,28 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(review["review_of_run_id"], implementation["id"])
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["agent_run_id"], implementation["id"])
+
+    def test_review_prompt_includes_supervisor_verification(self):
+        state = default_state()
+        task = add_task(state)
+        implementation = {
+            "id": 4,
+            "status": "completed",
+            "result": "implemented",
+            "stderr": "",
+            "supervisor_verification": {
+                "command": "python -m unittest",
+                "exit_code": 0,
+                "stdout": "OK",
+                "stderr": "",
+            },
+        }
+
+        prompt = build_review_prompt(task, implementation)
+
+        self.assertIn("Supervisor verification:", prompt)
+        self.assertIn('"command": "python -m unittest"', prompt)
+        self.assertIn('"exit_code": 0', prompt)
 
     def test_retry_run_is_implementation_with_parent_context(self):
         state = default_state()

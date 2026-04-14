@@ -1,8 +1,6 @@
-import os
+import json
 import select
-import shlex
 import shutil
-import subprocess
 import sys
 import time
 
@@ -55,8 +53,10 @@ from .state import (
     state_lock,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
-from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_key
+from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
+from .tasks import find_task, format_task, open_tasks, task_sort_key
 from .timeutil import now_iso
+from .toolbox import format_command_record, run_command_record, run_git_tool
 
 
 def cmd_task_add(args):
@@ -401,6 +401,75 @@ def cmd_next(args):
     print(next_move(state))
     return 0
 
+def _tool_allowed_roots(args):
+    roots = getattr(args, "root", None) or ["."]
+    return roots
+
+def _print_json_or_text(result, as_json, text):
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(text)
+
+def cmd_tool_list(args):
+    try:
+        result = inspect_dir(args.path, _tool_allowed_roots(args), limit=args.limit)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_read_result("inspect_dir", result))
+    return 0
+
+def cmd_tool_read(args):
+    try:
+        result = read_file(args.path, _tool_allowed_roots(args), max_chars=args.max_chars)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_read_result("read_file", result))
+    return 0
+
+def cmd_tool_search(args):
+    try:
+        result = search_text(
+            args.query,
+            args.path,
+            _tool_allowed_roots(args),
+            max_matches=args.max_matches,
+        )
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_read_result("search_text", result))
+    return 0
+
+def cmd_tool_status(args):
+    try:
+        result = run_git_tool("status", cwd=args.cwd)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, format_command_record(result))
+    return 0 if result.get("exit_code") == 0 else 1
+
+def cmd_tool_test(args):
+    try:
+        result = run_command_record(args.command, cwd=args.cwd, timeout=args.timeout)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, format_command_record(result))
+    return 0 if result.get("exit_code") == 0 else 1
+
+def cmd_tool_git(args):
+    try:
+        result = run_git_tool(args.git_action, cwd=args.cwd, limit=args.limit)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, format_command_record(result))
+    return 0 if result.get("exit_code") == 0 else 1
+
 def cmd_self_improve(args):
     if args.cycle:
         return cmd_self_improve_cycle(args)
@@ -498,65 +567,11 @@ def _wait_cycle_run(args, run_id):
         save_state(state)
     return run
 
-def _split_command_env(command):
-    parts = shlex.split(command or "")
-    env_overrides = {}
-    while parts:
-        head = parts[0]
-        if "=" not in head:
-            break
-        key, value = head.split("=", 1)
-        if not key.replace("_", "").isalnum() or key[:1].isdigit():
-            break
-        env_overrides[key] = value
-        parts = parts[1:]
-    return parts, env_overrides
-
 def _run_verification_command(command, cwd, timeout):
-    argv, env_overrides = _split_command_env(command)
-    if not argv:
-        raise MewError("verify command is empty")
-
-    started_at = now_iso()
     try:
-        result = subprocess.run(
-            argv,
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            shell=False,
-            env={**os.environ, **env_overrides},
-        )
-        return {
-            "command": command,
-            "cwd": cwd,
-            "started_at": started_at,
-            "finished_at": now_iso(),
-            "exit_code": result.returncode,
-            "stdout": clip_output(result.stdout),
-            "stderr": clip_output(result.stderr),
-        }
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "command": command,
-            "cwd": cwd,
-            "started_at": started_at,
-            "finished_at": now_iso(),
-            "exit_code": None,
-            "stdout": clip_output(exc.stdout if isinstance(exc.stdout, str) else ""),
-            "stderr": f"verification timed out after {timeout} second(s)",
-        }
-    except OSError as exc:
-        return {
-            "command": command,
-            "cwd": cwd,
-            "started_at": started_at,
-            "finished_at": now_iso(),
-            "exit_code": None,
-            "stdout": "",
-            "stderr": str(exc),
-        }
+        return run_command_record(command, cwd=cwd, timeout=timeout)
+    except ValueError as exc:
+        raise MewError(str(exc)) from exc
 
 def _verify_cycle_implementation(args, run_id):
     if not args.verify_command:

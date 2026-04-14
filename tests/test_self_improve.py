@@ -172,7 +172,7 @@ class SelfImproveTests(unittest.TestCase):
 
                 with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
                     with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
-                        with patch("mew.commands.subprocess.run", side_effect=fake_verify_run):
+                        with patch("mew.toolbox.subprocess.run", side_effect=fake_verify_run):
                             with redirect_stdout(StringIO()) as stdout:
                                 code = main(
                                     [
@@ -235,7 +235,7 @@ class SelfImproveTests(unittest.TestCase):
 
                 with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
                     with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
-                        with patch("mew.commands.subprocess.run", return_value=VerifyResult()):
+                        with patch("mew.toolbox.subprocess.run", return_value=VerifyResult()):
                             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                                 code = main(
                                     [

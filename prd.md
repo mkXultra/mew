@@ -408,6 +408,7 @@ Current package boundaries:
 - `src/mew/tasks.py`: task queries, formatting, and command execution.
 - `src/mew/agent_runs.py`: task-linked `ai-cli` agent run creation, waiting, and result capture.
 - `src/mew/read_tools.py`: validated read-only local inspection tools.
+- `src/mew/toolbox.py`: bounded local command and read-only git helpers for `mew tool`.
 - `src/mew/brief.py`: compact operational brief generation.
 - `src/mew/config.py`, `src/mew/errors.py`, `src/mew/timeutil.py`: shared constants and small utilities.
 
@@ -650,6 +651,7 @@ The first user-facing version should likely include:
 - `mew doctor`: check local state, runtime lock, and required local tools.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew next`: print the single next useful command or move.
+- `mew tool`: expose safe AI-facing workspace inspection, search, test, and read-only git helpers.
 - `mew self-improve`: create and optionally dispatch a mew self-improvement task.
 - `mew -m <message>`: send a message to the running background AI.
 - `mew listen`: stream newly created outbox messages.
