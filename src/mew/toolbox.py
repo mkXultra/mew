@@ -85,12 +85,18 @@ def run_command_record(command, cwd=None, timeout=300):
         }
 
 
-def run_git_tool(action, cwd=None, limit=20):
+def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False):
     resolved_cwd = resolve_tool_cwd(cwd)
     if action == "status":
         command = "git status --short"
     elif action == "diff":
-        command = "git diff --"
+        parts = ["git", "diff"]
+        if staged:
+            parts.append("--staged")
+        if stat:
+            parts.append("--stat")
+        parts.append("--")
+        command = " ".join(parts)
     elif action == "log":
         safe_limit = max(1, min(int(limit), 100))
         command = f"git log --oneline -n {safe_limit}"

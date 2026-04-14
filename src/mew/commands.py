@@ -463,7 +463,13 @@ def cmd_tool_test(args):
 
 def cmd_tool_git(args):
     try:
-        result = run_git_tool(args.git_action, cwd=args.cwd, limit=args.limit)
+        result = run_git_tool(
+            args.git_action,
+            cwd=args.cwd,
+            limit=getattr(args, "limit", 20),
+            staged=getattr(args, "staged", False),
+            stat=getattr(args, "stat", False),
+        )
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1

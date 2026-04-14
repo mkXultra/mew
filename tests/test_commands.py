@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -165,6 +166,24 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 1)
                 self.assertIn("exit_code: 7", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_git_diff_supports_staged_stat(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                subprocess.run(["git", "init"], check=True, text=True, capture_output=True)
+                Path("example.txt").write_text("hello\n", encoding="utf-8")
+                subprocess.run(["git", "add", "example.txt"], check=True, text=True, capture_output=True)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "git", "diff", "--staged", "--stat"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("example.txt", stdout.getvalue())
+                self.assertIn("git diff --staged --stat --", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

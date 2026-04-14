@@ -243,7 +243,11 @@ def build_parser():
     for git_action in ("status", "diff", "log"):
         git_action_parser = tool_git_subparsers.add_parser(git_action, help=f"git {git_action}")
         git_action_parser.add_argument("--cwd", default=".")
-        git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
+        if git_action == "diff":
+            git_action_parser.add_argument("--staged", action="store_true", help="show staged changes")
+            git_action_parser.add_argument("--stat", action="store_true", help="show diffstat instead of patch")
+        if git_action == "log":
+            git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
         git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
         git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
 

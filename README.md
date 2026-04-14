@@ -84,6 +84,7 @@ uv run mew tool read src/mew/cli.py --max-chars 4000
 uv run mew tool search "self-improve" src
 uv run mew tool test --command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
 uv run mew tool git diff
+uv run mew tool git diff --staged --stat
 ```
 
 Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
