@@ -671,7 +671,7 @@ The first user-facing version should likely include:
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
 - `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
-- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/digest`, `/approve`, `/plan`, `/dispatch`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/pause`, `/resume`, and `/mode`.
+- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/digest`, `/approve`, `/plan`, `/dispatch`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
 - `mew questions`: show open questions that block progress.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.
 - `mew ack <message-id...>`: mark one or more outbox messages as read.
@@ -825,6 +825,9 @@ Autonomous programmer behavior uses the same loop:
   `--verify-command` are present. Passive verification respects
   `--verify-interval-minutes`. Results are stored in state and failures create
   attention items.
+- Manual chat verification may run through `/verify <command>`, storing the
+  result in the same verification history and creating a high-priority attention
+  item on failure.
 - Open verification failure attention items may cause autonomous `propose` or
   `act` mode to create a high-priority repair task, unless a matching open
   repair task already exists.

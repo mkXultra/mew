@@ -35,6 +35,7 @@ from .programmer import (
 )
 from .self_improve import create_self_improve_task, ensure_self_improve_plan
 from .state import (
+    add_attention_item,
     add_outbox_message,
     add_event,
     ensure_desires,
@@ -60,7 +61,7 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
-from .tasks import find_task, format_task, open_tasks, task_sort_key
+from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_key
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .write_tools import edit_file, summarize_write_result, write_file
@@ -1621,6 +1622,7 @@ CHAT_HELP = """Commands:
 /retry <run-id>       retry an implementation run; add dry-run to preview
 /sweep [dry-run]      collect stale programmer-loop work
 /verification         show recent verification runs
+/verify <command>     run and record a verification command
 /writes               show recent runtime write/edit runs
 /why                  explain the latest processed think/act decision
 /digest               summarize activity since the last user message
@@ -2010,6 +2012,57 @@ def print_chat_verification():
         print(format_verification_run(run))
 
 
+def chat_verification_failure_reason(command, result):
+    parts = [command, f"exit_code={result.get('exit_code')}"]
+    stdout = result.get("stdout") or ""
+    stderr = result.get("stderr") or ""
+    if stdout:
+        parts.append("stdout:\n" + clip_output(stdout, 2000))
+    if stderr:
+        parts.append("stderr:\n" + clip_output(stderr, 2000))
+    return "\n".join(parts)
+
+
+def chat_run_verification(command, timeout=300):
+    command = command.strip()
+    if not command:
+        print("usage: /verify <command>")
+        return
+
+    try:
+        result = run_command_record(command, cwd=".", timeout=timeout)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        run = {
+            "id": next_id(state, "verification_run"),
+            "event_id": None,
+            "task_id": None,
+            "reason": "manual chat verification",
+            **result,
+            "created_at": current_time,
+            "updated_at": now_iso(),
+        }
+        state.setdefault("verification_runs", []).append(run)
+        del state["verification_runs"][:-100]
+        if result.get("exit_code") != 0:
+            add_attention_item(
+                state,
+                "verification",
+                f"Verification run #{run['id']} failed",
+                chat_verification_failure_reason(command, result),
+                priority="high",
+            )
+        save_state(state)
+
+    print(format_verification_run(run))
+    print(format_command_record(result))
+
+
 def print_chat_writes():
     state = load_state()
     runs = list(reversed(state.get("write_runs", [])[-10:]))
@@ -2317,8 +2370,14 @@ def run_chat_slash_command(line, chat_state):
     if command == "sweep":
         chat_sweep_agents(rest)
         return "continue"
-    if command in ("verification", "verify"):
+    if command == "verification":
         print_chat_verification()
+        return "continue"
+    if command == "verify":
+        if not rest:
+            print_chat_verification()
+        else:
+            chat_run_verification(rest)
         return "continue"
     if command in ("writes", "write"):
         print_chat_writes()

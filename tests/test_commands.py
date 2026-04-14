@@ -601,6 +601,52 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_verify_runs_and_records_failure_attention(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                def fake_run_command(command, cwd=None, timeout=300):
+                    return {
+                        "command": command,
+                        "argv": ["python", "-m", "unittest"],
+                        "cwd": str(Path(".").resolve()),
+                        "started_at": "start",
+                        "finished_at": "end",
+                        "exit_code": 1,
+                        "stdout": "some stdout",
+                        "stderr": "FAILED",
+                    }
+
+                stdin = StringIO("/verify python -m unittest\n/verification\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    patch("mew.commands.run_command_record", side_effect=fake_run_command),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("#1 [failed]", output)
+                self.assertIn("exit_code: 1", output)
+                self.assertIn("FAILED", output)
+
+                state = load_state()
+                self.assertEqual(len(state["verification_runs"]), 1)
+                self.assertEqual(state["verification_runs"][0]["command"], "python -m unittest")
+                self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
+                self.assertEqual(state["verification_runs"][0]["reason"], "manual chat verification")
+                self.assertEqual(len(state["attention"]["items"]), 1)
+                self.assertEqual(state["attention"]["items"][0]["kind"], "verification")
+                self.assertEqual(state["attention"]["items"][0]["priority"], "high")
+                self.assertIn("FAILED", state["attention"]["items"][0]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_autonomy_controls_respect_pause_and_mode_override(self):
         from argparse import Namespace
 

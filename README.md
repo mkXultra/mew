@@ -119,6 +119,7 @@ state without leaving the session:
 /retry 12 dry-run
 /sweep dry-run
 /verification
+/verify UV_CACHE_DIR=.uv-cache uv run python -m unittest
 /writes
 /why
 /digest
