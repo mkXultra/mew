@@ -13,6 +13,7 @@ from mew.agent_runs import (
     parse_ai_cli_status,
     parse_ai_cli_pid,
     sync_task_with_agent_run,
+    wait_agent_run,
 )
 from mew.cli import main
 from mew.programmer import (
@@ -24,7 +25,7 @@ from mew.programmer import (
     extract_review_text,
     parse_review_status,
 )
-from mew.state import add_question, default_state, load_state, migrate_state, save_state
+from mew.state import add_attention_item, add_question, default_state, load_state, migrate_state, save_state
 from mew.tasks import execute_task_action
 from mew.timeutil import now_iso
 
@@ -218,6 +219,38 @@ class ProgrammerTests(unittest.TestCase):
         self.assertIn("could not parse", run["result"])
         self.assertEqual(task["status"], "blocked")
         self.assertIn("no parseable status", state["outbox"][-1]["text"])
+
+    def test_agent_result_os_error_finalizes_linked_task_and_attention(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task), dry_run=True)
+        run["status"] = "running"
+        run["external_pid"] = 12345
+        add_attention_item(state, "agent_run", "Agent run #1 is running", "still running", agent_run_id=run["id"])
+
+        with patch("mew.agent_runs.subprocess.run", side_effect=OSError("ai-cli missing")):
+            get_agent_run_result(state, run)
+
+        self.assertEqual(run["status"], "failed")
+        self.assertEqual(run["result"], "ai-cli missing")
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+
+    def test_agent_wait_os_error_finalizes_linked_task_and_attention(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task), dry_run=True)
+        run["status"] = "running"
+        run["external_pid"] = 12345
+        add_attention_item(state, "agent_run", "Agent run #1 is running", "still running", agent_run_id=run["id"])
+
+        with patch("mew.agent_runs.subprocess.run", side_effect=OSError("ai-cli missing")):
+            wait_agent_run(state, run)
+
+        self.assertEqual(run["status"], "failed")
+        self.assertEqual(run["result"], "ai-cli missing")
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
 
     def test_autonomous_plan_task_action_creates_plan(self):
         state = default_state()

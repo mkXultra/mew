@@ -326,9 +326,12 @@ def get_agent_run_result(state, run, verbose=False):
     except OSError as exc:
         current_time = now_iso()
         run["stderr"] = str(exc)
+        run["result"] = run["stderr"]
         run["updated_at"] = current_time
         run["status"] = "failed"
         run["finished_at"] = current_time
+        sync_task_with_agent_run(state, run, current_time)
+        resolve_agent_run_attention(state, run, current_time)
         add_outbox_message(
             state,
             "warning",
@@ -400,9 +403,12 @@ def wait_agent_run(state, run, timeout=None):
     except OSError as exc:
         current_time = now_iso()
         run["stderr"] = str(exc)
+        run["result"] = run["stderr"]
         run["updated_at"] = current_time
         run["status"] = "failed"
         run["finished_at"] = current_time
+        sync_task_with_agent_run(state, run, current_time)
+        resolve_agent_run_attention(state, run, current_time)
         add_outbox_message(
             state,
             "warning",
