@@ -195,6 +195,24 @@ def build_parser():
     doctor_parser.add_argument("--require-auth", action="store_true", help="fail if Codex OAuth auth is missing")
     doctor_parser.set_defaults(func=cmd_doctor)
 
+    message_parser = subparsers.add_parser("message", help="queue a user message")
+    message_parser.add_argument("message")
+    message_parser.add_argument("--wait", action="store_true", help="wait for outbox messages from this event")
+    message_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="maximum wait time in seconds",
+    )
+    message_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
+        help=f"outbox poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
+    )
+    message_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
+    message_parser.set_defaults(func=cmd_message)
+
     brief_parser = subparsers.add_parser("brief", help="show a compact operational brief")
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")
     brief_parser.set_defaults(func=cmd_brief)

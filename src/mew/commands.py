@@ -262,7 +262,15 @@ def queue_user_message(text, reply_to_question_id=None):
 def cmd_message(args):
     event = queue_user_message(args.message)
     print(f"queued message event #{event['id']}")
-    return 0
+    if not getattr(args, "wait", False):
+        return 0
+    warn_if_runtime_inactive()
+    return wait_for_event_response(
+        event["id"],
+        timeout=getattr(args, "timeout", 60.0),
+        poll_interval=getattr(args, "poll_interval", 1.0),
+        mark_read=getattr(args, "mark_read", False),
+    )
 
 def cmd_reply(args):
     with state_lock():
@@ -1240,6 +1248,51 @@ def mark_outbox_read(message_ids):
                 changed = True
         if changed:
             save_state(state)
+
+def find_event_by_id(state, event_id):
+    wanted = str(event_id)
+    for event in state.get("inbox", []):
+        if str(event.get("id")) == wanted:
+            return event
+    return None
+
+def outbox_for_event(state, event_id):
+    wanted = str(event_id)
+    return [
+        message
+        for message in state.get("outbox", [])
+        if str(message.get("event_id")) == wanted
+    ]
+
+def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read=False):
+    deadline = time.monotonic() + max(0.0, timeout)
+    seen_ids = set()
+
+    while True:
+        state = load_state()
+        messages = outbox_for_event(state, event_id)
+        new_messages = [
+            message
+            for message in messages
+            if str(message.get("id")) not in seen_ids
+        ]
+        if new_messages:
+            print_outbox_messages(new_messages)
+            seen_ids.update(str(message.get("id")) for message in new_messages)
+            if mark_read:
+                mark_outbox_read(message.get("id") for message in new_messages)
+            return 0
+
+        event = find_event_by_id(state, event_id)
+        if event and event.get("processed_at"):
+            print(f"message event #{event_id} was processed without an outbox response.")
+            return 0
+
+        if time.monotonic() >= deadline:
+            print(f"mew: timed out waiting for message event #{event_id}", file=sys.stderr)
+            return 1
+
+        time.sleep(max(0.01, poll_interval))
 
 def emit_initial_outbox(history, unread, mark_read):
     state = load_state()

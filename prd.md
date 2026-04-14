@@ -453,6 +453,7 @@ Possible later CLI interfaces:
 
 Current CLI interfaces:
 
+- `mew message "<message>" --wait`: queue one message and wait for outbox responses linked to that event.
 - `mew listen`: stream newly created agent messages until stopped.
 - `mew attach`: stream newly created agent messages, runtime activity, and allow interactive message sending.
 - `mew attach -m "<message>"`: queue an initial message and keep listening for the response.
@@ -656,6 +657,7 @@ The first user-facing version should likely include:
 - `mew tool`: expose safe AI-facing workspace inspection, search, test, and read-only git helpers.
 - `mew self-improve`: create and optionally dispatch a mew self-improvement task.
 - `mew -m <message>`: send a message to the running background AI.
+- `mew message <message> --wait`: send a message and wait for responses linked to that event.
 - `mew listen`: stream newly created outbox messages.
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.

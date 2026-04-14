@@ -1,6 +1,8 @@
 import os
 import subprocess
 import sys
+import threading
+import time
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -215,6 +217,53 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [passed]", stdout.getvalue())
                 self.assertIn("stdout:", stdout.getvalue())
                 self.assertIn("OK", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_message_wait_prints_response_for_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                def respond_once_event_exists():
+                    deadline = time.monotonic() + 2.0
+                    while time.monotonic() < deadline:
+                        with state_lock():
+                            state = load_state()
+                            if state["inbox"]:
+                                event = state["inbox"][0]
+                                add_outbox_message(
+                                    state,
+                                    "assistant",
+                                    "hello from runtime",
+                                    event_id=event["id"],
+                                )
+                                event["processed_at"] = "done"
+                                save_state(state)
+                                return
+                        time.sleep(0.01)
+
+                responder = threading.Thread(target=respond_once_event_exists)
+                responder.start()
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    code = main(
+                        [
+                            "message",
+                            "hello?",
+                            "--wait",
+                            "--timeout",
+                            "2",
+                            "--poll-interval",
+                            "0.01",
+                        ]
+                    )
+                responder.join(timeout=2)
+
+                self.assertEqual(code, 0)
+                self.assertIn("queued message event #1", stdout.getvalue())
+                self.assertIn("hello from runtime", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 
