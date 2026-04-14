@@ -252,6 +252,56 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tool_git_diff_supports_base_stat(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                subprocess.run(["git", "init"], check=True, text=True, capture_output=True)
+                Path("example.txt").write_text("hello\n", encoding="utf-8")
+                subprocess.run(["git", "add", "example.txt"], check=True, text=True, capture_output=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.name=mew",
+                        "-c",
+                        "user.email=mew@example.com",
+                        "commit",
+                        "-m",
+                        "initial",
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                Path("example.txt").write_text("hello\nmew\n", encoding="utf-8")
+                subprocess.run(["git", "add", "example.txt"], check=True, text=True, capture_output=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.name=mew",
+                        "-c",
+                        "user.email=mew@example.com",
+                        "commit",
+                        "-m",
+                        "change",
+                    ],
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "git", "diff", "--base", "HEAD~1", "--stat"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("git diff HEAD~1...HEAD --stat --", stdout.getvalue())
+                self.assertIn("example.txt", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_verification_lists_recent_runs(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

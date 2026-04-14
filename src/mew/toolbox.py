@@ -85,13 +85,28 @@ def run_command_record(command, cwd=None, timeout=300):
         }
 
 
-def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False):
+def validate_git_ref(ref):
+    if not ref:
+        return ""
+    if ref.startswith("-"):
+        raise ValueError("git ref must not start with '-'")
+    if any(char.isspace() for char in ref):
+        raise ValueError("git ref must not contain whitespace")
+    return ref
+
+
+def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False, base=""):
     resolved_cwd = resolve_tool_cwd(cwd)
     if action == "status":
         command = "git status --short"
     elif action == "diff":
+        base = validate_git_ref(base)
+        if staged and base:
+            raise ValueError("--staged and --base cannot be combined")
         parts = ["git", "diff"]
-        if staged:
+        if base:
+            parts.append(f"{base}...HEAD")
+        elif staged:
             parts.append("--staged")
         if stat:
             parts.append("--stat")

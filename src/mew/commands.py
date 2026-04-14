@@ -565,6 +565,7 @@ def cmd_tool_git(args):
             limit=getattr(args, "limit", 20),
             staged=getattr(args, "staged", False),
             stat=getattr(args, "stat", False),
+            base=getattr(args, "base", ""),
         )
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)

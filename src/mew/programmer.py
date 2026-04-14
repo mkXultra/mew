@@ -15,6 +15,7 @@ SAFE_TOOL_PROMPT_GUIDANCE = (
     "- Use `uv run mew tool write --dry-run` or `uv run mew tool edit --dry-run` to preview "
     "small file changes before applying them.\n"
     "- Use `uv run mew tool test --command \"...\"` for verification when practical.\n\n"
+    "- Use `uv run mew tool git diff --base <branch> --stat` to summarize branch changes.\n\n"
 )
 
 
