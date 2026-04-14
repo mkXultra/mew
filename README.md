@@ -108,6 +108,9 @@ state without leaving the session:
 /questions
 /reply 3 それで進めて
 /attention
+/agents
+/verification
+/writes
 /ack all
 /activity off
 /exit

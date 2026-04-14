@@ -1608,6 +1608,9 @@ CHAT_HELP = """Commands:
 /questions [all]      list open questions, or all questions
 /attention [all]      list open attention items, or all attention items
 /outbox [all]         list unread outbox messages, or all messages
+/agents [all]         list running agent runs, or all agent runs
+/verification         show recent verification runs
+/writes               show recent runtime write/edit runs
 /ack all|<ids...>     mark outbox messages as read
 /reply <id> <text>    answer an open question
 /activity on|off      toggle runtime activity lines
@@ -1678,6 +1681,43 @@ def print_chat_outbox(show_all=False):
     print_outbox_messages(messages)
 
 
+def print_chat_agents(show_all=False):
+    state = load_state()
+    runs = state["agent_runs"]
+    if not show_all:
+        runs = [run for run in runs if run.get("status") in ("created", "running")]
+    if not runs:
+        print("No agent runs.")
+        return
+    for run in runs:
+        pid = run.get("external_pid") or ""
+        purpose = run.get("purpose") or "implementation"
+        print(
+            f"#{run['id']} [{run['status']}/{purpose}] task={run.get('task_id')} "
+            f"{run.get('backend')}:{run.get('model')} pid={pid}"
+        )
+
+
+def print_chat_verification():
+    state = load_state()
+    runs = list(reversed(state.get("verification_runs", [])[-10:]))
+    if not runs:
+        print("No verification runs.")
+        return
+    for run in runs:
+        print(format_verification_run(run))
+
+
+def print_chat_writes():
+    state = load_state()
+    runs = list(reversed(state.get("write_runs", [])[-10:]))
+    if not runs:
+        print("No write runs.")
+        return
+    for run in runs:
+        print(format_write_run(run))
+
+
 def run_chat_slash_command(line, chat_state):
     body = line[1:].strip()
     command, _, rest = body.partition(" ")
@@ -1709,6 +1749,15 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "outbox":
         print_chat_outbox(show_all=rest.casefold() == "all")
+        return "continue"
+    if command in ("agents", "agent", "runs"):
+        print_chat_agents(show_all=rest.casefold() == "all")
+        return "continue"
+    if command in ("verification", "verify"):
+        print_chat_verification()
+        return "continue"
+    if command in ("writes", "write"):
+        print_chat_writes()
         return "continue"
     if command == "history":
         print_chat_outbox(show_all=True)

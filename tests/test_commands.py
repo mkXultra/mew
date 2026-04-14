@@ -321,9 +321,38 @@ class CommandTests(unittest.TestCase):
                             "updated_at": "now",
                         }
                     )
+                    state["agent_runs"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "purpose": "implementation",
+                            "status": "running",
+                            "backend": "ai-cli",
+                            "model": "codex-ultra",
+                            "external_pid": 123,
+                        }
+                    )
+                    state["verification_runs"].append(
+                        {
+                            "id": 1,
+                            "command": "python -m unittest",
+                            "exit_code": 0,
+                            "finished_at": "done",
+                        }
+                    )
+                    state["write_runs"].append(
+                        {
+                            "id": 1,
+                            "operation": "edit_file",
+                            "path": "/tmp/example.py",
+                            "changed": True,
+                            "dry_run": True,
+                            "written": False,
+                        }
+                    )
                     save_state(state)
 
-                stdin = StringIO("/next\nhello mew\n/exit\n")
+                stdin = StringIO("/next\n/agents\n/verification\n/writes\nhello mew\n/exit\n")
                 with (
                     patch("sys.stdin", stdin),
                     redirect_stdout(StringIO()) as stdout,
@@ -334,7 +363,10 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("mew chat", output)
-                self.assertIn("mew task plan 1", output)
+                self.assertIn("mew agent result 1", output)
+                self.assertIn("#1 [running/implementation]", output)
+                self.assertIn("#1 [passed]", output)
+                self.assertIn("#1 [edit_file]", output)
                 self.assertIn("queued message event", output)
 
                 state = load_state()
