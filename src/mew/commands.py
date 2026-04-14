@@ -16,6 +16,7 @@ from .agent_runs import (
     start_agent_run,
     wait_agent_run,
 )
+from .archive import archive_state_records, format_archive_result
 from .brief import build_brief, next_move, verification_outcome
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
@@ -977,6 +978,21 @@ def cmd_attention(args):
         status = item.get("status")
         priority = item.get("priority")
         print(f"#{item['id']} [{status}/{priority}] {item.get('title')}: {item.get('reason')}")
+    return 0
+
+def cmd_archive(args):
+    with state_lock():
+        state = load_state()
+        result = archive_state_records(
+            state,
+            keep_recent=args.keep_recent,
+            dry_run=not args.apply,
+        )
+        if args.apply:
+            save_state(state)
+    print(format_archive_result(result))
+    if not args.apply and result.get("total_archived"):
+        print("Run `mew archive --apply` to write the archive and compact active state.")
     return 0
 
 def cmd_memory(args):

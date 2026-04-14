@@ -672,6 +672,8 @@ The first user-facing version should likely include:
 - `mew ack --all`: mark all unread outbox messages as read.
 - `mew attention`: show what currently needs the user's attention.
 - `mew attention --resolve <attention-id>` and `--resolve-all`: close attention items the user has handled.
+- `mew archive`: dry-run archival for processed inbox and read outbox records.
+- `mew archive --apply`: write `.mew/archive/` and compact active state.
 - `mew memory`: show shallow memory and recent remembered events.
 - `mew memory --compact`: compact recent shallow events into durable project memory.
 - `mew task run <task-id>`: start an agent run for a task.

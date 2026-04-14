@@ -13,6 +13,7 @@ from .commands import (
     cmd_agent_show,
     cmd_agent_sweep,
     cmd_agent_wait,
+    cmd_archive,
     cmd_attention,
     cmd_brief,
     cmd_desires_init,
@@ -397,6 +398,16 @@ def build_parser():
     attention_parser.add_argument("--resolve", action="append", default=[], help="resolve an open attention item")
     attention_parser.add_argument("--resolve-all", action="store_true", help="resolve all open attention items")
     attention_parser.set_defaults(func=cmd_attention)
+
+    archive_parser = subparsers.add_parser("archive", help="archive old processed inbox and read outbox records")
+    archive_parser.add_argument("--apply", action="store_true", help="write archive and compact active state")
+    archive_parser.add_argument(
+        "--keep-recent",
+        type=int,
+        default=100,
+        help="processed/read records to keep active per section",
+    )
+    archive_parser.set_defaults(func=cmd_archive)
 
     memory_parser = subparsers.add_parser("memory", help="show what mew remembers")
     memory_parser.add_argument("--recent", type=int, default=5, help="number of recent shallow memory events")

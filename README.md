@@ -84,6 +84,8 @@ uv run mew questions
 uv run mew reply <question-id> "answer"
 uv run mew attention
 uv run mew attention --resolve-all
+uv run mew archive
+uv run mew archive --apply
 uv run mew memory --compact
 ```
 
@@ -160,6 +162,8 @@ uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 
 - `.mew/state.json`: durable state.
 - `.mew/runtime.md`: runtime log.
+- `.mew/runtime.out`: background runtime output when started with `mew start`.
+- `.mew/archive/`: archived processed inbox and read outbox records.
 - `.mew/guidance.md`: human-written think-phase priority.
 - `.mew/policy.md`: local safety policy.
 - `.mew/self.md`: mew identity and behavior.

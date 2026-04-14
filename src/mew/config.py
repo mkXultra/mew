@@ -4,6 +4,7 @@ from pathlib import Path
 STATE_VERSION = 5
 STATE_DIR = Path(".mew")
 STATE_FILE = STATE_DIR / "state.json"
+ARCHIVE_DIR = STATE_DIR / "archive"
 LOG_FILE = STATE_DIR / "runtime.md"
 LOCK_FILE = STATE_DIR / "runtime.lock"
 STATE_LOCK_FILE = STATE_DIR / "state.lock"

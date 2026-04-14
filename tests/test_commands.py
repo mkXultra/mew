@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -90,6 +91,42 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue(
                     all(item.get("status") == "resolved" for item in state["attention"]["items"])
                 )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_archive_compacts_processed_and_read_records(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    for index in range(3):
+                        event = add_event(state, "user_message", "test", {"index": index})
+                        event["processed_at"] = f"done-{index}"
+                    add_event(state, "user_message", "test", {"index": "open"})
+                    for index in range(3):
+                        message = add_outbox_message(state, "info", f"read {index}")
+                        message["read_at"] = f"read-{index}"
+                    add_outbox_message(state, "info", "unread")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["archive", "--keep-recent", "1", "--apply"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("archived_inbox: 2", stdout.getvalue())
+                self.assertIn("archived_outbox: 2", stdout.getvalue())
+
+                state = load_state()
+                self.assertEqual(len(state["inbox"]), 2)
+                self.assertEqual(len(state["outbox"]), 2)
+                archives = list((Path(".mew") / "archive").glob("state-*.json"))
+                self.assertEqual(len(archives), 1)
+                archived = json.loads(archives[0].read_text(encoding="utf-8"))
+                self.assertEqual(archived["counts"], {"inbox": 2, "outbox": 2})
             finally:
                 os.chdir(old_cwd)
 
