@@ -53,6 +53,42 @@ def set_runtime_stopped(state, stopped_at):
     runtime["stopped_at"] = stopped_at
     runtime["last_action"] = "runtime stopped"
 
+def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
+    autonomy = state["autonomy"]
+    requested_enabled = bool(args.autonomous)
+    requested_level = args.autonomy_level if requested_enabled else "off"
+    level_override = autonomy.get("level_override") or ""
+    if level_override not in ("", "observe", "propose", "act"):
+        level_override = ""
+        autonomy["level_override"] = ""
+
+    paused = bool(autonomy.get("paused"))
+    effective_enabled = requested_enabled and not paused
+    effective_level = level_override or requested_level
+    if not effective_enabled:
+        effective_level = "off"
+
+    autonomy["requested_enabled"] = requested_enabled
+    autonomy["requested_level"] = requested_level
+    autonomy["enabled"] = effective_enabled
+    autonomy["level"] = effective_level
+    autonomy["paused"] = paused
+    autonomy.setdefault("pause_reason", "")
+    autonomy.setdefault("paused_at", None)
+    autonomy.setdefault("resumed_at", None)
+    autonomy["allow_agent_run"] = bool(args.allow_agent_run)
+    autonomy["allow_verify"] = bool(args.allow_verify)
+    autonomy["verify_command_configured"] = bool(args.verify_command)
+    autonomy["allow_write"] = bool(args.allow_write)
+    autonomy["updated_at"] = current_time
+
+    autonomous_for_cycle = effective_enabled and not pending_user
+    return {
+        "autonomous": autonomous_for_cycle,
+        "autonomy_level": effective_level if autonomous_for_cycle else "off",
+        "allow_agent_run": bool(args.allow_agent_run) and autonomous_for_cycle,
+    }
+
 def run_runtime(args):
     codex_auth = None
     ensure_guidance(args.guidance)
@@ -159,14 +195,13 @@ def run_runtime(args):
                     self_text = read_self(args.self_file)
                     desires = read_desires(args.desires)
                     allow_task_execution = args.execute_tasks and not pending_user
-                    autonomy = state["autonomy"]
-                    autonomy["enabled"] = bool(args.autonomous)
-                    autonomy["level"] = args.autonomy_level if args.autonomous else "off"
-                    autonomy["allow_agent_run"] = bool(args.allow_agent_run)
-                    autonomy["allow_verify"] = bool(args.allow_verify)
-                    autonomy["verify_command_configured"] = bool(args.verify_command)
-                    autonomy["allow_write"] = bool(args.allow_write)
-                    autonomy["updated_at"] = now_iso()
+                    current_time = now_iso()
+                    autonomy_controls = apply_runtime_autonomy_controls(
+                        state,
+                        args,
+                        pending_user,
+                        current_time,
+                    )
                     processed_count = process_events(
                         state,
                         reason,
@@ -182,9 +217,9 @@ def run_runtime(args):
                         policy=policy,
                         self_text=self_text,
                         desires=desires,
-                        autonomous=args.autonomous and not pending_user,
-                        autonomy_level=args.autonomy_level if args.autonomous else "off",
-                        allow_agent_run=args.allow_agent_run and not pending_user,
+                        autonomous=autonomy_controls["autonomous"],
+                        autonomy_level=autonomy_controls["autonomy_level"],
+                        allow_agent_run=autonomy_controls["allow_agent_run"],
                         allow_verify=args.allow_verify,
                         verify_command=args.verify_command or "",
                         verify_timeout=args.verify_timeout,

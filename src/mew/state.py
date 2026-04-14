@@ -76,6 +76,13 @@ def default_state():
         "autonomy": {
             "enabled": False,
             "level": "off",
+            "requested_enabled": False,
+            "requested_level": "off",
+            "paused": False,
+            "pause_reason": "",
+            "paused_at": None,
+            "resumed_at": None,
+            "level_override": "",
             "cycles": 0,
             "last_cycle_reason": None,
             "last_self_review_at": None,
@@ -266,6 +273,13 @@ def migrate_state(state):
     state.setdefault("autonomy", default_state()["autonomy"])
     state["autonomy"].setdefault("enabled", False)
     state["autonomy"].setdefault("level", "off")
+    state["autonomy"].setdefault("requested_enabled", False)
+    state["autonomy"].setdefault("requested_level", "off")
+    state["autonomy"].setdefault("paused", False)
+    state["autonomy"].setdefault("pause_reason", "")
+    state["autonomy"].setdefault("paused_at", None)
+    state["autonomy"].setdefault("resumed_at", None)
+    state["autonomy"].setdefault("level_override", "")
     state["autonomy"].setdefault("cycles", 0)
     state["autonomy"].setdefault("last_cycle_reason", None)
     state["autonomy"].setdefault("last_self_review_at", None)

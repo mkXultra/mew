@@ -374,6 +374,118 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_cockpit_commands_update_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Cockpit task",
+                            "description": "Exercise chat controls.",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    event = add_event(state, "passive_tick", "runtime")
+                    event["processed_at"] = "processed"
+                    event["decision_plan"] = {
+                        "summary": "Choose a small useful next move.",
+                        "decisions": [{"type": "propose_task", "title": "Cockpit task"}],
+                    }
+                    event["action_plan"] = {
+                        "summary": "Proposed a task.",
+                        "actions": [{"type": "propose_task", "title": "Cockpit task"}],
+                    }
+                    save_state(state)
+
+                stdin = StringIO(
+                    "/why\n"
+                    "/digest\n"
+                    "/pause testing\n"
+                    "/mode act\n"
+                    "/approve 1\n"
+                    "/dispatch 1 dry-run\n"
+                    "/resume\n"
+                    "/exit\n"
+                )
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("Latest processed event", output)
+                self.assertIn("Digest since", output)
+                self.assertIn("autonomy paused", output)
+                self.assertIn("mode override: act", output)
+                self.assertIn("approved task #1", output)
+                self.assertIn("created dry-run implementation run", output)
+                self.assertIn("autonomy resumed", output)
+
+                state = load_state()
+                self.assertFalse(state["autonomy"]["paused"])
+                self.assertEqual(state["autonomy"]["level_override"], "act")
+                self.assertEqual(state["tasks"][0]["status"], "ready")
+                self.assertTrue(state["tasks"][0]["auto_execute"])
+                self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_runtime_autonomy_controls_respect_pause_and_mode_override(self):
+        from argparse import Namespace
+
+        from mew.runtime import apply_runtime_autonomy_controls
+        from mew.state import default_state
+
+        state = default_state()
+        args = Namespace(
+            autonomous=True,
+            autonomy_level="act",
+            allow_agent_run=True,
+            allow_verify=True,
+            verify_command="python -m unittest",
+            allow_write=False,
+        )
+        state["autonomy"]["paused"] = True
+
+        controls = apply_runtime_autonomy_controls(state, args, pending_user=False, current_time="now")
+
+        self.assertFalse(controls["autonomous"])
+        self.assertEqual(controls["autonomy_level"], "off")
+        self.assertFalse(state["autonomy"]["enabled"])
+        self.assertTrue(state["autonomy"]["requested_enabled"])
+
+        state["autonomy"]["paused"] = False
+        state["autonomy"]["level_override"] = "observe"
+        controls = apply_runtime_autonomy_controls(state, args, pending_user=False, current_time="later")
+
+        self.assertTrue(controls["autonomous"])
+        self.assertEqual(controls["autonomy_level"], "observe")
+        self.assertEqual(state["autonomy"]["level"], "observe")
+        self.assertTrue(controls["allow_agent_run"])
+
     def test_tool_read_prints_non_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

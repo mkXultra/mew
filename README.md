@@ -111,6 +111,13 @@ state without leaving the session:
 /agents
 /verification
 /writes
+/why
+/digest
+/approve 4
+/dispatch 4 dry-run
+/pause
+/resume
+/mode act
 /ack all
 /activity off
 /exit

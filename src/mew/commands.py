@@ -378,6 +378,8 @@ def cmd_status(args):
     print(f"agent_last_thought: {agent.get('last_thought')}")
     print(f"autonomy_enabled: {autonomy.get('enabled')}")
     print(f"autonomy_level: {autonomy.get('level')}")
+    print(f"autonomy_paused: {autonomy.get('paused')}")
+    print(f"autonomy_level_override: {autonomy.get('level_override') or ''}")
     print(f"autonomy_cycles: {autonomy.get('cycles')}")
     print(f"last_self_review_at: {autonomy.get('last_self_review_at')}")
     print(f"user_mode: {user.get('mode')}")
@@ -1611,6 +1613,13 @@ CHAT_HELP = """Commands:
 /agents [all]         list running agent runs, or all agent runs
 /verification         show recent verification runs
 /writes               show recent runtime write/edit runs
+/why                  explain the latest processed think/act decision
+/digest               summarize activity since the last user message
+/approve <task-id>    mark a task ready and auto_execute=true
+/dispatch <task-id>   start an implementation run; add dry-run to preview
+/pause [reason]       pause autonomous non-user work
+/resume               resume autonomous non-user work
+/mode <level>         override autonomy level: observe|propose|act|default
 /ack all|<ids...>     mark outbox messages as read
 /reply <id> <text>    answer an open question
 /activity on|off      toggle runtime activity lines
@@ -1631,6 +1640,11 @@ def print_chat_status():
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
     print(f"runtime: {state['runtime_status'].get('state')} lock={lock_state} pid={state['runtime_status'].get('pid')}")
     print(f"agent: {state['agent_status'].get('mode')} focus={state['agent_status'].get('current_focus') or '(none)'}")
+    autonomy = state.get("autonomy", {})
+    print(
+        f"autonomy: enabled={autonomy.get('enabled')} level={autonomy.get('level')} "
+        f"paused={autonomy.get('paused')} override={autonomy.get('level_override') or '(none)'}"
+    )
     print(
         f"counts: tasks={len(open_tasks(state))} questions={len(open_questions(state))} "
         f"attention={len(open_attention_items(state))} unread={len(unread)} running_agents={len(running_agents)}"
@@ -1718,6 +1732,191 @@ def print_chat_writes():
         print(format_write_run(run))
 
 
+def latest_processed_event(state):
+    for event in reversed(state.get("inbox", [])):
+        if event.get("processed_at"):
+            return event
+    return None
+
+
+def describe_plan_item(item):
+    item_type = item.get("type") or "unknown"
+    parts = [item_type]
+    for key in ("task_id", "run_id", "plan_id"):
+        if item.get(key) is not None:
+            parts.append(f"{key}={item.get(key)}")
+    for key in ("reason", "question", "title", "summary", "text"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            first_line = value.strip().splitlines()[0]
+            if len(first_line) > 120:
+                first_line = first_line[:117] + "..."
+            parts.append(f"{key}={first_line}")
+            break
+    return " ".join(str(part) for part in parts)
+
+
+def print_chat_why():
+    state = load_state()
+    event = latest_processed_event(state)
+    if not event:
+        print("No processed events yet.")
+        return
+
+    decision_plan = event.get("decision_plan") or {}
+    action_plan = event.get("action_plan") or {}
+    print(f"Latest processed event: #{event.get('id')} {event.get('type')} at {event.get('processed_at')}")
+    if decision_plan.get("summary"):
+        print(f"think: {decision_plan.get('summary')}")
+    if action_plan.get("summary"):
+        print(f"act: {action_plan.get('summary')}")
+    decisions = decision_plan.get("decisions") or []
+    actions = action_plan.get("actions") or []
+    if decisions:
+        print("decisions:")
+        for decision in decisions[:10]:
+            print(f"- {describe_plan_item(decision)}")
+    if actions:
+        print("actions:")
+        for action in actions[:10]:
+            print(f"- {describe_plan_item(action)}")
+
+
+def _after_since(value, since):
+    if not since:
+        return True
+    if not value:
+        return False
+    return str(value) > str(since)
+
+
+def print_chat_digest():
+    state = load_state()
+    since = state.get("user_status", {}).get("last_interaction_at")
+    events = [
+        event
+        for event in state.get("inbox", [])
+        if _after_since(event.get("created_at"), since) or _after_since(event.get("processed_at"), since)
+    ]
+    outbox = [message for message in state.get("outbox", []) if _after_since(message.get("created_at"), since)]
+    tasks = [task for task in state.get("tasks", []) if _after_since(task.get("created_at"), since)]
+    agent_runs = [
+        run
+        for run in state.get("agent_runs", [])
+        if _after_since(run.get("created_at"), since) or _after_since(run.get("updated_at"), since)
+    ]
+    verifications = [
+        run
+        for run in state.get("verification_runs", [])
+        if _after_since(run.get("created_at"), since) or _after_since(run.get("updated_at"), since)
+    ]
+    writes = [
+        run
+        for run in state.get("write_runs", [])
+        if _after_since(run.get("created_at"), since) or _after_since(run.get("updated_at"), since)
+    ]
+    passive_ticks = len([event for event in events if event.get("type") == "passive_tick"])
+    failed_verifications = len([run for run in verifications if run.get("exit_code") != 0])
+    rolled_back = len([run for run in writes if run.get("rolled_back")])
+
+    print(f"Digest since: {since or 'beginning'}")
+    print(f"events: {len(events)} passive_ticks={passive_ticks}")
+    print(f"outbox_messages: {len(outbox)} unread={len([message for message in state['outbox'] if not message.get('read_at')])}")
+    print(f"new_tasks: {len(tasks)}")
+    print(f"agent_runs_touched: {len(agent_runs)}")
+    print(f"verification_runs: {len(verifications)} failed={failed_verifications}")
+    print(f"write_runs: {len(writes)} rolled_back={rolled_back}")
+    print(f"open_attention: {len(open_attention_items(state))}")
+    print(f"next: {next_move(state)}")
+
+
+def chat_set_paused(paused, reason=""):
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        autonomy = state.setdefault("autonomy", {})
+        autonomy["paused"] = paused
+        autonomy["updated_at"] = current_time
+        if paused:
+            autonomy["pause_reason"] = reason
+            autonomy["paused_at"] = current_time
+        else:
+            autonomy["pause_reason"] = ""
+            autonomy["resumed_at"] = current_time
+        save_state(state)
+
+
+def chat_set_mode_override(value):
+    if value not in ("observe", "propose", "act", "default", ""):
+        print("usage: /mode observe|propose|act|default")
+        return
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        autonomy = state.setdefault("autonomy", {})
+        autonomy["level_override"] = "" if value in ("default", "") else value
+        autonomy["updated_at"] = current_time
+        save_state(state)
+    if value in ("default", ""):
+        print("mode override cleared")
+    else:
+        print(f"mode override: {value}")
+
+
+def chat_approve_task(task_id):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        task["status"] = "ready"
+        task["auto_execute"] = True
+        task["updated_at"] = now_iso()
+        save_state(state)
+    print(f"approved task #{task_id}: ready auto_execute=true")
+
+
+def chat_dispatch_task(rest):
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    if not parts:
+        print("usage: /dispatch <task-id> [dry-run]")
+        return
+    task_id = parts[0]
+    dry_run = any(part in ("dry-run", "--dry-run") for part in parts[1:])
+
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        plan = latest_task_plan(task)
+        plan_created = False
+        if not plan:
+            plan = create_task_plan(state, task)
+            plan_created = True
+        run = create_implementation_run_from_plan(state, task, plan, dry_run=dry_run)
+        if dry_run:
+            ensure_agent_run_prompt_file(run)
+            run["command"] = build_ai_cli_run_command(run)
+        else:
+            start_agent_run(state, run)
+        save_state(state)
+
+    if plan_created:
+        print(f"created {format_task_plan(plan)}")
+    if dry_run:
+        print(f"created dry-run implementation run #{run['id']} from plan #{plan['id']}")
+        print(" ".join(run["command"]))
+    else:
+        print(f"started implementation run #{run['id']} task={task['id']} plan={plan['id']} status={run.get('status')} pid={run.get('external_pid')}")
+
+
 def run_chat_slash_command(line, chat_state):
     body = line[1:].strip()
     command, _, rest = body.partition(" ")
@@ -1758,6 +1957,32 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("writes", "write"):
         print_chat_writes()
+        return "continue"
+    if command == "why":
+        print_chat_why()
+        return "continue"
+    if command == "digest":
+        print_chat_digest()
+        return "continue"
+    if command == "approve":
+        if not rest:
+            print("usage: /approve <task-id>")
+        else:
+            chat_approve_task(rest)
+        return "continue"
+    if command == "dispatch":
+        chat_dispatch_task(rest)
+        return "continue"
+    if command == "pause":
+        chat_set_paused(True, rest)
+        print("autonomy paused")
+        return "continue"
+    if command == "resume":
+        chat_set_paused(False)
+        print("autonomy resumed")
+        return "continue"
+    if command == "mode":
+        chat_set_mode_override(rest.casefold())
         return "continue"
     if command == "history":
         print_chat_outbox(show_all=True)
