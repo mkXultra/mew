@@ -140,6 +140,69 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tool_write_create_and_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "tool",
+                            "write",
+                            "notes.md",
+                            "--content",
+                            "hello\n",
+                            "--create",
+                            "--dry-run",
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertIn("dry_run: True", stdout.getvalue())
+                self.assertFalse(Path("notes.md").exists())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "tool",
+                            "write",
+                            "notes.md",
+                            "--content",
+                            "hello\n",
+                            "--create",
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(Path("notes.md").read_text(encoding="utf-8"), "hello\n")
+                self.assertIn("written: True", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_edit_replaces_one_match_and_refuses_sensitive_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("notes.md").write_text("hello mew\n", encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "edit", "notes.md", "--old", "mew", "--new", "shell"])
+
+                self.assertEqual(code, 0)
+                self.assertEqual(Path("notes.md").read_text(encoding="utf-8"), "hello shell\n")
+                self.assertIn("edit_file", stdout.getvalue())
+
+                Path("auth.json").write_text("secret", encoding="utf-8")
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["tool", "edit", "auth.json", "--old", "secret", "--new", "x"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("sensitive path", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_tool_test_runs_bounded_command_with_env(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -217,6 +280,37 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [passed]", stdout.getvalue())
                 self.assertIn("stdout:", stdout.getvalue())
                 self.assertIn("OK", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_writes_lists_recent_runs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["write_runs"].append(
+                        {
+                            "id": 1,
+                            "operation": "edit_file",
+                            "path": "/tmp/notes.md",
+                            "changed": True,
+                            "dry_run": False,
+                            "written": True,
+                            "diff": "--- a\n+++ b\n",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["writes", "--details"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("#1 [edit_file]", stdout.getvalue())
+                self.assertIn("diff:", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

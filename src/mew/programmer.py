@@ -12,6 +12,8 @@ SAFE_TOOL_PROMPT_GUIDANCE = (
     "- Prefer `uv run mew tool status` and `uv run mew tool git status` for workspace status.\n"
     "- Use `uv run mew tool list`, `uv run mew tool read`, and `uv run mew tool search` "
     "for bounded inspection.\n"
+    "- Use `uv run mew tool write --dry-run` or `uv run mew tool edit --dry-run` to preview "
+    "small file changes before applying them.\n"
     "- Use `uv run mew tool test --command \"...\"` for verification when practical.\n\n"
 )
 

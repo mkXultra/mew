@@ -120,6 +120,10 @@ def run_runtime(args):
             print("read-only inspection allowed under:")
             for path in args.allow_read:
                 print(f"- {path}")
+        if args.allow_write:
+            print("gated writes allowed under:")
+            for path in args.allow_write:
+                print(f"- {path}")
 
         first = True
         next_passive_at = time.time() + args.interval
@@ -159,6 +163,7 @@ def run_runtime(args):
                     autonomy["allow_agent_run"] = bool(args.allow_agent_run)
                     autonomy["allow_verify"] = bool(args.allow_verify)
                     autonomy["verify_command_configured"] = bool(args.verify_command)
+                    autonomy["allow_write"] = bool(args.allow_write)
                     autonomy["updated_at"] = now_iso()
                     processed_count = process_events(
                         state,
@@ -183,6 +188,8 @@ def run_runtime(args):
                         verify_timeout=args.verify_timeout,
                         verify_interval_seconds=max(0.0, args.verify_interval_minutes * 60.0),
                         allowed_read_roots=args.allow_read,
+                        allow_write=bool(args.allow_write),
+                        allowed_write_roots=args.allow_write,
                     )
                     if args.echo_outbox:
                         new_outbox_messages = list(state.get("outbox", [])[outbox_len_before:])

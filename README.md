@@ -55,6 +55,7 @@ without executing arbitrary task commands:
 ```sh
 uv run mew run --autonomous --autonomy-level act \
   --allow-verify \
+  --allow-write . \
   --verify-command "UV_CACHE_DIR=.uv-cache uv run python -m unittest" \
   --verify-interval-minutes 60
 ```
@@ -67,6 +68,7 @@ uv run mew message "今日のタスクは何？" --wait
 uv run mew brief
 uv run mew next
 uv run mew verification
+uv run mew writes
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
 uv run mew ack --all
@@ -86,13 +88,18 @@ uv run mew tool status
 uv run mew tool list src/mew
 uv run mew tool read src/mew/cli.py --max-chars 4000
 uv run mew tool search "self-improve" src
+uv run mew tool write notes.md --content "hello" --create --dry-run
+uv run mew tool edit notes.md --old "hello" --new "hello mew" --dry-run
 uv run mew tool test --command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
 uv run mew tool git diff
 uv run mew tool git diff --staged --stat
 ```
 
 Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
-read command. Tool commands do not provide file-writing operations.
+read and write commands. Runtime write actions require `--allow-write` and
+non-dry-run runtime writes also require `--allow-verify --verify-command`.
+Runtime write actions default to dry-run unless the action explicitly sets
+`dry_run=false`.
 Programmer-loop implementation prompts also point agents at these commands so
 self-improvement runs can inspect and verify work through the safe layer.
 

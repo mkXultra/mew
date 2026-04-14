@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-STATE_VERSION = 4
+STATE_VERSION = 5
 STATE_DIR = Path(".mew")
 STATE_FILE = STATE_DIR / "state.json"
 LOG_FILE = STATE_DIR / "runtime.md"

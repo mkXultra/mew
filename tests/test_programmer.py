@@ -4,6 +4,7 @@ import os
 import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from mew.agent import apply_action_plan, deterministic_decision_plan
@@ -78,6 +79,8 @@ class ProgrammerTests(unittest.TestCase):
         self.assertIn("uv run mew tool status", plan["implementation_prompt"])
         self.assertIn("uv run mew tool read", plan["implementation_prompt"])
         self.assertIn("uv run mew tool test --command", plan["implementation_prompt"])
+        self.assertIn("uv run mew tool write --dry-run", plan["implementation_prompt"])
+        self.assertIn("uv run mew tool edit --dry-run", plan["implementation_prompt"])
 
     def test_dispatch_run_is_implementation_and_syncs_task(self):
         state = default_state()
@@ -454,6 +457,201 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
         self.assertIn("Verification failed", state["outbox"][-1]["text"])
         self.assertEqual(state["attention"]["items"][0]["kind"], "verification")
+
+    def test_autonomous_write_requires_allow_write(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "write", "decisions": []},
+            {
+                "summary": "write",
+                "actions": [
+                    {
+                        "type": "write_file",
+                        "path": "notes.md",
+                        "content": "hello",
+                        "create": True,
+                        "dry_run": True,
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_write=False,
+        )
+
+        self.assertEqual(state["write_runs"], [])
+        self.assertIn("--allow-write is required", state["outbox"][-1]["text"])
+
+    def test_autonomous_write_dry_run_records_without_verification(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "write", "decisions": []},
+                {
+                    "summary": "write",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": str(path),
+                            "content": "hello\n",
+                            "create": True,
+                            "dry_run": True,
+                        }
+                    ],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_write=True,
+                allowed_write_roots=[tmp],
+            )
+
+            self.assertFalse(path.exists())
+            self.assertEqual(len(state["write_runs"]), 1)
+            self.assertTrue(state["write_runs"][0]["dry_run"])
+            self.assertEqual(state["verification_runs"], [])
+
+    def test_autonomous_write_defaults_to_dry_run_when_flag_is_omitted(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "write", "decisions": []},
+                {
+                    "summary": "write",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": str(path),
+                            "content": "hello\n",
+                            "create": True,
+                        }
+                    ],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_write=True,
+                allowed_write_roots=[tmp],
+                allow_verify=True,
+                verify_command="python -m unittest",
+            )
+
+            self.assertFalse(path.exists())
+            self.assertTrue(state["write_runs"][0]["dry_run"])
+            self.assertEqual(state["verification_runs"], [])
+
+    def test_autonomous_real_write_requires_verification_gate(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "write", "decisions": []},
+                {
+                    "summary": "write",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": str(path),
+                            "content": "hello\n",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_write=True,
+                allowed_write_roots=[tmp],
+                allow_verify=False,
+                verify_command="python -m unittest",
+            )
+
+            self.assertFalse(path.exists())
+            self.assertEqual(state["write_runs"], [])
+            self.assertIn("require --allow-verify and --verify-command", state["outbox"][-1]["text"])
+
+    def test_autonomous_write_runs_verification_after_write(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        def fake_run_command_record(command, cwd=None, timeout=300):
+            return {
+                "command": command,
+                "argv": ["python", "-m", "unittest"],
+                "cwd": "/tmp/repo",
+                "started_at": "start",
+                "finished_at": "end",
+                "exit_code": 0,
+                "stdout": "OK",
+                "stderr": "",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+            path.write_text("hello mew\n", encoding="utf-8")
+
+            with patch("mew.agent.run_command_record", side_effect=fake_run_command_record):
+                apply_action_plan(
+                    state,
+                    event,
+                    {"summary": "edit", "decisions": []},
+                    {
+                        "summary": "edit",
+                        "actions": [
+                            {
+                                "type": "edit_file",
+                                "path": str(path),
+                                "old": "mew",
+                                "new": "shell",
+                                "dry_run": False,
+                            }
+                        ],
+                    },
+                    now_iso(),
+                    allow_task_execution=False,
+                    task_timeout=1,
+                    autonomous=True,
+                    autonomy_level="act",
+                    allow_write=True,
+                    allowed_write_roots=[tmp],
+                    allow_verify=True,
+                    verify_command="python -m unittest",
+                    verify_timeout=10,
+                )
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "hello shell\n")
+            self.assertEqual(len(state["write_runs"]), 1)
+            self.assertEqual(state["write_runs"][0]["operation"], "edit_file")
+            self.assertEqual(len(state["verification_runs"]), 1)
+            self.assertIn("Verification passed", state["outbox"][-1]["text"])
 
     def test_autonomous_dispatch_starts_when_allowed(self):
         state = default_state()

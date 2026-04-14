@@ -72,6 +72,7 @@ def default_state():
         },
         "agent_runs": [],
         "verification_runs": [],
+        "write_runs": [],
         "autonomy": {
             "enabled": False,
             "level": "off",
@@ -83,6 +84,7 @@ def default_state():
             "allow_agent_run": False,
             "allow_verify": False,
             "verify_command_configured": False,
+            "allow_write": False,
             "updated_at": None,
         },
         "memory": {
@@ -113,6 +115,7 @@ def default_state():
             "agent_run": 1,
             "plan": 1,
             "verification_run": 1,
+            "write_run": 1,
         },
     }
 
@@ -154,6 +157,7 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "attention", state.get("attention", {}).get("items", []))
     _ensure_next_id_after_existing(next_ids, "agent_run", state.get("agent_runs", []))
     _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
+    _ensure_next_id_after_existing(next_ids, "write_run", state.get("write_runs", []))
 
     plans = []
     for task in state.get("tasks", []):
@@ -270,12 +274,15 @@ def migrate_state(state):
     state["autonomy"].setdefault("allow_agent_run", False)
     state["autonomy"].setdefault("allow_verify", False)
     state["autonomy"].setdefault("verify_command_configured", False)
+    state["autonomy"].setdefault("allow_write", False)
     state["autonomy"].setdefault("updated_at", None)
     state.setdefault("attention", {"items": []})
     state["attention"].setdefault("items", [])
 
     next_ids = state.setdefault("next_ids", {})
-    for name in ("question", "reply", "attention", "agent_run", "plan", "verification_run"):
+    state.setdefault("write_runs", [])
+
+    for name in ("question", "reply", "attention", "agent_run", "plan", "verification_run", "write_run"):
         next_ids.setdefault(name, 1)
 
     linked_message_ids = {
@@ -393,6 +400,8 @@ Default policy:
 - Do not execute tasks unless the task has auto_execute=true and the runtime was started with --execute-tasks.
 - Do not start autonomous programmer agent runs unless --allow-agent-run is enabled.
 - Read-only local inspection is allowed only inside paths explicitly passed with --allow-read.
+- Runtime file writes are allowed only inside paths explicitly passed with --allow-write.
+- Non-dry-run runtime writes require --allow-verify and a configured --verify-command.
 - Never read or search sensitive files such as auth.json, .env, private keys, or token files.
 - Keep user-facing messages short and actionable.
 - Preserve state and memory; do not erase history unless the user explicitly asks.
@@ -457,6 +466,7 @@ When there is no user request, mew wants to:
 - Compress noisy memory into durable project knowledge.
 - Read a small amount of allowed local context and update memory.
 - Propose small improvements to mew itself.
+- Preview small local edits with dry-run before applying them.
 - Avoid changing files or running expensive work without explicit permission.
 """
 

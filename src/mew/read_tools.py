@@ -46,9 +46,9 @@ def is_sensitive_path(path):
     )
 
 
-def ensure_not_sensitive(path):
+def ensure_not_sensitive(path, verb="inspect"):
     if is_sensitive_path(path):
-        raise ValueError(f"refusing to inspect sensitive path: {path}")
+        raise ValueError(f"refusing to {verb} sensitive path: {path}")
 
 
 def resolve_allowed_path(path, allowed_roots):

@@ -644,6 +644,7 @@ The first user-facing version should likely include:
 
 - `mew run`: start the background AI process.
 - `mew run --allow-read <path>`: allow bounded read-only inspection under a local path.
+- `mew run --allow-write <path>`: allow gated file writes under a local path.
 - `mew run --autonomous`: let mew do self-directed work when no user input is pending.
 - `mew run --autonomy-level observe|propose|act`: control how much freedom autonomous mode has.
 - `mew run --allow-agent-run`: allow autonomous programmer dispatch/review runs.
@@ -655,7 +656,8 @@ The first user-facing version should likely include:
 - `mew brief`: show the current operational summary and next useful move.
 - `mew next`: print the single next useful command or move.
 - `mew verification`: show recent runtime verification runs.
-- `mew tool`: expose safe AI-facing workspace inspection, search, test, and read-only git helpers.
+- `mew writes`: show recent runtime write/edit runs and optional diffs.
+- `mew tool`: expose safe AI-facing workspace inspection, write/edit, search, test, and read-only git helpers.
 - `mew self-improve`: create and optionally dispatch a mew self-improvement task.
 - `mew -m <message>`: send a message to the running background AI.
 - `mew message <message> --wait`: send a message and wait for responses linked to that event.
@@ -721,6 +723,8 @@ The MVP should persist local state for:
 - `replies`: answers linked to questions and user-message events.
 - `attention`: open items that explain what needs user focus.
 - `agent_runs`: task-linked coding-agent runs, initially via `ai-cli`.
+- `verification_runs`: bounded runtime verification command results.
+- `write_runs`: audited runtime write/edit attempts and their diffs.
 
 The runtime should read guidance before each `think` phase so edits can take
 effect without restarting a long-running passive process.
@@ -868,9 +872,13 @@ Autonomy levels:
 
 - `observe`: remember and self-review only.
 - `propose`: `observe` plus creating proposed tasks and programmer plans.
-- `act`: `propose` plus bounded read-only inspection under `--allow-read`, and programmer dispatch/review when `--allow-agent-run` is enabled.
+- `act`: `propose` plus bounded read-only inspection under `--allow-read`, gated writes under `--allow-write`, and programmer dispatch/review when `--allow-agent-run` is enabled.
 
 Local command execution still requires `--execute-tasks`, `auto_execute=true`, and an explicit command. Autonomous programmer agent dispatch requires `--allow-agent-run`, `auto_execute=true`, `status=ready`, and a programmer plan.
+Runtime write actions require `--allow-write`; non-dry-run runtime writes also
+require `--allow-verify` and a configured `--verify-command`, and should trigger
+verification immediately after writing. Runtime write actions default to dry-run
+unless the action explicitly sets `dry_run=false`.
 
 ### 11.6 Out of Scope for MVP
 
@@ -905,7 +913,10 @@ The initial goal is to prove behavior, not storage sophistication. SQLite can be
 - The background AI should only read and write the local task store through the same task management API.
 - The background AI should ask before making bulk task changes.
 - The background AI should only inspect local project files under explicit `--allow-read` roots.
+- The background AI should only write local project files under explicit `--allow-write` roots.
+- The background AI should preview small writes with dry-run when practical.
 - The background AI should refuse sensitive files such as `auth.json`, `.env`, private keys, and token files even when they are inside an allowed read root.
+- The background AI should refuse writing sensitive files such as `auth.json`, `.env`, private keys, and token files even when they are inside an allowed write root.
 - The background AI should not use read-only inspection results as permission to execute commands.
 - Autonomous programmer dispatch/review should require `--allow-agent-run`; without it, the runtime may plan but must not start a new agent run.
 - Review agent runs should be read-only by prompt and should not directly change the original task status.

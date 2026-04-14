@@ -57,6 +57,7 @@ from .read_tools import inspect_dir, read_file, search_text, summarize_read_resu
 from .tasks import find_task, format_task, open_tasks, task_sort_key
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
+from .write_tools import edit_file, summarize_write_result, write_file
 
 
 def cmd_task_add(args):
@@ -439,6 +440,32 @@ def cmd_verification(args):
                 print(run["stderr"])
     return 0
 
+def format_write_run(run):
+    return (
+        f"#{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
+        f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
+        f"written={run.get('written')} path={run.get('path')}"
+    )
+
+def cmd_writes(args):
+    state = load_state()
+    runs = list(state.get("write_runs", []))
+    if not runs:
+        print("No write runs.")
+        return 0
+    if not args.all:
+        runs = runs[-args.limit :]
+    runs = list(reversed(runs))
+    if args.json:
+        print(json.dumps(runs, ensure_ascii=False, indent=2))
+        return 0
+    for run in runs:
+        print(format_write_run(run))
+        if args.details and run.get("diff"):
+            print("diff:")
+            print(run["diff"])
+    return 0
+
 def _tool_allowed_roots(args):
     roots = getattr(args, "root", None) or ["."]
     return roots
@@ -479,6 +506,37 @@ def cmd_tool_search(args):
         print(f"mew: {exc}", file=sys.stderr)
         return 1
     _print_json_or_text(result, args.json, summarize_read_result("search_text", result))
+    return 0
+
+def cmd_tool_write(args):
+    try:
+        result = write_file(
+            args.path,
+            args.content,
+            _tool_allowed_roots(args),
+            create=args.create,
+            dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_write_result(result))
+    return 0
+
+def cmd_tool_edit(args):
+    try:
+        result = edit_file(
+            args.path,
+            args.old,
+            args.new,
+            _tool_allowed_roots(args),
+            replace_all=args.replace_all,
+            dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_write_result(result))
     return 0
 
 def cmd_tool_status(args):

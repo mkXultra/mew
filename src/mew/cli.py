@@ -43,12 +43,15 @@ from .commands import (
     cmd_task_show,
     cmd_task_update,
     cmd_tool_git,
+    cmd_tool_edit,
     cmd_tool_list,
     cmd_tool_read,
     cmd_tool_search,
     cmd_tool_status,
     cmd_tool_test,
+    cmd_tool_write,
     cmd_verification,
+    cmd_writes,
 )
 from .config import (
     DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
@@ -176,6 +179,12 @@ def build_parser():
         help="allow read-only autonomous inspection under this path; can be passed more than once",
     )
     run_parser.add_argument(
+        "--allow-write",
+        action="append",
+        default=[],
+        help="allow gated autonomous writes under this path; can be passed more than once",
+    )
+    run_parser.add_argument(
         "--model",
         default=os.environ.get("MEW_CODEX_MODEL", DEFAULT_CODEX_MODEL),
         help=f"Codex model name; default {DEFAULT_CODEX_MODEL}",
@@ -233,6 +242,13 @@ def build_parser():
     verification_parser.add_argument("--json", action="store_true", help="print structured JSON")
     verification_parser.set_defaults(func=cmd_verification)
 
+    writes_parser = subparsers.add_parser("writes", help="show runtime write/edit runs")
+    writes_parser.add_argument("--all", action="store_true", help="show all write runs")
+    writes_parser.add_argument("--limit", type=int, default=10, help="number of recent runs to show")
+    writes_parser.add_argument("--details", action="store_true", help="include diffs")
+    writes_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    writes_parser.set_defaults(func=cmd_writes)
+
     tool_parser = subparsers.add_parser("tool", help="safe local tools for AI-facing inspection")
     tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
 
@@ -262,6 +278,25 @@ def build_parser():
     tool_search_parser.add_argument("--max-matches", type=int, default=50)
     tool_search_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_search_parser.set_defaults(func=cmd_tool_search)
+
+    tool_write_parser = tool_subparsers.add_parser("write", help="write a file under an allowed root")
+    tool_write_parser.add_argument("path")
+    tool_write_parser.add_argument("--content", required=True)
+    tool_write_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_write_parser.add_argument("--create", action="store_true", help="allow creating a new file")
+    tool_write_parser.add_argument("--dry-run", action="store_true", help="show diff without writing")
+    tool_write_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_write_parser.set_defaults(func=cmd_tool_write)
+
+    tool_edit_parser = tool_subparsers.add_parser("edit", help="replace text in a file under an allowed root")
+    tool_edit_parser.add_argument("path")
+    tool_edit_parser.add_argument("--old", required=True)
+    tool_edit_parser.add_argument("--new", required=True)
+    tool_edit_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_edit_parser.add_argument("--replace-all", action="store_true", help="replace every occurrence")
+    tool_edit_parser.add_argument("--dry-run", action="store_true", help="show diff without writing")
+    tool_edit_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_edit_parser.set_defaults(func=cmd_tool_edit)
 
     tool_test_parser = tool_subparsers.add_parser("test", help="run a bounded verification command")
     tool_test_parser.add_argument("--command", required=True)
