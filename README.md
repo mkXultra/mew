@@ -111,6 +111,7 @@ state without leaving the session:
 /note 4 次はここを見る
 /reply 3 それで進めて
 /attention
+/resolve all
 /agents
 /result 12
 /wait 12 60

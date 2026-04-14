@@ -1613,6 +1613,7 @@ CHAT_HELP = """Commands:
 /note <task-id> <txt> append a task note
 /questions [all]      list open questions, or all questions
 /attention [all]      list open attention items, or all attention items
+/resolve all|<ids>    resolve attention items
 /outbox [all]         list unread outbox messages, or all messages
 /agents [all]         list running agent runs, or all agent runs
 /result <run-id>      collect an agent run result
@@ -1771,6 +1772,43 @@ def print_chat_attention(show_all=False):
         return
     for item in items:
         print(f"#{item['id']} [{item.get('status')}/{item.get('priority')}] {item.get('title')}: {item.get('reason')}")
+
+
+def chat_resolve_attention(rest):
+    if not rest:
+        print("usage: /resolve all|<attention-id...>")
+        return
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        if len(parts) == 1 and parts[0].casefold() == "all":
+            items = [item for item in state["attention"]["items"] if item.get("status") == "open"]
+        else:
+            ids = {str(part) for part in parts}
+            items = [
+                item
+                for item in state["attention"]["items"]
+                if str(item.get("id")) in ids and item.get("status") == "open"
+            ]
+            found_ids = {str(item.get("id")) for item in items}
+            missing = ids - found_ids
+            if missing:
+                print(f"mew: attention not found or already resolved: {', '.join(sorted(missing))}")
+                return
+
+        for item in items:
+            item["status"] = "resolved"
+            item["resolved_at"] = current_time
+            item["updated_at"] = current_time
+        save_state(state)
+
+    print(f"resolved {len(items)} attention item(s)")
 
 
 def print_chat_outbox(show_all=False):
@@ -2415,6 +2453,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "attention":
         print_chat_attention(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "resolve":
+        chat_resolve_attention(rest)
         return "continue"
     if command == "outbox":
         print_chat_outbox(show_all=rest.casefold() == "all")

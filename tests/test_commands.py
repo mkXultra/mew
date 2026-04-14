@@ -470,6 +470,39 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_resolves_attention_items(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_attention_item, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_attention_item(state, "test", "One", "first")
+                    add_attention_item(state, "test", "Two", "second")
+                    save_state(state)
+
+                stdin = StringIO("/attention\n/resolve 1\n/resolve all\n/attention all\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("#1 [open/normal] One: first", output)
+                self.assertIn("resolved 1 attention item(s)", output)
+                self.assertIn("#1 [resolved/normal] One: first", output)
+                self.assertIn("#2 [resolved/normal] Two: second", output)
+
+                state = load_state()
+                self.assertTrue(all(item.get("status") == "resolved" for item in state["attention"]["items"]))
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_programmer_loop_commands(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
