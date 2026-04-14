@@ -1632,6 +1632,7 @@ CHAT_HELP = """Commands:
 /block <task-id>      mark a task blocked
 /plan <task-id>       create or show a programmer plan; add prompt to print prompts
 /dispatch <task-id>   start an implementation run; add dry-run to preview
+/self [focus]         create/plan self-improvement; add dispatch or dry-run
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
 /mode <level>         override autonomy level: observe|propose|act|default
@@ -2305,6 +2306,75 @@ def chat_dispatch_task(rest):
         print(f"started implementation run #{run['id']} task={task['id']} plan={plan['id']} status={run.get('status')} pid={run.get('external_pid')}")
 
 
+def chat_self_improve(rest):
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+
+    option_tokens = {
+        "dispatch",
+        "--dispatch",
+        "dry-run",
+        "--dry-run",
+        "force",
+        "--force",
+        "force-plan",
+        "--force-plan",
+        "prompt",
+        "--prompt",
+        "ready",
+        "--ready",
+        "auto-execute",
+        "--auto-execute",
+    }
+    flags = {part.casefold() for part in parts if part.casefold() in option_tokens}
+    dry_run = "dry-run" in flags or "--dry-run" in flags
+    dispatch = "dispatch" in flags or "--dispatch" in flags or dry_run
+    force = "force" in flags or "--force" in flags
+    force_plan = "force-plan" in flags or "--force-plan" in flags
+    show_prompt = "prompt" in flags or "--prompt" in flags
+    ready = dispatch or "ready" in flags or "--ready" in flags
+    auto_execute = "auto-execute" in flags or "--auto-execute" in flags
+    focus = " ".join(part for part in parts if part.casefold() not in option_tokens).strip()
+
+    with state_lock():
+        state = load_state()
+        task, created = create_self_improve_task(
+            state,
+            focus=focus,
+            cwd=".",
+            ready=ready,
+            auto_execute=auto_execute,
+            force=force,
+        )
+        plan, plan_created = ensure_self_improve_plan(state, task, force=force_plan)
+        run = None
+        if dispatch:
+            run = create_implementation_run_from_plan(state, task, plan, dry_run=dry_run)
+            if dry_run:
+                ensure_agent_run_prompt_file(run)
+                run["command"] = build_ai_cli_run_command(run)
+            else:
+                start_agent_run(state, run)
+        save_state(state)
+
+    print(("created " if created else "reused ") + format_task(task))
+    print(("created " if plan_created else "reused ") + format_task_plan(plan))
+    if show_prompt:
+        print("implementation_prompt:")
+        print(plan.get("implementation_prompt") or "")
+        print("review_prompt:")
+        print(plan.get("review_prompt") or "")
+    if run:
+        if dry_run:
+            print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
+            print(" ".join(run["command"]))
+        else:
+            print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
+
+
 def run_chat_slash_command(line, chat_state):
     body = line[1:].strip()
     command, _, rest = body.partition(" ")
@@ -2417,6 +2487,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "dispatch":
         chat_dispatch_task(rest)
+        return "continue"
+    if command in ("self", "self-improve"):
+        chat_self_improve(rest)
         return "continue"
     if command == "pause":
         chat_set_paused(True, rest)

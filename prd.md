@@ -671,7 +671,7 @@ The first user-facing version should likely include:
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
 - `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
-- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/digest`, `/approve`, `/plan`, `/dispatch`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
+- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/digest`, `/approve`, `/plan`, `/dispatch`, `/self`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
 - `mew questions`: show open questions that block progress.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.
 - `mew ack <message-id...>`: mark one or more outbox messages as read.
@@ -855,6 +855,11 @@ It should:
 
 This keeps self-improvement supervised by default while making it easy to hand a
 small, reviewable improvement to the programmer loop.
+
+`mew chat` should expose the same supervised self-improvement path through
+`/self`, so a long-lived cockpit session can create or reuse the improvement
+task, ensure a plan, preview prompts, and optionally dispatch a dry-run or live
+implementation run without leaving chat.
 
 ### 11.5 Background AI
 

@@ -127,6 +127,7 @@ state without leaving the session:
 /ready 4
 /plan 4 prompt
 /dispatch 4 dry-run
+/self dry-run prompt improve chat loop
 /done 4
 /block 4
 /pause

@@ -647,6 +647,38 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_self_improve_creates_plan_and_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                stdin = StringIO("/self dry-run prompt improve chat self loop\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("created #1 [ready/normal] Improve mew itself", output)
+                self.assertIn("created plan #1", output)
+                self.assertIn("implementation_prompt:", output)
+                self.assertIn("created dry-run self-improve run #1", output)
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["title"], "Improve mew itself")
+                self.assertEqual(state["tasks"][0]["status"], "ready")
+                self.assertIn("improve chat self loop", state["tasks"][0]["description"])
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], 1)
+                self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+                self.assertEqual(state["agent_runs"][0]["purpose"], "implementation")
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_autonomy_controls_respect_pause_and_mode_override(self):
         from argparse import Namespace
 
