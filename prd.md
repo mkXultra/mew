@@ -817,6 +817,8 @@ It should:
 - Create a programmer plan unless `--no-plan` is passed.
 - Optionally mark the task ready and auto-executable.
 - Optionally dispatch an implementation run when explicitly requested.
+- Optionally run a supervised cycle that dispatches implementation, waits for
+  completion, starts review, processes follow-up, and stops unless review passes.
 
 This keeps self-improvement supervised by default while making it easy to hand a
 small, reviewable improvement to the programmer loop.

@@ -398,6 +398,12 @@ def cmd_next(args):
     return 0
 
 def cmd_self_improve(args):
+    if args.cycle:
+        return cmd_self_improve_cycle(args)
+    if args.cycles != 1:
+        print("mew: --cycles requires --cycle", file=sys.stderr)
+        return 1
+
     with state_lock():
         state = load_state()
         task, created = create_self_improve_task(
@@ -443,6 +449,161 @@ def cmd_self_improve(args):
             print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
             if run.get("status") != "running":
                 return 1
+    return 0
+
+def _create_self_improve_implementation_run(args):
+    state = load_state()
+    task, created = create_self_improve_task(
+        state,
+        title=args.title,
+        description=args.description,
+        focus=args.focus or "",
+        cwd=args.cwd or ".",
+        priority=args.priority,
+        ready=True,
+        auto_execute=args.auto_execute,
+        agent_model=args.agent_model,
+        force=args.force,
+    )
+    plan, plan_created = ensure_self_improve_plan(
+        state,
+        task,
+        agent_model=args.agent_model,
+        review_model=args.review_model,
+        force=args.force_plan,
+    )
+    run = create_implementation_run_from_plan(state, task, plan, dry_run=args.dry_run)
+    if args.dry_run:
+        ensure_agent_run_prompt_file(run)
+        run["command"] = build_ai_cli_run_command(run)
+    else:
+        start_agent_run(state, run)
+    save_state(state)
+    return state, task, created, plan, plan_created, run
+
+def _wait_cycle_run(args, run_id):
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, run_id)
+        if not run:
+            raise MewError(f"agent run not found: {run_id}")
+        try:
+            wait_agent_run(state, run, timeout=args.timeout)
+        except ValueError as exc:
+            raise MewError(str(exc)) from exc
+        save_state(state)
+    return run
+
+def _start_cycle_review(args, implementation_run_id):
+    with state_lock():
+        state = load_state()
+        implementation_run = find_agent_run(state, implementation_run_id)
+        if not implementation_run:
+            raise MewError(f"agent run not found: {implementation_run_id}")
+        task = find_task(state, implementation_run.get("task_id"))
+        if not task:
+            raise MewError(f"task not found for run #{implementation_run_id}")
+        plan = find_task_plan(task, implementation_run.get("plan_id")) if implementation_run.get("plan_id") else None
+        review_run = create_review_run_for_implementation(
+            state,
+            task,
+            implementation_run,
+            plan=plan,
+            model=args.review_model,
+        )
+        start_agent_run(state, review_run)
+        save_state(state)
+    return review_run
+
+def _process_cycle_review(run_id):
+    with state_lock():
+        state = load_state()
+        review_run = find_agent_run(state, run_id)
+        if not review_run:
+            raise MewError(f"agent run not found: {run_id}")
+        task = find_task(state, review_run.get("task_id"))
+        if not task:
+            raise MewError(f"task not found for review run #{run_id}")
+        followup, status = create_follow_up_task_from_review(state, task, review_run)
+        save_state(state)
+    return review_run, followup, status
+
+def cmd_self_improve_cycle(args):
+    if args.no_plan:
+        print("mew: --cycle requires planning; remove --no-plan", file=sys.stderr)
+        return 1
+    if args.cycles < 1:
+        print("mew: --cycles must be at least 1", file=sys.stderr)
+        return 1
+
+    for cycle_index in range(args.cycles):
+        try:
+            with state_lock():
+                state, task, created, plan, plan_created, run = _create_self_improve_implementation_run(
+                    args
+                )
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+
+        cycle_label = f"cycle {cycle_index + 1}/{args.cycles}"
+        print(f"{cycle_label}: {('created' if created else 'reused')} {format_task(task)}")
+        print(f"{cycle_label}: {('created' if plan_created else 'reused')} {format_task_plan(plan)}")
+
+        if args.dry_run:
+            print(f"{cycle_label}: created dry-run self-improve run #{run['id']}")
+            print(" ".join(run["command"]))
+            continue
+
+        print(f"{cycle_label}: started implementation run #{run['id']} pid={run.get('external_pid')}")
+        if run.get("status") != "running":
+            print(f"mew: implementation run #{run['id']} status={run.get('status')}", file=sys.stderr)
+            return 1
+
+        try:
+            implementation_run = _wait_cycle_run(args, run["id"])
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        print(f"{cycle_label}: implementation run #{implementation_run['id']} status={implementation_run.get('status')}")
+        if implementation_run.get("status") != "completed":
+            return 1
+
+        try:
+            review_run = _start_cycle_review(args, implementation_run["id"])
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        print(f"{cycle_label}: started review run #{review_run['id']} pid={review_run.get('external_pid')}")
+        if review_run.get("status") != "running":
+            print(f"mew: review run #{review_run['id']} status={review_run.get('status')}", file=sys.stderr)
+            return 1
+
+        try:
+            review_run = _wait_cycle_run(args, review_run["id"])
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        print(f"{cycle_label}: review run #{review_run['id']} status={review_run.get('status')}")
+        if review_run.get("status") != "completed":
+            return 1
+
+        try:
+            review_run, followup, review_status = _process_cycle_review(review_run["id"])
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        print(f"{cycle_label}: review status={review_status}")
+        if followup:
+            print(f"{cycle_label}: created follow-up {format_task(followup)}")
+            return 1
+        if review_status != "pass" and not args.allow_unknown_review:
+            print(
+                f"mew: stopping because review run #{review_run['id']} status={review_status}",
+                file=sys.stderr,
+            )
+            return 1
+
     return 0
 
 def cmd_outbox(args):
@@ -659,6 +820,7 @@ def cmd_agent_show(args):
         "review_of_run_id",
         "review_status",
         "followup_task_id",
+        "followup_processed_at",
         "backend",
         "model",
         "cwd",

@@ -195,6 +195,23 @@ def build_parser():
     self_improve_parser.add_argument("--force-plan", action="store_true", help="create a new plan even if one exists")
     self_improve_parser.add_argument("--dispatch", action="store_true", help="start an implementation run immediately")
     self_improve_parser.add_argument("--dry-run", action="store_true", help="create the run record without starting ai-cli")
+    self_improve_parser.add_argument(
+        "--cycle",
+        action="store_true",
+        help="run a supervised implementation, review, and follow-up cycle",
+    )
+    self_improve_parser.add_argument(
+        "--cycles",
+        type=int,
+        default=1,
+        help="number of supervised cycles to run with --cycle",
+    )
+    self_improve_parser.add_argument("--timeout", type=float, default=900.0, help="agent wait timeout per run")
+    self_improve_parser.add_argument(
+        "--allow-unknown-review",
+        action="store_true",
+        help="continue supervised cycles when a review returns unknown",
+    )
     self_improve_parser.set_defaults(func=cmd_self_improve)
 
     outbox_parser = subparsers.add_parser("outbox", help="show runtime messages")

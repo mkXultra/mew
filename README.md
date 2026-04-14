@@ -81,6 +81,16 @@ uv run mew self-improve --focus "Improve docs" --ready --auto-execute --dispatch
 When reusing an open self-improvement task, mew creates a fresh plan if the
 latest plan was already dispatched or no longer matches the current focus.
 
+Run one supervised implementation plus review cycle:
+
+```sh
+uv run mew self-improve --cycle --focus "Make one small safe improvement"
+```
+
+The cycle waits for implementation, starts a review, processes follow-up, and
+stops unless the review returns `STATUS: pass`. Use `--cycles N` to repeat that
+guarded loop.
+
 Let passive mode dispatch ready self-improvement tasks:
 
 ```sh

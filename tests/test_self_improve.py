@@ -1,13 +1,17 @@
+import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from unittest.mock import patch
 
 from mew.cli import main
+from mew.agent_runs import sync_task_with_agent_run
 from mew.programmer import create_implementation_run_from_plan
 from mew.self_improve import create_self_improve_task, ensure_self_improve_plan
 from mew.state import default_state, load_state
+from mew.timeutil import now_iso
 
 
 class SelfImproveTests(unittest.TestCase):
@@ -86,6 +90,149 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(len(state["agent_runs"]), 1)
                 self.assertEqual(state["agent_runs"][0]["purpose"], "implementation")
                 self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_cycle_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "self-improve",
+                            "--cycle",
+                            "--focus",
+                            "Run a supervised dry run",
+                            "--dry-run",
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertIn("cycle 1/1: created dry-run self-improve run", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(len(state["agent_runs"]), 1)
+                self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+                self.assertEqual(state["agent_runs"][0]["purpose"], "implementation")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_cycle_waits_reviews_and_processes_pass(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_start_agent_run(state, run):
+                    run["status"] = "running"
+                    run["external_pid"] = 1000 + run["id"]
+                    run["started_at"] = now_iso()
+                    run["updated_at"] = run["started_at"]
+                    return run
+
+                def fake_wait_agent_run(state, run, timeout=None):
+                    run["status"] = "completed"
+                    run["finished_at"] = now_iso()
+                    run["updated_at"] = run["finished_at"]
+                    if run["purpose"] == "review":
+                        run["result"] = json.dumps(
+                            [
+                                {
+                                    "status": "completed",
+                                    "agentOutput": {
+                                        "message": (
+                                            "STATUS: pass\n"
+                                            "SUMMARY: ok\n"
+                                            "FINDINGS:\n"
+                                            "- none\n"
+                                            "FOLLOW_UP:\n"
+                                            "- none"
+                                        )
+                                    },
+                                }
+                            ]
+                        )
+                    else:
+                        run["result"] = json.dumps(
+                            [{"status": "completed", "agentOutput": {"message": "implemented"}}]
+                        )
+                    sync_task_with_agent_run(state, run, run["updated_at"])
+                    return run
+
+                with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
+                    with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
+                        with redirect_stdout(StringIO()) as stdout:
+                            code = main(
+                                [
+                                    "self-improve",
+                                    "--cycle",
+                                    "--focus",
+                                    "Run a supervised cycle",
+                                    "--timeout",
+                                    "1",
+                                ]
+                            )
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("implementation run #1 status=completed", output)
+                self.assertIn("review run #2 status=completed", output)
+                self.assertIn("review status=pass", output)
+
+                state = load_state()
+                self.assertEqual(len(state["tasks"]), 1)
+                self.assertEqual(state["tasks"][0]["status"], "done")
+                self.assertEqual(len(state["agent_runs"]), 2)
+                self.assertEqual(state["agent_runs"][1]["purpose"], "review")
+                self.assertEqual(state["agent_runs"][1]["review_status"], "pass")
+                self.assertTrue(state["agent_runs"][1]["followup_processed_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_cycle_stops_on_unknown_review(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_start_agent_run(state, run):
+                    run["status"] = "running"
+                    run["external_pid"] = 2000 + run["id"]
+                    return run
+
+                def fake_wait_agent_run(state, run, timeout=None):
+                    run["status"] = "completed"
+                    run["finished_at"] = now_iso()
+                    run["updated_at"] = run["finished_at"]
+                    if run["purpose"] == "review":
+                        run["result"] = json.dumps(
+                            [{"status": "completed", "agentOutput": {"message": "No structured status"}}]
+                        )
+                    else:
+                        run["result"] = json.dumps(
+                            [{"status": "completed", "agentOutput": {"message": "implemented"}}]
+                        )
+                    sync_task_with_agent_run(state, run, run["updated_at"])
+                    return run
+
+                with patch("mew.commands.start_agent_run", side_effect=fake_start_agent_run):
+                    with patch("mew.commands.wait_agent_run", side_effect=fake_wait_agent_run):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            code = main(
+                                [
+                                    "self-improve",
+                                    "--cycle",
+                                    "--focus",
+                                    "Stop on unknown review",
+                                    "--timeout",
+                                    "1",
+                                ]
+                            )
+
+                self.assertEqual(code, 1)
+                state = load_state()
+                self.assertEqual(state["agent_runs"][1]["review_status"], "unknown")
+                self.assertTrue(state["agent_runs"][1]["followup_processed_at"])
+                self.assertEqual(len(state["tasks"]), 1)
             finally:
                 os.chdir(old_cwd)
 
