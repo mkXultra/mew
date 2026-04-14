@@ -73,6 +73,7 @@ def default_state():
         "agent_runs": [],
         "verification_runs": [],
         "write_runs": [],
+        "thought_journal": [],
         "autonomy": {
             "enabled": False,
             "level": "off",
@@ -123,6 +124,7 @@ def default_state():
             "plan": 1,
             "verification_run": 1,
             "write_run": 1,
+            "thought": 1,
         },
     }
 
@@ -165,6 +167,7 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "agent_run", state.get("agent_runs", []))
     _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
     _ensure_next_id_after_existing(next_ids, "write_run", state.get("write_runs", []))
+    _ensure_next_id_after_existing(next_ids, "thought", state.get("thought_journal", []))
 
     plans = []
     for task in state.get("tasks", []):
@@ -295,8 +298,18 @@ def migrate_state(state):
 
     next_ids = state.setdefault("next_ids", {})
     state.setdefault("write_runs", [])
+    state.setdefault("thought_journal", [])
 
-    for name in ("question", "reply", "attention", "agent_run", "plan", "verification_run", "write_run"):
+    for name in (
+        "question",
+        "reply",
+        "attention",
+        "agent_run",
+        "plan",
+        "verification_run",
+        "write_run",
+        "thought",
+    ):
         next_ids.setdefault(name, 1)
 
     linked_message_ids = {

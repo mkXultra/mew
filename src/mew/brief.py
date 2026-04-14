@@ -1,5 +1,6 @@
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .tasks import open_tasks, task_sort_key
+from .thoughts import recent_thoughts_for_context
 from .timeutil import now_iso
 
 
@@ -154,6 +155,20 @@ def _verification_item(run):
     }
 
 
+def _thought_item(thought):
+    return {
+        "id": thought.get("id"),
+        "at": thought.get("at"),
+        "event_id": thought.get("event_id"),
+        "event_type": thought.get("event_type"),
+        "cycle_reason": thought.get("cycle_reason"),
+        "summary": thought.get("summary"),
+        "open_threads": thought.get("open_threads", []),
+        "resolved_threads": thought.get("resolved_threads", []),
+        "counts": thought.get("counts", {}),
+    }
+
+
 def build_brief_data(state, limit=5):
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
@@ -181,6 +196,7 @@ def build_brief_data(state, limit=5):
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
         },
+        "thought_journal": [_thought_item(thought) for thought in recent_thoughts_for_context(state, limit=limit)],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "open_questions": [_question_item(question) for question in questions[:limit]],
         "open_tasks": [_task_item(task) for task in tasks[:limit]],
@@ -256,6 +272,7 @@ def build_brief(state, limit=5):
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
+    thoughts = recent_thoughts_for_context(state, limit=limit)
 
     lines = [
         f"Mew brief at {now_iso()}",
@@ -317,6 +334,17 @@ def build_brief(state, limit=5):
             lines.append(
                 f"- #{run.get('id')} [{verification_outcome(run)}] "
                 f"exit_code={run.get('exit_code')} command={run.get('command')}"
+            )
+        lines.append("")
+
+    if thoughts:
+        lines.append("Thought journal")
+        for thought in thoughts[:limit]:
+            open_count = len(thought.get("open_threads", []))
+            suffix = f" open_threads={open_count}" if open_count else ""
+            lines.append(
+                f"- #{thought.get('id')} {thought.get('event_type')}#{thought.get('event_id')}: "
+                f"{thought.get('summary')}{suffix}"
             )
         lines.append("")
 

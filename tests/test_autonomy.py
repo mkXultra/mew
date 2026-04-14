@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mew.agent import apply_action_plan, deterministic_decision_plan
+from mew.agent import apply_action_plan, build_context, deterministic_decision_plan
 from mew.read_tools import read_file
 from mew.state import add_attention_item, add_event, default_state, migrate_state
 from mew.timeutil import now_iso
@@ -38,6 +38,8 @@ class AutonomyTests(unittest.TestCase):
     def test_migration_adds_autonomy_defaults(self):
         state = default_state()
         state.pop("autonomy")
+        state.pop("thought_journal")
+        state["next_ids"].pop("thought")
 
         migrated = migrate_state(state)
 
@@ -45,6 +47,43 @@ class AutonomyTests(unittest.TestCase):
         self.assertFalse(migrated["autonomy"]["enabled"])
         self.assertEqual(migrated["autonomy"]["level"], "off")
         self.assertEqual(migrated["autonomy"]["cycles"], 0)
+        self.assertEqual(migrated["thought_journal"], [])
+        self.assertEqual(migrated["next_ids"]["thought"], 1)
+
+    def test_action_plan_records_thought_journal_threads(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "continue"})
+
+        apply_action_plan(
+            state,
+            event,
+            {
+                "summary": "Need to keep working memory.",
+                "open_threads": ["Investigate task #1 next."],
+                "decisions": [{"type": "remember", "summary": "Need to keep working memory."}],
+            },
+            {
+                "summary": "Recorded continuity.",
+                "resolved_threads": ["Old question answered."],
+                "actions": [{"type": "record_memory", "summary": "Recorded continuity."}],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+
+        self.assertEqual(len(state["thought_journal"]), 1)
+        thought = state["thought_journal"][0]
+        self.assertEqual(thought["event_id"], event["id"])
+        self.assertEqual(thought["cycle_reason"], "user_input")
+        self.assertEqual(thought["summary"], "Recorded continuity.")
+        self.assertEqual(thought["open_threads"], ["Investigate task #1 next."])
+        self.assertEqual(thought["resolved_threads"], ["Old question answered."])
+        self.assertEqual(thought["actions"][0]["type"], "record_memory")
+
+        context = build_context(state, event, "later")
+        self.assertEqual(context["thought_journal"][0]["summary"], "Recorded continuity.")
 
     def test_self_review_can_propose_task_at_propose_level(self):
         state = default_state()

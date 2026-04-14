@@ -663,6 +663,7 @@ The first user-facing version should likely include:
 - `mew next --json`: print the next move and extracted command as structured JSON.
 - `mew verification`: show recent runtime verification runs.
 - `mew writes`: show recent runtime write/edit runs and optional diffs.
+- `mew thoughts`: show recent thought journal entries and unfinished thought threads.
 - `mew tool`: expose safe AI-facing workspace inspection, write/edit, search, test, and read-only git helpers.
 - `mew self-improve`: create and optionally dispatch a mew self-improvement task.
 - `mew -m <message>`: send a message to the running background AI.
@@ -671,7 +672,7 @@ The first user-facing version should likely include:
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
 - `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
-- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/digest`, `/attention`, `/resolve`, `/approve`, `/plan`, `/dispatch`, `/self`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
+- `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/thoughts`, `/digest`, `/attention`, `/resolve`, `/approve`, `/plan`, `/dispatch`, `/self`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
 - `mew questions`: show open questions that block progress.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.
 - `mew ack <message-id...>`: mark one or more outbox messages as read.
@@ -729,6 +730,8 @@ The MVP should persist local state for:
 - `desires`: human-written self-directed goals loaded from `.mew/desires.md`.
 - `autonomy`: whether autonomous mode is enabled, its level, cycle counts, and last self-review timestamps.
 - `memory`: shallow current context plus deep preferences, project knowledge, and decisions.
+- `thought_journal`: bounded per-event working memory with summaries, open thought
+  threads, resolved threads, and compact action digests.
 - `questions`: first-class questions with answer status and task/blocking links.
 - `replies`: answers linked to questions and user-message events.
 - `attention`: open items that explain what needs user focus.

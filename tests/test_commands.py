@@ -350,9 +350,22 @@ class CommandTests(unittest.TestCase):
                             "written": False,
                         }
                     )
+                    state["thought_journal"].append(
+                        {
+                            "id": 1,
+                            "event_id": 1,
+                            "event_type": "passive_tick",
+                            "at": "thought-time",
+                            "summary": "Remember the current loop.",
+                            "open_threads": ["Keep checking the task."],
+                            "resolved_threads": [],
+                            "actions": [{"type": "record_memory", "summary": "Remember"}],
+                            "counts": {"actions": 1},
+                        }
+                    )
                     save_state(state)
 
-                stdin = StringIO("/next\n/agents\n/verification\n/writes\nhello mew\n/exit\n")
+                stdin = StringIO("/next\n/agents\n/verification\n/writes\n/thoughts details\nhello mew\n/exit\n")
                 with (
                     patch("sys.stdin", stdin),
                     redirect_stdout(StringIO()) as stdout,
@@ -367,6 +380,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [running/implementation]", output)
                 self.assertIn("#1 [passed]", output)
                 self.assertIn("#1 [edit_file]", output)
+                self.assertIn("#1 event=passive_tick#1", output)
+                self.assertIn("open_threads:", output)
                 self.assertIn("queued message event", output)
 
                 state = load_state()

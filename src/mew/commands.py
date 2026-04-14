@@ -62,6 +62,7 @@ from .state import (
 from .sweep import format_sweep_report, sweep_agent_runs
 from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
 from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_key
+from .thoughts import format_thought_entry
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .write_tools import edit_file, summarize_write_result, write_file
@@ -603,6 +604,24 @@ def cmd_writes(args):
             print("rollback:")
             print(json.dumps(run["rollback"], ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_thoughts(args):
+    state = load_state()
+    thoughts = list(state.get("thought_journal", []))
+    if not thoughts:
+        print("No thought journal entries.")
+        return 0
+    if not args.all:
+        thoughts = thoughts[-args.limit :]
+    thoughts = list(reversed(thoughts))
+    if args.json:
+        print(json.dumps(thoughts, ensure_ascii=False, indent=2))
+        return 0
+    for thought in thoughts:
+        print(format_thought_entry(thought, details=args.details))
+    return 0
+
 
 def _tool_allowed_roots(args):
     roots = getattr(args, "root", None) or ["."]
@@ -1626,6 +1645,7 @@ CHAT_HELP = """Commands:
 /verify <command>     run and record a verification command
 /writes               show recent runtime write/edit runs
 /why                  explain the latest processed think/act decision
+/thoughts            show recent thought journal entries
 /digest               summarize activity since the last user message
 /approve <task-id>    mark a task ready and auto_execute=true
 /ready <task-id>      mark a task ready without changing auto_execute
@@ -2112,6 +2132,16 @@ def print_chat_writes():
         print(format_write_run(run))
 
 
+def print_chat_thoughts(details=False):
+    state = load_state()
+    thoughts = list(reversed(state.get("thought_journal", [])[-10:]))
+    if not thoughts:
+        print("No thought journal entries.")
+        return
+    for thought in thoughts:
+        print(format_thought_entry(thought, details=details))
+
+
 def latest_processed_event(state):
     for event in reversed(state.get("inbox", [])):
         if event.get("processed_at"):
@@ -2492,6 +2522,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("writes", "write"):
         print_chat_writes()
+        return "continue"
+    if command in ("thoughts", "thought"):
+        print_chat_thoughts(details=rest.casefold() in ("details", "--details"))
         return "continue"
     if command == "why":
         print_chat_why()

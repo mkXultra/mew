@@ -46,6 +46,7 @@ from .commands import (
     cmd_task_run,
     cmd_task_show,
     cmd_task_update,
+    cmd_thoughts,
     cmd_tool_git,
     cmd_tool_edit,
     cmd_tool_list,
@@ -285,6 +286,13 @@ def build_parser():
     writes_parser.add_argument("--details", action="store_true", help="include diffs")
     writes_parser.add_argument("--json", action="store_true", help="print structured JSON")
     writes_parser.set_defaults(func=cmd_writes)
+
+    thoughts_parser = subparsers.add_parser("thoughts", help="show recent thought journal entries")
+    thoughts_parser.add_argument("--all", action="store_true", help="show all thought journal entries")
+    thoughts_parser.add_argument("--limit", type=int, default=10, help="number of recent entries to show")
+    thoughts_parser.add_argument("--details", action="store_true", help="include threads and action digest")
+    thoughts_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    thoughts_parser.set_defaults(func=cmd_thoughts)
 
     tool_parser = subparsers.add_parser("tool", help="safe local tools for AI-facing inspection")
     tool_subparsers = tool_parser.add_subparsers(dest="tool_command")

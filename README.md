@@ -82,6 +82,7 @@ uv run mew next
 uv run mew next --json
 uv run mew verification
 uv run mew writes
+uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
 uv run mew ack --all
@@ -123,6 +124,7 @@ state without leaving the session:
 /verify UV_CACHE_DIR=.uv-cache uv run python -m unittest
 /writes
 /why
+/thoughts details
 /digest
 /approve 4
 /ready 4

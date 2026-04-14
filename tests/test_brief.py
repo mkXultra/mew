@@ -96,6 +96,27 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Recent verification", brief)
         self.assertIn("#1 [passed]", brief)
 
+    def test_brief_surfaces_recent_thought_journal(self):
+        state = default_state()
+        state["thought_journal"].append(
+            {
+                "id": 1,
+                "event_id": 2,
+                "event_type": "passive_tick",
+                "at": "now",
+                "summary": "Continue the self-improvement thread.",
+                "open_threads": ["Check the verification result next."],
+                "resolved_threads": [],
+                "counts": {"actions": 1},
+            }
+        )
+
+        brief = build_brief(state)
+
+        self.assertIn("Thought journal", brief)
+        self.assertIn("#1 passive_tick#2", brief)
+        self.assertIn("open_threads=1", brief)
+
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()
         state["verification_runs"].append(

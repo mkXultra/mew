@@ -46,6 +46,7 @@ from .tasks import (
 )
 from .timeutil import elapsed_hours, now_iso
 from .toolbox import format_command_record, run_command_record
+from .thoughts import normalize_thread_list, recent_thoughts_for_context, record_thought_journal_entry
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -158,6 +159,7 @@ def build_context(
         "self": self_text,
         "desires": desires,
         "runtime_log_tail": read_runtime_log_tail(),
+        "thought_journal": recent_thoughts_for_context(state),
         "allowed_read_roots": allowed_read_roots or [],
         "allowed_write_roots": allowed_write_roots or [],
         "verification_runs": state.get("verification_runs", [])[-10:],
@@ -213,6 +215,7 @@ def build_think_prompt(
         "Your job is to decide what should happen next, not to execute anything.\n"
         "Follow the human-written guidance when prioritizing decisions. "
         "If guidance conflicts with safety rules, safety rules win.\n"
+        "Use open_threads for unfinished reasoning that should survive the next wake, and resolved_threads for threads closed now.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
         "execute_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
@@ -240,6 +243,8 @@ def build_think_prompt(
         "Schema:\n"
         "{\n"
         '  "summary": "short memory of the current situation",\n'
+        '  "open_threads": ["reasoning threads that should survive the next wake"],\n'
+        '  "resolved_threads": ["threads resolved by this decision"],\n'
         '  "agent_status": {\n'
         '    "mode": "idle|reviewing_tasks|answering_user|waiting_for_user|acting",\n'
         '    "current_focus": "short phrase",\n'
@@ -314,6 +319,7 @@ def build_act_prompt(
         "Return only JSON. Do not use markdown.\n"
         "Your job is to normalize the THINK phase DecisionPlan into concrete actions.\n"
         "You still do not execute shell commands yourself. Local code will execute only validated actions.\n"
+        "Preserve or refine open_threads when follow-up is needed, and mark resolved_threads when actions close a thread.\n"
         "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, run_verification, "
         "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
@@ -338,6 +344,8 @@ def build_act_prompt(
         "Schema:\n"
         "{\n"
         '  "summary": "short action summary",\n'
+        '  "open_threads": ["action follow-up threads that should survive the next wake"],\n'
+        '  "resolved_threads": ["threads resolved by these actions"],\n'
         '  "actions": [\n'
         '    {"type": "record_memory", "summary": "..."},\n'
         '    {"type": "send_message", "message_type": "assistant|info|warning", "text": "..."},\n'
@@ -806,6 +814,8 @@ def deterministic_decision_plan(
 
     return {
         "summary": summary,
+        "open_threads": [],
+        "resolved_threads": [],
         "agent_status": {
             "mode": "answering_user" if event["type"] == "user_message" else "reviewing_tasks",
             "current_focus": event.get("payload", {}).get("text", "")
@@ -887,6 +897,8 @@ def normalize_decision_plan(plan, fallback_summary):
     agent_status = plan.get("agent_status") if isinstance(plan.get("agent_status"), dict) else {}
     return {
         "summary": summary,
+        "open_threads": normalize_thread_list(plan.get("open_threads")),
+        "resolved_threads": normalize_thread_list(plan.get("resolved_threads")),
         "agent_status": agent_status,
         "decisions": normalized,
     }
@@ -993,7 +1005,12 @@ def deterministic_action_plan(decision_plan):
             actions.append(dict(decision))
     if not actions:
         actions.append({"type": "record_memory", "summary": decision_plan["summary"]})
-    return {"summary": decision_plan["summary"], "actions": actions}
+    return {
+        "summary": decision_plan["summary"],
+        "open_threads": list(decision_plan.get("open_threads") or []),
+        "resolved_threads": list(decision_plan.get("resolved_threads") or []),
+        "actions": actions,
+    }
 
 def normalize_action_plan(plan, fallback_plan):
     if not isinstance(plan, dict):
@@ -1079,7 +1096,14 @@ def normalize_action_plan(plan, fallback_plan):
     if not normalized:
         normalized = fallback_plan.get("actions", [])
 
-    return {"summary": summary, "actions": normalized}
+    return {
+        "summary": summary,
+        "open_threads": normalize_thread_list(plan.get("open_threads"))
+        or normalize_thread_list(fallback_plan.get("open_threads")),
+        "resolved_threads": normalize_thread_list(plan.get("resolved_threads"))
+        or normalize_thread_list(fallback_plan.get("resolved_threads")),
+        "actions": normalized,
+    }
 
 def act_phase(
     state,
@@ -1795,6 +1819,7 @@ def apply_action_plan(
     verify_timeout=300,
     allow_write=False,
     allowed_write_roots=None,
+    cycle_reason="",
 ):
     counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
@@ -1969,6 +1994,15 @@ def apply_action_plan(
 
     update_shallow_knowledge(state, event, memory_summary, current_time)
     update_agent_work_context_from_plan(state, event, decision_plan, action_plan, current_time)
+    record_thought_journal_entry(
+        state,
+        event,
+        current_time,
+        decision_plan,
+        action_plan,
+        counts,
+        cycle_reason=cycle_reason,
+    )
     return counts
 
 def process_events(
@@ -2073,6 +2107,7 @@ def process_events(
             verify_timeout=verify_timeout,
             allow_write=allow_write,
             allowed_write_roots=allowed_write_roots,
+            cycle_reason=reason,
         )
         event["decision_plan"] = decision_plan
         event["action_plan"] = action_plan
