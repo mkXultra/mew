@@ -181,6 +181,7 @@ def run_runtime(args):
                         allow_verify=args.allow_verify,
                         verify_command=args.verify_command or "",
                         verify_timeout=args.verify_timeout,
+                        verify_interval_seconds=max(0.0, args.verify_interval_minutes * 60.0),
                         allowed_read_roots=args.allow_read,
                     )
                     if args.echo_outbox:

@@ -491,6 +491,9 @@ def append_autonomous_decisions(
     autonomy_level,
     desires,
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_interval_seconds=3600,
     current_time=None,
 ):
     if event["type"] not in ("startup", "passive_tick"):
@@ -575,6 +578,20 @@ def append_autonomous_decisions(
                 )
                 return
 
+    if (
+        autonomy_level == "act"
+        and allow_verify
+        and verify_command
+        and runtime_verification_due(state, current_time, verify_interval_seconds)
+    ):
+        decisions.append(
+            {
+                "type": "run_verification",
+                "reason": "Configured runtime verification is due.",
+            }
+        )
+        return
+
     if autonomy_level in ("propose", "act") and not open_task_with_title(state, "Review mew self direction"):
         decisions.append(
             {
@@ -585,6 +602,22 @@ def append_autonomous_decisions(
             }
         )
 
+def latest_verification_time(state):
+    for run in reversed(state.get("verification_runs", [])):
+        timestamp = run.get("finished_at") or run.get("updated_at") or run.get("created_at")
+        if timestamp:
+            return timestamp
+    return None
+
+def runtime_verification_due(state, current_time, interval_seconds):
+    latest = latest_verification_time(state)
+    if not latest:
+        return True
+    hours = elapsed_hours(latest, current_time)
+    if hours is None:
+        return True
+    return hours * 3600 >= max(0.0, interval_seconds)
+
 def deterministic_decision_plan(
     state,
     event,
@@ -594,6 +627,9 @@ def deterministic_decision_plan(
     autonomy_level="off",
     desires="",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_interval_seconds=3600,
 ):
     summary = build_recall_summary(state, event, current_time)
     decisions = [{"type": "remember", "summary": summary}]
@@ -630,6 +666,9 @@ def deterministic_decision_plan(
                 autonomy_level,
                 desires,
                 allow_agent_run=allow_agent_run,
+                allow_verify=allow_verify,
+                verify_command=verify_command,
+                verify_interval_seconds=verify_interval_seconds,
                 current_time=current_time,
             )
     elif event["type"] == "passive_tick":
@@ -649,6 +688,9 @@ def deterministic_decision_plan(
                 autonomy_level,
                 desires,
                 allow_agent_run=allow_agent_run,
+                allow_verify=allow_verify,
+                verify_command=verify_command,
+                verify_interval_seconds=verify_interval_seconds,
                 current_time=current_time,
             )
 
@@ -755,6 +797,7 @@ def think_phase(
     allow_agent_run=False,
     allow_verify=False,
     verify_command="",
+    verify_interval_seconds=3600,
     allowed_read_roots=None,
 ):
     fallback = deterministic_decision_plan(
@@ -766,6 +809,9 @@ def think_phase(
         autonomy_level=autonomy_level,
         desires=desires,
         allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        verify_interval_seconds=verify_interval_seconds,
     )
     if not codex_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
         return fallback
@@ -1626,6 +1672,7 @@ def process_events(
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
+    verify_interval_seconds=3600,
     allowed_read_roots=None,
 ):
     current_time = now_iso()
@@ -1659,6 +1706,7 @@ def process_events(
             allow_agent_run=allow_agent_run,
             allow_verify=allow_verify,
             verify_command=verify_command,
+            verify_interval_seconds=verify_interval_seconds,
             allowed_read_roots=allowed_read_roots,
         )
         action_plan = act_phase(

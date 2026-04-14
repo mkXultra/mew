@@ -137,6 +137,12 @@ def build_parser():
         help="runtime verification command timeout in seconds",
     )
     run_parser.add_argument(
+        "--verify-interval-minutes",
+        type=float,
+        default=60.0,
+        help="minimum minutes between autonomous runtime verification runs",
+    )
+    run_parser.add_argument(
         "--task-timeout",
         type=float,
         default=DEFAULT_TASK_TIMEOUT_SECONDS,

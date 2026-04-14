@@ -8,6 +8,32 @@ from mew.state import add_event, default_state, migrate_state
 from mew.timeutil import now_iso
 
 
+def add_planned_ready_task(state):
+    current_time = now_iso()
+    task = {
+        "id": 1,
+        "title": "Verify mew",
+        "description": "",
+        "status": "ready",
+        "priority": "normal",
+        "notes": "",
+        "command": "python -m unittest",
+        "cwd": ".",
+        "auto_execute": False,
+        "agent_backend": "",
+        "agent_model": "",
+        "agent_prompt": "",
+        "agent_run_id": None,
+        "plans": [{"id": 1, "status": "planned"}],
+        "latest_plan_id": 1,
+        "runs": [],
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    state["tasks"].append(task)
+    return task
+
+
 class AutonomyTests(unittest.TestCase):
     def test_migration_adds_autonomy_defaults(self):
         state = default_state()
@@ -151,6 +177,50 @@ class AutonomyTests(unittest.TestCase):
         )
 
         self.assertNotIn("self_review", [decision["type"] for decision in plan["decisions"]])
+
+    def test_autonomous_act_schedules_configured_verification_when_due(self):
+        state = default_state()
+        add_planned_ready_task(state)
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_verify=True,
+            verify_command="python -m unittest",
+        )
+
+        self.assertIn("run_verification", [decision["type"] for decision in plan["decisions"]])
+
+    def test_autonomous_verification_respects_interval(self):
+        state = default_state()
+        current_time = now_iso()
+        add_planned_ready_task(state)
+        state["verification_runs"].append(
+            {
+                "id": 1,
+                "command": "python -m unittest",
+                "exit_code": 0,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_verify=True,
+            verify_command="python -m unittest",
+            verify_interval_seconds=3600,
+        )
+
+        self.assertNotIn("run_verification", [decision["type"] for decision in plan["decisions"]])
 
 
 if __name__ == "__main__":

@@ -55,7 +55,8 @@ without executing arbitrary task commands:
 ```sh
 uv run mew run --autonomous --autonomy-level act \
   --allow-verify \
-  --verify-command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
+  --verify-command "UV_CACHE_DIR=.uv-cache uv run python -m unittest" \
+  --verify-interval-minutes 60
 ```
 
 ## Useful Commands

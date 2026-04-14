@@ -648,6 +648,7 @@ The first user-facing version should likely include:
 - `mew run --autonomy-level observe|propose|act`: control how much freedom autonomous mode has.
 - `mew run --allow-agent-run`: allow autonomous programmer dispatch/review runs.
 - `mew run --allow-verify --verify-command <command>`: allow act-level runtime verification using the configured bounded command.
+- `mew run --verify-interval-minutes <minutes>`: set the minimum interval between autonomous verification runs.
 - `mew run --echo-outbox`: print newly created outbox messages in the runtime terminal for debugging.
 - `mew status`: show whether the background AI is running and what it last did.
 - `mew doctor`: check local state, runtime lock, and required local tools.
@@ -807,8 +808,9 @@ Autonomous programmer behavior uses the same loop:
 - Completed implementation runs may receive review runs only when `act` and `--allow-agent-run` are both enabled.
 - Completed review runs may create follow-up tasks when their report says more work is needed.
 - Runtime verification may run only when `act`, `--allow-verify`, and a configured
-  `--verify-command` are present. Results are stored in state and failures
-  create attention items.
+  `--verify-command` are present. Passive verification respects
+  `--verify-interval-minutes`. Results are stored in state and failures create
+  attention items.
 
 `mew agent sweep` is the manual maintenance entrypoint for this lifecycle. It
 should be able to collect running results, flag stale runs as attention items,
