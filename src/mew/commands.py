@@ -1,5 +1,7 @@
 import json
+import os
 import select
+import signal
 import shutil
 import sys
 import time
@@ -358,6 +360,37 @@ def cmd_status(args):
     print(f"latest_summary: {latest_summary}")
     print(f"next_move: {next_move(state)}")
     return 0
+
+def cmd_stop(args):
+    lock = read_lock()
+    if not lock:
+        print("No active runtime.")
+        return 0
+
+    pid = lock.get("pid")
+    if not pid_alive(pid):
+        print(f"mew: runtime lock is stale pid={pid}", file=sys.stderr)
+        return 1
+
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except (OSError, ValueError) as exc:
+        print(f"mew: failed to stop runtime pid={pid}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"sent stop signal to runtime pid={pid}")
+    if not args.wait:
+        return 0
+
+    deadline = time.monotonic() + max(0.0, args.timeout)
+    while time.monotonic() < deadline:
+        if not runtime_is_active():
+            print("runtime stopped")
+            return 0
+        time.sleep(max(0.01, args.poll_interval))
+
+    print(f"mew: timed out waiting for runtime pid={pid} to stop", file=sys.stderr)
+    return 1
 
 def cmd_doctor(args):
     failed = False

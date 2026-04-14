@@ -1,4 +1,5 @@
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -109,6 +110,32 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue((Path(".mew") / "desires.md").exists())
             finally:
                 os.chdir(old_cwd)
+
+    def test_stop_reports_when_no_runtime_is_active(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["stop"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("No active runtime.", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_stop_signals_active_runtime_and_waits(self):
+        with (
+            patch("mew.commands.read_lock", return_value={"pid": 123}),
+            patch("mew.commands.pid_alive", side_effect=[True, False]),
+            patch("mew.commands.os.kill") as kill,
+        ):
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(["stop", "--timeout", "1", "--poll-interval", "0.01"])
+
+        self.assertEqual(code, 0)
+        kill.assert_called_once_with(123, signal.SIGTERM)
+        self.assertIn("runtime stopped", stdout.getvalue())
 
     def test_tool_read_prints_non_sensitive_file(self):
         old_cwd = os.getcwd()

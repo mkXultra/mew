@@ -652,6 +652,7 @@ The first user-facing version should likely include:
 - `mew run --verify-interval-minutes <minutes>`: set the minimum interval between autonomous verification runs.
 - `mew run --echo-outbox`: print newly created outbox messages in the runtime terminal for debugging.
 - `mew status`: show whether the background AI is running and what it last did.
+- `mew stop`: stop the active background runtime and wait for shutdown.
 - `mew doctor`: check local state, runtime lock, and required local tools.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew next`: print the single next useful command or move.

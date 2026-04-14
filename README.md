@@ -64,6 +64,7 @@ uv run mew run --autonomous --autonomy-level act \
 
 ```sh
 uv run mew status
+uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
 uv run mew brief
 uv run mew next

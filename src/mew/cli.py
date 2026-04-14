@@ -34,6 +34,7 @@ from .commands import (
     cmd_self_improve,
     cmd_self_show,
     cmd_status,
+    cmd_stop,
     cmd_task_add,
     cmd_task_dispatch,
     cmd_task_done,
@@ -204,6 +205,13 @@ def build_parser():
 
     status_parser = subparsers.add_parser("status", help="show runtime status")
     status_parser.set_defaults(func=cmd_status)
+
+    stop_parser = subparsers.add_parser("stop", help="stop the active runtime")
+    stop_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after sending SIGTERM")
+    stop_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for shutdown")
+    stop_parser.add_argument("--poll-interval", type=float, default=0.1, help="shutdown poll interval in seconds")
+    stop_parser.set_defaults(wait=True)
+    stop_parser.set_defaults(func=cmd_stop)
 
     doctor_parser = subparsers.add_parser("doctor", help="check local mew dependencies and state")
     doctor_parser.add_argument("--auth", help="path to Codex OAuth auth.json")
