@@ -1,0 +1,207 @@
+import os
+import signal
+import sys
+import time
+
+from .agent import process_events
+from .codex_api import load_codex_oauth
+from .config import (
+    DEFAULT_CODEX_MODEL,
+    DEFAULT_CODEX_WEB_BASE_URL,
+    DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_TASK_TIMEOUT_SECONDS,
+    DESIRES_FILE,
+    GUIDANCE_FILE,
+    POLICY_FILE,
+    SELF_FILE,
+    STATE_FILE,
+)
+from .errors import MewError
+from .state import (
+    acquire_lock,
+    append_log,
+    ensure_desires,
+    ensure_guidance,
+    ensure_policy,
+    ensure_self,
+    has_pending_user_message,
+    load_state,
+    read_desires,
+    read_guidance,
+    read_policy,
+    read_self,
+    release_lock,
+    save_state,
+    state_lock,
+)
+from .timeutil import now_iso
+
+
+def set_runtime_running(state, started_at):
+    runtime = state["runtime_status"]
+    runtime["state"] = "running"
+    runtime["pid"] = os.getpid()
+    runtime["started_at"] = started_at
+    runtime["stopped_at"] = None
+    runtime["last_action"] = "runtime started"
+
+def set_runtime_stopped(state, stopped_at):
+    runtime = state["runtime_status"]
+    runtime["state"] = "stopped"
+    runtime["pid"] = None
+    runtime["stopped_at"] = stopped_at
+    runtime["last_action"] = "runtime stopped"
+
+def run_runtime(args):
+    codex_auth = None
+    ensure_guidance(args.guidance)
+    ensure_policy(args.policy)
+    if args.autonomous:
+        ensure_self(args.self_file)
+        ensure_desires(args.desires)
+    initial_guidance = read_guidance(args.guidance)
+    initial_policy = read_policy(args.policy)
+    initial_self = read_self(args.self_file)
+    initial_desires = read_desires(args.desires)
+    if args.ai:
+        try:
+            codex_auth = load_codex_oauth(args.auth)
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+
+    try:
+        lock = acquire_lock()
+    except RuntimeError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
+    stop_requested = {"value": False}
+
+    def request_stop(signum, frame):
+        stop_requested["value"] = True
+
+    previous_sigint = signal.signal(signal.SIGINT, request_stop)
+    previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
+
+    try:
+        with state_lock():
+            state = load_state()
+            set_runtime_running(state, lock["started_at"])
+            save_state(state)
+        append_log(f"## {lock['started_at']}: runtime started pid={os.getpid()}")
+        print(f"mew runtime started pid={os.getpid()} state={STATE_FILE}")
+        if codex_auth:
+            print(
+                "codex web api enabled "
+                f"auth={codex_auth['path']} model={args.model} base_url={args.base_url}"
+            )
+        if initial_guidance:
+            guidance_path = args.guidance or str(GUIDANCE_FILE)
+            print(f"guidance loaded path={guidance_path}")
+        if initial_policy:
+            policy_path = args.policy or str(POLICY_FILE)
+            print(f"policy loaded path={policy_path}")
+        if initial_self:
+            self_path = args.self_file or str(SELF_FILE)
+            print(f"self loaded path={self_path}")
+        if initial_desires:
+            desires_path = args.desires or str(DESIRES_FILE)
+            print(f"desires loaded path={desires_path}")
+        if args.autonomous:
+            print(f"autonomous mode enabled level={args.autonomy_level}")
+        if args.allow_agent_run:
+            print("autonomous agent runs allowed")
+        if args.allow_read:
+            print("read-only inspection allowed under:")
+            for path in args.allow_read:
+                print(f"- {path}")
+
+        first = True
+        next_passive_at = time.time() + args.interval
+        while not stop_requested["value"]:
+            sleep_for = None
+            processed_count = None
+            new_outbox_messages = []
+            reason = None
+            with state_lock():
+                state = load_state()
+                if state["runtime_status"].get("state") != "running":
+                    set_runtime_running(state, lock["started_at"])
+                pending_user = has_pending_user_message(state)
+                current_monotonic = time.time()
+                if pending_user:
+                    reason = "user_input"
+                    create_internal_event = False
+                elif first:
+                    reason = "startup"
+                    create_internal_event = True
+                elif current_monotonic >= next_passive_at:
+                    reason = "passive_tick"
+                    create_internal_event = True
+                else:
+                    sleep_for = min(args.poll_interval, max(0.0, next_passive_at - current_monotonic))
+
+                if sleep_for is None:
+                    outbox_len_before = len(state.get("outbox", []))
+                    guidance = read_guidance(args.guidance)
+                    policy = read_policy(args.policy)
+                    self_text = read_self(args.self_file)
+                    desires = read_desires(args.desires)
+                    allow_task_execution = args.execute_tasks and not pending_user
+                    autonomy = state["autonomy"]
+                    autonomy["enabled"] = bool(args.autonomous)
+                    autonomy["level"] = args.autonomy_level if args.autonomous else "off"
+                    autonomy["allow_agent_run"] = bool(args.allow_agent_run)
+                    autonomy["updated_at"] = now_iso()
+                    processed_count = process_events(
+                        state,
+                        reason,
+                        codex_auth=codex_auth,
+                        model=args.model,
+                        base_url=args.base_url,
+                        timeout=args.timeout,
+                        ai_ticks=args.ai_ticks,
+                        create_internal_event=create_internal_event,
+                        allow_task_execution=allow_task_execution,
+                        task_timeout=args.task_timeout,
+                        guidance=guidance,
+                        policy=policy,
+                        self_text=self_text,
+                        desires=desires,
+                        autonomous=args.autonomous and not pending_user,
+                        autonomy_level=args.autonomy_level if args.autonomous else "off",
+                        allow_agent_run=args.allow_agent_run and not pending_user,
+                        allowed_read_roots=args.allow_read,
+                    )
+                    if args.echo_outbox:
+                        new_outbox_messages = list(state.get("outbox", [])[outbox_len_before:])
+                    save_state(state)
+                    first = False
+                    if reason in ("startup", "passive_tick"):
+                        next_passive_at = time.time() + args.interval
+
+            if sleep_for is not None:
+                time.sleep(sleep_for)
+                continue
+
+            print(f"processed {processed_count} event(s) reason={reason}")
+            for message in new_outbox_messages:
+                text = str(message.get("text") or "").replace("\n", "\n  ")
+                print(f"outbox #{message.get('id')} [{message.get('type')}]: {text}")
+
+            if args.once:
+                break
+    finally:
+        stopped_at = now_iso()
+        with state_lock():
+            state = load_state()
+            set_runtime_stopped(state, stopped_at)
+            save_state(state)
+        release_lock()
+        append_log(f"## {stopped_at}: runtime stopped pid={os.getpid()}")
+        signal.signal(signal.SIGINT, previous_sigint)
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        print("mew runtime stopped")
+
+    return 0

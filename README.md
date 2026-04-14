@@ -1,0 +1,96 @@
+# mew
+
+`mew` is a local passive AI task agent prototype.
+
+It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, asks questions, and can run a guarded programmer loop through `ai-cli`.
+
+## Quick Start
+
+```sh
+uv run mew doctor --auth auth.json
+uv run mew task add "Improve mew" --description "Pick one small useful improvement"
+uv run mew run --autonomous --autonomy-level propose --echo-outbox
+```
+
+In another shell:
+
+```sh
+uv run mew attach -m "今日のタスクは何？"
+uv run mew brief
+uv run mew next
+```
+
+## Programmer Loop
+
+Manual flow:
+
+```sh
+uv run mew task plan <task-id>
+uv run mew task dispatch <task-id>
+uv run mew agent result <run-id>
+uv run mew agent review <run-id>
+uv run mew agent followup <review-run-id>
+uv run mew agent retry <failed-run-id>
+uv run mew agent sweep
+```
+
+Autonomous dispatch is intentionally gated:
+
+```sh
+uv run mew task update <task-id> --status ready --auto-execute
+uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
+```
+
+Local shell command execution is a separate gate:
+
+```sh
+uv run mew task update <task-id> --command "python -m pytest" --status ready --auto-execute
+uv run mew run --execute-tasks
+```
+
+## Useful Commands
+
+```sh
+uv run mew status
+uv run mew brief
+uv run mew next
+uv run mew self-improve --focus "Make one small mew improvement"
+uv run mew outbox
+uv run mew ack --all
+uv run mew questions
+uv run mew reply <question-id> "answer"
+uv run mew attention
+uv run mew attention --resolve-all
+uv run mew memory --compact
+```
+
+## Self-Improvement
+
+Create a planned self-improvement task without starting an agent:
+
+```sh
+uv run mew self-improve --focus "Improve stale agent-run handling"
+```
+
+Create a dry-run implementation record:
+
+```sh
+uv run mew self-improve --focus "Improve docs" --ready --auto-execute --dispatch --dry-run
+```
+
+Let passive mode dispatch ready self-improvement tasks:
+
+```sh
+uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
+```
+
+## State Files
+
+- `.mew/state.json`: durable state.
+- `.mew/runtime.md`: runtime log.
+- `.mew/guidance.md`: human-written think-phase priority.
+- `.mew/policy.md`: local safety policy.
+- `.mew/self.md`: mew identity and behavior.
+- `.mew/desires.md`: autonomous work preferences.
+
+`auth.json` and `.mew/` are ignored by git.

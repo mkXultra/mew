@@ -1,0 +1,1082 @@
+import select
+import shutil
+import sys
+import time
+
+from .agent_runs import (
+    build_ai_cli_run_command,
+    create_agent_run,
+    ensure_agent_run_prompt_file,
+    find_agent_run,
+    get_agent_run_result,
+    start_agent_run,
+    wait_agent_run,
+)
+from .brief import build_brief, next_move
+from .codex_api import load_codex_oauth
+from .config import LOG_FILE
+from .errors import MewError
+from .memory import compact_memory
+from .programmer import (
+    create_follow_up_task_from_review,
+    create_implementation_run_from_plan,
+    create_retry_run_for_implementation,
+    create_review_run_for_implementation,
+    create_task_plan,
+    find_task_plan,
+    format_task_plan,
+    latest_task_plan,
+)
+from .self_improve import create_self_improve_task, ensure_self_improve_plan
+from .state import (
+    add_event,
+    ensure_desires,
+    ensure_guidance,
+    ensure_policy,
+    ensure_self,
+    find_question,
+    load_state,
+    mark_message_read,
+    mark_question_answered,
+    next_id,
+    open_attention_items,
+    open_questions,
+    pid_alive,
+    read_desires,
+    read_guidance,
+    read_policy,
+    read_self,
+    read_lock,
+    save_state,
+    state_lock,
+)
+from .sweep import format_sweep_report, sweep_agent_runs
+from .tasks import find_task, format_task, open_tasks, task_sort_key
+from .timeutil import now_iso
+
+
+def cmd_task_add(args):
+    with state_lock():
+        state = load_state()
+        current_time = now_iso()
+        task = {
+            "id": next_id(state, "task"),
+            "title": args.title,
+            "description": args.description or "",
+            "status": "todo",
+            "priority": args.priority,
+            "notes": args.notes or "",
+            "command": args.command or "",
+            "cwd": args.cwd or "",
+            "auto_execute": args.auto_execute,
+            "agent_backend": args.agent_backend or "",
+            "agent_model": args.agent_model or "",
+            "agent_prompt": args.agent_prompt or "",
+            "agent_run_id": None,
+            "plans": [],
+            "latest_plan_id": None,
+            "runs": [],
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+        state["tasks"].append(task)
+        save_state(state)
+    print(format_task(task))
+    return 0
+
+def cmd_task_list(args):
+    state = load_state()
+    tasks = state["tasks"] if args.all else open_tasks(state)
+    tasks = sorted(tasks, key=task_sort_key)
+    if not tasks:
+        print("No tasks.")
+        return 0
+    for task in tasks:
+        print(format_task(task))
+    return 0
+
+def cmd_task_show(args):
+    state = load_state()
+    task = find_task(state, args.task_id)
+    if not task:
+        print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+        return 1
+
+    print(format_task(task))
+    print(f"description: {task.get('description') or ''}")
+    print(f"notes: {task.get('notes') or ''}")
+    print(f"command: {task.get('command') or ''}")
+    print(f"cwd: {task.get('cwd') or ''}")
+    print(f"auto_execute: {task.get('auto_execute')}")
+    print(f"agent_backend: {task.get('agent_backend') or ''}")
+    print(f"agent_model: {task.get('agent_model') or ''}")
+    print(f"agent_prompt: {task.get('agent_prompt') or ''}")
+    print(f"agent_run_id: {task.get('agent_run_id') or ''}")
+    print(f"latest_plan_id: {task.get('latest_plan_id') or ''}")
+    print(f"plans: {len(task.get('plans') or [])}")
+    print(f"runs: {len(task.get('runs') or [])}")
+    print(f"created_at: {task.get('created_at')}")
+    print(f"updated_at: {task.get('updated_at')}")
+    return 0
+
+def cmd_task_done(args):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, args.task_id)
+        if not task:
+            print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+        task["status"] = "done"
+        task["updated_at"] = now_iso()
+        save_state(state)
+    print(format_task(task))
+    return 0
+
+def cmd_task_update(args):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, args.task_id)
+        if not task:
+            print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+
+        changed = False
+        for field in (
+            "title",
+            "description",
+            "status",
+            "priority",
+            "notes",
+            "command",
+            "cwd",
+            "agent_backend",
+            "agent_model",
+            "agent_prompt",
+        ):
+            value = getattr(args, field)
+            if value is not None:
+                task[field] = value
+                changed = True
+        if args.auto_execute is not None:
+            task["auto_execute"] = args.auto_execute
+            changed = True
+
+        if changed:
+            task["updated_at"] = now_iso()
+            save_state(state)
+    print(format_task(task))
+    return 0
+
+def append_task_note(task, note):
+    existing = task.get("notes") or ""
+    task["notes"] = f"{existing.rstrip()}\n{note}".strip()
+
+def apply_reply_to_related_task(state, question, answer_text, event_id):
+    task_id = question.get("related_task_id") if question else None
+    if task_id is None:
+        return None
+
+    task = find_task(state, task_id)
+    if not task:
+        return None
+
+    current_time = now_iso()
+    text = answer_text.strip()
+    append_task_note(task, f"{current_time} reply to question #{question['id']}: {text}")
+
+    lowered = text.lower()
+    status_aliases = {
+        "ready": "ready",
+        "make ready": "ready",
+        "todo": "todo",
+        "blocked": "blocked",
+        "block": "blocked",
+        "done": "done",
+        "complete": "done",
+    }
+    if lowered in status_aliases:
+        task["status"] = status_aliases[lowered]
+
+    prefix_map = (
+        ("command:", "command"),
+        ("cmd:", "command"),
+        ("cwd:", "cwd"),
+        ("prompt:", "agent_prompt"),
+        ("agent-prompt:", "agent_prompt"),
+        ("agent_prompt:", "agent_prompt"),
+        ("model:", "agent_model"),
+        ("agent-model:", "agent_model"),
+        ("agent_model:", "agent_model"),
+    )
+    for prefix, field in prefix_map:
+        if lowered.startswith(prefix):
+            value = text[len(prefix) :].strip()
+            if value:
+                task[field] = value
+                if field in ("command", "agent_prompt") and task.get("status") == "todo":
+                    task["status"] = "ready"
+
+    if lowered.startswith("agent:"):
+        value = text[len("agent:") :].strip()
+        task["agent_backend"] = "ai-cli"
+        if value:
+            task["agent_model"] = value
+        if task.get("status") == "todo":
+            task["status"] = "ready"
+    elif lowered.startswith("ai-cli:"):
+        value = text[len("ai-cli:") :].strip()
+        task["agent_backend"] = "ai-cli"
+        if value:
+            task["agent_model"] = value
+        if task.get("status") == "todo":
+            task["status"] = "ready"
+
+    task["updated_at"] = current_time
+    return task
+
+def queue_user_message(text, reply_to_question_id=None):
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        payload = {"text": text}
+        if reply_to_question_id is not None:
+            payload["reply_to_question_id"] = reply_to_question_id
+        event = add_event(state, "user_message", "user", payload)
+        if reply_to_question_id is not None:
+            question = find_question(state, reply_to_question_id)
+            if question:
+                mark_question_answered(state, question, text, event_id=event["id"])
+                apply_reply_to_related_task(state, question, text, event["id"])
+        user = state["user_status"]
+        user["mode"] = "waiting_for_agent"
+        user["last_request"] = text
+        user["last_interaction_at"] = current_time
+        user["updated_at"] = current_time
+        save_state(state)
+    return event
+
+def cmd_message(args):
+    event = queue_user_message(args.message)
+    print(f"queued message event #{event['id']}")
+    return 0
+
+def cmd_reply(args):
+    with state_lock():
+        state = load_state()
+        question = find_question(state, args.question_id)
+        if not question:
+            print(f"mew: question not found: {args.question_id}", file=sys.stderr)
+            return 1
+    event = queue_user_message(args.text, reply_to_question_id=question["id"])
+    print(f"answered question #{question['id']} with event #{event['id']}")
+    return 0
+
+def cmd_ack(args):
+    with state_lock():
+        state = load_state()
+        if args.all:
+            messages = [message for message in state["outbox"] if not message.get("read_at")]
+            for message in messages:
+                mark_message_read(state, message["id"])
+            save_state(state)
+            print(f"acknowledged {len(messages)} message(s)")
+            return 0
+
+        if not args.message_ids:
+            print("mew: ack requires a message id or --all", file=sys.stderr)
+            return 1
+
+        acknowledged = []
+        for message_id in args.message_ids:
+            message = mark_message_read(state, message_id)
+            if not message:
+                print(f"mew: message not found: {message_id}", file=sys.stderr)
+                return 1
+            acknowledged.append(message)
+        save_state(state)
+    if len(acknowledged) == 1:
+        print(f"acknowledged message #{acknowledged[0]['id']}")
+    else:
+        ids = ", ".join(f"#{message['id']}" for message in acknowledged)
+        print(f"acknowledged messages {ids}")
+    return 0
+
+def cmd_status(args):
+    state = load_state()
+    lock = read_lock()
+    lock_state = "none"
+    if lock:
+        lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
+
+    runtime = state["runtime_status"]
+    agent = state["agent_status"]
+    user = state["user_status"]
+    autonomy = state.get("autonomy", {})
+    unread = [message for message in state["outbox"] if not message.get("read_at")]
+    questions = open_questions(state)
+    attention = open_attention_items(state)
+    running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    print(f"runtime_status: {runtime.get('state')}")
+    print(f"pid: {runtime.get('pid')}")
+    print(f"lock: {lock_state}")
+    print(f"last_woke_at: {runtime.get('last_woke_at')}")
+    print(f"last_evaluated_at: {runtime.get('last_evaluated_at')}")
+    print(f"last_action: {runtime.get('last_action')}")
+    print(f"agent_mode: {agent.get('mode')}")
+    print(f"agent_focus: {agent.get('current_focus')}")
+    print(f"agent_last_thought: {agent.get('last_thought')}")
+    print(f"autonomy_enabled: {autonomy.get('enabled')}")
+    print(f"autonomy_level: {autonomy.get('level')}")
+    print(f"autonomy_cycles: {autonomy.get('cycles')}")
+    print(f"last_self_review_at: {autonomy.get('last_self_review_at')}")
+    print(f"user_mode: {user.get('mode')}")
+    print(f"user_focus: {user.get('current_focus')}")
+    print(f"user_last_request: {user.get('last_request')}")
+    print(f"open_tasks: {len(open_tasks(state))}")
+    print(f"open_questions: {len(questions)}")
+    print(f"open_attention: {len(attention)}")
+    print(f"running_agent_runs: {len(running_agents)}")
+    if attention:
+        top = attention[0]
+        print(f"top_attention: #{top['id']} {top.get('title')}: {top.get('reason')}")
+    print(f"unread_outbox: {len(unread)}")
+    memory = state.get("memory", {}).get("shallow", {})
+    latest_summary = memory.get("current_context") or state["knowledge"]["shallow"].get("latest_task_summary")
+    print(f"latest_summary: {latest_summary}")
+    print(f"next_move: {next_move(state)}")
+    return 0
+
+def cmd_doctor(args):
+    failed = False
+
+    try:
+        state = load_state()
+        print("state: ok")
+        print(f"state_version: {state.get('version')}")
+        print(f"tasks: {len(state.get('tasks', []))}")
+        print(f"agent_runs: {len(state.get('agent_runs', []))}")
+    except Exception as exc:
+        print(f"state: error {exc}")
+        failed = True
+
+    lock = read_lock()
+    if lock:
+        lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
+        print(f"runtime_lock: {lock_state} pid={lock.get('pid')}")
+    else:
+        print("runtime_lock: none")
+
+    for executable in ("ai-cli", "rg"):
+        path = shutil.which(executable)
+        if path:
+            print(f"{executable}: ok {path}")
+        else:
+            print(f"{executable}: missing")
+            failed = True
+
+    try:
+        auth = load_codex_oauth(args.auth)
+        account = "present" if auth.get("account_id") else "none"
+        expires = auth.get("expires") or "(unknown)"
+        print(f"codex_auth: ok path={auth.get('path')} account_id={account} expires={expires}")
+    except MewError as exc:
+        level = "error" if args.require_auth else "missing"
+        print(f"codex_auth: {level} {exc}")
+        if args.require_auth:
+            failed = True
+
+    return 1 if failed else 0
+
+def cmd_brief(args):
+    state = load_state()
+    print(build_brief(state, limit=args.limit))
+    return 0
+
+def cmd_next(args):
+    state = load_state()
+    print(next_move(state))
+    return 0
+
+def cmd_self_improve(args):
+    with state_lock():
+        state = load_state()
+        task, created = create_self_improve_task(
+            state,
+            title=args.title,
+            description=args.description,
+            focus=args.focus or "",
+            cwd=args.cwd or ".",
+            priority=args.priority,
+            ready=args.ready or args.dispatch,
+            auto_execute=args.auto_execute,
+            agent_model=args.agent_model,
+            force=args.force,
+        )
+        plan = None
+        plan_created = False
+        run = None
+        if not args.no_plan or args.dispatch:
+            plan, plan_created = ensure_self_improve_plan(
+                state,
+                task,
+                agent_model=args.agent_model,
+                review_model=args.review_model,
+                force=args.force_plan,
+            )
+        if args.dispatch:
+            run = create_implementation_run_from_plan(state, task, plan, dry_run=args.dry_run)
+            if args.dry_run:
+                ensure_agent_run_prompt_file(run)
+                run["command"] = build_ai_cli_run_command(run)
+            else:
+                start_agent_run(state, run)
+        save_state(state)
+
+    print(("created" if created else "reused") + f" {format_task(task)}")
+    if plan:
+        print(("created" if plan_created else "reused") + f" {format_task_plan(plan)}")
+    if run:
+        if args.dry_run:
+            print(f"created dry-run self-improve run #{run['id']}")
+            print(" ".join(run["command"]))
+        else:
+            print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
+            if run.get("status") != "running":
+                return 1
+    return 0
+
+def cmd_outbox(args):
+    state = load_state()
+    messages = state["outbox"] if args.all else [m for m in state["outbox"] if not m.get("read_at")]
+    if not messages:
+        print("No messages.")
+        return 0
+    for message in messages:
+        read = "read" if message.get("read_at") else "unread"
+        print(f"#{message['id']} [{message['type']}/{read}] {message['text']}")
+    return 0
+
+def cmd_questions(args):
+    state = load_state()
+    questions = state["questions"] if args.all else open_questions(state)
+    if not questions:
+        print("No questions.")
+        return 0
+    for question in questions:
+        status = question.get("status")
+        task = question.get("related_task_id")
+        task_text = f" task=#{task}" if task else ""
+        print(f"#{question['id']} [{status}]{task_text} {question['text']}")
+    return 0
+
+def cmd_attention(args):
+    if args.resolve or args.resolve_all:
+        with state_lock():
+            state = load_state()
+            current_time = now_iso()
+            if args.resolve_all:
+                items = [item for item in state["attention"]["items"] if item.get("status") == "open"]
+            else:
+                ids = {str(item_id) for item_id in args.resolve}
+                items = [
+                    item
+                    for item in state["attention"]["items"]
+                    if str(item.get("id")) in ids and item.get("status") == "open"
+                ]
+                found_ids = {str(item.get("id")) for item in items}
+                missing = ids - found_ids
+                if missing:
+                    print(f"mew: attention not found or already resolved: {', '.join(sorted(missing))}", file=sys.stderr)
+                    return 1
+            for item in items:
+                item["status"] = "resolved"
+                item["resolved_at"] = current_time
+                item["updated_at"] = current_time
+            save_state(state)
+        print(f"resolved {len(items)} attention item(s)")
+        return 0
+
+    state = load_state()
+    items = state["attention"]["items"] if args.all else open_attention_items(state)
+    if not items:
+        print("No attention items.")
+        return 0
+    for item in items:
+        status = item.get("status")
+        priority = item.get("priority")
+        print(f"#{item['id']} [{status}/{priority}] {item.get('title')}: {item.get('reason')}")
+    return 0
+
+def cmd_memory(args):
+    if args.compact:
+        with state_lock():
+            state = load_state()
+            note = compact_memory(state, keep_recent=args.keep_recent, dry_run=args.dry_run)
+            if not args.dry_run:
+                save_state(state)
+        print(note)
+        return 0
+
+    state = load_state()
+    memory = state.get("memory", {})
+    shallow = memory.get("shallow", {})
+    deep = memory.get("deep", {})
+    print(f"current_context: {shallow.get('current_context') or ''}")
+    print(f"latest_task_summary: {shallow.get('latest_task_summary') or ''}")
+    if args.recent:
+        print("recent_events:")
+        for event in shallow.get("recent_events", [])[-args.recent :]:
+            print(f"- {event.get('at')} {event.get('event_type')}#{event.get('event_id')}: {event.get('summary')}")
+    if args.deep:
+        print("preferences:")
+        for item in deep.get("preferences", []):
+            print(f"- {item}")
+        print("project:")
+        for item in deep.get("project", []):
+            print(f"- {item}")
+        print("decisions:")
+        for item in deep.get("decisions", []):
+            print(f"- {item}")
+    return 0
+
+def cmd_task_run(args):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, args.task_id)
+        if not task:
+            print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+        backend = args.agent_backend or task.get("agent_backend") or "ai-cli"
+        model = args.agent_model or task.get("agent_model") or "codex-ultra"
+        prompt = args.agent_prompt or task.get("agent_prompt") or None
+        run = create_agent_run(state, task, backend=backend, model=model, cwd=args.cwd, prompt=prompt)
+        if args.dry_run:
+            run["status"] = "dry_run"
+            ensure_agent_run_prompt_file(run)
+            run["command"] = build_ai_cli_run_command(run)
+            save_state(state)
+            print(f"created dry-run agent run #{run['id']}")
+            print(" ".join(run["command"]))
+            return 0
+        try:
+            start_agent_run(state, run)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        save_state(state)
+        if run.get("status") != "running":
+            detail = run.get("stderr") or run.get("stdout") or run.get("result") or "unknown error"
+            print(f"mew: agent run #{run['id']} failed to start: {detail}", file=sys.stderr)
+            return 1
+    print(f"started agent run #{run['id']} task=#{run['task_id']} backend={run['backend']} model={run['model']} pid={run.get('external_pid')}")
+    return 0
+
+def cmd_task_plan(args):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, args.task_id)
+        if not task:
+            print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+        if latest_task_plan(task) and not args.force:
+            plan = latest_task_plan(task)
+        else:
+            plan = create_task_plan(
+                state,
+                task,
+                cwd=args.cwd,
+                model=args.agent_model,
+                review_model=args.review_model,
+                objective=args.objective,
+                approach=args.approach,
+            )
+            save_state(state)
+    print(format_task_plan(plan))
+    if args.prompt:
+        print("implementation_prompt:")
+        print(plan.get("implementation_prompt") or "")
+        print("review_prompt:")
+        print(plan.get("review_prompt") or "")
+    return 0
+
+def cmd_task_dispatch(args):
+    with state_lock():
+        state = load_state()
+        task = find_task(state, args.task_id)
+        if not task:
+            print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+        plan = find_task_plan(task, args.plan_id) if args.plan_id else latest_task_plan(task)
+        if not plan:
+            plan = create_task_plan(state, task, cwd=args.cwd, model=args.agent_model)
+        if args.cwd:
+            plan["cwd"] = args.cwd
+        if args.agent_model:
+            plan["model"] = args.agent_model
+        run = create_implementation_run_from_plan(state, task, plan, dry_run=args.dry_run)
+        if args.dry_run:
+            ensure_agent_run_prompt_file(run)
+            run["command"] = build_ai_cli_run_command(run)
+            save_state(state)
+            print(f"created dry-run implementation run #{run['id']} from plan #{plan['id']}")
+            print(" ".join(run["command"]))
+            return 0
+        start_agent_run(state, run)
+        save_state(state)
+        if run.get("status") != "running":
+            detail = run.get("stderr") or run.get("stdout") or run.get("result") or "unknown error"
+            print(f"mew: implementation run #{run['id']} failed to start: {detail}", file=sys.stderr)
+            return 1
+    print(f"started implementation run #{run['id']} task=#{task['id']} plan=#{plan['id']} pid={run.get('external_pid')}")
+    return 0
+
+def cmd_agent_list(args):
+    state = load_state()
+    runs = state["agent_runs"]
+    if not args.all:
+        runs = [run for run in runs if run.get("status") in ("created", "running")]
+    if not runs:
+        print("No agent runs.")
+        return 0
+    for run in runs:
+        pid = run.get("external_pid") or ""
+        purpose = run.get("purpose") or "implementation"
+        print(f"#{run['id']} [{run['status']}/{purpose}] task=#{run.get('task_id')} {run.get('backend')}:{run.get('model')} pid={pid}")
+    return 0
+
+def cmd_agent_show(args):
+    state = load_state()
+    run = find_agent_run(state, args.run_id)
+    if not run:
+        print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+        return 1
+    for key in (
+        "id",
+        "task_id",
+        "purpose",
+        "plan_id",
+        "parent_run_id",
+        "review_of_run_id",
+        "review_status",
+        "followup_task_id",
+        "backend",
+        "model",
+        "cwd",
+        "prompt_file",
+        "status",
+        "external_pid",
+        "session_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "updated_at",
+    ):
+        print(f"{key}: {run.get(key)}")
+    if args.prompt:
+        print("prompt:")
+        print(run.get("prompt") or "")
+    if run.get("result"):
+        print("result:")
+        print(run["result"])
+    elif run.get("stdout"):
+        print("stdout:")
+        print(run["stdout"])
+    if run.get("stderr"):
+        print("stderr:")
+        print(run["stderr"])
+    return 0
+
+def cmd_agent_wait(args):
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, args.run_id)
+        if not run:
+            print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        try:
+            wait_agent_run(state, run, timeout=args.timeout)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        save_state(state)
+    print(f"agent run #{run['id']} status={run['status']}")
+    if run.get("result"):
+        print(run["result"])
+    return 0
+
+def cmd_agent_result(args):
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, args.run_id)
+        if not run:
+            print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        try:
+            get_agent_run_result(state, run, verbose=args.verbose)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        save_state(state)
+    print(f"agent run #{run['id']} status={run['status']}")
+    if run.get("result"):
+        print(run["result"])
+    elif run.get("stdout"):
+        print(run["stdout"])
+    return 0
+
+def cmd_agent_review(args):
+    with state_lock():
+        state = load_state()
+        implementation_run = find_agent_run(state, args.run_id)
+        if not implementation_run:
+            print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        if implementation_run.get("purpose") == "review":
+            print(f"mew: run #{args.run_id} is already a review run", file=sys.stderr)
+            return 1
+        if implementation_run.get("status") not in ("completed", "failed") and not args.force:
+            print(
+                f"mew: run #{args.run_id} status={implementation_run.get('status')}; use --force to review anyway",
+                file=sys.stderr,
+            )
+            return 1
+        task = find_task(state, implementation_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for run #{args.run_id}", file=sys.stderr)
+            return 1
+        plan = find_task_plan(task, implementation_run.get("plan_id")) if implementation_run.get("plan_id") else None
+        review_run = create_review_run_for_implementation(
+            state,
+            task,
+            implementation_run,
+            plan=plan,
+            model=args.agent_model,
+        )
+        if args.dry_run:
+            review_run["status"] = "dry_run"
+            ensure_agent_run_prompt_file(review_run)
+            review_run["command"] = build_ai_cli_run_command(review_run)
+            save_state(state)
+            print(f"created dry-run review run #{review_run['id']} for run #{implementation_run['id']}")
+            print(" ".join(review_run["command"]))
+            return 0
+        start_agent_run(state, review_run)
+        save_state(state)
+        if review_run.get("status") != "running":
+            detail = review_run.get("stderr") or review_run.get("stdout") or review_run.get("result") or "unknown error"
+            print(f"mew: review run #{review_run['id']} failed to start: {detail}", file=sys.stderr)
+            return 1
+    print(f"started review run #{review_run['id']} for run #{implementation_run['id']} pid={review_run.get('external_pid')}")
+    return 0
+
+def cmd_agent_followup(args):
+    with state_lock():
+        state = load_state()
+        review_run = find_agent_run(state, args.run_id)
+        if not review_run:
+            print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        if review_run.get("purpose") != "review":
+            print(f"mew: run #{args.run_id} is not a review run", file=sys.stderr)
+            return 1
+        if not review_run.get("result") and not review_run.get("stdout"):
+            try:
+                get_agent_run_result(state, review_run, verbose=False)
+            except ValueError as exc:
+                print(f"mew: {exc}", file=sys.stderr)
+                return 1
+        task = find_task(state, review_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for review run #{args.run_id}", file=sys.stderr)
+            return 1
+        followup, status = create_follow_up_task_from_review(state, task, review_run)
+        save_state(state)
+    print(f"review run #{review_run['id']} status={status}")
+    if followup:
+        print(format_task(followup))
+    else:
+        print("no follow-up task created")
+    return 0
+
+def cmd_agent_retry(args):
+    with state_lock():
+        state = load_state()
+        failed_run = find_agent_run(state, args.run_id)
+        if not failed_run:
+            print(f"mew: agent run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        if failed_run.get("purpose", "implementation") != "implementation":
+            print(f"mew: run #{args.run_id} is not an implementation run", file=sys.stderr)
+            return 1
+        if failed_run.get("status") not in ("failed", "completed") and not args.force:
+            print(
+                f"mew: run #{args.run_id} status={failed_run.get('status')}; use --force to retry anyway",
+                file=sys.stderr,
+            )
+            return 1
+        task = find_task(state, failed_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for run #{args.run_id}", file=sys.stderr)
+            return 1
+        plan = find_task_plan(task, failed_run.get("plan_id")) if failed_run.get("plan_id") else latest_task_plan(task)
+        retry_run = create_retry_run_for_implementation(
+            state,
+            task,
+            failed_run,
+            plan=plan,
+            model=args.agent_model,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            ensure_agent_run_prompt_file(retry_run)
+            retry_run["command"] = build_ai_cli_run_command(retry_run)
+            save_state(state)
+            print(f"created dry-run retry run #{retry_run['id']} for run #{failed_run['id']}")
+            print(" ".join(retry_run["command"]))
+            return 0
+        start_agent_run(state, retry_run)
+        save_state(state)
+        if retry_run.get("status") != "running":
+            detail = retry_run.get("stderr") or retry_run.get("stdout") or retry_run.get("result") or "unknown error"
+            print(f"mew: retry run #{retry_run['id']} failed to start: {detail}", file=sys.stderr)
+            return 1
+    print(f"started retry run #{retry_run['id']} for run #{failed_run['id']} pid={retry_run.get('external_pid')}")
+    return 0
+
+def cmd_agent_sweep(args):
+    with state_lock():
+        state = load_state()
+        report = sweep_agent_runs(
+            state,
+            collect=not args.no_collect,
+            start_reviews=args.start_reviews,
+            followup=not args.no_followup,
+            stale_minutes=args.stale_minutes,
+            dry_run=args.dry_run,
+            review_model=args.agent_model,
+        )
+        if not args.dry_run:
+            save_state(state)
+    print(format_sweep_report(report))
+    return 1 if report.get("errors") else 0
+
+def runtime_is_active():
+    lock = read_lock()
+    return bool(lock and pid_alive(lock.get("pid")))
+
+def format_outbox_line(message):
+    created_at = message.get("created_at") or "unknown-time"
+    message_id = message.get("id")
+    message_type = message.get("type") or "message"
+    text = str(message.get("text") or "")
+    prefix = f"[{created_at}] #{message_id} {message_type}: "
+    return prefix + text.replace("\n", "\n" + " " * len(prefix))
+
+def print_outbox_messages(messages):
+    for message in messages:
+        print(format_outbox_line(message), flush=True)
+
+def current_log_offset():
+    if not LOG_FILE.exists():
+        return 0
+    return LOG_FILE.stat().st_size
+
+def emit_new_activity(offset):
+    if not LOG_FILE.exists():
+        return 0
+
+    size = LOG_FILE.stat().st_size
+    if size < offset:
+        offset = 0
+
+    with LOG_FILE.open("rb") as handle:
+        handle.seek(offset)
+        data = handle.read()
+        new_offset = handle.tell()
+
+    text = data.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        if line.strip():
+            print(f"runtime: {line}", flush=True)
+    return new_offset
+
+def mark_outbox_read(message_ids):
+    if not message_ids:
+        return
+    ids = {str(message_id) for message_id in message_ids}
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        changed = False
+        for message_id in ids:
+            if mark_message_read(state, message_id):
+                changed = True
+        if changed:
+            save_state(state)
+
+def emit_initial_outbox(history, unread, mark_read):
+    state = load_state()
+    seen_ids = {str(message.get("id")) for message in state["outbox"]}
+    if history:
+        messages = list(state["outbox"])
+    elif unread:
+        messages = [message for message in state["outbox"] if not message.get("read_at")]
+    else:
+        messages = []
+    print_outbox_messages(messages)
+    if mark_read:
+        mark_outbox_read(message.get("id") for message in messages)
+    return seen_ids
+
+def emit_new_outbox(seen_ids, mark_read):
+    state = load_state()
+    messages = []
+    for message in state["outbox"]:
+        message_id = str(message.get("id"))
+        if message_id in seen_ids:
+            continue
+        seen_ids.add(message_id)
+        messages.append(message)
+    print_outbox_messages(messages)
+    if mark_read:
+        mark_outbox_read(message.get("id") for message in messages)
+    return len(messages)
+
+def stream_outbox_and_input(args, allow_input):
+    seen_ids = emit_initial_outbox(args.history, args.unread, args.mark_read)
+    activity_offset = current_log_offset() if args.activity else None
+    deadline = None
+    if args.timeout is not None:
+        deadline = time.monotonic() + max(0.0, args.timeout)
+
+    while True:
+        emit_new_outbox(seen_ids, args.mark_read)
+        if args.activity:
+            activity_offset = emit_new_activity(activity_offset)
+        if deadline is not None and time.monotonic() >= deadline:
+            return 0
+
+        wait_for = args.poll_interval
+        if deadline is not None:
+            wait_for = min(wait_for, max(0.0, deadline - time.monotonic()))
+
+        if allow_input:
+            readable, _, _ = select.select([sys.stdin], [], [], wait_for)
+            if readable:
+                line = sys.stdin.readline()
+                if line == "":
+                    allow_input = False
+                    continue
+                text = line.rstrip("\n")
+                if text in ("/quit", "/exit"):
+                    return 0
+                if text.strip():
+                    event = queue_user_message(text)
+                    print(f"queued message event #{event['id']}", flush=True)
+        else:
+            time.sleep(wait_for)
+
+def warn_if_runtime_inactive():
+    if not runtime_is_active():
+        print(
+            "mew: no active runtime found; messages can be queued, but nothing will process them until `mew run` is running.",
+            file=sys.stderr,
+        )
+
+def cmd_attach(args):
+    warn_if_runtime_inactive()
+    for text in args.attach_messages or []:
+        event = queue_user_message(text)
+        print(f"queued message event #{event['id']}", flush=True)
+
+    allow_input = not args.no_input and sys.stdin.isatty()
+    if allow_input:
+        print("attached. Type a message and press Enter. Use /exit or Ctrl-C to detach.", flush=True)
+    else:
+        detail = "outbox messages and runtime activity" if args.activity else "outbox messages"
+        print(f"attached. Listening for {detail}.", flush=True)
+
+    try:
+        return stream_outbox_and_input(args, allow_input)
+    except KeyboardInterrupt:
+        print("\ndetached")
+        return 0
+
+def cmd_listen(args):
+    warn_if_runtime_inactive()
+    try:
+        return stream_outbox_and_input(args, allow_input=False)
+    except KeyboardInterrupt:
+        print("\nstopped listening")
+        return 0
+
+def cmd_log(args):
+    if not LOG_FILE.exists():
+        print("No runtime log.")
+        return 0
+    print(LOG_FILE.read_text(encoding="utf-8").rstrip())
+    return 0
+
+def cmd_guidance_init(args):
+    path, created = ensure_guidance(args.path)
+    if created:
+        print(f"created guidance: {path}")
+    else:
+        print(f"guidance already exists: {path}")
+    return 0
+
+def cmd_guidance_show(args):
+    text = read_guidance(args.path)
+    if not text:
+        print("No guidance found.")
+        return 0
+    print(text)
+    return 0
+
+def cmd_policy_init(args):
+    path, created = ensure_policy(args.path)
+    if created:
+        print(f"created policy: {path}")
+    else:
+        print(f"policy already exists: {path}")
+    return 0
+
+def cmd_policy_show(args):
+    text = read_policy(args.path)
+    if not text:
+        print("No policy found.")
+        return 0
+    print(text)
+    return 0
+
+def cmd_self_init(args):
+    path, created = ensure_self(args.path)
+    if created:
+        print(f"created self: {path}")
+    else:
+        print(f"self already exists: {path}")
+    return 0
+
+def cmd_self_show(args):
+    text = read_self(args.path)
+    if not text:
+        print("No self found.")
+        return 0
+    print(text)
+    return 0
+
+def cmd_desires_init(args):
+    path, created = ensure_desires(args.path)
+    if created:
+        print(f"created desires: {path}")
+    else:
+        print(f"desires already exists: {path}")
+    return 0
+
+def cmd_desires_show(args):
+    text = read_desires(args.path)
+    if not text:
+        print("No desires found.")
+        return 0
+    print(text)
+    return 0
