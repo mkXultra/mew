@@ -81,7 +81,8 @@ uv run mew memory --compact
 
 ## Safe Tools
 
-`mew tool` gives AI-facing read-only workspace tools and bounded verification:
+`mew tool` gives AI-facing workspace tools with bounded read, write-preview,
+verification, and read-only git helpers:
 
 ```sh
 uv run mew tool status
@@ -93,6 +94,7 @@ uv run mew tool edit notes.md --old "hello" --new "hello mew" --dry-run
 uv run mew tool test --command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
 uv run mew tool git diff
 uv run mew tool git diff --staged --stat
+uv run mew tool git diff --base main --stat
 ```
 
 Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
@@ -100,6 +102,8 @@ read and write commands. Runtime write actions require `--allow-write` and
 non-dry-run runtime writes also require `--allow-verify --verify-command`.
 Runtime write actions default to dry-run unless the action explicitly sets
 `dry_run=false`.
+Direct `mew tool write` and `mew tool edit` commands can apply changes, so use
+`--dry-run` first when an AI is operating through the tool layer.
 Programmer-loop implementation prompts also point agents at these commands so
 self-improvement runs can inspect and verify work through the safe layer.
 
