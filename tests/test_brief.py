@@ -1,7 +1,7 @@
 import unittest
 
-from mew.brief import build_brief, next_move
-from mew.programmer import create_implementation_run_from_plan, create_task_plan
+from mew.brief import build_brief, next_move, review_runs_needing_followup
+from mew.programmer import create_follow_up_task_from_review, create_implementation_run_from_plan, create_task_plan
 from mew.state import add_question, default_state
 
 
@@ -61,6 +61,24 @@ class BriefTests(unittest.TestCase):
         add_task(state)
 
         self.assertEqual(next_move(state), "plan task #1 with `mew task plan 1`")
+
+    def test_processed_review_does_not_keep_needing_followup(self):
+        state = default_state()
+        task = add_task(state)
+        review = {
+            "id": 2,
+            "task_id": task["id"],
+            "purpose": "review",
+            "status": "completed",
+            "result": "STATUS: pass\nFOLLOW_UP:\n- none",
+            "stdout": "",
+            "followup_task_id": None,
+        }
+
+        create_follow_up_task_from_review(state, task, review)
+        state["agent_runs"].append(review)
+
+        self.assertEqual(review_runs_needing_followup(state), [])
 
 
 if __name__ == "__main__":

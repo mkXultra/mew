@@ -55,6 +55,7 @@ def create_agent_run(
         "review_of_run_id": review_of_run_id,
         "review_status": "",
         "followup_task_id": None,
+        "followup_processed_at": None,
         "backend": backend or task.get("agent_backend") or DEFAULT_AGENT_BACKEND,
         "model": model or task.get("agent_model") or DEFAULT_AGENT_MODEL,
         "cwd": str(resolve_run_cwd(task, cwd)),

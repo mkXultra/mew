@@ -1,3 +1,4 @@
+import json
 import unittest
 import os
 import tempfile
@@ -20,6 +21,7 @@ from mew.programmer import (
     create_retry_run_for_implementation,
     create_review_run_for_implementation,
     create_task_plan,
+    extract_review_text,
     parse_review_status,
 )
 from mew.state import add_question, default_state, load_state, migrate_state, save_state
@@ -127,10 +129,55 @@ class ProgrammerTests(unittest.TestCase):
         self.assertIsNotNone(followup)
         self.assertIn("Add tests", followup["description"])
         self.assertEqual(task["status"], "blocked")
+        self.assertTrue(review["followup_processed_at"])
+
+    def test_review_status_uses_agent_message_not_prompt_template(self):
+        state = default_state()
+        task = add_task(state)
+        review = {
+            "id": 8,
+            "task_id": task["id"],
+            "purpose": "review",
+            "result": json.dumps(
+                [
+                    {
+                        "prompt": "Return STATUS: pass|needs_fix|unknown",
+                        "agentOutput": {"message": None},
+                    }
+                ]
+            ),
+            "stdout": "",
+        }
+
+        followup, status = create_follow_up_task_from_review(state, task, review)
+
+        self.assertIsNone(followup)
+        self.assertEqual(status, "unknown")
+        self.assertEqual(review["review_status"], "unknown")
+        self.assertTrue(review["followup_processed_at"])
+
+    def test_review_status_reads_nested_agent_message(self):
+        review = {
+            "result": json.dumps(
+                [
+                    {
+                        "prompt": "Return STATUS: pass|needs_fix|unknown",
+                        "agentOutput": {
+                            "message": "STATUS: needs_fix\nSUMMARY: x\nFOLLOW_UP:\n- Tighten review parsing"
+                        },
+                    }
+                ]
+            ),
+            "stdout": "",
+        }
+
+        self.assertIn("Tighten review parsing", extract_review_text(review))
 
     def test_parse_review_status(self):
         self.assertEqual(parse_review_status("STATUS: pass"), "pass")
         self.assertEqual(parse_review_status("STATUS: needs_fix"), "needs_fix")
+        self.assertEqual(parse_review_status("STATUS: needs fix"), "needs_fix")
+        self.assertEqual(parse_review_status("STATUS: pass|needs_fix|unknown"), "unknown")
         self.assertEqual(parse_review_status("no explicit status"), "unknown")
 
     def test_parse_ai_cli_pid_does_not_accept_unlabeled_numbers(self):

@@ -78,6 +78,9 @@ Create a dry-run implementation record:
 uv run mew self-improve --focus "Improve docs" --ready --auto-execute --dispatch --dry-run
 ```
 
+When reusing an open self-improvement task, mew creates a fresh plan if the
+latest plan was already dispatched or no longer matches the current focus.
+
 Let passive mode dispatch ready self-improvement tasks:
 
 ```sh

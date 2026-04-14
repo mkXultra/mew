@@ -243,6 +243,7 @@ def migrate_state(state):
         run.setdefault("review_of_run_id", None)
         run.setdefault("review_status", "")
         run.setdefault("followup_task_id", None)
+        run.setdefault("followup_processed_at", None)
         run.setdefault("prompt_file", "")
         if (
             run.get("status") == "created"

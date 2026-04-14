@@ -89,9 +89,30 @@ def create_self_improve_task(
     return task, created
 
 
+def self_improve_plan_matches_task(plan, task, agent_model=None, review_model=None):
+    if not plan or plan.get("status") != "planned":
+        return False
+
+    expected_objective = task.get("description") or task.get("title") or ""
+    if plan.get("objective") != expected_objective:
+        return False
+
+    if (plan.get("cwd") or ".") != (task.get("cwd") or "."):
+        return False
+
+    expected_model = agent_model or task.get("agent_model")
+    if expected_model and plan.get("model") != expected_model:
+        return False
+
+    if review_model and plan.get("review_model") != review_model:
+        return False
+
+    return True
+
+
 def ensure_self_improve_plan(state, task, agent_model=None, review_model=None, force=False):
     plan = None if force else latest_task_plan(task)
-    if plan:
+    if self_improve_plan_matches_task(plan, task, agent_model=agent_model, review_model=review_model):
         return plan, False
     plan = create_task_plan(
         state,

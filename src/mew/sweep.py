@@ -130,6 +130,8 @@ def sweep_agent_runs(
             continue
         if run.get("followup_task_id"):
             continue
+        if run.get("followup_processed_at"):
+            continue
 
         task = task_by_id(state, run.get("task_id"))
         if not task:

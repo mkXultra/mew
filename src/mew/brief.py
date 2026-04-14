@@ -40,6 +40,7 @@ def review_runs_needing_followup(state):
         if run.get("purpose") == "review"
         and run.get("status") in ("completed", "failed")
         and not run.get("followup_task_id")
+        and not run.get("followup_processed_at")
     ]
 
 

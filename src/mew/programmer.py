@@ -1,3 +1,5 @@
+import json
+
 from .agent_runs import DEFAULT_AGENT_BACKEND, DEFAULT_AGENT_MODEL, create_agent_run
 from .state import next_id, reconcile_next_ids
 from .timeutil import now_iso
@@ -203,12 +205,78 @@ def find_review_run_for_implementation(state, implementation_run_id):
 
 
 def parse_review_status(text):
-    lowered = (text or "").casefold()
-    if "status: pass" in lowered:
-        return "pass"
-    if "status: needs_fix" in lowered or "status: fail" in lowered or "needs fix" in lowered:
-        return "needs_fix"
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.casefold().startswith("status:"):
+            continue
+        value = stripped.split(":", 1)[1].strip().casefold()
+        normalized = value.replace("-", "_")
+        if normalized == "pass":
+            return "pass"
+        if normalized in ("needs_fix", "needs fix", "fail", "failed"):
+            return "needs_fix"
     return "unknown"
+
+
+def _nonempty_string(value):
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def _extract_ai_cli_agent_message(value):
+    if isinstance(value, list):
+        for child in value:
+            found = _extract_ai_cli_agent_message(child)
+            if found:
+                return found
+        return ""
+
+    if not isinstance(value, dict):
+        return ""
+
+    for output_key in ("agentOutput", "agent_output"):
+        output = value.get(output_key)
+        if isinstance(output, dict):
+            for message_key in ("message", "text", "content", "output"):
+                found = _nonempty_string(output.get(message_key))
+                if found:
+                    return found
+        found = _nonempty_string(output)
+        if found:
+            return found
+
+    for message_key in ("message", "text", "content", "output"):
+        found = _nonempty_string(value.get(message_key))
+        if found:
+            return found
+
+    for child_key in ("result", "data"):
+        found = _extract_ai_cli_agent_message(value.get(child_key))
+        if found:
+            return found
+
+    return ""
+
+
+def extract_review_text(review_run):
+    for key in ("result", "stdout"):
+        raw = review_run.get(key)
+        if not _nonempty_string(raw):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw.strip()
+
+        message = _extract_ai_cli_agent_message(parsed)
+        if message:
+            return message
+
+        # ai-cli JSON includes the prompt, which contains the review template.
+        # Do not scan the raw JSON string or the template can be mistaken for
+        # an actual STATUS line.
+    return ""
 
 
 def extract_follow_up_text(text):
@@ -236,7 +304,7 @@ def create_follow_up_task_from_review(state, task, review_run):
             if str(existing.get("id")) == str(followup_task_id):
                 return existing, review_run.get("review_status") or "unknown"
 
-    result = review_run.get("result") or review_run.get("stdout") or ""
+    result = extract_review_text(review_run)
     status = parse_review_status(result)
     review_run["review_status"] = status
     task.setdefault("notes", "")
@@ -245,8 +313,12 @@ def create_follow_up_task_from_review(state, task, review_run):
         f"{task['notes'].rstrip()}\n{current_time} review run #{review_run['id']}: {status}"
     ).strip()
     task["updated_at"] = current_time
+    review_run["followup_processed_at"] = current_time
+    review_run["updated_at"] = current_time
 
     follow_up = extract_follow_up_text(result)
+    if status == "needs_fix" and not follow_up:
+        follow_up = result or f"Review run #{review_run['id']} reported needs_fix without follow-up details."
     if not follow_up or status == "pass":
         return None, status
 
