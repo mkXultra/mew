@@ -35,6 +35,7 @@ from .state import (
     pending_question_for_task,
 )
 from .tasks import (
+    clip_output,
     execute_task_action,
     normalize_task_id,
     open_tasks,
@@ -1561,11 +1562,21 @@ def record_verification_result(state, event, action, current_time, verify_comman
             state,
             "verification",
             f"Verification run #{run['id']} failed",
-            f"{verify_command}\nexit_code={result.get('exit_code')}",
+            verification_failure_reason(verify_command, result),
             related_task_id=action.get("task_id"),
             priority="high",
         )
     return run
+
+def verification_failure_reason(verify_command, result):
+    parts = [verify_command, f"exit_code={result.get('exit_code')}"]
+    stdout = result.get("stdout") or ""
+    stderr = result.get("stderr") or ""
+    if stdout:
+        parts.append("stdout:\n" + clip_output(stdout, 2000))
+    if stderr:
+        parts.append("stderr:\n" + clip_output(stderr, 2000))
+    return "\n".join(parts)
 
 def apply_run_verification_action(
     state,

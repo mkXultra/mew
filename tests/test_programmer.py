@@ -457,6 +457,8 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
         self.assertIn("Verification failed", state["outbox"][-1]["text"])
         self.assertEqual(state["attention"]["items"][0]["kind"], "verification")
+        self.assertIn("stderr:", state["attention"]["items"][0]["reason"])
+        self.assertIn("FAILED", state["attention"]["items"][0]["reason"])
 
     def test_autonomous_write_requires_allow_write(self):
         state = default_state()
