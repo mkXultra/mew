@@ -199,6 +199,22 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(parse_ai_cli_status('{"result": {"status": "running"}}'), "running")
         self.assertIsNone(parse_ai_cli_status('{"review_status": "pass"}'))
 
+    def test_sync_task_with_agent_run_tolerates_string_task_id(self):
+        state = default_state()
+        task = add_task(state)
+        run = {
+            "id": 3,
+            "task_id": str(task["id"]),
+            "purpose": "implementation",
+            "status": "completed",
+        }
+
+        sync_task_with_agent_run(state, run, "done-at")
+
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["agent_run_id"], run["id"])
+        self.assertEqual(task["updated_at"], "done-at")
+
     def test_unparseable_agent_result_fails_run_instead_of_polling_forever(self):
         state = default_state()
         task = add_task(state)
@@ -226,7 +242,7 @@ class ProgrammerTests(unittest.TestCase):
         run = create_implementation_run_from_plan(state, task, create_task_plan(state, task), dry_run=True)
         run["status"] = "running"
         run["external_pid"] = 12345
-        add_attention_item(state, "agent_run", "Agent run #1 is running", "still running", agent_run_id=run["id"])
+        add_attention_item(state, "agent_run", "Agent run #1 is running", "still running", agent_run_id=str(run["id"]))
 
         with patch("mew.agent_runs.subprocess.run", side_effect=OSError("ai-cli missing")):
             get_agent_run_result(state, run)

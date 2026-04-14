@@ -161,6 +161,10 @@ def extract_ai_cli_session_id(text):
     return _find_first_string_by_key(data, ("session_id", "sessionId"))
 
 
+def _same_id(left, right):
+    return left is not None and right is not None and str(left) == str(right)
+
+
 def sync_task_with_agent_run(state, run, current_time=None):
     if run.get("purpose", "implementation") != "implementation":
         return None
@@ -168,7 +172,7 @@ def sync_task_with_agent_run(state, run, current_time=None):
     current_time = current_time or now_iso()
     task = None
     for candidate in state.get("tasks", []):
-        if candidate.get("id") == run.get("task_id"):
+        if _same_id(candidate.get("id"), run.get("task_id")):
             task = candidate
             break
     if not task:
@@ -275,7 +279,7 @@ def find_agent_run(state, run_id):
 
 def resolve_agent_run_attention(state, run, current_time):
     for item in state["attention"]["items"]:
-        if item.get("agent_run_id") == run["id"] and item.get("status") == "open":
+        if _same_id(item.get("agent_run_id"), run.get("id")) and item.get("status") == "open":
             item["status"] = "resolved"
             item["resolved_at"] = current_time
             item["updated_at"] = current_time
