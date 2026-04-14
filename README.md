@@ -62,6 +62,10 @@ uv run mew run --autonomous --autonomy-level act \
   --verify-interval-minutes 60
 ```
 
+When autonomous mode sees an open verification failure attention item, it can
+propose a high-priority repair task instead of letting the failure sit as a
+passive alert.
+
 ## Useful Commands
 
 ```sh

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from mew.agent import apply_action_plan, deterministic_decision_plan
 from mew.read_tools import read_file
-from mew.state import add_event, default_state, migrate_state
+from mew.state import add_attention_item, add_event, default_state, migrate_state
 from mew.timeutil import now_iso
 
 
@@ -278,6 +278,80 @@ class AutonomyTests(unittest.TestCase):
         )
 
         self.assertNotIn("run_verification", [decision["type"] for decision in plan["decisions"]])
+
+    def test_autonomous_verification_failure_attention_proposes_repair_task(self):
+        state = default_state()
+        add_attention_item(
+            state,
+            "verification",
+            "Verification run #7 failed",
+            "python -m unittest\nexit_code=1",
+            priority="high",
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        proposed = [decision for decision in plan["decisions"] if decision["type"] == "propose_task"]
+        self.assertEqual(len(proposed), 1)
+        self.assertEqual(proposed[0]["title"], "Fix Verification run #7 failed")
+        self.assertEqual(proposed[0]["priority"], "high")
+        self.assertIn("exit_code=1", proposed[0]["description"])
+
+    def test_autonomous_verification_repair_task_is_not_duplicated(self):
+        state = default_state()
+        current_time = now_iso()
+        add_attention_item(
+            state,
+            "verification",
+            "Verification run #7 failed",
+            "python -m unittest\nexit_code=1",
+            priority="high",
+        )
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Fix Verification run #7 failed",
+                "description": "",
+                "status": "todo",
+                "priority": "high",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        titles = [
+            decision.get("title")
+            for decision in plan["decisions"]
+            if decision["type"] == "propose_task"
+        ]
+        self.assertNotIn("Fix Verification run #7 failed", titles)
 
 
 if __name__ == "__main__":

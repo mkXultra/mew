@@ -817,6 +817,9 @@ Autonomous programmer behavior uses the same loop:
   `--verify-command` are present. Passive verification respects
   `--verify-interval-minutes`. Results are stored in state and failures create
   attention items.
+- Open verification failure attention items may cause autonomous `propose` or
+  `act` mode to create a high-priority repair task, unless a matching open
+  repair task already exists.
 
 `mew agent sweep` is the manual maintenance entrypoint for this lifecycle. It
 should be able to collect running results, flag stale runs as attention items,

@@ -457,6 +457,8 @@ def append_passive_decisions(
 ):
     tasks = sorted(open_tasks(state), key=task_sort_key)
     if not tasks:
+        if autonomous and latest_open_verification_attention(state):
+            return
         question = "What task should I track next?"
         if autonomous:
             decision = {
@@ -516,6 +518,48 @@ def append_passive_decisions(
             )
             question_added = True
 
+def has_decision_type(decisions, decision_type):
+    return any(decision.get("type") == decision_type for decision in decisions)
+
+def decisions_create_task(decisions):
+    return any(
+        decision.get("type") == "propose_task"
+        or (
+            decision.get("type") == "self_review"
+            and bool(decision.get("proposed_task_title"))
+        )
+        for decision in decisions
+    )
+
+def latest_open_verification_attention(state):
+    for item in reversed(open_attention_items(state)):
+        if item.get("kind") == "verification":
+            return item
+    return None
+
+def append_verification_repair_decision(state, decisions, autonomy_level):
+    if autonomy_level not in ("propose", "act"):
+        return False
+    attention = latest_open_verification_attention(state)
+    if not attention:
+        return False
+    title = f"Fix {attention.get('title') or 'failing runtime verification'}"
+    if open_task_with_title(state, title):
+        return False
+    decisions.append(
+        {
+            "type": "propose_task",
+            "title": title,
+            "description": (
+                "Investigate and fix the failing runtime verification.\n\n"
+                f"Attention #{attention.get('id')}: {attention.get('title')}\n"
+                f"Reason:\n{attention.get('reason') or '(none)'}"
+            ),
+            "priority": "high",
+        }
+    )
+    return True
+
 def append_autonomous_decisions(
     state,
     decisions,
@@ -531,6 +575,9 @@ def append_autonomous_decisions(
     if event["type"] not in ("startup", "passive_tick"):
         return
 
+    if append_verification_repair_decision(state, decisions, autonomy_level):
+        return
+
     desires_summary = (desires or "").strip().splitlines()
     first_desire = ""
     for line in desires_summary:
@@ -542,7 +589,9 @@ def append_autonomous_decisions(
         state.get("autonomy", {}).get("last_self_review_at"),
         current_time,
     )
-    if hours_since_self_review is None or hours_since_self_review >= 1:
+    if not has_decision_type(decisions, "self_review") and (
+        hours_since_self_review is None or hours_since_self_review >= 1
+    ):
         decisions.append(
             {
                 "type": "self_review",
@@ -621,7 +670,11 @@ def append_autonomous_decisions(
                 )
                 return
 
-    if autonomy_level in ("propose", "act") and not open_task_with_title(state, "Review mew self direction"):
+    if (
+        autonomy_level in ("propose", "act")
+        and not decisions_create_task(decisions)
+        and not open_task_with_title(state, "Review mew self direction")
+    ):
         decisions.append(
             {
                 "type": "propose_task",
@@ -705,7 +758,6 @@ def deterministic_decision_plan(
                 "text": summary,
             }
         )
-        had_tasks = bool(open_tasks(state))
         append_passive_decisions(
             state,
             decisions,
@@ -713,17 +765,7 @@ def deterministic_decision_plan(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
         )
-        if autonomous and not had_tasks:
-            append_runtime_verification_decision(
-                state,
-                decisions,
-                autonomy_level,
-                allow_verify,
-                verify_command,
-                verify_interval_seconds,
-                current_time,
-            )
-        if autonomous and had_tasks:
+        if autonomous:
             append_autonomous_decisions(
                 state,
                 decisions,
@@ -737,7 +779,6 @@ def deterministic_decision_plan(
                 current_time=current_time,
             )
     elif event["type"] == "passive_tick":
-        had_tasks = bool(open_tasks(state))
         append_passive_decisions(
             state,
             decisions,
@@ -745,17 +786,7 @@ def deterministic_decision_plan(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
         )
-        if autonomous and not had_tasks:
-            append_runtime_verification_decision(
-                state,
-                decisions,
-                autonomy_level,
-                allow_verify,
-                verify_command,
-                verify_interval_seconds,
-                current_time,
-            )
-        if autonomous and had_tasks:
+        if autonomous:
             append_autonomous_decisions(
                 state,
                 decisions,
