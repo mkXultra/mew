@@ -79,6 +79,8 @@ uv run mew tool git diff
 
 Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
 read command. Tool commands do not provide file-writing operations.
+Programmer-loop implementation prompts also point agents at these commands so
+self-improvement runs can inspect and verify work through the safe layer.
 
 ## Self-Improvement
 

@@ -68,6 +68,17 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(task["agent_model"], "codex-ultra")
         self.assertEqual(task["agent_prompt"], plan["implementation_prompt"])
 
+    def test_task_plan_prompt_advertises_safe_tool_layer(self):
+        state = default_state()
+        task = add_task(state)
+
+        plan = create_task_plan(state, task)
+
+        self.assertIn("Safe local tool layer:", plan["implementation_prompt"])
+        self.assertIn("uv run mew tool status", plan["implementation_prompt"])
+        self.assertIn("uv run mew tool read", plan["implementation_prompt"])
+        self.assertIn("uv run mew tool test --command", plan["implementation_prompt"])
+
     def test_dispatch_run_is_implementation_and_syncs_task(self):
         state = default_state()
         task = add_task(state)

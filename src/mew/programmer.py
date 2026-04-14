@@ -7,6 +7,14 @@ from .timeutil import now_iso
 
 DEFAULT_REVIEW_MODEL = "gpt-5.1-codex-mini"
 
+SAFE_TOOL_PROMPT_GUIDANCE = (
+    "Safe local tool layer:\n"
+    "- Prefer `uv run mew tool status` and `uv run mew tool git status` for workspace status.\n"
+    "- Use `uv run mew tool list`, `uv run mew tool read`, and `uv run mew tool search` "
+    "for bounded inspection.\n"
+    "- Use `uv run mew tool test --command \"...\"` for verification when practical.\n\n"
+)
+
 
 def latest_task_plan(task):
     plans = task.get("plans") or []
@@ -31,6 +39,7 @@ def build_implementation_prompt(task, plan):
         "You are an implementation agent working under mew's programmer loop.\n"
         "Make focused changes for the assigned task, preserve unrelated work, run relevant checks, "
         "and report changed files and verification results.\n\n"
+        f"{SAFE_TOOL_PROMPT_GUIDANCE}"
         f"Task #{task['id']}: {task.get('title')}\n"
         f"Description:\n{task.get('description') or '(none)'}\n\n"
         f"Notes:\n{task.get('notes') or '(none)'}\n\n"
