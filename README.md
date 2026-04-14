@@ -124,6 +124,7 @@ state without leaving the session:
 /digest
 /approve 4
 /ready 4
+/plan 4 prompt
 /dispatch 4 dry-run
 /done 4
 /block 4

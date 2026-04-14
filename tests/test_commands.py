@@ -427,6 +427,7 @@ class CommandTests(unittest.TestCase):
                     "/mode act\n"
                     "/ready 1\n"
                     "/approve 1\n"
+                    "/plan 1 prompt\n"
                     "/dispatch 1 dry-run\n"
                     "/block 1\n"
                     "/done 1\n"
@@ -451,6 +452,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("mode override: act", output)
                 self.assertIn("task #1 status=ready", output)
                 self.assertIn("approved task #1", output)
+                self.assertIn("created plan #1", output)
+                self.assertIn("implementation_prompt:", output)
                 self.assertIn("created dry-run implementation run", output)
                 self.assertIn("task #1 status=blocked", output)
                 self.assertIn("task #1 status=done", output)

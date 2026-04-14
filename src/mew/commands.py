@@ -1628,6 +1628,7 @@ CHAT_HELP = """Commands:
 /ready <task-id>      mark a task ready without changing auto_execute
 /done <task-id>       mark a task done
 /block <task-id>      mark a task blocked
+/plan <task-id>       create or show a programmer plan; add prompt to print prompts
 /dispatch <task-id>   start an implementation run; add dry-run to preview
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
@@ -2177,6 +2178,40 @@ def chat_set_task_status(task_id, status):
     print(f"task #{task_id} status={status}")
 
 
+def chat_plan_task(rest):
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    if not parts:
+        print("usage: /plan <task-id> [force] [prompt]")
+        return
+    task_id = parts[0]
+    force = any(part in ("force", "--force") for part in parts[1:])
+    show_prompt = any(part in ("prompt", "--prompt") for part in parts[1:])
+
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        plan = latest_task_plan(task)
+        created = False
+        if force or not plan:
+            plan = create_task_plan(state, task)
+            created = True
+            save_state(state)
+
+    print(("created " if created else "") + format_task_plan(plan))
+    if show_prompt:
+        print("implementation_prompt:")
+        print(plan.get("implementation_prompt") or "")
+        print("review_prompt:")
+        print(plan.get("review_prompt") or "")
+
+
 def chat_dispatch_task(rest):
     try:
         parts = shlex.split(rest)
@@ -2317,6 +2352,9 @@ def run_chat_slash_command(line, chat_state):
             print("usage: /block <task-id>")
         else:
             chat_set_task_status(rest, "blocked")
+        return "continue"
+    if command == "plan":
+        chat_plan_task(rest)
         return "continue"
     if command == "dispatch":
         chat_dispatch_task(rest)
