@@ -418,6 +418,9 @@ class CommandTests(unittest.TestCase):
                     save_state(state)
 
                 stdin = StringIO(
+                    "/add New cockpit task | Created inside chat\n"
+                    "/show 2\n"
+                    "/note 2 remember this detail\n"
                     "/why\n"
                     "/digest\n"
                     "/pause testing\n"
@@ -439,6 +442,9 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
+                self.assertIn("created #2 [todo/normal] New cockpit task", output)
+                self.assertIn("description: Created inside chat", output)
+                self.assertIn("noted task #2", output)
                 self.assertIn("Latest processed event", output)
                 self.assertIn("Digest since", output)
                 self.assertIn("autonomy paused", output)
@@ -455,6 +461,8 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(state["autonomy"]["level_override"], "act")
                 self.assertEqual(state["tasks"][0]["status"], "done")
                 self.assertTrue(state["tasks"][0]["auto_execute"])
+                self.assertEqual(state["tasks"][1]["title"], "New cockpit task")
+                self.assertIn("remember this detail", state["tasks"][1]["notes"])
                 self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
             finally:
                 os.chdir(old_cwd)

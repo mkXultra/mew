@@ -106,6 +106,9 @@ state without leaving the session:
 /next
 /tasks
 /questions
+/add "調査する" | "対象を小さく確認する"
+/show 4
+/note 4 次はここを見る
 /reply 3 それで進めて
 /attention
 /agents

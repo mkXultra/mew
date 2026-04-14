@@ -1606,7 +1606,10 @@ CHAT_HELP = """Commands:
 /brief                show the current operational brief
 /next                 show the next useful move
 /status               show compact runtime status
+/add <title> [| desc] create a task from chat
 /tasks [all]          list open tasks, or all tasks
+/show <task-id>       show task details
+/note <task-id> <txt> append a task note
 /questions [all]      list open questions, or all questions
 /attention [all]      list open attention items, or all attention items
 /outbox [all]         list unread outbox messages, or all messages
@@ -1664,6 +1667,77 @@ def print_chat_tasks(show_all=False):
         return
     for task in tasks:
         print(format_task(task))
+
+
+def print_chat_task(task_id):
+    state = load_state()
+    task = find_task(state, task_id)
+    if not task:
+        print(f"mew: task not found: {task_id}")
+        return
+    print(format_task(task))
+    print(f"description: {task.get('description') or ''}")
+    print(f"notes: {task.get('notes') or ''}")
+    print(f"command: {task.get('command') or ''}")
+    print(f"cwd: {task.get('cwd') or ''}")
+    print(f"auto_execute: {task.get('auto_execute')}")
+    print(f"agent_model: {task.get('agent_model') or ''}")
+    print(f"agent_run_id: {task.get('agent_run_id') or ''}")
+    print(f"latest_plan_id: {task.get('latest_plan_id') or ''}")
+
+
+def chat_add_task(rest):
+    title, separator, description = rest.partition("|")
+    title = title.strip()
+    description = description.strip() if separator else ""
+    if not title:
+        print("usage: /add <title> [| description]")
+        return
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        task = {
+            "id": next_id(state, "task"),
+            "title": title,
+            "description": description,
+            "status": "todo",
+            "priority": "normal",
+            "notes": f"Created from chat at {current_time}.",
+            "command": "",
+            "cwd": "",
+            "auto_execute": False,
+            "agent_backend": "",
+            "agent_model": "",
+            "agent_prompt": "",
+            "agent_run_id": None,
+            "plans": [],
+            "latest_plan_id": None,
+            "runs": [],
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+        state["tasks"].append(task)
+        save_state(state)
+    print(f"created {format_task(task)}")
+
+
+def chat_append_task_note(rest):
+    task_id, _, note = rest.partition(" ")
+    note = note.strip()
+    if not task_id or not note:
+        print("usage: /note <task-id> <text>")
+        return
+    current_time = now_iso()
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        append_task_note(task, f"{current_time} chat: {note}")
+        task["updated_at"] = current_time
+        save_state(state)
+    print(f"noted task #{task_id}")
 
 
 def print_chat_questions(show_all=False):
@@ -1953,8 +2027,20 @@ def run_chat_slash_command(line, chat_state):
     if command == "status":
         print_chat_status()
         return "continue"
+    if command == "add":
+        chat_add_task(rest)
+        return "continue"
     if command in ("tasks", "task"):
         print_chat_tasks(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "show":
+        if not rest:
+            print("usage: /show <task-id>")
+        else:
+            print_chat_task(rest)
+        return "continue"
+    if command == "note":
+        chat_append_task_note(rest)
         return "continue"
     if command in ("questions", "question"):
         print_chat_questions(show_all=rest.casefold() == "all")
