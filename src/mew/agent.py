@@ -568,6 +568,17 @@ def append_autonomous_decisions(
             decisions.append({"type": "followup_review", "run_id": run["id"]})
             return
 
+    if append_runtime_verification_decision(
+        state,
+        decisions,
+        autonomy_level,
+        allow_verify,
+        verify_command,
+        verify_interval_seconds,
+        current_time,
+    ):
+        return
+
     if autonomy_level in ("propose", "act"):
         for task in sorted(open_tasks(state), key=task_sort_key):
             if (
@@ -604,20 +615,6 @@ def append_autonomous_decisions(
                 )
                 return
 
-    if (
-        autonomy_level == "act"
-        and allow_verify
-        and verify_command
-        and runtime_verification_due(state, current_time, verify_interval_seconds)
-    ):
-        decisions.append(
-            {
-                "type": "run_verification",
-                "reason": "Configured runtime verification is due.",
-            }
-        )
-        return
-
     if autonomy_level in ("propose", "act") and not open_task_with_title(state, "Review mew self direction"):
         decisions.append(
             {
@@ -643,6 +640,32 @@ def runtime_verification_due(state, current_time, interval_seconds):
     if hours is None:
         return True
     return hours * 3600 >= max(0.0, interval_seconds)
+
+def append_runtime_verification_decision(
+    state,
+    decisions,
+    autonomy_level,
+    allow_verify,
+    verify_command,
+    verify_interval_seconds,
+    current_time,
+):
+    if any(decision.get("type") == "run_verification" for decision in decisions):
+        return False
+    if not (
+        autonomy_level == "act"
+        and allow_verify
+        and verify_command
+        and runtime_verification_due(state, current_time, verify_interval_seconds)
+    ):
+        return False
+    decisions.append(
+        {
+            "type": "run_verification",
+            "reason": "Configured runtime verification is due.",
+        }
+    )
+    return True
 
 def deterministic_decision_plan(
     state,
@@ -684,6 +707,16 @@ def deterministic_decision_plan(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
         )
+        if autonomous and not had_tasks:
+            append_runtime_verification_decision(
+                state,
+                decisions,
+                autonomy_level,
+                allow_verify,
+                verify_command,
+                verify_interval_seconds,
+                current_time,
+            )
         if autonomous and had_tasks:
             append_autonomous_decisions(
                 state,
@@ -706,6 +739,16 @@ def deterministic_decision_plan(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
         )
+        if autonomous and not had_tasks:
+            append_runtime_verification_decision(
+                state,
+                decisions,
+                autonomy_level,
+                allow_verify,
+                verify_command,
+                verify_interval_seconds,
+                current_time,
+            )
         if autonomous and had_tasks:
             append_autonomous_decisions(
                 state,

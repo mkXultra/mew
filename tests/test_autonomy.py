@@ -195,6 +195,63 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertIn("run_verification", [decision["type"] for decision in plan["decisions"]])
 
+    def test_autonomous_verification_is_not_blocked_by_unplanned_tasks(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Unplanned work",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_verify=True,
+            verify_command="python -m unittest",
+        )
+
+        decision_types = [decision["type"] for decision in plan["decisions"]]
+        self.assertIn("run_verification", decision_types)
+        self.assertNotIn("plan_task", decision_types)
+
+    def test_autonomous_verification_can_run_without_open_tasks(self):
+        state = default_state()
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_verify=True,
+            verify_command="python -m unittest",
+        )
+
+        self.assertIn("run_verification", [decision["type"] for decision in plan["decisions"]])
+
     def test_autonomous_verification_respects_interval(self):
         state = default_state()
         current_time = now_iso()
