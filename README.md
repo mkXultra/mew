@@ -86,6 +86,7 @@ uv run mew attention
 uv run mew attention --resolve-all
 uv run mew archive
 uv run mew archive --apply
+uv run mew run --auto-archive
 uv run mew memory --compact
 ```
 
@@ -164,6 +165,7 @@ uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 - `.mew/runtime.md`: runtime log.
 - `.mew/runtime.out`: background runtime output when started with `mew start`.
 - `.mew/archive/`: archived processed inbox and read outbox records.
+- `mew run --auto-archive` writes old processed/read records to `.mew/archive/`.
 - `.mew/guidance.md`: human-written think-phase priority.
 - `.mew/policy.md`: local safety policy.
 - `.mew/self.md`: mew identity and behavior.

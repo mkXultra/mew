@@ -149,6 +149,17 @@ def build_parser():
         help="minimum minutes between autonomous runtime verification runs",
     )
     run_parser.add_argument(
+        "--auto-archive",
+        action="store_true",
+        help="archive old processed inbox and read outbox records after runtime cycles",
+    )
+    run_parser.add_argument(
+        "--archive-keep-recent",
+        type=int,
+        default=100,
+        help="processed/read records to keep active per section when --auto-archive is enabled",
+    )
+    run_parser.add_argument(
         "--task-timeout",
         type=float,
         default=DEFAULT_TASK_TIMEOUT_SECONDS,

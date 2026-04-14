@@ -130,6 +130,45 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_auto_archive_compacts_processed_and_read_records(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    for index in range(3):
+                        event = add_event(state, "user_message", "test", {"index": index})
+                        event["processed_at"] = f"done-{index}"
+                    for index in range(3):
+                        message = add_outbox_message(state, "info", f"read {index}")
+                        message["read_at"] = f"read-{index}"
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "run",
+                            "--once",
+                            "--poll-interval",
+                            "0.01",
+                            "--auto-archive",
+                            "--archive-keep-recent",
+                            "1",
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertIn("archived", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(len([event for event in state["inbox"] if event.get("processed_at")]), 1)
+                self.assertEqual(len([message for message in state["outbox"] if message.get("read_at")]), 1)
+                self.assertEqual(len(list((Path(".mew") / "archive").glob("state-*.json"))), 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_autonomous_initializes_instruction_files(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

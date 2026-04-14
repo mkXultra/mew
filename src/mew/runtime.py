@@ -4,6 +4,7 @@ import sys
 import time
 
 from .agent import process_events
+from .archive import archive_state_records
 from .codex_api import load_codex_oauth
 from .config import (
     DEFAULT_CODEX_MODEL,
@@ -131,6 +132,7 @@ def run_runtime(args):
             sleep_for = None
             processed_count = None
             new_outbox_messages = []
+            archive_result = None
             reason = None
             with state_lock():
                 state = load_state()
@@ -191,6 +193,18 @@ def run_runtime(args):
                         allow_write=bool(args.allow_write),
                         allowed_write_roots=args.allow_write,
                     )
+                    if args.auto_archive:
+                        archive_result = archive_state_records(
+                            state,
+                            keep_recent=args.archive_keep_recent,
+                            dry_run=False,
+                        )
+                        if archive_result.get("total_archived"):
+                            append_log(
+                                "- "
+                                f"{now_iso()}: archived {archive_result['total_archived']} record(s) "
+                                f"path={archive_result.get('archive_path')}"
+                            )
                     if args.echo_outbox:
                         new_outbox_messages = list(state.get("outbox", [])[outbox_len_before:])
                     save_state(state)
@@ -206,6 +220,12 @@ def run_runtime(args):
             for message in new_outbox_messages:
                 text = str(message.get("text") or "").replace("\n", "\n  ")
                 print(f"outbox #{message.get('id')} [{message.get('type')}]: {text}")
+            if archive_result and archive_result.get("total_archived"):
+                print(
+                    "archived "
+                    f"{archive_result['total_archived']} record(s) "
+                    f"path={archive_result.get('archive_path')}"
+                )
 
             if args.once:
                 break
