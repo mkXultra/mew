@@ -653,6 +653,62 @@ class ProgrammerTests(unittest.TestCase):
             self.assertEqual(len(state["verification_runs"]), 1)
             self.assertIn("Verification passed", state["outbox"][-1]["text"])
 
+    def test_autonomous_write_rolls_back_when_verification_fails(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        def fake_run_command_record(command, cwd=None, timeout=300):
+            return {
+                "command": command,
+                "argv": ["python", "-m", "unittest"],
+                "cwd": "/tmp/repo",
+                "started_at": "start",
+                "finished_at": "end",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "FAILED",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+            path.write_text("hello mew\n", encoding="utf-8")
+
+            with patch("mew.agent.run_command_record", side_effect=fake_run_command_record):
+                apply_action_plan(
+                    state,
+                    event,
+                    {"summary": "edit", "decisions": []},
+                    {
+                        "summary": "edit",
+                        "actions": [
+                            {
+                                "type": "edit_file",
+                                "path": str(path),
+                                "old": "mew",
+                                "new": "broken",
+                                "dry_run": False,
+                            }
+                        ],
+                    },
+                    now_iso(),
+                    allow_task_execution=False,
+                    task_timeout=1,
+                    autonomous=True,
+                    autonomy_level="act",
+                    allow_write=True,
+                    allowed_write_roots=[tmp],
+                    allow_verify=True,
+                    verify_command="python -m unittest",
+                    verify_timeout=10,
+                )
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "hello mew\n")
+            self.assertEqual(len(state["write_runs"]), 1)
+            self.assertTrue(state["write_runs"][0]["rolled_back"])
+            self.assertEqual(len(state["verification_runs"]), 1)
+            self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
+            self.assertIn("Rolled back write run", state["outbox"][-1]["text"])
+
     def test_autonomous_dispatch_starts_when_allowed(self):
         state = default_state()
         task = add_task(state)

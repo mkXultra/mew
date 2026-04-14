@@ -82,6 +82,38 @@ def _atomic_write_text(path, content):
             tmp_path.unlink(missing_ok=True)
 
 
+def snapshot_write_path(path, allowed_roots, create=False):
+    resolved = resolve_allowed_write_path(path, allowed_roots, create=create)
+    existed = resolved.exists()
+    return {
+        "path": str(resolved),
+        "existed": existed,
+        "content": _read_text_if_exists(resolved) if existed else "",
+        "created_at": now_iso(),
+    }
+
+
+def restore_write_snapshot(snapshot):
+    path = Path(snapshot.get("path") or "")
+    if not path.is_absolute():
+        raise ValueError("rollback snapshot path must be absolute")
+
+    existed = bool(snapshot.get("existed"))
+    if existed:
+        _atomic_write_text(path, snapshot.get("content") or "")
+        removed = False
+    else:
+        path.unlink(missing_ok=True)
+        removed = True
+
+    return {
+        "path": str(path),
+        "restored": True,
+        "removed_created_file": removed,
+        "restored_at": now_iso(),
+    }
+
+
 def write_file(path, content, allowed_roots, create=False, dry_run=False, max_chars=DEFAULT_WRITE_MAX_CHARS):
     if not isinstance(content, str):
         raise ValueError("content must be a string")

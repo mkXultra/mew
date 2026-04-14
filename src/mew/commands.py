@@ -517,10 +517,11 @@ def cmd_verification(args):
     return 0
 
 def format_write_run(run):
+    rollback = f" rolled_back={run.get('rolled_back')}" if run.get("rolled_back") is not None else ""
     return (
         f"#{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
         f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
-        f"written={run.get('written')} path={run.get('path')}"
+        f"written={run.get('written')}{rollback} path={run.get('path')}"
     )
 
 def cmd_writes(args):
@@ -540,6 +541,9 @@ def cmd_writes(args):
         if args.details and run.get("diff"):
             print("diff:")
             print(run["diff"])
+        if args.details and run.get("rollback"):
+            print("rollback:")
+            print(json.dumps(run["rollback"], ensure_ascii=False, indent=2))
     return 0
 
 def _tool_allowed_roots(args):

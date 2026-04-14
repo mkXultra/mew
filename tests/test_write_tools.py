@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mew.write_tools import edit_file, write_file
+from mew.write_tools import (
+    edit_file,
+    restore_write_snapshot,
+    snapshot_write_path,
+    write_file,
+)
 
 
 class WriteToolsTests(unittest.TestCase):
@@ -39,6 +44,31 @@ class WriteToolsTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "edited content is too large"):
                 edit_file(str(path), "hello", "x" * 20, [tmp], max_chars=10)
+
+    def test_snapshot_restore_existing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+            path.write_text("before\n", encoding="utf-8")
+
+            snapshot = snapshot_write_path(str(path), [tmp])
+            write_file(str(path), "after\n", [tmp])
+            rollback = restore_write_snapshot(snapshot)
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "before\n")
+            self.assertTrue(rollback["restored"])
+            self.assertFalse(rollback["removed_created_file"])
+
+    def test_snapshot_restore_created_file_removes_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+
+            snapshot = snapshot_write_path(str(path), [tmp], create=True)
+            write_file(str(path), "created\n", [tmp], create=True)
+            rollback = restore_write_snapshot(snapshot)
+
+            self.assertFalse(path.exists())
+            self.assertTrue(rollback["restored"])
+            self.assertTrue(rollback["removed_created_file"])
 
 
 if __name__ == "__main__":

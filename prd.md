@@ -880,7 +880,9 @@ Local command execution still requires `--execute-tasks`, `auto_execute=true`, a
 Runtime write actions require `--allow-write`; non-dry-run runtime writes also
 require `--allow-verify` and a configured `--verify-command`, and should trigger
 verification immediately after writing. Runtime write actions default to dry-run
-unless the action explicitly sets `dry_run=false`.
+unless the action explicitly sets `dry_run=false`. If verification fails after a
+runtime write, mew should restore the previous content or remove the newly
+created file and record the rollback in `write_runs`.
 
 ### 11.6 Out of Scope for MVP
 

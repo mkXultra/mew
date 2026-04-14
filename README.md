@@ -105,7 +105,9 @@ Sensitive files such as `auth.json`, `.env`, and private keys are refused by the
 read and write commands. Runtime write actions require `--allow-write` and
 non-dry-run runtime writes also require `--allow-verify --verify-command`.
 Runtime write actions default to dry-run unless the action explicitly sets
-`dry_run=false`.
+`dry_run=false`. If verification fails after a runtime write, mew restores the
+previous file content or removes the newly created file and records the rollback
+in `mew writes`.
 Direct `mew tool write` and `mew tool edit` commands can apply changes, so use
 `--dry-run` first when an AI is operating through the tool layer.
 Programmer-loop implementation prompts also point agents at these commands so

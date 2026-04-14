@@ -45,7 +45,13 @@ from .tasks import (
 )
 from .timeutil import elapsed_hours, now_iso
 from .toolbox import format_command_record, run_command_record
-from .write_tools import edit_file, summarize_write_result, write_file
+from .write_tools import (
+    edit_file,
+    restore_write_snapshot,
+    snapshot_write_path,
+    summarize_write_result,
+    write_file,
+)
 
 
 def build_recall_summary(state, event, current_time):
@@ -1616,7 +1622,14 @@ def apply_write_action(
         )
         return 1
 
+    snapshot = None
     try:
+        if not dry_run:
+            snapshot = snapshot_write_path(
+                action.get("path") or "",
+                allowed_write_roots,
+                create=bool(action.get("create")) if action_type == "write_file" else False,
+            )
         if action_type == "write_file":
             result = write_file(
                 action.get("path") or "",
@@ -1683,6 +1696,44 @@ def apply_write_action(
             verification,
         )
         message_count += 1
+        if verification.get("exit_code") != 0 and snapshot:
+            try:
+                rollback = restore_write_snapshot(snapshot)
+                run["rolled_back"] = True
+                run["rollback"] = {
+                    key: value
+                    for key, value in rollback.items()
+                    if key != "content"
+                }
+                run["updated_at"] = now_iso()
+                add_outbox_message(
+                    state,
+                    "warning",
+                    f"Rolled back write run #{run['id']} because verification failed.",
+                    event_id=event["id"],
+                    related_task_id=action.get("task_id"),
+                )
+                message_count += 1
+            except (OSError, ValueError) as exc:
+                run["rolled_back"] = False
+                run["rollback_error"] = str(exc)
+                run["updated_at"] = now_iso()
+                add_attention_item(
+                    state,
+                    "rollback",
+                    f"Rollback failed for write run #{run['id']}",
+                    str(exc),
+                    related_task_id=action.get("task_id"),
+                    priority="high",
+                )
+                add_outbox_message(
+                    state,
+                    "warning",
+                    f"Rollback failed for write run #{run['id']}: {exc}",
+                    event_id=event["id"],
+                    related_task_id=action.get("task_id"),
+                )
+                message_count += 1
     return message_count
 
 def apply_action_plan(

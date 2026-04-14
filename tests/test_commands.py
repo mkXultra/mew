@@ -401,6 +401,13 @@ class CommandTests(unittest.TestCase):
                             "changed": True,
                             "dry_run": False,
                             "written": True,
+                            "rolled_back": True,
+                            "rollback": {
+                                "path": "/tmp/notes.md",
+                                "restored": True,
+                                "removed_created_file": False,
+                                "restored_at": "done",
+                            },
                             "diff": "--- a\n+++ b\n",
                         }
                     )
@@ -411,7 +418,9 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("#1 [edit_file]", stdout.getvalue())
+                self.assertIn("rolled_back=True", stdout.getvalue())
                 self.assertIn("diff:", stdout.getvalue())
+                self.assertIn("rollback:", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 
