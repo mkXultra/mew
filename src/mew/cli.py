@@ -121,6 +121,21 @@ def build_parser():
         help="allow autonomous programmer loop to start ai-cli agent runs",
     )
     run_parser.add_argument(
+        "--allow-verify",
+        action="store_true",
+        help="allow runtime actions to run the configured verification command",
+    )
+    run_parser.add_argument(
+        "--verify-command",
+        help="verification command available to runtime run_verification actions",
+    )
+    run_parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=300.0,
+        help="runtime verification command timeout in seconds",
+    )
+    run_parser.add_argument(
         "--task-timeout",
         type=float,
         default=DEFAULT_TASK_TIMEOUT_SECONDS,

@@ -112,6 +112,10 @@ def run_runtime(args):
             print(f"autonomous mode enabled level={args.autonomy_level}")
         if args.allow_agent_run:
             print("autonomous agent runs allowed")
+        if args.allow_verify:
+            print("runtime verification allowed")
+            if args.verify_command:
+                print(f"verify command: {args.verify_command}")
         if args.allow_read:
             print("read-only inspection allowed under:")
             for path in args.allow_read:
@@ -153,6 +157,8 @@ def run_runtime(args):
                     autonomy["enabled"] = bool(args.autonomous)
                     autonomy["level"] = args.autonomy_level if args.autonomous else "off"
                     autonomy["allow_agent_run"] = bool(args.allow_agent_run)
+                    autonomy["allow_verify"] = bool(args.allow_verify)
+                    autonomy["verify_command_configured"] = bool(args.verify_command)
                     autonomy["updated_at"] = now_iso()
                     processed_count = process_events(
                         state,
@@ -172,6 +178,9 @@ def run_runtime(args):
                         autonomous=args.autonomous and not pending_user,
                         autonomy_level=args.autonomy_level if args.autonomous else "off",
                         allow_agent_run=args.allow_agent_run and not pending_user,
+                        allow_verify=args.allow_verify,
+                        verify_command=args.verify_command or "",
+                        verify_timeout=args.verify_timeout,
                         allowed_read_roots=args.allow_read,
                     )
                     if args.echo_outbox:

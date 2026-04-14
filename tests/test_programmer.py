@@ -362,6 +362,99 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(state["agent_runs"], [])
         self.assertIn("command and auto_execute", state["outbox"][-1]["text"])
 
+    def test_autonomous_run_verification_requires_allow_verify(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "verify", "decisions": []},
+            {"summary": "verify", "actions": [{"type": "run_verification", "reason": "check tests"}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_verify=False,
+            verify_command="python -m unittest",
+        )
+
+        self.assertEqual(state["verification_runs"], [])
+        self.assertIn("--allow-verify is required", state["outbox"][-1]["text"])
+
+    def test_autonomous_run_verification_records_result(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        def fake_run_command_record(command, cwd=None, timeout=300):
+            return {
+                "command": command,
+                "argv": ["python", "-m", "unittest"],
+                "cwd": "/tmp/repo",
+                "started_at": "start",
+                "finished_at": "end",
+                "exit_code": 0,
+                "stdout": "OK",
+                "stderr": "",
+            }
+
+        with patch("mew.agent.run_command_record", side_effect=fake_run_command_record):
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "verify", "decisions": []},
+                {"summary": "verify", "actions": [{"type": "run_verification", "reason": "check tests"}]},
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_verify=True,
+                verify_command="python -m unittest",
+                verify_timeout=10,
+            )
+
+        self.assertEqual(len(state["verification_runs"]), 1)
+        self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+        self.assertEqual(state["verification_runs"][0]["reason"], "check tests")
+        self.assertIn("Verification passed", state["outbox"][-1]["text"])
+
+    def test_autonomous_run_verification_failure_creates_attention(self):
+        state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
+
+        def fake_run_command_record(command, cwd=None, timeout=300):
+            return {
+                "command": command,
+                "argv": ["python", "-m", "unittest"],
+                "cwd": "/tmp/repo",
+                "started_at": "start",
+                "finished_at": "end",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "FAILED",
+            }
+
+        with patch("mew.agent.run_command_record", side_effect=fake_run_command_record):
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "verify", "decisions": []},
+                {"summary": "verify", "actions": [{"type": "run_verification"}]},
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_verify=True,
+                verify_command="python -m unittest",
+            )
+
+        self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
+        self.assertIn("Verification failed", state["outbox"][-1]["text"])
+        self.assertEqual(state["attention"]["items"][0]["kind"], "verification")
+
     def test_autonomous_dispatch_starts_when_allowed(self):
         state = default_state()
         task = add_task(state)

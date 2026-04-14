@@ -44,6 +44,7 @@ from .tasks import (
     task_sort_key,
 )
 from .timeutil import elapsed_hours, now_iso
+from .toolbox import format_command_record, run_command_record
 
 
 def build_recall_summary(state, event, current_time):
@@ -99,6 +100,8 @@ def build_context(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
 ):
     unanswered_questions = [
         {
@@ -137,12 +140,15 @@ def build_context(
             "requested_enabled": bool(autonomous),
             "requested_level": autonomy_level,
             "allow_agent_run": bool(allow_agent_run),
+            "allow_verify": bool(allow_verify),
+            "verify_command_configured": bool(verify_command),
             "configured_allow_agent_run": bool(state.get("autonomy", {}).get("allow_agent_run")),
         },
         "self": self_text,
         "desires": desires,
         "runtime_log_tail": read_runtime_log_tail(),
         "allowed_read_roots": allowed_read_roots or [],
+        "verification_runs": state.get("verification_runs", [])[-10:],
         "event": event,
     }
 
@@ -167,6 +173,8 @@ def build_think_prompt(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
     allowed_read_roots=None,
 ):
     context = build_context(
@@ -179,6 +187,8 @@ def build_think_prompt(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
     )
     return (
         "You are the THINK phase of mew, a passive personal task agent.\n"
@@ -187,16 +197,19 @@ def build_think_prompt(
         "Follow the human-written guidance when prioritizing decisions. "
         "If guidance conflicts with safety rules, safety rules win.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
-        "execute_task, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
+        "execute_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
+        f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         "When autonomous mode is false, do not do self-directed work unless it directly answers the user.\n"
         "When autonomous mode is true and there is no user input, use Self and Desires to choose useful small work.\n"
         "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task; "
         "act can also use allowed read-only inspection and programmer-loop actions. "
         "Starting agent runs requires allow_agent_run in local state, even at act level. "
-        "Local command execution still requires allow_task_execution. Agent runs require dispatch_task and allow_agent_run.\n"
+        "Local task command execution still requires allow_task_execution. "
+        "Verification command execution requires run_verification plus allow_verify and a configured verify command. "
+        "Agent runs require dispatch_task and allow_agent_run.\n"
         "If you are waiting for the user because specific input is needed, prefer ask_user. "
         "If you emit wait_for_user, include a question when the missing input should be visible to the user.\n"
         "Use execute_task only when a task is ready, has command, has auto_execute=true, "
@@ -222,6 +235,7 @@ def build_think_prompt(
         '    {"type": "inspect_dir", "path": "..."},\n'
         '    {"type": "read_file", "path": "...", "max_chars": 4000},\n'
         '    {"type": "search_text", "path": "...", "query": "...", "max_matches": 20},\n'
+        '    {"type": "run_verification", "reason": "..."},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
         '    {"type": "propose_task", "title": "...", "description": "...", "priority": "low|normal|high"},\n'
         '    {"type": "plan_task", "task_id": 1, "objective": "...", "approach": "..."},\n'
@@ -251,6 +265,8 @@ def build_act_prompt(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
     allowed_read_roots=None,
 ):
     context = build_context(
@@ -263,20 +279,25 @@ def build_act_prompt(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
     )
     return (
         "You are the ACT phase of mew, a passive personal task agent.\n"
         "Return only JSON. Do not use markdown.\n"
         "Your job is to normalize the THINK phase DecisionPlan into concrete actions.\n"
         "You still do not execute shell commands yourself. Local code will execute only validated actions.\n"
-        "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, "
+        "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, run_verification, "
         "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
+        f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         "Respect the autonomy level: observe may record/self_review only; propose may propose_task/plan_task; "
         "act may use allowed read-only inspection and programmer-loop actions. "
-        "Starting agent runs requires allow_agent_run in local state. Local command execution still requires allow_task_execution.\n"
+        "Starting agent runs requires allow_agent_run in local state. "
+        "Local task command execution still requires allow_task_execution. "
+        "Verification command execution requires run_verification plus allow_verify and a configured verify command.\n"
         "If the DecisionPlan is waiting on concrete user input, turn it into ask_user or include question on wait_for_user.\n"
         "Use execute_task only when the task is ready, has command, has auto_execute=true, "
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
@@ -295,6 +316,7 @@ def build_act_prompt(
         '    {"type": "inspect_dir", "path": "..."},\n'
         '    {"type": "read_file", "path": "...", "max_chars": 4000},\n'
         '    {"type": "search_text", "path": "...", "query": "...", "max_matches": 20},\n'
+        '    {"type": "run_verification", "reason": "..."},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
         '    {"type": "propose_task", "title": "...", "description": "...", "priority": "low|normal|high"},\n'
         '    {"type": "plan_task", "task_id": 1, "objective": "...", "approach": "..."},\n'
@@ -731,6 +753,8 @@ def think_phase(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
     allowed_read_roots=None,
 ):
     fallback = deterministic_decision_plan(
@@ -758,6 +782,8 @@ def think_phase(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
         allowed_read_roots=allowed_read_roots,
     )
     try:
@@ -786,6 +812,7 @@ def deterministic_action_plan(decision_plan):
             "ask_user",
             "wait_for_user",
             "execute_task",
+            "run_verification",
             "update_memory",
             "inspect_dir",
             "read_file",
@@ -825,6 +852,7 @@ def normalize_action_plan(plan, fallback_plan):
             "ask_user",
             "wait_for_user",
             "execute_task",
+            "run_verification",
             "update_memory",
             "inspect_dir",
             "read_file",
@@ -897,6 +925,8 @@ def act_phase(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
     allowed_read_roots=None,
 ):
     fallback = deterministic_action_plan(decision_plan)
@@ -915,6 +945,8 @@ def act_phase(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
         allowed_read_roots=allowed_read_roots,
     )
     try:
@@ -954,6 +986,7 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
             action["type"]
             in (
                 "execute_task",
+                "run_verification",
                 "dispatch_task",
                 "collect_agent_result",
                 "review_agent_run",
@@ -1322,6 +1355,79 @@ def apply_followup_review_action(state, event, action, autonomous, autonomy_leve
     )
     return 1
 
+def apply_run_verification_action(
+    state,
+    event,
+    action,
+    current_time,
+    autonomous,
+    autonomy_level,
+    allow_verify,
+    verify_command,
+    verify_timeout,
+):
+    if event["type"] != "user_message" and not (autonomous and autonomy_level == "act"):
+        add_outbox_message(
+            state,
+            "warning",
+            "Refused run_verification: current mode does not allow verification.",
+            event_id=event["id"],
+            related_task_id=action.get("task_id"),
+        )
+        return 1
+    if not allow_verify:
+        add_outbox_message(
+            state,
+            "warning",
+            "Refused run_verification: --allow-verify is required.",
+            event_id=event["id"],
+            related_task_id=action.get("task_id"),
+        )
+        return 1
+    if not verify_command:
+        add_outbox_message(
+            state,
+            "warning",
+            "Refused run_verification: --verify-command is required.",
+            event_id=event["id"],
+            related_task_id=action.get("task_id"),
+        )
+        return 1
+
+    result = run_command_record(verify_command, cwd=".", timeout=verify_timeout)
+    run = {
+        "id": next_id(state, "verification_run"),
+        "event_id": event["id"],
+        "task_id": action.get("task_id"),
+        "reason": action.get("reason") or "",
+        **result,
+        "created_at": current_time,
+        "updated_at": now_iso(),
+    }
+    state.setdefault("verification_runs", []).append(run)
+    del state["verification_runs"][:-100]
+
+    passed = result.get("exit_code") == 0
+    message_type = "info" if passed else "warning"
+    status = "passed" if passed else "failed"
+    add_outbox_message(
+        state,
+        message_type,
+        f"Verification {status}: {verify_command}\n{format_command_record(result)}",
+        event_id=event["id"],
+        related_task_id=action.get("task_id"),
+    )
+    if not passed:
+        add_attention_item(
+            state,
+            "verification",
+            f"Verification run #{run['id']} failed",
+            f"{verify_command}\nexit_code={result.get('exit_code')}",
+            related_task_id=action.get("task_id"),
+            priority="high",
+        )
+    return 1
+
 def apply_action_plan(
     state,
     event,
@@ -1334,6 +1440,9 @@ def apply_action_plan(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_timeout=300,
 ):
     counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
@@ -1422,6 +1531,18 @@ def apply_action_plan(
                 autonomous,
                 autonomy_level,
             )
+        elif action_type == "run_verification":
+            counts["messages"] += apply_run_verification_action(
+                state,
+                event,
+                action,
+                current_time,
+                autonomous,
+                autonomy_level,
+                allow_verify,
+                verify_command,
+                verify_timeout,
+            )
         elif action_type == "send_message":
             text = action.get("text") or memory_summary
             message_type = action.get("message_type") or "info"
@@ -1502,6 +1623,9 @@ def process_events(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_timeout=300,
     allowed_read_roots=None,
 ):
     current_time = now_iso()
@@ -1533,6 +1657,8 @@ def process_events(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
             allow_agent_run=allow_agent_run,
+            allow_verify=allow_verify,
+            verify_command=verify_command,
             allowed_read_roots=allowed_read_roots,
         )
         action_plan = act_phase(
@@ -1552,6 +1678,8 @@ def process_events(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
             allow_agent_run=allow_agent_run,
+            allow_verify=allow_verify,
+            verify_command=verify_command,
             allowed_read_roots=allowed_read_roots,
         )
         counts = apply_action_plan(
@@ -1566,6 +1694,9 @@ def process_events(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
             allow_agent_run=allow_agent_run,
+            allow_verify=allow_verify,
+            verify_command=verify_command,
+            verify_timeout=verify_timeout,
         )
         event["decision_plan"] = decision_plan
         event["action_plan"] = action_plan

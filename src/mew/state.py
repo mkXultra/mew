@@ -71,6 +71,7 @@ def default_state():
             "items": [],
         },
         "agent_runs": [],
+        "verification_runs": [],
         "autonomy": {
             "enabled": False,
             "level": "off",
@@ -80,6 +81,8 @@ def default_state():
             "last_autonomous_action_at": None,
             "last_desire": "",
             "allow_agent_run": False,
+            "allow_verify": False,
+            "verify_command_configured": False,
             "updated_at": None,
         },
         "memory": {
@@ -109,6 +112,7 @@ def default_state():
             "attention": 1,
             "agent_run": 1,
             "plan": 1,
+            "verification_run": 1,
         },
     }
 
@@ -149,6 +153,7 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "reply", state.get("replies", []))
     _ensure_next_id_after_existing(next_ids, "attention", state.get("attention", {}).get("items", []))
     _ensure_next_id_after_existing(next_ids, "agent_run", state.get("agent_runs", []))
+    _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
 
     plans = []
     for task in state.get("tasks", []):
@@ -236,6 +241,7 @@ def migrate_state(state):
     state.setdefault("questions", [])
     state.setdefault("replies", [])
     state.setdefault("agent_runs", [])
+    state.setdefault("verification_runs", [])
     for run in state["agent_runs"]:
         run.setdefault("purpose", "implementation")
         run.setdefault("plan_id", None)
@@ -262,12 +268,14 @@ def migrate_state(state):
     state["autonomy"].setdefault("last_autonomous_action_at", None)
     state["autonomy"].setdefault("last_desire", "")
     state["autonomy"].setdefault("allow_agent_run", False)
+    state["autonomy"].setdefault("allow_verify", False)
+    state["autonomy"].setdefault("verify_command_configured", False)
     state["autonomy"].setdefault("updated_at", None)
     state.setdefault("attention", {"items": []})
     state["attention"].setdefault("items", [])
 
     next_ids = state.setdefault("next_ids", {})
-    for name in ("question", "reply", "attention", "agent_run", "plan"):
+    for name in ("question", "reply", "attention", "agent_run", "plan", "verification_run"):
         next_ids.setdefault(name, 1)
 
     linked_message_ids = {

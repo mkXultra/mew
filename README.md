@@ -48,6 +48,15 @@ uv run mew task update <task-id> --command "python -m pytest" --status ready --a
 uv run mew run --execute-tasks
 ```
 
+Passive verification is a narrower gate for letting the runtime check the repo
+without executing arbitrary task commands:
+
+```sh
+uv run mew run --autonomous --autonomy-level act \
+  --allow-verify \
+  --verify-command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"
+```
+
 ## Useful Commands
 
 ```sh
