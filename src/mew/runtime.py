@@ -5,7 +5,6 @@ import time
 
 from .agent import process_events
 from .archive import archive_state_records
-from .codex_api import load_codex_oauth
 from .config import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_CODEX_WEB_BASE_URL,
@@ -18,6 +17,7 @@ from .config import (
     STATE_FILE,
 )
 from .errors import MewError
+from .model_backends import load_model_auth, model_backend_label, normalize_model_backend
 from .state import (
     acquire_lock,
     append_log,
@@ -90,7 +90,12 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
     }
 
 def run_runtime(args):
-    codex_auth = None
+    model_auth = None
+    try:
+        model_backend = normalize_model_backend(args.model_backend)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     ensure_guidance(args.guidance)
     ensure_policy(args.policy)
     if args.autonomous:
@@ -102,7 +107,7 @@ def run_runtime(args):
     initial_desires = read_desires(args.desires)
     if args.ai:
         try:
-            codex_auth = load_codex_oauth(args.auth)
+            model_auth = load_model_auth(model_backend, args.auth)
         except MewError as exc:
             print(f"mew: {exc}", file=sys.stderr)
             return 1
@@ -128,10 +133,10 @@ def run_runtime(args):
             save_state(state)
         append_log(f"## {lock['started_at']}: runtime started pid={os.getpid()}")
         print(f"mew runtime started pid={os.getpid()} state={STATE_FILE}")
-        if codex_auth:
+        if model_auth:
             print(
-                "codex web api enabled "
-                f"auth={codex_auth['path']} model={args.model} base_url={args.base_url}"
+                f"{model_backend_label(model_backend)} enabled "
+                f"auth={model_auth['path']} model={args.model} base_url={args.base_url}"
             )
         if initial_guidance:
             guidance_path = args.guidance or str(GUIDANCE_FILE)
@@ -205,9 +210,10 @@ def run_runtime(args):
                     processed_count = process_events(
                         state,
                         reason,
-                        codex_auth=codex_auth,
+                        model_auth=model_auth,
                         model=args.model,
                         base_url=args.base_url,
+                        model_backend=model_backend,
                         timeout=args.timeout,
                         ai_ticks=args.ai_ticks,
                         create_internal_event=create_internal_event,

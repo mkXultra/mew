@@ -347,7 +347,7 @@ The runtime should separate decision-making from execution.
 - Reads human-written `Policy`.
 - Reads human-written `Self`.
 - Reads human-written `Desires`.
-- Calls Codex Web API.
+- Calls the configured resident model backend.
 - Produces a `DecisionPlan`.
 - Does not modify task state.
 - Does not execute commands.
@@ -355,7 +355,7 @@ The runtime should separate decision-making from execution.
 `act` phase:
 
 - Reads the `DecisionPlan`.
-- Calls Codex Web API again.
+- Calls the configured resident model backend again.
 - Produces an `ActionPlan`.
 - Local code validates the `ActionPlan`.
 - Local code performs approved effects such as writing an outbox message, asking the user a question, waiting for user input, or executing an explicitly allowed task command.
@@ -403,6 +403,7 @@ Current package boundaries:
 - `src/mew/commands.py`: user-facing command handlers such as task, message, attach, and listen.
 - `src/mew/runtime.py`: long-running runtime loop and startup/shutdown sequence.
 - `src/mew/agent.py`: think/act prompts, plan normalization, and ActionPlan application.
+- `src/mew/model_backends.py`: resident model adapter layer.
 - `src/mew/codex_api.py`: Codex Web API OAuth loading, streaming call, and JSON extraction.
 - `src/mew/state.py`: local JSON state, runtime locks, inbox/outbox primitives, guidance, policy, self, and desires files.
 - `src/mew/tasks.py`: task queries, formatting, and command execution.
@@ -414,7 +415,15 @@ Current package boundaries:
 
 This is enough to validate whether the startup sequence, recall flow, and event loop work. SQLite can be reconsidered later only if JSON file coordination becomes a real problem.
 
-The first real AI backend should be Codex Web API, called directly with an OAuth access token from `auth.json`.
+The first real resident model backend should be Codex Web API, called directly with an OAuth access token from `auth.json`.
+
+Backend selection should be explicit at runtime:
+
+```sh
+mew run --ai --model-backend codex --auth auth.json
+```
+
+The model adapter layer should keep `think` and `act` independent from any one provider. Codex is the first implementation, not a permanent architectural assumption.
 
 Initial assumptions:
 

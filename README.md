@@ -10,6 +10,7 @@ It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, a
 uv run mew doctor --auth auth.json
 uv run mew task add "Improve mew" --description "Pick one small useful improvement"
 uv run mew run --autonomous --autonomy-level propose --echo-outbox
+uv run mew run --ai --model-backend codex --auth auth.json --echo-outbox
 # or run it in the background:
 uv run mew start -- --autonomous --autonomy-level propose
 ```
@@ -93,8 +94,22 @@ uv run mew attention --resolve-all
 uv run mew archive
 uv run mew archive --apply
 uv run mew run --auto-archive
+uv run mew run --ai --model-backend codex --auth auth.json
 uv run mew memory --compact
 ```
+
+## Resident Model
+
+`mew run --ai` routes `think` and `act` through a resident model backend. The
+first backend is `codex`, which calls the Codex Web API directly with OAuth
+credentials from `auth.json` or `~/.codex/auth.json`.
+
+```sh
+uv run mew run --ai --model-backend codex --auth auth.json
+```
+
+The runtime still validates every action locally. The model chooses plans; mew's
+local code decides which effects are allowed.
 
 ## Chat
 

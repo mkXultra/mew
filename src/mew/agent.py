@@ -1,16 +1,17 @@
 import json
 import os
 
-from .codex_api import call_codex_json
 from .config import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_CODEX_WEB_BASE_URL,
+    DEFAULT_MODEL_BACKEND,
     DEFAULT_TASK_TIMEOUT_SECONDS,
     LOG_FILE,
     MAX_RECENT_EVENTS,
 )
 from .errors import CodexApiError
 from .agent_runs import find_agent_run, get_agent_run_result, start_agent_run
+from .model_backends import call_model_json, model_backend_label
 from .programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -907,7 +908,7 @@ def think_phase(
     state,
     event,
     current_time,
-    codex_auth,
+    model_auth,
     model,
     base_url,
     timeout,
@@ -926,6 +927,7 @@ def think_phase(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    model_backend=DEFAULT_MODEL_BACKEND,
 ):
     fallback = deterministic_decision_plan(
         state,
@@ -940,7 +942,7 @@ def think_phase(
         verify_command=verify_command,
         verify_interval_seconds=verify_interval_seconds,
     )
-    if not codex_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
+    if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
         return fallback
 
     prompt = build_think_prompt(
@@ -962,15 +964,15 @@ def think_phase(
         allowed_write_roots=allowed_write_roots,
     )
     try:
-        plan = call_codex_json(codex_auth, prompt, model, base_url, timeout)
-        append_log(f"- {current_time}: think_phase codex_api ok event={event['id']}")
+        plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
+        append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
     except CodexApiError as exc:
-        append_log(f"- {current_time}: think_phase codex_api error event={event['id']} error={exc}")
+        append_log(f"- {current_time}: think_phase {model_backend} error event={event['id']} error={exc}")
         fallback["decisions"].append(
             {
                 "type": "send_message",
                 "message_type": "warning",
-                "text": f"Codex THINK error: {exc}",
+                "text": f"{model_backend_label(model_backend)} THINK error: {exc}",
             }
         )
         return fallback
@@ -1110,7 +1112,7 @@ def act_phase(
     event,
     decision_plan,
     current_time,
-    codex_auth,
+    model_auth,
     model,
     base_url,
     timeout,
@@ -1127,9 +1129,10 @@ def act_phase(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    model_backend=DEFAULT_MODEL_BACKEND,
 ):
     fallback = deterministic_action_plan(decision_plan)
-    if not codex_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
+    if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
         return fallback
 
     prompt = build_act_prompt(
@@ -1151,15 +1154,15 @@ def act_phase(
         allowed_write_roots=allowed_write_roots,
     )
     try:
-        action_plan = call_codex_json(codex_auth, prompt, model, base_url, timeout)
-        append_log(f"- {current_time}: act_phase codex_api ok event={event['id']}")
+        action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
+        append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
     except CodexApiError as exc:
-        append_log(f"- {current_time}: act_phase codex_api error event={event['id']} error={exc}")
+        append_log(f"- {current_time}: act_phase {model_backend} error event={event['id']} error={exc}")
         fallback["actions"].append(
             {
                 "type": "send_message",
                 "message_type": "warning",
-                "text": f"Codex ACT error: {exc}",
+                "text": f"{model_backend_label(model_backend)} ACT error: {exc}",
             }
         )
         return fallback
@@ -2008,9 +2011,10 @@ def apply_action_plan(
 def process_events(
     state,
     reason,
-    codex_auth=None,
+    model_auth=None,
     model=DEFAULT_CODEX_MODEL,
     base_url=DEFAULT_CODEX_WEB_BASE_URL,
+    model_backend=DEFAULT_MODEL_BACKEND,
     timeout=60,
     ai_ticks=False,
     create_internal_event=True,
@@ -2047,14 +2051,14 @@ def process_events(
             state,
             event,
             current_time,
-            codex_auth,
+            model_auth,
             model,
-            base_url,
-            timeout,
-            ai_ticks,
-            allow_task_execution,
-            guidance,
-            policy,
+            base_url=base_url,
+            timeout=timeout,
+            ai_ticks=ai_ticks,
+            allow_task_execution=allow_task_execution,
+            guidance=guidance,
+            policy=policy,
             self_text=self_text,
             desires=desires,
             autonomous=autonomous,
@@ -2066,19 +2070,20 @@ def process_events(
             allow_write=allow_write,
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
+            model_backend=model_backend,
         )
         action_plan = act_phase(
             state,
             event,
             decision_plan,
             current_time,
-            codex_auth,
+            model_auth,
             model,
-            base_url,
-            timeout,
-            ai_ticks,
-            allow_task_execution,
-            policy,
+            base_url=base_url,
+            timeout=timeout,
+            ai_ticks=ai_ticks,
+            allow_task_execution=allow_task_execution,
+            policy=policy,
             self_text=self_text,
             desires=desires,
             autonomous=autonomous,
@@ -2089,6 +2094,7 @@ def process_events(
             allow_write=allow_write,
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
+            model_backend=model_backend,
         )
         counts = apply_action_plan(
             state,

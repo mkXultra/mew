@@ -1,8 +1,16 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from mew.agent import apply_action_plan, build_context, deterministic_decision_plan
+from mew.agent import (
+    act_phase,
+    apply_action_plan,
+    build_context,
+    deterministic_decision_plan,
+    think_phase,
+)
 from mew.read_tools import read_file
 from mew.state import add_attention_item, add_event, default_state, migrate_state
 from mew.timeutil import now_iso
@@ -84,6 +92,82 @@ class AutonomyTests(unittest.TestCase):
 
         context = build_context(state, event, "later")
         self.assertEqual(context["thought_journal"][0]["summary"], "Recorded continuity.")
+
+    def test_think_phase_uses_model_backend_adapter(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = default_state()
+                event = add_event(state, "user_message", "test", {"text": "hello"})
+                auth = {"access_token": "token"}
+                with patch(
+                    "mew.agent.call_model_json",
+                    return_value={
+                        "summary": "adapter summary",
+                        "decisions": [{"type": "remember", "summary": "adapter summary"}],
+                    },
+                ) as call:
+                    plan = think_phase(
+                        state,
+                        event,
+                        now_iso(),
+                        auth,
+                        "test-model",
+                        "https://example.invalid",
+                        5,
+                        False,
+                        False,
+                        "",
+                        "",
+                        model_backend="codex",
+                    )
+
+                self.assertEqual(plan["summary"], "adapter summary")
+                self.assertEqual(call.call_args.args[0], "codex")
+                self.assertEqual(call.call_args.args[1], auth)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_act_phase_uses_model_backend_adapter(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = default_state()
+                event = add_event(state, "user_message", "test", {"text": "hello"})
+                auth = {"access_token": "token"}
+                decision_plan = {
+                    "summary": "decide",
+                    "decisions": [{"type": "send_message", "message_type": "info", "text": "hello"}],
+                }
+                with patch(
+                    "mew.agent.call_model_json",
+                    return_value={
+                        "summary": "adapter action",
+                        "actions": [{"type": "send_message", "message_type": "info", "text": "hello"}],
+                    },
+                ) as call:
+                    plan = act_phase(
+                        state,
+                        event,
+                        decision_plan,
+                        now_iso(),
+                        auth,
+                        "test-model",
+                        "https://example.invalid",
+                        5,
+                        False,
+                        False,
+                        "",
+                        model_backend="codex",
+                    )
+
+                self.assertEqual(plan["summary"], "adapter action")
+                self.assertEqual(call.call_args.args[0], "codex")
+                self.assertEqual(call.call_args.args[1], auth)
+            finally:
+                os.chdir(old_cwd)
 
     def test_self_review_can_propose_task_at_propose_level(self):
         state = default_state()

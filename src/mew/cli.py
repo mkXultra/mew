@@ -63,8 +63,10 @@ from .config import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_CODEX_WEB_BASE_URL,
     DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_MODEL_BACKEND,
     DEFAULT_TASK_TIMEOUT_SECONDS,
 )
+from .model_backends import SUPPORTED_MODEL_BACKENDS
 from .runtime import run_runtime
 
 
@@ -101,12 +103,12 @@ def build_parser():
     run_parser.add_argument(
         "--ai",
         action="store_true",
-        help="use Codex Web API via OAuth auth.json for startup and user messages",
+        help="use the resident model backend for startup and user messages",
     )
     run_parser.add_argument(
         "--ai-ticks",
         action="store_true",
-        help="also call Codex Web API for legacy tick events",
+        help="also call the resident model backend for legacy tick events",
     )
     run_parser.add_argument(
         "--execute-tasks",
@@ -169,7 +171,7 @@ def build_parser():
     )
     run_parser.add_argument(
         "--auth",
-        help="path to Codex OAuth auth.json; defaults to ./auth.json then ~/.codex/auth.json",
+        help="path to model auth file; for codex defaults to ./auth.json then ~/.codex/auth.json",
     )
     run_parser.add_argument(
         "--guidance",
@@ -201,20 +203,34 @@ def build_parser():
         help="allow gated autonomous writes under this path; can be passed more than once",
     )
     run_parser.add_argument(
+        "--model-backend",
+        default=os.environ.get("MEW_MODEL_BACKEND", DEFAULT_MODEL_BACKEND),
+        help=(
+            "resident model backend "
+            f"({', '.join(SUPPORTED_MODEL_BACKENDS)}); default {DEFAULT_MODEL_BACKEND}"
+        ),
+    )
+    run_parser.add_argument(
         "--model",
-        default=os.environ.get("MEW_CODEX_MODEL", DEFAULT_CODEX_MODEL),
-        help=f"Codex model name; default {DEFAULT_CODEX_MODEL}",
+        default=os.environ.get(
+            "MEW_MODEL",
+            os.environ.get("MEW_CODEX_MODEL", DEFAULT_CODEX_MODEL),
+        ),
+        help=f"resident model name; default {DEFAULT_CODEX_MODEL}",
     )
     run_parser.add_argument(
         "--base-url",
-        default=os.environ.get("MEW_CODEX_BASE_URL", DEFAULT_CODEX_WEB_BASE_URL),
-        help=f"Codex Web API base URL; default {DEFAULT_CODEX_WEB_BASE_URL}",
+        default=os.environ.get(
+            "MEW_MODEL_BASE_URL",
+            os.environ.get("MEW_CODEX_BASE_URL", DEFAULT_CODEX_WEB_BASE_URL),
+        ),
+        help=f"resident model API base URL; default {DEFAULT_CODEX_WEB_BASE_URL}",
     )
     run_parser.add_argument(
         "--timeout",
         type=float,
         default=60.0,
-        help="Codex Web API request timeout in seconds",
+        help="resident model request timeout in seconds",
     )
     run_parser.set_defaults(func=run_runtime)
 
