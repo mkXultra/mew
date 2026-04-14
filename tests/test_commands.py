@@ -467,6 +467,137 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_programmer_loop_commands(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Programmer loop",
+                            "description": "Exercise chat programmer commands.",
+                            "status": "ready",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": True,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": 3,
+                            "plans": [{"id": 1, "status": "planned", "cwd": ".", "model": "codex-ultra"}],
+                            "latest_plan_id": 1,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    state["agent_runs"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "task_id": 1,
+                                "purpose": "implementation",
+                                "plan_id": 1,
+                                "status": "completed",
+                                "backend": "ai-cli",
+                                "model": "codex-ultra",
+                                "cwd": str(Path(".").resolve()),
+                                "prompt": "implemented",
+                                "prompt_file": "",
+                                "external_pid": 111,
+                                "result": "implemented",
+                                "stdout": "",
+                                "stderr": "",
+                            },
+                            {
+                                "id": 2,
+                                "task_id": 1,
+                                "purpose": "review",
+                                "plan_id": 1,
+                                "review_of_run_id": 1,
+                                "status": "completed",
+                                "backend": "ai-cli",
+                                "model": "gpt-5.1-codex-mini",
+                                "cwd": str(Path(".").resolve()),
+                                "prompt": "review",
+                                "prompt_file": "",
+                                "external_pid": 222,
+                                "result": "STATUS: needs_fix\nSUMMARY: x\nFOLLOW_UP:\n- Add a regression test",
+                                "stdout": "",
+                                "stderr": "",
+                            },
+                            {
+                                "id": 3,
+                                "task_id": 1,
+                                "purpose": "implementation",
+                                "plan_id": 1,
+                                "status": "failed",
+                                "backend": "ai-cli",
+                                "model": "codex-ultra",
+                                "cwd": str(Path(".").resolve()),
+                                "prompt": "failed",
+                                "prompt_file": "",
+                                "external_pid": 333,
+                                "result": "failed",
+                                "stdout": "",
+                                "stderr": "",
+                            },
+                        ]
+                    )
+                    save_state(state)
+
+                def fake_get_result(state, run, verbose=False):
+                    run["status"] = "completed"
+                    run["result"] = run.get("result") or "collected"
+                    return run
+
+                def fake_wait(state, run, timeout=None):
+                    run["status"] = "completed"
+                    run["result"] = run.get("result") or "waited"
+                    return run
+
+                stdin = StringIO(
+                    "/result 1\n"
+                    "/wait 1 1\n"
+                    "/review 1 dry-run\n"
+                    "/followup 2\n"
+                    "/retry 3 dry-run\n"
+                    "/sweep dry-run\n"
+                    "/exit\n"
+                )
+                with (
+                    patch("sys.stdin", stdin),
+                    patch("mew.commands.get_agent_run_result", side_effect=fake_get_result),
+                    patch("mew.commands.wait_agent_run", side_effect=fake_wait),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("agent run #1 status=completed", output)
+                self.assertIn("created dry-run review run", output)
+                self.assertIn("review run #2 status=needs_fix", output)
+                self.assertIn("Follow up review #2 for task #1", output)
+                self.assertIn("created dry-run retry run", output)
+                self.assertIn("Review needed", output)
+
+                state = load_state()
+                purposes = [run.get("purpose") for run in state["agent_runs"]]
+                self.assertGreaterEqual(purposes.count("review"), 2)
+                self.assertEqual(state["tasks"][-1]["title"], "Follow up review #2 for task #1")
+                self.assertEqual(state["agent_runs"][-1]["status"], "dry_run")
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_autonomy_controls_respect_pause_and_mode_override(self):
         from argparse import Namespace
 

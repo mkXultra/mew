@@ -1614,6 +1614,12 @@ CHAT_HELP = """Commands:
 /attention [all]      list open attention items, or all attention items
 /outbox [all]         list unread outbox messages, or all messages
 /agents [all]         list running agent runs, or all agent runs
+/result <run-id>      collect an agent run result
+/wait <run-id> [sec]  wait for an agent run result
+/review <run-id>      start a review run; add dry-run to preview
+/followup <run-id>    process a completed review run
+/retry <run-id>       retry an implementation run; add dry-run to preview
+/sweep [dry-run]      collect stale programmer-loop work
 /verification         show recent verification runs
 /writes               show recent runtime write/edit runs
 /why                  explain the latest processed think/act decision
@@ -1787,6 +1793,210 @@ def print_chat_agents(show_all=False):
             f"#{run['id']} [{run['status']}/{purpose}] task={run.get('task_id')} "
             f"{run.get('backend')}:{run.get('model')} pid={pid}"
         )
+
+
+def _first_agent_output(run):
+    return run.get("result") or run.get("stdout") or run.get("stderr") or ""
+
+
+def chat_collect_agent_result(rest):
+    run_id = rest.strip()
+    if not run_id:
+        print("usage: /result <run-id>")
+        return
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, run_id)
+        if not run:
+            print(f"mew: agent run not found: {run_id}")
+            return
+        try:
+            get_agent_run_result(state, run)
+        except ValueError as exc:
+            print(f"mew: {exc}")
+            return
+        save_state(state)
+    print(f"agent run #{run['id']} status={run['status']}")
+    output = _first_agent_output(run)
+    if output:
+        print(output)
+
+
+def chat_wait_agent(rest):
+    parts = rest.split()
+    if not parts:
+        print("usage: /wait <run-id> [seconds]")
+        return
+    run_id = parts[0]
+    timeout = None
+    if len(parts) > 1:
+        try:
+            timeout = float(parts[1])
+        except ValueError:
+            print("usage: /wait <run-id> [seconds]")
+            return
+    with state_lock():
+        state = load_state()
+        run = find_agent_run(state, run_id)
+        if not run:
+            print(f"mew: agent run not found: {run_id}")
+            return
+        try:
+            wait_agent_run(state, run, timeout=timeout)
+        except ValueError as exc:
+            print(f"mew: {exc}")
+            return
+        save_state(state)
+    print(f"agent run #{run['id']} status={run['status']}")
+    output = _first_agent_output(run)
+    if output:
+        print(output)
+
+
+def chat_review_agent(rest):
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    if not parts:
+        print("usage: /review <run-id> [dry-run]")
+        return
+    run_id = parts[0]
+    dry_run = any(part in ("dry-run", "--dry-run") for part in parts[1:])
+
+    with state_lock():
+        state = load_state()
+        implementation_run = find_agent_run(state, run_id)
+        if not implementation_run:
+            print(f"mew: agent run not found: {run_id}")
+            return
+        if implementation_run.get("purpose") == "review":
+            print(f"mew: run #{run_id} is already a review run")
+            return
+        if implementation_run.get("status") not in ("completed", "failed"):
+            print(f"mew: run #{run_id} status={implementation_run.get('status')}; cannot review yet")
+            return
+        task = find_task(state, implementation_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for run #{run_id}")
+            return
+        plan = find_task_plan(task, implementation_run.get("plan_id")) if implementation_run.get("plan_id") else None
+        review_run = create_review_run_for_implementation(state, task, implementation_run, plan=plan)
+        if dry_run:
+            review_run["status"] = "dry_run"
+            ensure_agent_run_prompt_file(review_run)
+            review_run["command"] = build_ai_cli_run_command(review_run)
+        else:
+            start_agent_run(state, review_run)
+        save_state(state)
+
+    if dry_run:
+        print(f"created dry-run review run #{review_run['id']} for run #{implementation_run['id']}")
+        print(" ".join(review_run["command"]))
+    else:
+        print(f"started review run #{review_run['id']} for run #{implementation_run['id']} status={review_run.get('status')} pid={review_run.get('external_pid')}")
+
+
+def chat_followup_review(rest):
+    run_id = rest.strip()
+    if not run_id:
+        print("usage: /followup <review-run-id>")
+        return
+    with state_lock():
+        state = load_state()
+        review_run = find_agent_run(state, run_id)
+        if not review_run:
+            print(f"mew: agent run not found: {run_id}")
+            return
+        if review_run.get("purpose") != "review":
+            print(f"mew: run #{run_id} is not a review run")
+            return
+        if not review_run.get("result") and not review_run.get("stdout"):
+            try:
+                get_agent_run_result(state, review_run, verbose=False)
+            except ValueError as exc:
+                print(f"mew: {exc}")
+                return
+        task = find_task(state, review_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for review run #{run_id}")
+            return
+        followup, status = create_follow_up_task_from_review(state, task, review_run)
+        save_state(state)
+    print(f"review run #{review_run['id']} status={status}")
+    if followup:
+        print(format_task(followup))
+    else:
+        print("no follow-up task created")
+
+
+def chat_retry_agent(rest):
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    if not parts:
+        print("usage: /retry <run-id> [dry-run]")
+        return
+    run_id = parts[0]
+    dry_run = any(part in ("dry-run", "--dry-run") for part in parts[1:])
+
+    with state_lock():
+        state = load_state()
+        failed_run = find_agent_run(state, run_id)
+        if not failed_run:
+            print(f"mew: agent run not found: {run_id}")
+            return
+        if failed_run.get("purpose", "implementation") != "implementation":
+            print(f"mew: run #{run_id} is not an implementation run")
+            return
+        if failed_run.get("status") not in ("failed", "completed"):
+            print(f"mew: run #{run_id} status={failed_run.get('status')}; cannot retry yet")
+            return
+        task = find_task(state, failed_run.get("task_id"))
+        if not task:
+            print(f"mew: task not found for run #{run_id}")
+            return
+        plan = find_task_plan(task, failed_run.get("plan_id")) if failed_run.get("plan_id") else latest_task_plan(task)
+        retry_run = create_retry_run_for_implementation(
+            state,
+            task,
+            failed_run,
+            plan=plan,
+            dry_run=dry_run,
+        )
+        if dry_run:
+            ensure_agent_run_prompt_file(retry_run)
+            retry_run["command"] = build_ai_cli_run_command(retry_run)
+        else:
+            start_agent_run(state, retry_run)
+        save_state(state)
+
+    if dry_run:
+        print(f"created dry-run retry run #{retry_run['id']} for run #{failed_run['id']}")
+        print(" ".join(retry_run["command"]))
+    else:
+        print(f"started retry run #{retry_run['id']} for run #{failed_run['id']} status={retry_run.get('status')} pid={retry_run.get('external_pid')}")
+
+
+def chat_sweep_agents(rest):
+    parts = rest.split()
+    dry_run = "dry-run" in parts or "--dry-run" in parts
+    start_reviews = "reviews" in parts or "--reviews" in parts
+    with state_lock():
+        state = load_state()
+        report = sweep_agent_runs(
+            state,
+            collect=True,
+            start_reviews=start_reviews,
+            followup=True,
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            save_state(state)
+    print(format_sweep_report(report))
 
 
 def print_chat_verification():
@@ -2053,6 +2263,24 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("agents", "agent", "runs"):
         print_chat_agents(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "result":
+        chat_collect_agent_result(rest)
+        return "continue"
+    if command == "wait":
+        chat_wait_agent(rest)
+        return "continue"
+    if command == "review":
+        chat_review_agent(rest)
+        return "continue"
+    if command == "followup":
+        chat_followup_review(rest)
+        return "continue"
+    if command == "retry":
+        chat_retry_agent(rest)
+        return "continue"
+    if command == "sweep":
+        chat_sweep_agents(rest)
         return "continue"
     if command in ("verification", "verify"):
         print_chat_verification()

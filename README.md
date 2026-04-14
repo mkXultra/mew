@@ -112,6 +112,12 @@ state without leaving the session:
 /reply 3 それで進めて
 /attention
 /agents
+/result 12
+/wait 12 60
+/review 12 dry-run
+/followup 13
+/retry 12 dry-run
+/sweep dry-run
 /verification
 /writes
 /why
