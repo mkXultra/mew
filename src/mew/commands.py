@@ -13,7 +13,7 @@ from .agent_runs import (
     start_agent_run,
     wait_agent_run,
 )
-from .brief import build_brief, next_move
+from .brief import build_brief, next_move, verification_outcome
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE
 from .errors import MewError
@@ -399,6 +399,36 @@ def cmd_brief(args):
 def cmd_next(args):
     state = load_state()
     print(next_move(state))
+    return 0
+
+def format_verification_run(run):
+    return (
+        f"#{run.get('id')} [{verification_outcome(run)}] "
+        f"exit_code={run.get('exit_code')} command={run.get('command')} "
+        f"finished_at={run.get('finished_at') or run.get('updated_at') or run.get('created_at')}"
+    )
+
+def cmd_verification(args):
+    state = load_state()
+    runs = list(state.get("verification_runs", []))
+    if not runs:
+        print("No verification runs.")
+        return 0
+    if not args.all:
+        runs = runs[-args.limit :]
+    runs = list(reversed(runs))
+    if args.json:
+        print(json.dumps(runs, ensure_ascii=False, indent=2))
+        return 0
+    for run in runs:
+        print(format_verification_run(run))
+        if args.details:
+            if run.get("stdout"):
+                print("stdout:")
+                print(run["stdout"])
+            if run.get("stderr"):
+                print("stderr:")
+                print(run["stderr"])
     return 0
 
 def _tool_allowed_roots(args):

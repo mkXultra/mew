@@ -187,6 +187,37 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_verification_lists_recent_runs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["verification_runs"].append(
+                        {
+                            "id": 1,
+                            "command": "python -m unittest",
+                            "exit_code": 0,
+                            "stdout": "OK",
+                            "stderr": "",
+                            "finished_at": "done",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["verification", "--details"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("#1 [passed]", stdout.getvalue())
+                self.assertIn("stdout:", stdout.getvalue())
+                self.assertIn("OK", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

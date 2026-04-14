@@ -66,6 +66,17 @@ def dispatchable_planned_tasks(tasks):
     return result
 
 
+def verification_outcome(run):
+    if run.get("exit_code") == 0:
+        return "passed"
+    return "failed"
+
+
+def recent_verification_runs(state, limit=5):
+    runs = list(state.get("verification_runs", []))
+    return list(reversed(runs[-limit:]))
+
+
 def next_move(state):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
     tasks = sorted(open_tasks(state), key=task_sort_key)
@@ -77,11 +88,14 @@ def next_move(state):
     followup_waiting = review_runs_needing_followup(state)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
+    recent_verifications = recent_verification_runs(state, limit=1)
 
     if questions:
         return f"answer question #{questions[0].get('id')} with `mew reply {questions[0].get('id')} \"...\"`"
     if running_runs:
         return f"check agent run #{running_runs[0].get('id')} with `mew agent result {running_runs[0].get('id')}`"
+    if recent_verifications and verification_outcome(recent_verifications[0]) == "failed":
+        return f"inspect verification run #{recent_verifications[0].get('id')} with `mew verification`"
     if followup_waiting:
         return f"process review run #{followup_waiting[0].get('id')} with `mew agent followup {followup_waiting[0].get('id')}`"
     if review_waiting:
@@ -116,6 +130,7 @@ def build_brief(state, limit=5):
     followup_waiting = review_runs_needing_followup(state)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
+    verifications = recent_verification_runs(state, limit=limit)
 
     lines = [
         f"Mew brief at {now_iso()}",
@@ -168,6 +183,15 @@ def build_brief(state, limit=5):
             lines.append(
                 f"- #{run.get('id')} task=#{run.get('task_id')} "
                 f"{run.get('backend')}:{run.get('model')} status={run.get('status')}{pid}"
+            )
+        lines.append("")
+
+    if verifications:
+        lines.append("Recent verification")
+        for run in verifications[:limit]:
+            lines.append(
+                f"- #{run.get('id')} [{verification_outcome(run)}] "
+                f"exit_code={run.get('exit_code')} command={run.get('command')}"
             )
         lines.append("")
 

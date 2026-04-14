@@ -48,6 +48,7 @@ from .commands import (
     cmd_tool_search,
     cmd_tool_status,
     cmd_tool_test,
+    cmd_verification,
 )
 from .config import (
     DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
@@ -200,6 +201,13 @@ def build_parser():
 
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
     next_parser.set_defaults(func=cmd_next)
+
+    verification_parser = subparsers.add_parser("verification", help="show runtime verification runs")
+    verification_parser.add_argument("--all", action="store_true", help="show all verification runs")
+    verification_parser.add_argument("--limit", type=int, default=10, help="number of recent runs to show")
+    verification_parser.add_argument("--details", action="store_true", help="include stdout and stderr")
+    verification_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    verification_parser.set_defaults(func=cmd_verification)
 
     tool_parser = subparsers.add_parser("tool", help="safe local tools for AI-facing inspection")
     tool_subparsers = tool_parser.add_subparsers(dest="tool_command")

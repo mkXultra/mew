@@ -80,6 +80,35 @@ class BriefTests(unittest.TestCase):
 
         self.assertEqual(review_runs_needing_followup(state), [])
 
+    def test_brief_surfaces_recent_verification(self):
+        state = default_state()
+        state["verification_runs"].append(
+            {
+                "id": 1,
+                "command": "python -m unittest",
+                "exit_code": 0,
+                "finished_at": "done",
+            }
+        )
+
+        brief = build_brief(state)
+
+        self.assertIn("Recent verification", brief)
+        self.assertIn("#1 [passed]", brief)
+
+    def test_next_move_surfaces_latest_failed_verification(self):
+        state = default_state()
+        state["verification_runs"].append(
+            {
+                "id": 2,
+                "command": "python -m unittest",
+                "exit_code": 1,
+                "finished_at": "done",
+            }
+        )
+
+        self.assertEqual(next_move(state), "inspect verification run #2 with `mew verification`")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,7 @@ uv run mew run --autonomous --autonomy-level act \
 uv run mew status
 uv run mew brief
 uv run mew next
+uv run mew verification
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
 uv run mew ack --all

@@ -652,6 +652,7 @@ The first user-facing version should likely include:
 - `mew doctor`: check local state, runtime lock, and required local tools.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew next`: print the single next useful command or move.
+- `mew verification`: show recent runtime verification runs.
 - `mew tool`: expose safe AI-facing workspace inspection, search, test, and read-only git helpers.
 - `mew self-improve`: create and optionally dispatch a mew self-improvement task.
 - `mew -m <message>`: send a message to the running background AI.
