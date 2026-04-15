@@ -781,7 +781,8 @@ def deterministic_decision_plan(
             )
 
     if len(decisions) == 1:
-        decisions.append({"type": "wait_for_user", "reason": "No actionable task."})
+        reason = passive_wait_reason(state)
+        decisions.append({"type": "wait_for_user", "reason": reason})
 
     return {
         "summary": summary,
@@ -800,6 +801,12 @@ def deterministic_decision_plan(
         },
         "decisions": decisions,
     }
+
+def passive_wait_reason(state):
+    move = next_move(state)
+    if move and move != "ask the user what to track next":
+        return f"Next: {move}"
+    return "No actionable task."
 
 def normalize_decision_plan(plan, fallback_summary):
     schema_issues = []

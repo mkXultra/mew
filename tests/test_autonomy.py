@@ -1905,6 +1905,56 @@ class AutonomyTests(unittest.TestCase):
         messages = [decision for decision in plan["decisions"] if decision.get("type") == "send_message"]
         self.assertEqual(messages[0]["text"], 'Next: plan task #1 with `mew task plan 1`')
 
+    def test_non_ai_passive_wait_surfaces_next_move(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Implement CLI polish",
+                "kind": "coding",
+                "description": "",
+                "status": "ready",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "acm",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [{"id": 1, "status": "dry_run"}],
+                "latest_plan_id": 1,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        state["agent_runs"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "purpose": "implementation",
+                "status": "dry_run",
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+        )
+
+        waits = [decision for decision in plan["decisions"] if decision.get("type") == "wait_for_user"]
+        self.assertEqual(
+            waits[0]["reason"],
+            'Next: dispatch dry-run task #1 for real with `mew buddy --task 1 --dispatch`',
+        )
+
     def test_autonomous_high_priority_propose_task_can_interrupt_open_tasks(self):
         state = default_state()
         current_time = now_iso()
