@@ -38,6 +38,23 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Review current mew changes", guidance)
         self.assertIn("Do not stop solely because an unrelated older question is waiting.", guidance)
 
+    def test_step_allow_read_injects_evidence_gathering_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                report = {"steps": [], "stop_reason": "max_steps", "dry_run": True, "max_steps": 1}
+                with patch("mew.commands.run_step_loop", return_value=report) as run_step:
+                    with redirect_stdout(StringIO()):
+                        code = main(["step", "--dry-run", "--allow-read", ".", "--focus", "Plan implementation"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        guidance = run_step.call_args.kwargs["guidance"]
+        self.assertIn("Manual step read permission:", guidance)
+        self.assertIn("prefer one small targeted inspect_dir, read_file, or search_text", guidance)
+
     def test_doctor_missing_optional_auth_still_succeeds(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -141,6 +158,130 @@ class CommandTests(unittest.TestCase):
                 self.assertIsNone(by_text["answer this"]["read_at"])
             finally:
                 os.chdir(old_cwd)
+
+    def test_ack_routine_marks_historical_task_status_info(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(
+                        state,
+                        "info",
+                        "2 open task(s) (ready: 1, todo: 1). Next candidate: #7 Investigate docs.",
+                    )
+                    add_outbox_message(state, "info", "No open tasks.")
+                    add_outbox_message(state, "assistant", "2 open task(s) should stay visible.")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["ack", "--routine"]), 0)
+
+                self.assertIn("acknowledged 2 routine message(s)", stdout.getvalue())
+                state = load_state()
+                by_text = {message["text"]: message for message in state["outbox"]}
+                self.assertIsNotNone(
+                    by_text["2 open task(s) (ready: 1, todo: 1). Next candidate: #7 Investigate docs."]["read_at"]
+                )
+                self.assertIsNotNone(by_text["No open tasks."]["read_at"])
+                self.assertIsNone(by_text["2 open task(s) should stay visible."]["read_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_refreshes_stale_research_task_command_question(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 20,
+                            "title": "補助金について調べる",
+                            "description": "利用可能な補助金を調査する。",
+                            "kind": "",
+                            "status": "ready",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": "",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    add_question(
+                        state,
+                        "Task #20 is ready but has no command. What should I execute for it?",
+                        related_task_id=20,
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair"]), 0)
+
+                self.assertIn("repairs: 1", stdout.getvalue())
+                state = load_state()
+                question = state["questions"][0]
+                message = state["outbox"][0]
+                attention = state["attention"]["items"][0]
+                self.assertIn("ready research work", question["text"])
+                self.assertIn("research criteria", question["text"])
+                self.assertEqual(message["text"], question["text"])
+                self.assertEqual(attention["reason"], question["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_outbox_limit_shows_recent_matching_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(state, "info", "one")
+                    add_outbox_message(state, "info", "two")
+                    add_outbox_message(state, "info", "three")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["outbox", "--limit", "2"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("showing last 2 of 3 message(s)", output)
+                self.assertNotIn("one", output)
+                self.assertIn("two", output)
+                self.assertIn("three", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_outbox_limit_must_be_positive(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["outbox", "--limit", "0"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        self.assertIn("--limit must be positive", stderr.getvalue())
 
     def test_status_reports_routine_unread_cleanup_hint(self):
         old_cwd = os.getcwd()
@@ -1953,6 +2094,7 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("no active runtime", stderr.getvalue())
+                self.assertIn("mew step --ai --auth auth.json --max-steps 1", stderr.getvalue())
                 output = stdout.getvalue()
                 self.assertIn("mew chat", output)
                 self.assertIn("Mew focus", output)

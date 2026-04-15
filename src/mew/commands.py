@@ -103,6 +103,7 @@ from .tasks import (
     open_tasks,
     task_kind,
     task_kind_report,
+    task_question,
     task_sort_key,
 )
 from .thoughts import format_thought_entry
@@ -1125,12 +1126,51 @@ def cmd_doctor(args):
 
     return 0 if data.get("ok") else 1
 
+def legacy_task_command_question(task_id):
+    return f"Task #{task_id} is ready but has no command. What should I execute for it?"
+
+def repair_stale_task_questions(state):
+    task_by_id = {task.get("id"): task for task in state.get("tasks", [])}
+    outbox_by_id = {message.get("id"): message for message in state.get("outbox", [])}
+    repairs = []
+    for question in state.get("questions", []):
+        if question.get("status") != "open":
+            continue
+        task_id = question.get("related_task_id")
+        task = task_by_id.get(task_id)
+        if not task:
+            continue
+        legacy_text = legacy_task_command_question(task_id)
+        if question.get("text") != legacy_text:
+            continue
+        replacement = task_question(task)
+        if not replacement or replacement == legacy_text:
+            continue
+        question["text"] = replacement
+        message = outbox_by_id.get(question.get("outbox_message_id"))
+        if message and message.get("type") == "question":
+            message["text"] = replacement
+        for item in state.get("attention", {}).get("items", []):
+            if item.get("question_id") == question.get("id") and item.get("status") == "open":
+                item["reason"] = replacement
+        repairs.append(
+            {
+                "type": "stale_task_question",
+                "question_id": question.get("id"),
+                "task_id": task_id,
+                "old_text": legacy_text,
+                "new_text": replacement,
+            }
+        )
+    return repairs
+
 def build_repair_data():
     try:
         with state_lock():
             state = load_state()
             before_sha = state_digest(state)
             reconcile_next_ids(state)
+            repairs = repair_stale_task_questions(state)
             issues = validate_state(state)
             errors = validation_errors(issues)
             if errors:
@@ -1139,6 +1179,7 @@ def build_repair_data():
                     "repaired": False,
                     "before_sha256": before_sha,
                     "after_sha256": before_sha,
+                    "repairs": repairs,
                     "validation_issues": issues,
                 }
             save_state(state)
@@ -1151,6 +1192,7 @@ def build_repair_data():
                 "repaired": before_sha != after_sha,
                 "before_sha256": before_sha,
                 "after_sha256": after_sha,
+                "repairs": repairs,
                 "validation_issues": validate_state(state),
                 "last_effect": last_effect,
             }
@@ -1160,6 +1202,7 @@ def build_repair_data():
             "repaired": False,
             "before_sha256": "",
             "after_sha256": "",
+            "repairs": [],
             "validation_issues": [
                 {"level": "error", "path": "$", "message": f"unable to load or repair state: {exc}"}
             ],
@@ -1192,6 +1235,14 @@ def cmd_repair(args):
             print(f"state_repair: {status}")
             print(f"before_sha256: {str(data.get('before_sha256') or '')[:12]}")
             print(f"after_sha256: {str(data.get('after_sha256') or '')[:12]}")
+            repairs = data.get("repairs") or []
+            if repairs:
+                print(f"repairs: {len(repairs)}")
+                for repair in repairs:
+                    print(
+                        f"- {repair.get('type')} question=#{repair.get('question_id')} "
+                        f"task=#{repair.get('task_id')}"
+                    )
             print(format_validation_issues(data.get("validation_issues") or []))
         else:
             print("state_repair: failed")
@@ -1327,6 +1378,25 @@ def cmd_step(args):
                 )
                 if part
             )
+    if args.allow_read:
+        guidance = "\n\n".join(
+            part
+            for part in (
+                guidance.strip(),
+                (
+                    "Manual step read permission:\n"
+                    "Read-only local inspection is available for this step. "
+                    "When the focus asks for implementation planning, repository reasoning, "
+                    "or current-code evaluation, prefer one small targeted inspect_dir, read_file, "
+                    "or search_text action before proposing a plan. Keep the read narrow."
+                ),
+            )
+            if part
+        )
+
+    progress = None
+    if args.ai and not args.json:
+        progress = lambda line: print(f"mew step: {line}", file=sys.stderr, flush=True)
 
     report = run_step_loop(
         max_steps=args.max_steps,
@@ -1345,6 +1415,7 @@ def cmd_step(args):
         allow_verify=args.allow_verify,
         verify_command=args.verify_command or "",
         verify_timeout=args.verify_timeout,
+        progress=progress,
     )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -1893,9 +1964,18 @@ def cmd_self_improve_cycle(args):
 def cmd_outbox(args):
     state = load_state()
     messages = state["outbox"] if args.all else [m for m in state["outbox"] if not m.get("read_at")]
+    total = len(messages)
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        if limit < 1:
+            print("mew: --limit must be positive", file=sys.stderr)
+            return 1
+        messages = messages[-limit:]
     if not messages:
         print("No messages.")
         return 0
+    if limit is not None and total > len(messages):
+        print(f"showing last {len(messages)} of {total} message(s)")
     for message in messages:
         read = "read" if message.get("read_at") else "unread"
         print(f"#{message['id']} [{message['type']}/{read}] {message['text']}")
@@ -2807,6 +2887,11 @@ def warn_if_runtime_inactive():
     if not runtime_is_active():
         print(
             "mew: no active runtime found; messages can be queued, but nothing will process them until `mew run` is running.",
+            file=sys.stderr,
+        )
+        print(
+            "mew: next: run `mew step --ai --auth auth.json --max-steps 1` to process one bounded step, "
+            "or `mew run --ai --auth auth.json` for passive processing.",
             file=sys.stderr,
         )
 

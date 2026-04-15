@@ -717,6 +717,7 @@ def build_parser():
 
     outbox_parser = subparsers.add_parser("outbox", help="show runtime messages")
     outbox_parser.add_argument("--all", action="store_true", help="show read and unread messages")
+    outbox_parser.add_argument("--limit", type=int, help="show only the most recent N matching messages")
     outbox_parser.set_defaults(func=cmd_outbox)
 
     questions_parser = subparsers.add_parser("questions", help="show open questions")

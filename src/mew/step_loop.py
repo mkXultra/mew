@@ -321,6 +321,7 @@ def run_step_loop(
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
+    progress=None,
 ):
     steps = []
     stop_reason = "max_steps"
@@ -346,6 +347,8 @@ def run_step_loop(
         snapshot_autonomy["level"] = autonomy_level
         snapshot_autonomy["manual_step"] = True
 
+        if progress:
+            progress(f"step #{index + 1}: planning start event={event_snapshot.get('id')}")
         decision_plan, action_plan = plan_event(
             state_snapshot,
             event_snapshot,
@@ -371,6 +374,8 @@ def run_step_loop(
             allowed_write_roots=[],
             log_phases=not dry_run,
         )
+        if progress:
+            progress(f"step #{index + 1}: planning ok event={event_snapshot.get('id')}")
         filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
         filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
@@ -391,6 +396,8 @@ def run_step_loop(
                 )
                 event_id = event.get("id")
                 apply_time = now_iso()
+                if progress:
+                    progress(f"step #{index + 1}: apply start event={event_id}")
                 counts = apply_event_plans(
                     state,
                     event_id,
@@ -409,6 +416,11 @@ def run_step_loop(
                     allow_write=False,
                     allowed_write_roots=[],
                 ) or counts
+                if progress:
+                    progress(
+                        f"step #{index + 1}: apply ok event={event_id} "
+                        f"actions={counts.get('actions', 0)} messages={counts.get('messages', 0)}"
+                    )
                 update_runtime_processing_summary(
                     state,
                     "manual_step",

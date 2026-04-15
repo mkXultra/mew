@@ -174,6 +174,34 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(state["step_runs"][0]["event_id"], state["inbox"][0]["id"])
         self.assertEqual(state["step_runs"][0]["skipped_actions"][0]["type"], "write_file")
 
+    def test_step_loop_reports_progress(self):
+        old_cwd = os.getcwd()
+        progress = []
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Remember one thing.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [{"type": "remember", "summary": "Remember one thing."}],
+                }
+                fake_actions = {
+                    "summary": "Remember one thing.",
+                    "actions": [{"type": "record_memory", "summary": "Remember one thing."}],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    run_step_loop(max_steps=1, progress=progress.append)
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(
+            [line.split()[2] for line in progress],
+            ["planning", "planning", "apply", "apply"],
+        )
+        self.assertIn("actions=1", progress[-1])
+
     def test_step_run_records_visible_effects(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 
 from .config import (
     DESIRES_FILE,
@@ -699,10 +700,20 @@ ROUTINE_INFO_PREFIXES = (
     "Searched ",
     "Inspected directory ",
     "Skipped repeated ",
+    "No open tasks.",
+)
+ROUTINE_INFO_PATTERNS = (
+    re.compile(r"^\d+ open task\(s\) \([^)]+\)\. Next candidate: #\d+ .+\.?$"),
 )
 
 def event_type_for_outbox_message(state, message):
     return _event_type_for_id(state, message.get("event_id"))
+
+def is_routine_info_text(text):
+    text = str(text or "")
+    return text.startswith(ROUTINE_INFO_PREFIXES) or any(
+        pattern.match(text) for pattern in ROUTINE_INFO_PATTERNS
+    )
 
 def is_routine_outbox_message(state, message):
     if (
@@ -719,7 +730,7 @@ def is_routine_outbox_message(state, message):
     if event_type:
         return False
     text = message.get("text") or ""
-    return bool(message.get("agent_run_id")) or text.startswith(ROUTINE_INFO_PREFIXES)
+    return bool(message.get("agent_run_id")) or is_routine_info_text(text)
 
 def _outbox_quiet_on_create(state, message_type, event_id, requires_reply, quiet):
     if requires_reply or message_type in ("question", "warning", "assistant"):

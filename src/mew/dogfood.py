@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -215,6 +216,12 @@ def run_command(command, workspace, timeout=30, env=None):
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+def queued_message_event_id(output):
+    match = re.search(r"queued message event #(\d+)", output or "")
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def tail_lines(text, limit=20, max_line_chars=1000):
@@ -631,6 +638,68 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
     }
 
 
+def injected_message_status(state, sent_messages, event_ids=None):
+    sent_messages = list(sent_messages or [])
+    if not sent_messages:
+        return {"total": 0, "processed": 0, "unprocessed": 0, "events": []}
+
+    if event_ids:
+        events_by_id = {str(event.get("id")): event for event in state.get("inbox", [])}
+        events = []
+        unmatched = []
+        for index, text in enumerate(sent_messages):
+            event_id = event_ids[index] if index < len(event_ids) else None
+            event = events_by_id.get(str(event_id)) if event_id is not None else None
+            if not event:
+                unmatched.append(text)
+                continue
+            events.append(
+                {
+                    "id": event.get("id"),
+                    "text": (event.get("payload") or {}).get("text"),
+                    "processed": bool(event.get("processed_at")),
+                    "processed_at": event.get("processed_at"),
+                }
+            )
+        processed = len([event for event in events if event.get("processed")])
+        return {
+            "total": len(sent_messages),
+            "matched": len(events),
+            "processed": processed,
+            "unprocessed": len(events) - processed + len(unmatched),
+            "events": events,
+            "unmatched": unmatched,
+        }
+
+    pending_texts = list(sent_messages)
+    events = []
+    for event in state.get("inbox", []):
+        if event.get("type") != "user_message":
+            continue
+        text = (event.get("payload") or {}).get("text")
+        if text not in pending_texts:
+            continue
+        pending_texts.remove(text)
+        events.append(
+            {
+                "id": event.get("id"),
+                "text": text,
+                "processed": bool(event.get("processed_at")),
+                "processed_at": event.get("processed_at"),
+            }
+        )
+
+    processed = len([event for event in events if event.get("processed")])
+    return {
+        "total": len(sent_messages),
+        "matched": len(events),
+        "processed": processed,
+        "unprocessed": len(events) - processed + len(pending_texts),
+        "events": events,
+        "unmatched": pending_texts,
+    }
+
+
 def format_dogfood_report(report):
     lines = [
         f"Mew dogfood report at {report.get('generated_at')}",
@@ -656,6 +725,15 @@ def format_dogfood_report(report):
         f"programmer_loop: {report.get('programmer_loop')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
     ]
+    injected = report.get("injected_messages") or {}
+    if injected.get("total"):
+        lines.append(
+            "injected_messages: "
+            f"processed={injected.get('processed')}/{injected.get('total')} "
+            f"unprocessed={injected.get('unprocessed')}"
+        )
+        if injected.get("unprocessed"):
+            lines.append("warning: injected user message(s) were left unprocessed")
     seed_task = report.get("seed_task")
     if seed_task:
         lines.append(
@@ -883,13 +961,15 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         )
 
     wait_for_runtime_state(workspace, timeout=args.startup_timeout, poll_interval=0.1)
+    injected_event_ids = []
     for message in args.send_message or []:
-        run_command(
+        result = run_command(
             [sys.executable, "-m", "mew", "message", message],
             workspace,
             timeout=args.message_timeout,
             env=env,
         )
+        injected_event_ids.append(queued_message_event_id(result.get("stdout")))
 
     try:
         time.sleep(max(0.0, args.duration))
@@ -909,6 +989,11 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         exit_code,
         duration,
         kept=not (args.cleanup and created_temp),
+    )
+    report["injected_messages"] = injected_message_status(
+        read_json_file(workspace / STATE_FILE, {}),
+        getattr(args, "send_message", None),
+        event_ids=injected_event_ids,
     )
     report["runtime_output_path"] = str(output_path)
     report["source_copy"] = source_copy

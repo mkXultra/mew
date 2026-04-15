@@ -17,8 +17,10 @@ from mew.dogfood import (
     copy_source_workspace,
     format_dogfood_loop_report,
     format_dogfood_report,
+    injected_message_status,
     prepopulate_project_snapshot,
     prepare_dogfood_workspace,
+    queued_message_event_id,
     run_dogfood,
     run_dogfood_loop,
     run_post_wait_agent_reflex,
@@ -278,6 +280,63 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
             self.assertIn("plan_schema_issues", text)
+
+    def test_injected_message_status_reports_unprocessed_messages(self):
+        state = default_state()
+        processed = add_event(state, "user_message", "user", {"text": "handled"})
+        processed["processed_at"] = "done"
+        add_event(state, "user_message", "user", {"text": "pending"})
+
+        status = injected_message_status(state, ["handled", "pending", "missing"])
+
+        self.assertEqual(status["total"], 3)
+        self.assertEqual(status["matched"], 2)
+        self.assertEqual(status["processed"], 1)
+        self.assertEqual(status["unprocessed"], 2)
+        self.assertEqual(status["unmatched"], ["missing"])
+
+    def test_injected_message_status_prefers_event_ids(self):
+        state = default_state()
+        old = add_event(state, "user_message", "user", {"text": "same"})
+        old["processed_at"] = "done"
+        new = add_event(state, "user_message", "user", {"text": "same"})
+
+        status = injected_message_status(state, ["same"], event_ids=[new["id"]])
+
+        self.assertEqual(status["matched"], 1)
+        self.assertEqual(status["processed"], 0)
+        self.assertEqual(status["unprocessed"], 1)
+        self.assertEqual(status["events"][0]["id"], new["id"])
+
+    def test_queued_message_event_id_parses_message_output(self):
+        self.assertEqual(queued_message_event_id("queued message event #42\n"), 42)
+        self.assertIsNone(queued_message_event_id("no id"))
+
+    def test_format_dogfood_report_warns_for_unprocessed_injected_messages(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+            "events": {"processed": 1, "total": 2, "by_type": {"startup": 1, "user_message": 1}},
+            "runtime_status": {},
+            "model_phases": {},
+            "outbox": {"total": 0, "unread": 0, "by_type": {}},
+            "actions": {},
+            "read_inspection": {},
+            "tasks": {},
+            "agent_runs": {},
+            "programmer_loop": {},
+            "verification_runs": 0,
+            "write_runs": 0,
+            "injected_messages": {"total": 1, "processed": 0, "unprocessed": 1},
+            "next_move": "inspect",
+        }
+
+        text = format_dogfood_report(report)
+
+        self.assertIn("injected_messages: processed=0/1 unprocessed=1", text)
+        self.assertIn("warning: injected user message(s) were left unprocessed", text)
 
     def test_prepopulate_project_snapshot_writes_dogfood_state(self):
         with tempfile.TemporaryDirectory() as tmp:
