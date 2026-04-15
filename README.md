@@ -35,6 +35,7 @@ uv run mew task dispatch <task-id>
 uv run mew agent result <run-id>
 uv run mew agent review <run-id>
 uv run mew agent followup <review-run-id>
+uv run mew agent followup <review-run-id> --ack --note "handled elsewhere"
 uv run mew agent retry <failed-run-id>
 uv run mew agent sweep
 ```
@@ -86,6 +87,7 @@ uv run mew dogfood --ai --duration 60
 uv run mew dogfood --source-workspace . --ai --duration 60
 uv run mew dogfood --source-workspace . --pre-snapshot --ai --duration 60
 uv run mew dogfood --source-workspace . --cycles 3 --duration 30
+uv run mew dogfood --source-workspace . --cycles 3 --report .mew/dogfood-latest.json
 uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json
@@ -110,6 +112,9 @@ Read-only inspections also maintain a compact `project_snapshot` under deep
 memory, so dogfood runs and resident prompts can reuse repository shape without
 re-reading every file.
 Run `mew snapshot --allow-read .` to refresh that map deterministically.
+`mew dogfood --report <path>` stores the structured report for later inspection,
+including model phase counts, cycle summaries, active dropped-thread warnings,
+and the final project snapshot.
 
 ## Resident Model
 
@@ -130,6 +135,9 @@ local code decides which effects are allowed.
 `mew thoughts --details` shows the resident mind's carried threads. If a thread
 was open in one cycle and disappears without being carried or resolved, mew
 records it as a dropped thread and injects a warning into the next model context.
+Dogfood loop reports distinguish historical dropped threads from active dropped
+thread warnings, so resolved continuity hiccups do not look like current
+blockers.
 
 ## Chat
 

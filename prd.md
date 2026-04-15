@@ -680,6 +680,7 @@ The first user-facing version should likely include:
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.
 - `mew dogfood --pre-snapshot`: refresh project snapshot memory before the dogfood runtime starts.
 - `mew dogfood --cycles <n>`: reuse one dogfood workspace across multiple runtime cycles and report the aggregate.
+- `mew dogfood --report <path>`: write the structured dogfood report to JSON for later inspection.
 - `mew next`: print the single next useful command or move.
 - `mew next --json`: print the next move and extracted command as structured JSON.
 - `mew verification`: show recent runtime verification runs.
@@ -710,6 +711,7 @@ The first user-facing version should likely include:
 - `mew agent list/show/wait/result`: inspect and collect agent-run results.
 - `mew agent review <run-id>`: start a review agent run for an implementation run.
 - `mew agent followup <run-id>`: create a follow-up task from a review run.
+- `mew agent followup <run-id> --ack --note <text>`: mark a review follow-up processed when it was handled elsewhere.
 - `mew agent retry <run-id>`: start a retry implementation run using the same task and plan context.
 - `mew agent sweep`: collect running results, flag stale runs, optionally start reviews, and process completed review follow-ups.
 - `mew guidance init`: create `.mew/guidance.md`.
