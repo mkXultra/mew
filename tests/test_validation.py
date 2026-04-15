@@ -7,8 +7,8 @@ from io import StringIO
 from unittest.mock import patch
 
 from mew.cli import main
-from mew.config import EFFECT_LOG_FILE, STATE_FILE
-from mew.state import default_state, read_last_state_effect, save_state, state_digest
+from mew.config import EFFECT_LOG_FILE, STATE_FILE, STATE_VERSION
+from mew.state import default_state, load_state, read_last_state_effect, save_state, state_digest
 from mew.validation import format_validation_issues, validate_state, validation_errors
 
 
@@ -61,6 +61,101 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(record["type"], "state_saved")
                 self.assertEqual(record["state_sha256"], state_digest(state))
                 self.assertEqual(record["counts"]["tasks"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_load_state_migrates_legacy_status_and_reflex_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STATE_FILE.write_text(
+                    json.dumps(
+                        {
+                            "version": 0,
+                            "agent_status": {
+                                "state": "running",
+                                "pid": 123,
+                                "last_action": "legacy action",
+                                "last_evaluated_at": "2026-01-01T00:00:00+00:00",
+                                "last_user_interaction_at": "2026-01-01T00:01:00+00:00",
+                            },
+                            "user_status": {
+                                "state": "focused",
+                                "updated_at": "2026-01-01T00:02:00+00:00",
+                            },
+                            "tasks": [
+                                {
+                                    "id": 7,
+                                    "title": "legacy task",
+                                    "status": "todo",
+                                }
+                            ],
+                            "inbox": [],
+                            "outbox": [],
+                            "knowledge": {
+                                "shallow": {
+                                    "latest_task_summary": "legacy summary",
+                                    "recent_events": ["old event"],
+                                }
+                            },
+                            "next_ids": {
+                                "task": 1,
+                                "event": 1,
+                                "message": 1,
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                state = load_state()
+                persisted = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+
+                self.assertEqual(state["version"], STATE_VERSION)
+                self.assertEqual(persisted["version"], STATE_VERSION)
+                self.assertEqual(state["runtime_status"]["state"], "running")
+                self.assertEqual(state["runtime_status"]["pid"], 123)
+                self.assertIsNone(state["runtime_status"]["last_agent_reflex_at"])
+                self.assertEqual(state["runtime_status"]["last_agent_reflex_report"], {})
+                self.assertEqual(state["agent_status"]["mode"], "idle")
+                self.assertEqual(state["agent_status"]["last_thought"], "legacy action")
+                self.assertEqual(state["user_status"]["mode"], "focused")
+                self.assertEqual(
+                    state["user_status"]["last_interaction_at"],
+                    "2026-01-01T00:01:00+00:00",
+                )
+                self.assertEqual(
+                    state["memory"]["shallow"]["latest_task_summary"],
+                    "legacy summary",
+                )
+                self.assertEqual(state["tasks"][0]["plans"], [])
+                self.assertEqual(state["next_ids"]["task"], 8)
+                self.assertEqual(read_last_state_effect()["state_version"], STATE_VERSION)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_load_state_adds_new_runtime_fields_to_existing_runtime_status(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                legacy_state = default_state()
+                legacy_state["version"] = 0
+                del legacy_state["runtime_status"]["last_agent_reflex_at"]
+                del legacy_state["runtime_status"]["last_agent_reflex_report"]
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STATE_FILE.write_text(json.dumps(legacy_state) + "\n", encoding="utf-8")
+
+                state = load_state()
+
+                self.assertIn("last_agent_reflex_at", state["runtime_status"])
+                self.assertIn("last_agent_reflex_report", state["runtime_status"])
+                self.assertIsNone(state["runtime_status"]["last_agent_reflex_at"])
+                self.assertEqual(state["runtime_status"]["last_agent_reflex_report"], {})
+                self.assertEqual(read_last_state_effect()["state_version"], STATE_VERSION)
             finally:
                 os.chdir(old_cwd)
 
