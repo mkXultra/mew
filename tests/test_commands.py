@@ -2029,6 +2029,35 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(waiter.call_args.kwargs["mark_read"])
         self.assertEqual(waiter.call_args.kwargs["event_label"], "file_change event")
 
+    def test_top_level_message_shortcut_can_wait_for_response(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.commands.wait_for_event_response", return_value=0) as waiter:
+                    with redirect_stdout(StringIO()):
+                        code = main(
+                            [
+                                "-m",
+                                "hello",
+                                "--wait",
+                                "--timeout",
+                                "2",
+                                "--poll-interval",
+                                "0.1",
+                                "--mark-read",
+                            ]
+                        )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        waiter.assert_called_once()
+        self.assertEqual(waiter.call_args.args[0], 1)
+        self.assertEqual(waiter.call_args.kwargs["timeout"], 2.0)
+        self.assertEqual(waiter.call_args.kwargs["poll_interval"], 0.1)
+        self.assertTrue(waiter.call_args.kwargs["mark_read"])
+
     def test_webhook_queues_external_event(self):
         from mew.commands import make_webhook_handler
 

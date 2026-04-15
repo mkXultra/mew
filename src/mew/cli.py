@@ -87,6 +87,16 @@ from .runtime import run_runtime
 def build_parser():
     parser = argparse.ArgumentParser(prog="mew")
     parser.add_argument("-m", "--message", help="queue a message for the runtime")
+    parser.add_argument("--wait", dest="message_wait", action="store_true", help="with -m, wait for an outbox response")
+    parser.add_argument("--timeout", dest="message_timeout", type=float, default=60.0, help="with -m, maximum wait time in seconds")
+    parser.add_argument(
+        "--poll-interval",
+        dest="message_poll_interval",
+        type=float,
+        default=DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
+        help=f"with -m, outbox poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
+    )
+    parser.add_argument("--mark-read", dest="message_mark_read", action="store_true", help="with -m, mark printed responses as read")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -1059,8 +1069,13 @@ def main(argv=None):
         args.interval = args.interval_minutes * 60.0
     require_positive_float(parser, args, "interval", "--interval")
     require_positive_float(parser, args, "poll_interval", "--poll-interval")
+    require_positive_float(parser, args, "message_poll_interval", "--poll-interval")
 
-    if args.message:
+    if args.message and args.command is None:
+        args.wait = args.message_wait
+        args.timeout = args.message_timeout
+        args.poll_interval = args.message_poll_interval
+        args.mark_read = args.message_mark_read
         return cmd_message(args)
     if hasattr(args, "func"):
         return args.func(args)
