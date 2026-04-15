@@ -1273,7 +1273,9 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
         if first_task_id is None and action.get("task_id") is not None:
             first_task_id = action.get("task_id")
         if action["type"] in ("ask_user", "wait_for_user"):
-            pending_question = action.get("question") or action.get("reason")
+            candidate = action.get("question") or action.get("reason")
+            if candidate != "No actionable task.":
+                pending_question = candidate
 
     mode = planned_status.get("mode")
     if mode not in ("idle", "reviewing_tasks", "answering_user", "waiting_for_user", "acting"):
@@ -1281,6 +1283,8 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
             mode = "waiting_for_user"
         elif event["type"] == "user_message":
             mode = "answering_user"
+        elif state_has_no_open_work(state):
+            mode = "idle"
         elif any(
             action["type"]
             in (
@@ -1299,6 +1303,12 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
             mode = "acting"
         else:
             mode = "reviewing_tasks"
+    if (
+        mode in ("reviewing_tasks", "waiting_for_user")
+        and not pending_question
+        and state_has_no_open_work(state)
+    ):
+        mode = "idle"
 
     agent["mode"] = mode
     agent["current_focus"] = planned_status.get("current_focus") or action_plan.get("summary") or ""
@@ -1306,6 +1316,15 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
     agent["pending_question"] = planned_status.get("pending_question") or pending_question
     agent["last_thought"] = planned_status.get("last_thought") or decision_plan.get("summary") or action_plan.get("summary") or ""
     agent["updated_at"] = current_time
+
+def state_has_no_open_work(state):
+    running_runs = [
+        run for run in state.get("agent_runs", []) if run.get("status") in ("created", "running")
+    ]
+    open_question_items = [
+        question for question in state.get("questions", []) if question.get("status") == "open"
+    ]
+    return not open_tasks(state) and not open_question_items and not open_attention_items(state) and not running_runs
 
 def update_user_status_after_plan(state, event, action_plan, counts, current_time):
     if event.get("type") != "user_message":

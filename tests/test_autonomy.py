@@ -344,10 +344,11 @@ class AutonomyTests(unittest.TestCase):
 
     def test_non_autonomous_passive_idle_does_not_ask_for_new_task(self):
         state = default_state()
+        event = {"id": 1, "type": "passive_tick"}
 
         plan = deterministic_decision_plan(
             state,
-            {"id": 1, "type": "passive_tick"},
+            event,
             now_iso(),
             allow_task_execution=False,
         )
@@ -355,6 +356,17 @@ class AutonomyTests(unittest.TestCase):
         self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
         waits = [decision for decision in plan["decisions"] if decision["type"] == "wait_for_user"]
         self.assertEqual(waits[0]["reason"], "No actionable task.")
+        apply_action_plan(
+            state,
+            event,
+            plan,
+            {"summary": plan["summary"], "actions": waits},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+        self.assertEqual(state["agent_status"]["mode"], "idle")
+        self.assertIsNone(state["agent_status"]["pending_question"])
 
     def test_user_info_and_passive_warnings_stay_unread(self):
         state = default_state()
