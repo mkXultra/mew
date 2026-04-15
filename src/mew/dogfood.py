@@ -451,6 +451,28 @@ def agent_run_summary(agent_runs, limit=5):
     }
 
 
+def programmer_loop_metrics(state):
+    runs = state.get("agent_runs", [])
+    implementation_runs = [run for run in runs if (run.get("purpose") or "implementation") == "implementation"]
+    review_runs = [run for run in runs if run.get("purpose") == "review"]
+    followup_task_ids = [
+        run.get("followup_task_id")
+        for run in review_runs
+        if run.get("followup_task_id") is not None
+    ]
+    return {
+        "implementation_runs": len(implementation_runs),
+        "implementation_by_status": count_by(implementation_runs, "status"),
+        "review_runs": len(review_runs),
+        "review_by_status": count_by(review_runs, "status"),
+        "reviews_with_followup_processed": len(
+            [run for run in review_runs if run.get("followup_processed_at")]
+        ),
+        "followup_tasks_created": len(followup_task_ids),
+        "followup_task_ids": followup_task_ids[-5:],
+    }
+
+
 def has_active_agent_runs(report):
     statuses = (report.get("agent_runs") or {}).get("by_status") or {}
     return bool(statuses.get("created") or statuses.get("running"))
@@ -535,6 +557,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "read_inspection": read_inspection_metrics(outbox, actions),
         "tasks": count_by(state.get("tasks", []), "status"),
         "agent_runs": agent_run_summary(state.get("agent_runs", [])),
+        "programmer_loop": programmer_loop_metrics(state),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
         "dropped_threads": {
@@ -577,6 +600,7 @@ def format_dogfood_report(report):
         f"read_inspection: {report.get('read_inspection')}",
         f"tasks: {report.get('tasks')}",
         f"agent_runs: {report.get('agent_runs')}",
+        f"programmer_loop: {report.get('programmer_loop')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
     ]
     seed_task = report.get("seed_task")

@@ -194,6 +194,17 @@ class DogfoodTests(unittest.TestCase):
                     "external_pid": 123,
                 }
             )
+            state["agent_runs"].append(
+                {
+                    "id": 2,
+                    "task_id": 1,
+                    "plan_id": 2,
+                    "purpose": "review",
+                    "status": "completed",
+                    "followup_processed_at": "done",
+                    "followup_task_id": 3,
+                }
+            )
             state["memory"]["deep"]["project_snapshot"] = {
                 "updated_at": "now",
                 "project_types": ["python"],
@@ -225,8 +236,12 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["read_inspection"]["read_progress_unread"], 0)
             self.assertEqual(report["read_inspection"]["repeated_read_skips"], 1)
             self.assertEqual(report["read_inspection"]["repeated_read_skips_unread"], 1)
-            self.assertEqual(report["agent_runs"]["total"], 1)
-            self.assertEqual(report["agent_runs"]["by_status"], {"running": 1})
+            self.assertEqual(report["agent_runs"]["total"], 2)
+            self.assertEqual(report["agent_runs"]["by_status"], {"completed": 1, "running": 1})
+            self.assertEqual(report["programmer_loop"]["implementation_runs"], 1)
+            self.assertEqual(report["programmer_loop"]["review_runs"], 1)
+            self.assertEqual(report["programmer_loop"]["reviews_with_followup_processed"], 1)
+            self.assertEqual(report["programmer_loop"]["followup_task_ids"], [3])
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
@@ -235,6 +250,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("runtime_cycle:", text)
             self.assertIn("read_inspection:", text)
             self.assertIn("agent_runs:", text)
+            self.assertIn("programmer_loop:", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
