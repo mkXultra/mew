@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from mew.config import LOG_FILE, STATE_FILE
+from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     build_dogfood_report,
     build_runtime_command,
@@ -71,6 +71,12 @@ class DogfoodTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            runtime_out_path = workspace / STATE_DIR / "dogfood-runtime.out"
+            runtime_out_path.write_text(
+                "mew runtime started pid=1\nprocessed 1 event(s) reason=startup\nmew runtime stopped\n",
+                encoding="utf-8",
+            )
+
             report = build_dogfood_report(workspace, ["mew", "run"], 0, 1.5)
             text = format_dogfood_report(report)
 
@@ -78,6 +84,9 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertEqual(report["actions"], {"inspect_dir": 1})
             self.assertIn("Recent activity", text)
+            self.assertEqual(len(report["runtime_output_tail"]), 3)
+            self.assertIn("Runtime output (last lines)", text)
+            self.assertIn("mew runtime stopped", text)
 
 
 if __name__ == "__main__":

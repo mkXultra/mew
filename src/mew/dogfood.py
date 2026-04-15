@@ -203,6 +203,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
     workspace = Path(workspace)
     state = read_json_file(workspace / STATE_FILE, {})
     log_text = read_text_file(workspace / LOG_FILE)
+    runtime_output = read_text_file(workspace / STATE_DIR / "dogfood-runtime.out")
     inbox = state.get("inbox", [])
     outbox = state.get("outbox", [])
     thoughts = state.get("thought_journal", [])
@@ -238,6 +239,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "recent_activity": recent_activity(state, limit=8) if state else [],
         "next_move": next_move(state) if state else "state was not created",
         "log_tail": log_text.splitlines()[-20:],
+        "runtime_output_tail": runtime_output.splitlines()[-20:],
     }
 
 
@@ -274,6 +276,12 @@ def format_dogfood_report(report):
             actions = item.get("actions") or []
             suffix = f" actions={', '.join(actions)}" if actions else ""
             lines.append(f"- #{item.get('id')} {item.get('event_type')}: {item.get('summary')}{suffix}")
+
+    runtime_output_tail = report.get("runtime_output_tail") or []
+    if runtime_output_tail:
+        lines.append("")
+        lines.append("Runtime output (last lines)")
+        lines.extend(runtime_output_tail)
 
     lines.append("")
     lines.append(f"Next useful move: {report.get('next_move')}")
