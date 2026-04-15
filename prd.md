@@ -675,6 +675,8 @@ The first user-facing version should likely include:
 - `mew doctor --json`: expose the same health check as structured JSON for agents and automation.
 - `mew repair`: reconcile and validate local state, then write a fresh checkpoint when validation passes.
 - `mew repair --json`: expose the repair pass as structured JSON.
+- `mew effects`: show recent append-only state checkpoint records.
+- `mew effects --json`: expose state checkpoint records as structured JSON.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.

@@ -23,6 +23,7 @@ from .commands import (
     cmd_desires_show,
     cmd_dogfood,
     cmd_doctor,
+    cmd_effects,
     cmd_guidance_init,
     cmd_guidance_show,
     cmd_listen,
@@ -639,6 +640,11 @@ def build_parser():
 
     log_parser = subparsers.add_parser("log", help="show runtime log")
     log_parser.set_defaults(func=cmd_log)
+
+    effects_parser = subparsers.add_parser("effects", help="show recent state effect checkpoints")
+    effects_parser.add_argument("--limit", type=int, default=20, help="maximum effect records")
+    effects_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    effects_parser.set_defaults(func=cmd_effects)
 
     guidance_parser = subparsers.add_parser("guidance", help="manage think-phase guidance")
     guidance_subparsers = guidance_parser.add_subparsers(dest="guidance_command")

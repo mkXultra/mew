@@ -110,6 +110,25 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_effects_command_reads_state_checkpoints(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                save_state(default_state())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["effects", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(len(data["effects"]), 1)
+                self.assertEqual(data["effects"][0]["type"], "state_saved")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["effects"]), 0)
+                self.assertIn("state_saved", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

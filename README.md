@@ -78,6 +78,8 @@ uv run mew doctor
 uv run mew doctor --json
 uv run mew repair
 uv run mew repair --json
+uv run mew effects
+uv run mew effects --json
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait

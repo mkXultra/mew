@@ -27,7 +27,7 @@ from .brief import (
     verification_outcome,
 )
 from .codex_api import load_codex_oauth
-from .config import LOG_FILE, STATE_DIR
+from .config import EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
 from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogfood, run_dogfood_loop
 from .errors import MewError
@@ -3006,6 +3006,43 @@ def cmd_log(args):
         print("No runtime log.")
         return 0
     print(LOG_FILE.read_text(encoding="utf-8").rstrip())
+    return 0
+
+def read_effect_records(limit=20):
+    ensure_state_dir()
+    if not EFFECT_LOG_FILE.exists():
+        return []
+    try:
+        lines = EFFECT_LOG_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            records.append({"type": "corrupt_effect_record", "raw": line})
+    return records[-max(1, limit):]
+
+def cmd_effects(args):
+    records = read_effect_records(limit=args.limit)
+    if args.json:
+        print(json.dumps({"effects": records}, ensure_ascii=False, indent=2))
+        return 0
+    if not records:
+        print("No effects yet.")
+        return 0
+    for record in records:
+        counts = record.get("counts") or {}
+        sha = str(record.get("state_sha256") or "")[:12]
+        print(
+            f"{record.get('saved_at') or '(unknown)'} "
+            f"{record.get('type') or 'unknown'} "
+            f"sha={sha} "
+            f"tasks={counts.get('tasks')} inbox={counts.get('inbox')} outbox={counts.get('outbox')}"
+        )
     return 0
 
 def cmd_guidance_init(args):
