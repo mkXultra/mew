@@ -10,9 +10,10 @@ import time
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, STATE_DIR, STATE_FILE
+from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
-from .state import default_state
+from .state import default_state, migrate_state, next_id, reconcile_next_ids
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso
 
@@ -31,6 +32,7 @@ DOGFOOD_SKIP_DIR_NAMES = {
     "node_modules",
 }
 DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
+DOGFOOD_READY_CODING_TASK_TITLE = "Dogfood programmer loop smoke task"
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -164,6 +166,10 @@ def build_runtime_command(args, workspace):
         command.append("--allow-verify")
         command.extend(["--verify-command", args.verify_command])
         command.extend(["--verify-interval-minutes", str(args.verify_interval_minutes)])
+    if getattr(args, "execute_tasks", False):
+        command.append("--execute-tasks")
+    if getattr(args, "allow_agent_run", False):
+        command.append("--allow-agent-run")
     return command
 
 
@@ -315,6 +321,51 @@ def read_inspection_metrics(outbox, actions):
     }
 
 
+def agent_run_summary(agent_runs, limit=5):
+    latest = []
+    for run in agent_runs[-limit:]:
+        latest.append(
+            {
+                "id": run.get("id"),
+                "task_id": run.get("task_id"),
+                "plan_id": run.get("plan_id"),
+                "purpose": run.get("purpose") or "implementation",
+                "status": run.get("status") or "unknown",
+                "model": run.get("model") or "",
+                "external_pid": run.get("external_pid"),
+                "session_id": run.get("session_id"),
+            }
+        )
+    return {
+        "total": len(agent_runs),
+        "by_status": count_by(agent_runs, "status"),
+        "by_purpose": count_by(agent_runs, "purpose"),
+        "latest": latest,
+    }
+
+
+def has_active_agent_runs(report):
+    statuses = (report.get("agent_runs") or {}).get("by_status") or {}
+    return bool(statuses.get("created") or statuses.get("running"))
+
+
+def workspace_has_active_agent_runs(workspace):
+    state = read_json_file(Path(workspace) / STATE_FILE, {})
+    return any(run.get("status") in ("created", "running") for run in state.get("agent_runs", []))
+
+
+def active_implementation_run_for_task(state, task_id):
+    wanted = str(task_id)
+    for run in reversed(state.get("agent_runs", [])):
+        if str(run.get("task_id")) != wanted:
+            continue
+        if (run.get("purpose") or "implementation") != "implementation":
+            continue
+        if run.get("status") in ("created", "running"):
+            return run
+    return None
+
+
 def plan_schema_issues(events, limit=5):
     issues = []
     for event in events:
@@ -376,6 +427,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "actions": actions,
         "read_inspection": read_inspection_metrics(outbox, actions),
         "tasks": count_by(state.get("tasks", []), "status"),
+        "agent_runs": agent_run_summary(state.get("agent_runs", [])),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
         "dropped_threads": {
@@ -417,8 +469,18 @@ def format_dogfood_report(report):
         f"actions: {report.get('actions')}",
         f"read_inspection: {report.get('read_inspection')}",
         f"tasks: {report.get('tasks')}",
+        f"agent_runs: {report.get('agent_runs')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
     ]
+    seed_task = report.get("seed_task")
+    if seed_task:
+        lines.append(
+            "seed_task: "
+            f"task=#{seed_task.get('id')} plan=#{seed_task.get('plan_id')} "
+            f"status={seed_task.get('status')} auto_execute={seed_task.get('auto_execute')}"
+        )
+    if report.get("cleanup_skipped_reason"):
+        lines.append(f"cleanup_skipped: {report.get('cleanup_skipped_reason')}")
     source_copy = report.get("source_copy")
     if source_copy:
         lines.append(
@@ -476,6 +538,92 @@ def format_dogfood_report(report):
     lines.append("")
     lines.append(f"Next useful move: {report.get('next_move')}")
     return "\n".join(lines)
+
+
+def seed_ready_coding_task(workspace, title=DOGFOOD_READY_CODING_TASK_TITLE):
+    workspace = Path(workspace).resolve()
+    state_path = workspace / STATE_FILE
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    current_time = now_iso()
+
+    existing = None
+    for task in state.get("tasks", []):
+        if task.get("title") == title:
+            existing = task
+            break
+
+    if existing is None:
+        task = {
+            "id": next_id(state, "task"),
+            "title": title,
+            "kind": "coding",
+            "description": (
+                "Exercise mew's programmer dispatch loop from an autonomous ready task. "
+                "Inspect the workspace, make no risky changes, and report a minimal safe improvement."
+            ),
+            "status": "ready",
+            "priority": "normal",
+            "notes": "Seeded by dogfood as a refined self-proposed coding task.",
+            "command": "",
+            "cwd": str(workspace),
+            "auto_execute": True,
+            "agent_backend": "",
+            "agent_model": "",
+            "agent_prompt": "",
+            "agent_run_id": None,
+            "plans": [],
+            "latest_plan_id": None,
+            "runs": [],
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+        state["tasks"].append(task)
+    else:
+        task = existing
+        active_run = active_implementation_run_for_task(state, task.get("id"))
+        if active_run:
+            task["status"] = "running"
+            task["agent_run_id"] = active_run.get("id")
+            task["updated_at"] = current_time
+            write_json_file(state_path, state)
+            return {
+                "id": task["id"],
+                "title": task.get("title"),
+                "status": task.get("status"),
+                "auto_execute": task.get("auto_execute"),
+                "plan_id": task.get("latest_plan_id"),
+                "active_run_id": active_run.get("id"),
+            }
+        task["kind"] = "coding"
+        task["status"] = "ready"
+        task["auto_execute"] = True
+        task["command"] = ""
+        task["cwd"] = task.get("cwd") or str(workspace)
+        task["agent_run_id"] = None
+        task["updated_at"] = current_time
+        task.setdefault("notes", "")
+        if "Seeded by dogfood" not in task["notes"]:
+            task["notes"] = f"{task['notes'].rstrip()}\nSeeded by dogfood for programmer dispatch.".strip()
+
+    plan = create_task_plan(
+        state,
+        task,
+        cwd=task.get("cwd") or str(workspace),
+        objective=task.get("description") or task.get("title"),
+        approach=(
+            "Dispatch the implementation agent under the normal programmer loop and report what happened. "
+            "Keep changes minimal and safe."
+        ),
+    )
+    write_json_file(state_path, state)
+    return {
+        "id": task["id"],
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "auto_execute": task.get("auto_execute"),
+        "plan_id": plan.get("id"),
+    }
 
 
 def prepopulate_project_snapshot(workspace):
@@ -545,6 +693,9 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
     report["source_copy"] = source_copy
     if pre_snapshot is not None:
         report["pre_snapshot"] = pre_snapshot
+    seed_task = getattr(args, "_seed_task", None)
+    if seed_task is not None:
+        report["seed_task"] = seed_task
     return report
 
 
@@ -554,6 +705,7 @@ def run_dogfood(args):
     if getattr(args, "source_workspace", None):
         source_copy = copy_source_workspace(args.source_workspace, workspace)
     pre_snapshot = prepopulate_project_snapshot(workspace) if getattr(args, "pre_snapshot", False) else None
+    args._seed_task = seed_ready_coding_task(workspace) if getattr(args, "seed_ready_coding_task", False) else None
     report = _run_dogfood_in_workspace(
         args,
         workspace,
@@ -561,7 +713,10 @@ def run_dogfood(args):
         source_copy=source_copy,
         pre_snapshot=pre_snapshot,
     )
-    if args.cleanup and created_temp:
+    if args.cleanup and created_temp and has_active_agent_runs(report):
+        report["kept"] = True
+        report["cleanup_skipped_reason"] = "active_agent_runs"
+    elif args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
     return report
 
@@ -572,6 +727,7 @@ def run_dogfood_loop(args):
     if getattr(args, "source_workspace", None):
         source_copy = copy_source_workspace(args.source_workspace, workspace)
     pre_snapshot = prepopulate_project_snapshot(workspace) if getattr(args, "pre_snapshot", False) else None
+    args._seed_task = seed_ready_coding_task(workspace) if getattr(args, "seed_ready_coding_task", False) else None
 
     cycles = max(1, int(getattr(args, "cycles", 1) or 1))
     reports = []
@@ -588,15 +744,26 @@ def run_dogfood_loop(args):
             reports.append(report)
             if index < cycles - 1:
                 time.sleep(max(0.0, float(getattr(args, "cycle_gap", 0.0) or 0.0)))
-    finally:
-        if args.cleanup and created_temp:
+    except Exception:
+        active_runs = (has_active_agent_runs(reports[-1]) if reports else False) or workspace_has_active_agent_runs(
+            workspace
+        )
+        if args.cleanup and created_temp and not active_runs:
             shutil.rmtree(workspace, ignore_errors=True)
+        raise
 
     final_report = reports[-1] if reports else {}
+    cleanup_skipped_reason = ""
+    if args.cleanup and created_temp and has_active_agent_runs(final_report):
+        cleanup_skipped_reason = "active_agent_runs"
+    elif args.cleanup and created_temp:
+        shutil.rmtree(workspace, ignore_errors=True)
+
     return {
         "generated_at": now_iso(),
         "workspace": str(workspace),
-        "kept": not (args.cleanup and created_temp),
+        "kept": not (args.cleanup and created_temp) or bool(cleanup_skipped_reason),
+        "cleanup_skipped_reason": cleanup_skipped_reason,
         "cycles": reports,
         "cycle_count": cycles,
         "exit_codes": [report.get("exit_code") for report in reports],
@@ -605,6 +772,7 @@ def run_dogfood_loop(args):
         "final_model_phases": final_report.get("model_phases", {}),
         "final_runtime_status": final_report.get("runtime_status", {}),
         "final_plan_schema_issues": final_report.get("plan_schema_issues", {}),
+        "final_agent_runs": final_report.get("agent_runs", {}),
         "final_dropped_threads": final_report.get("dropped_threads", {}),
         "final_active_dropped_threads": final_report.get("active_dropped_threads", {}),
         "final_project_snapshot": final_report.get("project_snapshot", {}),
@@ -618,7 +786,10 @@ def format_dogfood_loop_report(report):
         f"cycles: {report.get('cycle_count')} exit_codes={report.get('exit_codes')}",
         f"final_events: {report.get('final_events')}",
         f"final_model_phases: {report.get('final_model_phases')}",
+        f"final_agent_runs: {report.get('final_agent_runs')}",
     ]
+    if report.get("cleanup_skipped_reason"):
+        lines.append(f"cleanup_skipped: {report.get('cleanup_skipped_reason')}")
     final_dropped = report.get("final_dropped_threads") or {}
     if final_dropped.get("thought_count"):
         lines.append(
@@ -664,6 +835,7 @@ def format_dogfood_loop_report(report):
             f"duration={cycle.get('duration_seconds'):.1f}s "
             f"processed={events.get('processed')}/{events.get('total')} "
             f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
+            f"agent_runs={(cycle.get('agent_runs') or {}).get('total', 0)} "
             f"dropped_threads={dropped.get('thought_count', 0)} "
             f"active_dropped_threads={active_dropped.get('thought_count', 0)} "
             f"schema_issues={schema_issues.get('count', 0)} "

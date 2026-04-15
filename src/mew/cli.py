@@ -448,6 +448,13 @@ def build_parser():
     )
     dogfood_parser.add_argument("--allow-write", action="store_true", help="allow runtime writes inside dogfood workspace")
     dogfood_parser.add_argument("--allow-verify", action="store_true", help="allow runtime verification")
+    dogfood_parser.add_argument("--execute-tasks", action="store_true", help="allow runtime task execution gates during dogfood")
+    dogfood_parser.add_argument("--allow-agent-run", action="store_true", help="allow runtime programmer agent dispatch during dogfood")
+    dogfood_parser.add_argument(
+        "--seed-ready-coding-task",
+        action="store_true",
+        help="seed a ready auto-executable coding task before starting the dogfood runtime",
+    )
     dogfood_parser.add_argument("--verify-command", help="verification command for dogfood runtime")
     dogfood_parser.add_argument(
         "--verify-interval-minutes",

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
@@ -14,6 +15,9 @@ from mew.dogfood import (
     format_dogfood_report,
     prepopulate_project_snapshot,
     prepare_dogfood_workspace,
+    run_dogfood,
+    run_dogfood_loop,
+    seed_ready_coding_task,
 )
 from mew.state import add_event, add_outbox_message, default_state
 
@@ -39,6 +43,8 @@ class DogfoodTests(unittest.TestCase):
             base_url="",
             allow_write=False,
             allow_verify=False,
+            execute_tasks=False,
+            allow_agent_run=False,
             verify_command="",
             verify_interval_minutes=0.05,
         )
@@ -65,6 +71,8 @@ class DogfoodTests(unittest.TestCase):
                     base_url="",
                     allow_write=False,
                     allow_verify=False,
+                    execute_tasks=False,
+                    allow_agent_run=False,
                     verify_command="",
                     verify_interval_minutes=0.05,
                 )
@@ -74,6 +82,30 @@ class DogfoodTests(unittest.TestCase):
                 self.assertEqual(command[command.index("--auth") + 1], str((Path(tmp) / "auth.json").resolve()))
             finally:
                 os.chdir(old_cwd)
+
+    def test_build_runtime_command_can_enable_programmer_gates(self):
+        args = SimpleNamespace(
+            interval=3,
+            poll_interval=0.2,
+            autonomy_level="act",
+            model_timeout=45,
+            ai=False,
+            auth=None,
+            model_backend="codex",
+            model="",
+            base_url="",
+            allow_write=False,
+            allow_verify=False,
+            execute_tasks=True,
+            allow_agent_run=True,
+            verify_command="",
+            verify_interval_minutes=0.05,
+        )
+
+        command = build_runtime_command(args, Path("/tmp/work"))
+
+        self.assertIn("--execute-tasks", command)
+        self.assertIn("--allow-agent-run", command)
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:
@@ -135,6 +167,17 @@ class DogfoodTests(unittest.TestCase):
                     "dropped_threads": [],
                 }
             )
+            state["agent_runs"].append(
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "plan_id": 2,
+                    "purpose": "implementation",
+                    "status": "running",
+                    "model": "codex-ultra",
+                    "external_pid": 123,
+                }
+            )
             state["memory"]["deep"]["project_snapshot"] = {
                 "updated_at": "now",
                 "project_types": ["python"],
@@ -166,6 +209,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["read_inspection"]["read_progress_unread"], 0)
             self.assertEqual(report["read_inspection"]["repeated_read_skips"], 1)
             self.assertEqual(report["read_inspection"]["repeated_read_skips_unread"], 1)
+            self.assertEqual(report["agent_runs"]["total"], 1)
+            self.assertEqual(report["agent_runs"]["by_status"], {"running": 1})
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
@@ -173,6 +218,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
             self.assertIn("read_inspection:", text)
+            self.assertIn("agent_runs:", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
@@ -193,6 +239,114 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(state["memory"]["deep"]["project_snapshot"]["package"]["name"], "demo")
             self.assertEqual(state["dogfood"]["pre_snapshot"]["path"], str(workspace.resolve()))
 
+    def test_seed_ready_coding_task_creates_dispatchable_planned_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+
+            summary = seed_ready_coding_task(workspace)
+            second = seed_ready_coding_task(workspace)
+            state = json.loads((workspace / STATE_FILE).read_text(encoding="utf-8"))
+
+            self.assertEqual(summary["status"], "ready")
+            self.assertTrue(summary["auto_execute"])
+            self.assertEqual(second["id"], summary["id"])
+            self.assertEqual(len(state["tasks"]), 1)
+            task = state["tasks"][0]
+            self.assertEqual(task["kind"], "coding")
+            self.assertEqual(task["status"], "ready")
+            self.assertTrue(task["auto_execute"])
+            self.assertGreaterEqual(len(task["plans"]), 1)
+            self.assertEqual(task["latest_plan_id"], second["plan_id"])
+
+    def test_seed_ready_coding_task_clears_stale_shell_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            seed_ready_coding_task(workspace)
+            state_path = workspace / STATE_FILE
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["tasks"][0]["command"] = "echo stale"
+            state["tasks"][0]["agent_run_id"] = 99
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+
+            seed_ready_coding_task(workspace)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(state["tasks"][0]["command"], "")
+            self.assertIsNone(state["tasks"][0]["agent_run_id"])
+
+    def test_seed_ready_coding_task_preserves_active_agent_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            seed_ready_coding_task(workspace)
+            state_path = workspace / STATE_FILE
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            task = state["tasks"][0]
+            initial_plan_count = len(task["plans"])
+            state["agent_runs"].append(
+                {
+                    "id": 7,
+                    "task_id": task["id"],
+                    "plan_id": task["latest_plan_id"],
+                    "purpose": "implementation",
+                    "status": "running",
+                }
+            )
+            task["status"] = "running"
+            task["agent_run_id"] = 7
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+
+            summary = seed_ready_coding_task(workspace)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            task = state["tasks"][0]
+
+            self.assertEqual(summary["active_run_id"], 7)
+            self.assertEqual(task["status"], "running")
+            self.assertEqual(task["agent_run_id"], 7)
+            self.assertEqual(len(task["plans"]), initial_plan_count)
+
+    def test_run_dogfood_skips_cleanup_when_agent_run_is_active(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "dog"
+            workspace.mkdir()
+            args = SimpleNamespace(
+                workspace=None,
+                source_workspace=None,
+                pre_snapshot=False,
+                seed_ready_coding_task=False,
+                cleanup=True,
+            )
+            report = {"agent_runs": {"by_status": {"running": 1}}, "kept": False}
+
+            with patch("mew.dogfood.prepare_dogfood_workspace", return_value=(workspace, True)):
+                with patch("mew.dogfood._run_dogfood_in_workspace", return_value=report):
+                    result = run_dogfood(args)
+
+            self.assertTrue(workspace.exists())
+            self.assertTrue(result["kept"])
+            self.assertEqual(result["cleanup_skipped_reason"], "active_agent_runs")
+
+    def test_run_dogfood_loop_keeps_workspace_on_exception_with_active_agent_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "dog"
+            workspace.mkdir()
+            args = SimpleNamespace(
+                workspace=None,
+                source_workspace=None,
+                pre_snapshot=False,
+                seed_ready_coding_task=False,
+                cleanup=True,
+                cycles=2,
+                cycle_gap=0,
+            )
+            report = {"agent_runs": {"by_status": {"running": 1}}, "kept": False}
+
+            with patch("mew.dogfood.prepare_dogfood_workspace", return_value=(workspace, True)):
+                with patch("mew.dogfood._run_dogfood_in_workspace", side_effect=[report, RuntimeError("boom")]):
+                    with self.assertRaises(RuntimeError):
+                        run_dogfood_loop(args)
+
+            self.assertTrue(workspace.exists())
+
     def test_format_dogfood_loop_report_summarizes_cycles(self):
         text = format_dogfood_loop_report(
             {
@@ -208,6 +362,7 @@ class DogfoodTests(unittest.TestCase):
                     "last_processed_count": 3,
                 },
                 "final_plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
+                "final_agent_runs": {"total": 1, "by_status": {"running": 1}},
                 "final_dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
                 "final_active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                 "final_next_move": "keep going",
@@ -222,6 +377,7 @@ class DogfoodTests(unittest.TestCase):
                         "dropped_threads": {"thought_count": 0, "latest": []},
                         "active_dropped_threads": {"thought_count": 0, "latest": []},
                         "plan_schema_issues": {"count": 0, "by_level": {}, "latest": []},
+                        "agent_runs": {"total": 0},
                         "next_move": "cycle one",
                     },
                     {
@@ -233,6 +389,7 @@ class DogfoodTests(unittest.TestCase):
                         "dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
                         "active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                         "plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
+                        "agent_runs": {"total": 1},
                         "next_move": "keep going",
                     },
                 ],
@@ -247,6 +404,8 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("active_dropped_threads=1", text)
         self.assertIn("schema_issues=1", text)
         self.assertIn("final_plan_schema_issues", text)
+        self.assertIn("final_agent_runs", text)
+        self.assertIn("agent_runs=1", text)
         self.assertIn("final_runtime_cycle", text)
         self.assertIn("Final project snapshot", text)
         self.assertIn("Final next useful move: keep going", text)
