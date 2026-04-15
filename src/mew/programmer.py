@@ -379,6 +379,8 @@ def create_follow_up_task_from_review(state, task, review_run):
         for existing in state.get("tasks", []):
             if str(existing.get("id")) == str(followup_task_id):
                 return existing, review_run.get("review_status") or "unknown"
+    if review_run.get("followup_processed_at"):
+        return None, review_run.get("review_status") or "processed"
 
     result = extract_review_text(review_run)
     report = parse_review_report(result)

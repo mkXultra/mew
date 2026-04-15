@@ -229,6 +229,12 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(review["review_report"]["follow_up"], ["Already handled elsewhere"])
         self.assertIn("acknowledged without creating follow-up task", task["notes"])
 
+        followup, repeated_status = create_follow_up_task_from_review(state, task, review)
+
+        self.assertIsNone(followup)
+        self.assertEqual(repeated_status, "needs_fix")
+        self.assertEqual(len(state["tasks"]), 1)
+
     def test_review_status_uses_agent_message_not_prompt_template(self):
         state = default_state()
         task = add_task(state)
@@ -921,6 +927,32 @@ class ProgrammerTests(unittest.TestCase):
 
         self.assertEqual(len(state["tasks"]), 2)
         self.assertEqual(review["followup_task_id"], state["tasks"][1]["id"])
+
+    def test_autonomous_decision_skips_processed_review_followup(self):
+        state = default_state()
+        task = add_task(state)
+        review = {
+            "id": 9,
+            "task_id": task["id"],
+            "purpose": "review",
+            "status": "completed",
+            "result": "STATUS: needs_fix\nFOLLOW_UP:\n- Already handled elsewhere",
+            "stdout": "",
+            "followup_task_id": None,
+            "followup_processed_at": now_iso(),
+        }
+        state["agent_runs"].append(review)
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        self.assertNotIn("followup_review", [decision["type"] for decision in plan["decisions"]])
 
     def test_autonomous_decision_collects_running_run_even_with_open_question(self):
         state = default_state()

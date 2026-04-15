@@ -533,6 +533,7 @@ def append_autonomous_decisions(
             and status in ("completed", "failed")
             and autonomy_level in ("propose", "act")
             and not run.get("followup_task_id")
+            and not run.get("followup_processed_at")
         ):
             decisions.append({"type": "followup_review", "run_id": run["id"]})
             return
