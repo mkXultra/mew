@@ -597,7 +597,7 @@ def build_parser():
     next_parser.set_defaults(func=cmd_next)
 
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")
-    work_parser.add_argument("task_id")
+    work_parser.add_argument("task_id", nargs="?")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 

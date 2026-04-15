@@ -393,11 +393,27 @@ def format_workbench(data):
     return "\n".join(lines)
 
 
+def select_workbench_task(state, task_id=None):
+    task = find_task(state, task_id) if task_id else None
+    if task or task_id:
+        return task
+    active_task_id = state.get("agent_status", {}).get("active_task_id")
+    task = find_task(state, active_task_id) if active_task_id else None
+    if task:
+        return task
+    candidates = sorted(open_tasks(state), key=task_sort_key)
+    return candidates[0] if candidates else None
+
+
 def cmd_work(args):
     state = load_state()
-    task = find_task(state, args.task_id)
+    task_id = getattr(args, "task_id", None)
+    task = select_workbench_task(state, task_id)
     if not task:
-        print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+        if task_id:
+            print(f"mew: task not found: {task_id}", file=sys.stderr)
+        else:
+            print("No tasks.")
         return 1
     data = build_workbench_data(state, task)
     if args.json:
@@ -3127,7 +3143,7 @@ CHAT_HELP = """Commands:
 /add <title> [| desc] create a task from chat
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
-/work <task-id>       show task plan/runs/checks and next action
+/work [task-id]       show task plan/runs/checks and next action
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -3229,9 +3245,12 @@ def print_chat_task(task_id):
 
 def print_chat_workbench(task_id):
     state = load_state()
-    task = find_task(state, task_id)
+    task = select_workbench_task(state, task_id)
     if not task:
-        print(f"mew: task not found: {task_id}")
+        if task_id:
+            print(f"mew: task not found: {task_id}")
+        else:
+            print("No tasks.")
         return
     print(format_workbench(build_workbench_data(state, task)))
 
@@ -4146,10 +4165,7 @@ def run_chat_slash_command(line, chat_state):
             print_chat_task(rest)
         return "continue"
     if command == "work":
-        if not rest:
-            print("usage: /work <task-id>")
-        else:
-            print_chat_workbench(rest)
+        print_chat_workbench(rest or None)
         return "continue"
     if command == "note":
         chat_append_task_note(rest)
