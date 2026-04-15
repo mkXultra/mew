@@ -33,6 +33,7 @@ class CommandTests(unittest.TestCase):
         guidance = run_step.call_args.kwargs["guidance"]
         self.assertIn("Immediate step focus:", guidance)
         self.assertIn("Review current mew changes", guidance)
+        self.assertIn("Do not stop solely because an unrelated older question is waiting.", guidance)
 
     def test_doctor_missing_optional_auth_still_succeeds(self):
         old_cwd = os.getcwd()

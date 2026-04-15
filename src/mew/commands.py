@@ -1134,7 +1134,12 @@ def cmd_step(args):
                 part
                 for part in (
                     guidance.strip(),
-                    f"Immediate step focus:\n{focus_text}",
+                    (
+                        "Immediate step focus:\n"
+                        f"{focus_text}\n"
+                        "Prefer this focus over unrelated existing tasks or questions during this step loop. "
+                        "Do not stop solely because an unrelated older question is waiting."
+                    ),
                 )
                 if part
             )
