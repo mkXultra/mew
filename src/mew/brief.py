@@ -251,6 +251,14 @@ def _activity_item(thought):
     }
 
 
+def activity_label(item):
+    event_type = item.get("event_type") or "unknown"
+    cycle_reason = item.get("cycle_reason") or ""
+    if cycle_reason and cycle_reason != event_type:
+        return f"{event_type}/{cycle_reason}"
+    return event_type
+
+
 def recent_activity(state, limit=5):
     thoughts = list(state.get("thought_journal", []))
     items = []
@@ -304,7 +312,7 @@ def format_activity(state, limit=10):
             actions = item.get("actions") or []
             suffix = f" actions={', '.join(actions)}" if actions else ""
             lines.append(
-                f"- #{item.get('id')} {item.get('event_type')}: "
+                f"- #{item.get('id')} {activity_label(item)}: "
                 f"{item.get('summary')}{suffix}"
             )
 
@@ -586,7 +594,7 @@ def build_brief(state, limit=5):
             actions = item.get("actions") or []
             suffix = f" actions={', '.join(actions)}" if actions else ""
             lines.append(
-                f"- #{item.get('id')} {item.get('event_type')}: "
+                f"- #{item.get('id')} {activity_label(item)}: "
                 f"{item.get('summary')}{suffix}"
             )
         lines.append("")

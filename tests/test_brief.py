@@ -203,6 +203,27 @@ class BriefTests(unittest.TestCase):
         self.assertIn("inspect_dir /tmp/project", brief)
         self.assertEqual(data["recent_activity"][0]["summary"], "Inspected the workspace.")
 
+    def test_brief_labels_manual_step_activity(self):
+        state = default_state()
+        state["thought_journal"].append(
+            {
+                "id": 1,
+                "event_id": 2,
+                "event_type": "passive_tick",
+                "cycle_reason": "manual_step",
+                "at": "now",
+                "summary": "Read and remembered one thing.",
+                "open_threads": [],
+                "resolved_threads": [],
+                "actions": [{"type": "read_file", "path": "/tmp/project/README.md"}],
+                "counts": {"actions": 1, "messages": 1},
+            }
+        )
+
+        brief = build_brief(state)
+
+        self.assertIn("passive_tick/manual_step", brief)
+
     def test_brief_surfaces_project_snapshot(self):
         state = default_state()
         state["memory"]["deep"]["project_snapshot"] = {
