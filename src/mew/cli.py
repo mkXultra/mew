@@ -345,6 +345,15 @@ def build_parser():
     event_parser.add_argument("--source", default="cli", help="event source label")
     event_parser.add_argument("--payload", default="", help="JSON object payload")
     event_parser.add_argument("--text", help="convenience payload text field")
+    event_parser.add_argument("--wait", action="store_true", help="wait for outbox messages from this event")
+    event_parser.add_argument("--timeout", type=float, default=60.0, help="maximum wait time in seconds")
+    event_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
+        help=f"outbox poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
+    )
+    event_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     event_parser.set_defaults(func=cmd_event)
 
     session_parser = subparsers.add_parser("session", help="JSONL control session for automation")

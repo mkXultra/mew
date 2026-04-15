@@ -424,7 +424,16 @@ def cmd_event(args):
         print(f"mew: {exc}", file=sys.stderr)
         return 1
     print(f"queued {event['type']} event #{event['id']} source={event['source']}")
-    return 0
+    if not getattr(args, "wait", False):
+        return 0
+    warn_if_runtime_inactive()
+    return wait_for_event_response(
+        event["id"],
+        timeout=getattr(args, "timeout", 60.0),
+        poll_interval=getattr(args, "poll_interval", 1.0),
+        mark_read=getattr(args, "mark_read", False),
+        event_label=f"{event['type']} event",
+    )
 
 def cmd_message(args):
     event = queue_user_message(args.message)
@@ -2566,7 +2575,7 @@ def outbox_for_event(state, event_id):
         if str(message.get("event_id")) == wanted
     ]
 
-def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read=False):
+def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read=False, event_label="message event"):
     deadline = time.monotonic() + max(0.0, timeout)
     seen_ids = set()
 
@@ -2587,11 +2596,11 @@ def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read
 
         event = find_event_by_id(state, event_id)
         if event and event.get("processed_at"):
-            print(f"message event #{event_id} was processed without an outbox response.")
+            print(f"{event_label} #{event_id} was processed without an outbox response.")
             return 0
 
         if time.monotonic() >= deadline:
-            print(f"mew: timed out waiting for message event #{event_id}", file=sys.stderr)
+            print(f"mew: timed out waiting for {event_label} #{event_id}", file=sys.stderr)
             return 1
 
         time.sleep(max(0.01, poll_interval))

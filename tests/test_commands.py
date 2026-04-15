@@ -1609,6 +1609,36 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("event type is reserved: user_message", stderr.getvalue())
 
+    def test_event_command_can_wait_for_response(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.commands.wait_for_event_response", return_value=0) as waiter:
+                    with redirect_stdout(StringIO()):
+                        code = main(
+                            [
+                                "event",
+                                "file_change",
+                                "--wait",
+                                "--timeout",
+                                "2",
+                                "--poll-interval",
+                                "0.1",
+                                "--mark-read",
+                            ]
+                        )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        waiter.assert_called_once()
+        self.assertEqual(waiter.call_args.args[0], 1)
+        self.assertEqual(waiter.call_args.kwargs["timeout"], 2.0)
+        self.assertEqual(waiter.call_args.kwargs["poll_interval"], 0.1)
+        self.assertTrue(waiter.call_args.kwargs["mark_read"])
+        self.assertEqual(waiter.call_args.kwargs["event_label"], "file_change event")
+
     def test_perceive_command_supports_json(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
