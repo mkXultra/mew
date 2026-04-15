@@ -12,6 +12,8 @@ from mew.agent import (
     build_context,
     build_think_prompt,
     deterministic_decision_plan,
+    normalize_action_plan,
+    normalize_decision_plan,
     process_events,
     think_phase,
 )
@@ -773,6 +775,43 @@ class AutonomyTests(unittest.TestCase):
         self_reviews = [decision for decision in plan["decisions"] if decision["type"] == "self_review"]
         self.assertEqual(len(self_reviews), 1)
         self.assertEqual(self_reviews[0]["proposed_task_title"], "Define the next useful mew task")
+
+    def test_decision_plan_records_schema_issues(self):
+        plan = normalize_decision_plan(
+            {
+                "summary": "bad plan",
+                "decisions": [
+                    {"type": "propose_task"},
+                    {"type": "unknown_action", "summary": "x"},
+                    "not an object",
+                ],
+            },
+            "fallback",
+        )
+
+        messages = [issue["message"] for issue in plan["schema_issues"]]
+        self.assertIn("required for this type", messages)
+        self.assertIn("unsupported type 'unknown_action'", messages)
+        self.assertIn("must be an object", messages)
+
+    def test_action_plan_records_schema_issues(self):
+        plan = normalize_action_plan(
+            {
+                "summary": "bad action",
+                "actions": [
+                    {"type": "send_message"},
+                    {"type": "unknown_action"},
+                    "not an object",
+                ],
+            },
+            {"summary": "fallback", "actions": [{"type": "record_memory", "summary": "fallback"}]},
+        )
+
+        messages = [issue["message"] for issue in plan["schema_issues"]]
+        self.assertIn("required for this type", messages)
+        self.assertIn("unsupported type 'unknown_action'", messages)
+        self.assertIn("must be an object", messages)
+        self.assertEqual(plan["actions"], [{"type": "send_message"}])
 
     def test_act_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()

@@ -62,6 +62,77 @@ from .write_tools import (
     write_file,
 )
 
+DECISION_TYPES = {
+    "remember",
+    "send_message",
+    "ask_user",
+    "wait_for_user",
+    "execute_task",
+    "complete_task",
+    "run_verification",
+    "update_memory",
+    "inspect_dir",
+    "read_file",
+    "search_text",
+    "write_file",
+    "edit_file",
+    "self_review",
+    "propose_task",
+    "plan_task",
+    "dispatch_task",
+    "collect_agent_result",
+    "review_agent_run",
+    "followup_review",
+}
+
+ACTION_TYPES = (DECISION_TYPES - {"remember"}) | {"record_memory"}
+
+PLAN_REQUIRED_FIELDS = {
+    "send_message": ("text",),
+    "ask_user": ("question",),
+    "execute_task": ("task_id",),
+    "complete_task": ("task_id",),
+    "inspect_dir": ("path",),
+    "read_file": ("path",),
+    "search_text": ("query",),
+    "write_file": ("path", "content"),
+    "edit_file": ("path",),
+    "propose_task": ("title",),
+    "plan_task": ("task_id",),
+    "dispatch_task": ("task_id",),
+    "collect_agent_result": ("run_id",),
+    "review_agent_run": ("run_id",),
+    "followup_review": ("run_id",),
+}
+
+
+def plan_schema_issue(level, path, message):
+    return {"level": level, "path": path, "message": message}
+
+
+def _item_has_value(item, field):
+    value = item.get(field)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value is not None
+
+
+def validate_plan_items(items, allowed_types, item_name):
+    issues = []
+    for index, item in enumerate(items or []):
+        path = f"{item_name}[{index}]"
+        if not isinstance(item, dict):
+            issues.append(plan_schema_issue("warning", path, "must be an object"))
+            continue
+        item_type = item.get("type")
+        if item_type not in allowed_types:
+            issues.append(plan_schema_issue("warning", f"{path}.type", f"unsupported type {item_type!r}"))
+            continue
+        for field in PLAN_REQUIRED_FIELDS.get(item_type, ()):
+            if not _item_has_value(item, field):
+                issues.append(plan_schema_issue("error", f"{path}.{field}", "required for this type"))
+    return issues
+
 def build_codex_prompt(state, event, current_time):
     context = build_context(state, event, current_time)
     return (
@@ -737,7 +808,9 @@ def deterministic_decision_plan(
     }
 
 def normalize_decision_plan(plan, fallback_summary):
+    schema_issues = []
     if not isinstance(plan, dict):
+        schema_issues.append(plan_schema_issue("warning", "$", "decision plan must be an object"))
         plan = {}
     summary = plan.get("summary")
     if not isinstance(summary, str) or not summary.strip():
@@ -745,14 +818,18 @@ def normalize_decision_plan(plan, fallback_summary):
 
     decisions = plan.get("decisions")
     if not isinstance(decisions, list):
+        if "decisions" in plan:
+            schema_issues.append(plan_schema_issue("warning", "decisions", "must be a list"))
         decisions = []
 
     normalized = []
-    for decision in decisions:
+    for index, decision in enumerate(decisions):
         if not isinstance(decision, dict):
+            schema_issues.append(plan_schema_issue("warning", f"decisions[{index}]", "must be an object"))
             continue
         decision_type = decision.get("type")
         if not isinstance(decision_type, str):
+            schema_issues.append(plan_schema_issue("warning", f"decisions[{index}].type", "must be a string"))
             continue
         clean = {"type": decision_type}
         for key in (
@@ -801,12 +878,14 @@ def normalize_decision_plan(plan, fallback_summary):
         normalized.append({"type": "remember", "summary": summary})
 
     agent_status = plan.get("agent_status") if isinstance(plan.get("agent_status"), dict) else {}
+    schema_issues.extend(validate_plan_items(normalized, DECISION_TYPES, "decisions"))
     return {
         "summary": summary,
         "open_threads": normalize_thread_list(plan.get("open_threads")),
         "resolved_threads": normalize_thread_list(plan.get("resolved_threads")),
         "agent_status": agent_status,
         "decisions": normalized,
+        "schema_issues": schema_issues,
     }
 
 REQUIRED_MODEL_GUARDRAIL_DECISIONS = {
@@ -926,7 +1005,14 @@ def think_phase(
             }
         )
         return fallback
-    return append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
+    normalized = append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
+    if normalized.get("schema_issues"):
+        append_log(
+            "- "
+            f"{current_time}: think_phase schema_issues event={event['id']} "
+            f"count={len(normalized['schema_issues'])}"
+        )
+    return normalized
 
 def deterministic_action_plan(decision_plan):
     actions = []
@@ -966,7 +1052,9 @@ def deterministic_action_plan(decision_plan):
     }
 
 def normalize_action_plan(plan, fallback_plan):
+    schema_issues = []
     if not isinstance(plan, dict):
+        schema_issues.append(plan_schema_issue("warning", "$", "action plan must be an object"))
         plan = {}
     summary = plan.get("summary")
     if not isinstance(summary, str) or not summary.strip():
@@ -974,35 +1062,18 @@ def normalize_action_plan(plan, fallback_plan):
 
     actions = plan.get("actions")
     if not isinstance(actions, list):
+        if "actions" in plan:
+            schema_issues.append(plan_schema_issue("warning", "actions", "must be a list"))
         actions = fallback_plan.get("actions", [])
 
     normalized = []
-    for action in actions:
+    for index, action in enumerate(actions):
         if not isinstance(action, dict):
+            schema_issues.append(plan_schema_issue("warning", f"actions[{index}]", "must be an object"))
             continue
         action_type = action.get("type")
-        if action_type not in (
-            "record_memory",
-            "send_message",
-            "ask_user",
-            "wait_for_user",
-            "execute_task",
-            "complete_task",
-            "run_verification",
-            "update_memory",
-            "inspect_dir",
-            "read_file",
-            "search_text",
-            "write_file",
-            "edit_file",
-            "self_review",
-            "propose_task",
-            "plan_task",
-            "dispatch_task",
-            "collect_agent_result",
-            "review_agent_run",
-            "followup_review",
-        ):
+        if action_type not in ACTION_TYPES:
+            schema_issues.append(plan_schema_issue("warning", f"actions[{index}].type", f"unsupported type {action_type!r}"))
             continue
         clean = {"type": action_type}
         for key in (
@@ -1049,6 +1120,7 @@ def normalize_action_plan(plan, fallback_plan):
 
     if not normalized:
         normalized = fallback_plan.get("actions", [])
+    schema_issues.extend(validate_plan_items(normalized, ACTION_TYPES, "actions"))
 
     return {
         "summary": summary,
@@ -1057,6 +1129,7 @@ def normalize_action_plan(plan, fallback_plan):
         "resolved_threads": normalize_thread_list(plan.get("resolved_threads"))
         or normalize_thread_list(fallback_plan.get("resolved_threads")),
         "actions": normalized,
+        "schema_issues": schema_issues,
     }
 
 def act_phase(
@@ -1120,7 +1193,14 @@ def act_phase(
             }
         )
         return fallback
-    return normalize_action_plan(action_plan, fallback)
+    normalized = normalize_action_plan(action_plan, fallback)
+    if normalized.get("schema_issues"):
+        append_log(
+            "- "
+            f"{current_time}: act_phase schema_issues event={event['id']} "
+            f"count={len(normalized['schema_issues'])}"
+        )
+    return normalized
 
 def update_agent_work_context_from_plan(state, event, decision_plan, action_plan, current_time):
     agent = state["agent_status"]
