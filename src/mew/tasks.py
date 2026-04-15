@@ -151,31 +151,42 @@ def normalize_task_kind(kind):
     return normalized if normalized in TASK_KINDS else ""
 
 def infer_task_kind(title="", description="", notes="", command="", cwd="", agent_prompt=""):
-    text = " ".join(
+    primary_text = " ".join(
         value.strip()
-        for value in (title or "", description or "", notes or "", command or "", cwd or "", agent_prompt or "")
+        for value in (title or "", description or "")
         if isinstance(value, str) and value.strip()
     ).casefold()
+    execution_text = " ".join(
+        value.strip()
+        for value in (command or "", cwd or "", agent_prompt or "")
+        if isinstance(value, str) and value.strip()
+    ).casefold()
+    text = " ".join(
+        value.strip()
+        for value in (primary_text, execution_text)
+        if isinstance(value, str) and value.strip()
+    )
+    primary_tokens = set(re.findall(r"[a-z0-9_.+-]+|[ぁ-んァ-ン一-龯]+", primary_text))
     tokens = set(re.findall(r"[a-z0-9_.+-]+|[ぁ-んァ-ン一-龯]+", text))
     if not text:
         return "unknown"
     if command or agent_prompt:
         return "coding"
-    if any(keyword in text for keyword in PERSONAL_PHRASES) or any(keyword in tokens for keyword in PERSONAL_KEYWORDS):
-        return "personal"
-    if any(keyword in tokens for keyword in CODING_DECISIVE_KEYWORDS):
+    if any(keyword in primary_tokens for keyword in CODING_DECISIVE_KEYWORDS):
         return "coding"
-    if any(phrase in text for phrase in CODING_PHRASES):
+    if any(phrase in primary_text for phrase in CODING_PHRASES):
         return "coding"
     if (
-        any(keyword in text for keyword in RESEARCH_PHRASES)
-        or any(keyword in text for keyword in ("調査", "検証"))
-        or "調べる" in text
-        or any(keyword in tokens for keyword in RESEARCH_KEYWORDS)
+        any(keyword in primary_text for keyword in RESEARCH_PHRASES)
+        or any(keyword in primary_text for keyword in ("調査", "検証"))
+        or "調べる" in primary_text
+        or any(keyword in primary_tokens for keyword in RESEARCH_KEYWORDS)
     ):
         return "research"
-    if any(keyword in text for keyword in ADMIN_PHRASES) or any(keyword in tokens for keyword in ADMIN_KEYWORDS):
+    if any(keyword in primary_text for keyword in ADMIN_PHRASES) or any(keyword in primary_tokens for keyword in ADMIN_KEYWORDS):
         return "admin"
+    if any(keyword in primary_text for keyword in PERSONAL_PHRASES) or any(keyword in primary_tokens for keyword in PERSONAL_KEYWORDS):
+        return "personal"
     if any(keyword in tokens for keyword in CODING_STRONG_KEYWORDS):
         return "coding"
     if any(keyword in tokens for keyword in CODING_WEAK_KEYWORDS) and any(
@@ -188,6 +199,9 @@ def task_kind(task):
     explicit = normalize_task_kind(task.get("kind"))
     if explicit:
         return explicit
+    return inferred_task_kind(task)
+
+def inferred_task_kind(task):
     return infer_task_kind(
         task.get("title") or "",
         task.get("description") or "",
@@ -199,6 +213,22 @@ def task_kind(task):
 
 def is_programmer_task(task):
     return task_kind(task) == "coding"
+
+def task_kind_report(task):
+    stored_kind = task.get("kind") or ""
+    explicit = normalize_task_kind(stored_kind)
+    inferred = inferred_task_kind(task)
+    effective = explicit or inferred
+    return {
+        "id": task.get("id"),
+        "title": task.get("title") or "",
+        "status": task.get("status") or "",
+        "stored_kind": stored_kind,
+        "explicit_kind": explicit,
+        "inferred_kind": inferred,
+        "effective_kind": effective,
+        "mismatch": bool(explicit and inferred not in ("", "unknown") and explicit != inferred),
+    }
 
 def latest_task_plan_record(task):
     plans = task.get("plans") or []

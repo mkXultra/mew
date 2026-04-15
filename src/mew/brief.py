@@ -64,6 +64,19 @@ def review_runs_needing_followup(state):
         and not run.get("followup_processed_at")
     ]
 
+def dry_run_implementation_runs(state, tasks):
+    task_ids = {str(task.get("id")) for task in tasks if task_kind(task) == "coding"}
+    runs = []
+    for run in reversed(state.get("agent_runs", [])):
+        if run.get("purpose", "implementation") != "implementation":
+            continue
+        if run.get("status") != "dry_run":
+            continue
+        if str(run.get("task_id")) not in task_ids:
+            continue
+        runs.append(run)
+    return runs
+
 
 def tasks_needing_plan(tasks):
     return [task for task in tasks if task_needs_programmer_plan(task)]
@@ -324,6 +337,7 @@ def build_brief_data(state, limit=5):
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
+    dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
 
@@ -353,6 +367,7 @@ def build_brief_data(state, limit=5):
         "programmer_queue": {
             "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
             "followup_needed": [_agent_run_item(run) for run in followup_waiting[:limit]],
+            "dry_run_ready": [_agent_run_item(run) for run in dry_run_waiting[:limit]],
             "dispatchable": [
                 {"task": _task_item(task), "plan_id": plan.get("id")}
                 for task, plan in dispatchable[:limit]
@@ -432,6 +447,7 @@ def next_move(state):
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
+    dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     recent_verifications = recent_verification_runs(state, limit=1)
@@ -446,6 +462,9 @@ def next_move(state):
         return f"process review run #{followup_waiting[0].get('id')} with `mew agent followup {followup_waiting[0].get('id')}`"
     if review_waiting:
         return f"review implementation run #{review_waiting[0].get('id')} with `mew agent review {review_waiting[0].get('id')}`"
+    if dry_run_waiting:
+        task_id = dry_run_waiting[0].get("task_id")
+        return f"start dry-run task #{task_id} with `mew buddy --task {task_id} --dispatch`"
     if dispatchable:
         task, plan = dispatchable[0]
         return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `mew task dispatch {task.get('id')}`"
@@ -475,6 +494,7 @@ def build_brief(state, limit=5):
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
+    dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
@@ -585,12 +605,14 @@ def build_brief(state, limit=5):
             )
         lines.append("")
 
-    if review_waiting or followup_waiting or dispatchable or plan_needed:
+    if review_waiting or followup_waiting or dry_run_waiting or dispatchable or plan_needed:
         lines.append("Programmer queue")
         for run in review_waiting[:limit]:
             lines.append(f"- review needed: run #{run.get('id')} task=#{run.get('task_id')}")
         for run in followup_waiting[:limit]:
             lines.append(f"- follow-up needed: review run #{run.get('id')} task=#{run.get('task_id')}")
+        for run in dry_run_waiting[:limit]:
+            lines.append(f"- dry-run ready: run #{run.get('id')} task=#{run.get('task_id')}")
         for task, plan in dispatchable[:limit]:
             lines.append(f"- dispatchable: task #{task.get('id')} plan=#{plan.get('id')}")
         for task in plan_needed[:limit]:

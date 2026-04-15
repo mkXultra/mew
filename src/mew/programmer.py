@@ -236,6 +236,7 @@ def find_review_run_for_implementation(state, implementation_run_id):
         if (
             run.get("purpose") == "review"
             and str(run.get("review_of_run_id")) == str(implementation_run_id)
+            and run.get("status") != "dry_run"
         ):
             return run
     return None

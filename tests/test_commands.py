@@ -290,6 +290,31 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_classify_can_report_and_apply_mismatches(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "補助金について調べる", "--kind", "coding"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "classify", "--mismatches"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("stored=coding inferred=research mismatch", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "classify", "1", "--apply"]), 0)
+                self.assertIn("changed 1 task", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "show", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("kind: research", output)
+                self.assertIn("kind_override: research", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_plan_refuses_non_coding_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -303,6 +328,218 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("is not a coding task", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
+
+    def test_buddy_creates_plan_and_dry_run_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["task", "add", "Implement buddy test", "--kind", "coding", "--ready"]),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["buddy", "--task", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("buddy task #1", output)
+                self.assertIn("created plan #1", output)
+                self.assertIn("dispatch with `mew buddy --task 1 --dispatch --dry-run`", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("created dry-run implementation run #1", output)
+                self.assertIn("command: ai-cli run", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("reused implementation run #1 status=dry_run", output)
+                self.assertIn("command: ai-cli run", output)
+
+                from mew.state import load_state
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], 1)
+                self.assertEqual(len(state["agent_runs"]), 1)
+                self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+                self.assertEqual(state["agent_runs"][0]["purpose"], "implementation")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_buddy_reports_start_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement failing start", "--kind", "coding", "--ready"]), 0)
+
+                def fail_start(_state, run):
+                    run["status"] = "failed"
+                    run["stderr"] = "ai-cli unavailable"
+                    run["updated_at"] = "now"
+                    return run
+
+                with patch("mew.commands.start_agent_run", side_effect=fail_start):
+                    with redirect_stderr(StringIO()) as stderr:
+                        self.assertEqual(main(["buddy", "--task", "1", "--dispatch"]), 1)
+                self.assertIn("failed to start: ai-cli unavailable", stderr.getvalue())
+
+                from mew.state import load_state
+
+                state = load_state()
+                self.assertEqual(state["agent_runs"][0]["status"], "failed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_buddy_saves_dispatch_before_review_status_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement running review guard", "--kind", "coding", "--ready"]), 0)
+
+                def start_running(_state, run):
+                    run["status"] = "running"
+                    run["external_pid"] = 123
+                    run["updated_at"] = "now"
+                    return run
+
+                with patch("mew.commands.start_agent_run", side_effect=start_running):
+                    with redirect_stderr(StringIO()) as stderr:
+                        self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--review"]), 1)
+                self.assertIn("use --force-review", stderr.getvalue())
+
+                from mew.state import load_state
+
+                state = load_state()
+                self.assertEqual(state["agent_runs"][0]["status"], "running")
+                self.assertEqual(state["agent_runs"][0]["external_pid"], 123)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_buddy_creates_dry_run_review_for_completed_implementation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement review preview", "--kind", "coding", "--ready"]), 0)
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["agent_runs"][0]["status"] = "completed"
+                    state["agent_runs"][0]["result"] = "Implemented safely."
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["buddy", "--task", "1", "--review", "--dry-run"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("created dry-run review run #2", output)
+                self.assertIn("start review for real with `mew buddy --task 1 --review`", output)
+
+                state = load_state()
+                self.assertEqual(state["agent_runs"][1]["purpose"], "review")
+                self.assertEqual(state["agent_runs"][1]["status"], "dry_run")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_buddy_review_uses_implementation_run_plan(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement plan-specific review", "--kind", "coding", "--ready"]), 0)
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["agent_runs"][0]["status"] = "completed"
+                    state["agent_runs"][0]["result"] = "Implemented plan one."
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["buddy", "--task", "1", "--force-plan"]), 0)
+                    self.assertEqual(main(["buddy", "--task", "1", "--review", "--dry-run"]), 0)
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], 2)
+                self.assertEqual(state["agent_runs"][1]["purpose"], "review")
+                self.assertEqual(state["agent_runs"][1]["plan_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_buddy_forced_review_hint_keeps_force_review(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement forced review hint", "--kind", "coding", "--ready"]), 0)
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["buddy", "--task", "1", "--review", "--dry-run", "--force-review"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("created dry-run review run #2", output)
+                self.assertIn("command: ai-cli run", output)
+                self.assertIn("start review for real with `mew buddy --task 1 --review --force-review`", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_can_classify_and_run_buddy_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "補助金について調べる", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "add", "Implement chat buddy", "--kind", "coding", "--ready"]), 0)
+
+                stdin = StringIO(
+                    "/classify 1 apply\n"
+                    "/buddy 2\n"
+                    "/buddy 2 dispatch dry-run\n"
+                    "/exit\n"
+                )
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()) as stderr,
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                self.assertEqual(stderr.getvalue(), "")
+                output = stdout.getvalue()
+                self.assertIn("effective=research stored=research inferred=research", output)
+                self.assertIn("buddy task #2", output)
+                self.assertIn("created dry-run implementation run #1", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_classify_and_buddy_handle_bad_quotes(self):
+        stdin = StringIO('/classify "unterminated\n/buddy "unterminated\n/exit\n')
+        with (
+            patch("sys.stdin", stdin),
+            redirect_stdout(StringIO()) as stdout,
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertGreaterEqual(stdout.getvalue().count("No closing quotation"), 2)
 
     def test_task_run_refuses_non_coding_task(self):
         old_cwd = os.getcwd()

@@ -17,6 +17,7 @@ from .commands import (
     cmd_activity,
     cmd_attention,
     cmd_brief,
+    cmd_buddy,
     cmd_chat,
     cmd_context,
     cmd_desires_init,
@@ -48,6 +49,7 @@ from .commands import (
     cmd_status,
     cmd_stop,
     cmd_task_add,
+    cmd_task_classify,
     cmd_task_dispatch,
     cmd_task_done,
     cmd_task_list,
@@ -315,6 +317,22 @@ def build_parser():
     daily_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
     daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daily_parser.set_defaults(func=cmd_focus)
+
+    buddy_parser = subparsers.add_parser("buddy", help="advance one coding task through the programmer loop")
+    buddy_parser.add_argument("--task", dest="task_id", help="task id; defaults to the next open coding task")
+    buddy_parser.add_argument("--cwd", help="working directory for generated plan/run")
+    buddy_parser.add_argument("--agent-model", help="implementation model")
+    buddy_parser.add_argument("--review-model", help="review model")
+    buddy_parser.add_argument("--objective", help="override plan objective")
+    buddy_parser.add_argument("--approach", help="override plan approach")
+    buddy_parser.add_argument("--force-plan", action="store_true", help="create a new plan even if one exists")
+    buddy_parser.add_argument("--dispatch", action="store_true", help="create or start an implementation run")
+    buddy_parser.add_argument("--force-dispatch", action="store_true", help="create a new implementation run even if one is active")
+    buddy_parser.add_argument("--dry-run", action="store_true", help="create run records and commands without starting ai-cli")
+    buddy_parser.add_argument("--review", action="store_true", help="create or start a review run after implementation")
+    buddy_parser.add_argument("--force-review", action="store_true", help="review even if implementation run is not completed or failed")
+    buddy_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    buddy_parser.set_defaults(func=cmd_buddy)
 
     activity_parser = subparsers.add_parser("activity", help="show recent mew activity")
     activity_parser.add_argument("--limit", type=int, default=10, help="maximum activity items")
@@ -735,6 +753,16 @@ def build_parser():
     list_parser.add_argument("--all", action="store_true", help="include done tasks")
     list_parser.add_argument("--kind", choices=("coding", "research", "personal", "admin", "unknown"), help="filter by task kind")
     list_parser.set_defaults(func=cmd_task_list)
+
+    classify_parser = task_subparsers.add_parser("classify", help="inspect or update task kind inference")
+    classify_parser.add_argument("task_id", nargs="?", help="task id to classify; defaults to open tasks")
+    classify_parser.add_argument("--all", action="store_true", help="include done tasks")
+    classify_parser.add_argument("--mismatches", action="store_true", help="show only explicit kind mismatches")
+    classify_parser.add_argument("--apply", action="store_true", help="store inferred kind on selected tasks")
+    classify_parser.add_argument("--clear", action="store_true", help="clear stored kind override on selected tasks")
+    classify_parser.add_argument("--include-unknown", action="store_true", help="allow --apply to store unknown")
+    classify_parser.add_argument("--json", action="store_true", help="print JSON")
+    classify_parser.set_defaults(func=cmd_task_classify)
 
     show_parser = task_subparsers.add_parser("show", help="show a task")
     show_parser.add_argument("task_id")

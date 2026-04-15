@@ -53,6 +53,20 @@ Programmer plans and direct task agent runs are intentionally limited to tasks c
 For a misclassified implementation task, run `uv run mew task update <id> --kind coding`
 or `/kind <id> coding` in chat first.
 
+`mew buddy` is the safer single-task wrapper around that manual flow. By
+default it only creates or reuses a plan; add `--dispatch --dry-run` to preview
+the implementation run command before starting anything:
+
+```sh
+uv run mew task classify --mismatches
+uv run mew task classify <task-id> --apply
+uv run mew buddy --task <task-id>
+uv run mew buddy --task <task-id> --dispatch --dry-run
+uv run mew buddy --task <task-id> --dispatch
+uv run mew agent wait <run-id>
+uv run mew buddy --task <task-id> --review --dry-run
+```
+
 Autonomous dispatch is intentionally gated:
 
 ```sh
@@ -203,6 +217,7 @@ state without leaving the session:
 /show 4
 /note 4 次はここを見る
 /kind 4 research
+/classify 4 apply
 /defer 3 later
 /reopen 3
 /reply 3 それで進めて
@@ -225,6 +240,7 @@ state without leaving the session:
 /ready 4
 /plan 4 prompt
 /dispatch 4 dry-run
+/buddy 4 dispatch dry-run
 /self dry-run prompt improve chat loop
 /done 4
 /block 4

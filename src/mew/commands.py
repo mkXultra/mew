@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from .agent_runs import (
     build_ai_cli_run_command,
@@ -44,6 +45,7 @@ from .programmer import (
     create_retry_run_for_implementation,
     create_review_run_for_implementation,
     create_task_plan,
+    find_active_implementation_run_for_plan,
     find_task_plan,
     format_task_plan,
     latest_task_plan,
@@ -89,6 +91,7 @@ from .tasks import (
     normalize_task_kind,
     open_tasks,
     task_kind,
+    task_kind_report,
     task_sort_key,
 )
 from .thoughts import format_thought_entry
@@ -139,6 +142,70 @@ def cmd_task_list(args):
         return 0
     for task in tasks:
         print(format_task(task))
+    return 0
+
+def format_task_kind_report(report):
+    marker = " mismatch" if report.get("mismatch") else ""
+    stored = report.get("stored_kind") or "-"
+    return (
+        f"#{report.get('id')} [{report.get('status')}] "
+        f"effective={report.get('effective_kind')} stored={stored} "
+        f"inferred={report.get('inferred_kind')}{marker} {report.get('title')}"
+    )
+
+def cmd_task_classify(args):
+    if args.apply and args.clear:
+        print("mew: choose only one of --apply or --clear", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        if args.task_id:
+            task = find_task(state, args.task_id)
+            if not task:
+                print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+                return 1
+            tasks = [task]
+        else:
+            tasks = state["tasks"] if args.all else open_tasks(state)
+
+        tasks = sorted(tasks, key=task_sort_key)
+        reports = [task_kind_report(task) for task in tasks]
+        if args.mismatches:
+            pairs = [(task, report) for task, report in zip(tasks, reports) if report.get("mismatch")]
+            tasks = [task for task, _report in pairs]
+            reports = [report for _task, report in pairs]
+
+        changed = []
+        if args.clear or args.apply:
+            for task, report in zip(tasks, reports):
+                current = task.get("kind") or ""
+                if args.clear:
+                    if current:
+                        task["kind"] = ""
+                        task["updated_at"] = now_iso()
+                        changed.append(task)
+                    continue
+                inferred = report.get("inferred_kind") or "unknown"
+                if inferred == "unknown" and not args.include_unknown:
+                    continue
+                if current != inferred:
+                    task["kind"] = inferred
+                    task["updated_at"] = now_iso()
+                    changed.append(task)
+            if changed:
+                save_state(state)
+            reports = [task_kind_report(task) for task in tasks]
+
+    if args.json:
+        print(json.dumps({"tasks": reports, "changed": [task.get("id") for task in changed]}, ensure_ascii=False, indent=2))
+        return 0
+    if not reports:
+        print("No tasks.")
+        return 0
+    for report in reports:
+        print(format_task_kind_report(report))
+    if args.clear or args.apply:
+        print(f"changed {len(changed)} task(s)")
     return 0
 
 def cmd_task_show(args):
@@ -1718,6 +1785,234 @@ def cmd_snapshot(args):
     print(format_snapshot_refresh_report(report))
     return 0
 
+def latest_implementation_run_for_task(state, task_id):
+    for run in reversed(state.get("agent_runs", [])):
+        if run.get("purpose", "implementation") != "implementation":
+            continue
+        if str(run.get("task_id")) == str(task_id):
+            return run
+    return None
+
+def latest_implementation_run_for_plan(state, task_id, plan_id, statuses=None):
+    wanted_statuses = set(statuses or [])
+    for run in reversed(state.get("agent_runs", [])):
+        if run.get("purpose", "implementation") != "implementation":
+            continue
+        if str(run.get("task_id")) != str(task_id):
+            continue
+        if str(run.get("plan_id")) != str(plan_id):
+            continue
+        if wanted_statuses and run.get("status") not in wanted_statuses:
+            continue
+        return run
+    return None
+
+def select_buddy_task(state, task_id=None):
+    if task_id:
+        return find_task(state, task_id)
+    for task in sorted(open_tasks(state), key=task_sort_key):
+        if is_programmer_task(task):
+            return task
+    return None
+
+def summarize_buddy_step(action, detail, **extra):
+    step = {"action": action, "detail": detail}
+    step.update(extra)
+    return step
+
+def format_buddy_report(report):
+    lines = [f"buddy task #{report['task']['id']}: {report['task']['title']}"]
+    for step in report["steps"]:
+        lines.append(f"- {step['detail']}")
+        if step.get("command"):
+            lines.append(f"  command: {shlex.join(step['command'])}")
+    if report.get("next"):
+        lines.append(f"next: {report['next']}")
+    return "\n".join(lines)
+
+def cmd_buddy(args):
+    with state_lock():
+        state = load_state()
+        task = select_buddy_task(state, getattr(args, "task_id", None))
+        if not task:
+            print("mew: no coding task available for buddy", file=sys.stderr)
+            return 1
+        if not is_programmer_task(task):
+            print(
+                f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; update --kind coding first",
+                file=sys.stderr,
+            )
+            return 1
+
+        steps = []
+        dirty = False
+        plan = latest_task_plan(task)
+        if plan and not args.force_plan:
+            steps.append(summarize_buddy_step("plan", f"reused {format_task_plan(plan)}", plan_id=plan["id"]))
+        else:
+            plan = create_task_plan(
+                state,
+                task,
+                cwd=args.cwd,
+                model=args.agent_model,
+                review_model=args.review_model,
+                objective=args.objective,
+                approach=args.approach,
+            )
+            dirty = True
+            steps.append(summarize_buddy_step("plan", f"created {format_task_plan(plan)}", plan_id=plan["id"]))
+
+        run = None
+        if args.dispatch:
+            active = (
+                latest_implementation_run_for_plan(state, task["id"], plan["id"], statuses=("dry_run",))
+                if args.dry_run
+                else find_active_implementation_run_for_plan(state, task["id"], plan["id"])
+            )
+            if active and not args.force_dispatch:
+                run = active
+                extra = {"run_id": run["id"]}
+                if run.get("command"):
+                    extra["command"] = run["command"]
+                steps.append(
+                    summarize_buddy_step(
+                        "dispatch",
+                        f"reused implementation run #{run['id']} status={run.get('status')}",
+                        **extra,
+                    )
+                )
+            else:
+                if args.cwd:
+                    plan["cwd"] = args.cwd
+                if args.agent_model:
+                    plan["model"] = args.agent_model
+                run = create_implementation_run_from_plan(state, task, plan, dry_run=args.dry_run)
+                dirty = True
+                if args.dry_run:
+                    ensure_agent_run_prompt_file(run)
+                    run["command"] = build_ai_cli_run_command(run)
+                    steps.append(
+                        summarize_buddy_step(
+                            "dispatch",
+                            f"created dry-run implementation run #{run['id']} from plan #{plan['id']}",
+                            run_id=run["id"],
+                            command=run["command"],
+                        )
+                    )
+                else:
+                    try:
+                        start_agent_run(state, run)
+                    except ValueError as exc:
+                        save_state(state)
+                        print(f"mew: {exc}", file=sys.stderr)
+                        return 1
+                    if run.get("status") != "running":
+                        save_state(state)
+                        detail = run.get("stderr") or run.get("stdout") or run.get("result") or "unknown error"
+                        print(f"mew: implementation run #{run['id']} failed to start: {detail}", file=sys.stderr)
+                        return 1
+                    steps.append(
+                        summarize_buddy_step(
+                            "dispatch",
+                            f"started implementation run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}",
+                            run_id=run["id"],
+                        )
+                    )
+
+        review_run = None
+        review_requires_force = False
+        if args.review:
+            implementation_run = run or latest_implementation_run_for_task(state, task["id"])
+            if not implementation_run:
+                if dirty:
+                    save_state(state)
+                print(f"mew: no implementation run found for task #{task['id']}", file=sys.stderr)
+                return 1
+            if implementation_run.get("status") not in ("completed", "failed") and not args.force_review:
+                if dirty:
+                    save_state(state)
+                print(
+                    f"mew: implementation run #{implementation_run['id']} status={implementation_run.get('status')}; use --force-review",
+                    file=sys.stderr,
+                )
+                return 1
+            review_requires_force = implementation_run.get("status") not in ("completed", "failed")
+            review_plan = (
+                find_task_plan(task, implementation_run.get("plan_id"))
+                if implementation_run.get("plan_id")
+                else plan
+            )
+            review_run = create_review_run_for_implementation(
+                state,
+                task,
+                implementation_run,
+                plan=review_plan,
+                model=args.review_model,
+            )
+            dirty = True
+            if args.dry_run:
+                review_run["status"] = "dry_run"
+                ensure_agent_run_prompt_file(review_run)
+                review_run["command"] = build_ai_cli_run_command(review_run)
+                steps.append(
+                    summarize_buddy_step(
+                        "review",
+                        f"created dry-run review run #{review_run['id']} for implementation run #{implementation_run['id']}",
+                        run_id=review_run["id"],
+                        command=review_run["command"],
+                    )
+                )
+            else:
+                try:
+                    start_agent_run(state, review_run)
+                except ValueError as exc:
+                    save_state(state)
+                    print(f"mew: {exc}", file=sys.stderr)
+                    return 1
+                if review_run.get("status") != "running":
+                    save_state(state)
+                    detail = review_run.get("stderr") or review_run.get("stdout") or review_run.get("result") or "unknown error"
+                    print(f"mew: review run #{review_run['id']} failed to start: {detail}", file=sys.stderr)
+                    return 1
+                steps.append(
+                    summarize_buddy_step(
+                        "review",
+                        f"started review run #{review_run['id']} status={review_run.get('status')} pid={review_run.get('external_pid')}",
+                        run_id=review_run["id"],
+                    )
+                )
+
+        save_state(state)
+
+    next_text = f"inspect with `mew task show {task['id']}`"
+    if review_run and review_run.get("status") == "dry_run":
+        force = " --force-review" if review_requires_force else ""
+        next_text = f"start review for real with `mew buddy --task {task['id']} --review{force}`"
+    elif review_run and review_run.get("status") == "running":
+        next_text = f"wait for review with `mew agent wait {review_run['id']}`"
+    elif plan and not args.dispatch and not args.review:
+        next_text = f"dispatch with `mew buddy --task {task['id']} --dispatch --dry-run`"
+    elif run and run.get("status") == "dry_run":
+        next_text = f"start for real with `mew buddy --task {task['id']} --dispatch`"
+    elif run and run.get("status") == "running":
+        next_text = f"wait with `mew agent wait {run['id']}`"
+    elif run and run.get("status") in ("completed", "failed") and not review_run:
+        next_text = f"review with `mew buddy --task {task['id']} --review --dry-run`"
+
+    report = {
+        "task": {"id": task["id"], "title": task.get("title"), "kind": task_kind(task), "status": task.get("status")},
+        "plan_id": plan.get("id") if plan else None,
+        "run_id": run.get("id") if run else None,
+        "review_run_id": review_run.get("id") if review_run else None,
+        "steps": steps,
+        "next": next_text,
+    }
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_buddy_report(report))
+    return 0
+
 def cmd_task_run(args):
     with state_lock():
         state = load_state()
@@ -2276,6 +2571,7 @@ CHAT_HELP = """Commands:
 /show <task-id>       show task details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
+/classify [id]        inspect task kind inference; add apply|clear|mismatches
 /questions [all]      list open questions, or all questions
 /defer <id> [reason]  defer a question so /next can move on
 /reopen <id>          reopen a deferred question
@@ -2301,6 +2597,7 @@ CHAT_HELP = """Commands:
 /block <task-id>      mark a task blocked
 /plan <task-id>       create or show a programmer plan; add prompt to print prompts
 /dispatch <task-id>   start an implementation run; add dry-run to preview
+/buddy [task-id]      plan one coding task; add dispatch, dry-run, review
 /self [focus]         create/plan self-improvement; add dispatch or dry-run
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
@@ -2441,6 +2738,40 @@ def chat_set_task_kind(rest):
         task["updated_at"] = now_iso()
         save_state(state)
     print(f"task #{task['id']} kind={normalized}")
+
+def chat_classify_tasks(rest):
+    try:
+        tokens = shlex.split(rest) if rest else []
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    args = SimpleNamespace(
+        task_id=None,
+        all=False,
+        mismatches=False,
+        apply=False,
+        clear=False,
+        include_unknown=False,
+        json=False,
+    )
+    for token in tokens:
+        normalized = token.strip().casefold().lstrip("-")
+        if normalized == "all":
+            args.all = True
+        elif normalized in ("mismatch", "mismatches"):
+            args.mismatches = True
+        elif normalized == "apply":
+            args.apply = True
+        elif normalized == "clear":
+            args.clear = True
+        elif normalized in ("include-unknown", "unknown"):
+            args.include_unknown = True
+        elif args.task_id is None:
+            args.task_id = token
+        else:
+            print("usage: /classify [task-id|all] [mismatches] [apply|clear]")
+            return
+    cmd_task_classify(args)
 
 
 def print_chat_questions(show_all=False):
@@ -3090,6 +3421,55 @@ def chat_dispatch_task(rest):
         print(f"started implementation run #{run['id']} task={task['id']} plan={plan['id']} status={run.get('status')} pid={run.get('external_pid')}")
 
 
+def chat_buddy(rest):
+    try:
+        tokens = shlex.split(rest) if rest else []
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
+    args = SimpleNamespace(
+        task_id=None,
+        cwd=None,
+        agent_model=None,
+        review_model=None,
+        objective=None,
+        approach=None,
+        force_plan=False,
+        dispatch=False,
+        force_dispatch=False,
+        dry_run=False,
+        review=False,
+        force_review=False,
+        json=False,
+    )
+    for token in tokens:
+        normalized = token.strip().casefold().lstrip("-")
+        if normalized == "dispatch":
+            args.dispatch = True
+        elif normalized in ("dry-run", "dry"):
+            args.dry_run = True
+        elif normalized == "review":
+            args.review = True
+        elif normalized == "force-plan":
+            args.force_plan = True
+        elif normalized == "force-dispatch":
+            args.force_dispatch = True
+        elif normalized == "force-review":
+            args.force_review = True
+        elif normalized.startswith("model="):
+            args.agent_model = token.split("=", 1)[1]
+        elif normalized.startswith("review-model="):
+            args.review_model = token.split("=", 1)[1]
+        elif normalized.startswith("cwd="):
+            args.cwd = token.split("=", 1)[1]
+        elif args.task_id is None:
+            args.task_id = token
+        else:
+            print("usage: /buddy [task-id] [dispatch] [dry-run] [review]")
+            return
+    cmd_buddy(args)
+
+
 def chat_self_improve(rest):
     try:
         parts = shlex.split(rest)
@@ -3203,6 +3583,9 @@ def run_chat_slash_command(line, chat_state):
     if command == "kind":
         chat_set_task_kind(rest)
         return "continue"
+    if command in ("classify", "classification"):
+        chat_classify_tasks(rest)
+        return "continue"
     if command in ("questions", "question"):
         print_chat_questions(show_all=rest.casefold() == "all")
         return "continue"
@@ -3292,6 +3675,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "dispatch":
         chat_dispatch_task(rest)
+        return "continue"
+    if command == "buddy":
+        chat_buddy(rest)
         return "continue"
     if command in ("self", "self-improve"):
         chat_self_improve(rest)

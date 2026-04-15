@@ -768,11 +768,13 @@ The first user-facing version should likely include:
 - `mew desires init`: create `.mew/desires.md`.
 - `mew desires show`: show the current self-directed desires.
 - `mew task add <text>`: add a task. `--kind coding|research|personal|admin|unknown` may be used to override task classification, and `--ready` can create an immediately actionable task.
+- `mew task classify [task-id]`: inspect stored, inferred, and effective task kind; `--mismatches`, `--apply`, and `--clear` help repair stale task-kind overrides.
 - `mew task list --kind <kind>`: list only tasks matching a specific task kind.
 - `mew task list`: list tasks.
 - `mew task show <task-id>`: show task details.
 - `mew task update <task-id>`: update task fields.
 - `mew task done <task-id>`: mark a task complete.
+- `mew buddy [--task <task-id>]`: advance one coding task through the programmer loop. The default creates or reuses a plan; `--dispatch --dry-run` previews the implementation run, and explicit `--dispatch` or `--review` moves further. Long waits remain under `mew agent wait <run-id>`.
 
 Exact command names can change during implementation.
 

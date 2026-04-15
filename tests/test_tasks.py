@@ -1,6 +1,6 @@
 import unittest
 
-from mew.tasks import infer_task_kind, normalize_task_id, task_kind, task_needs_programmer_plan
+from mew.tasks import infer_task_kind, normalize_task_id, task_kind, task_kind_report, task_needs_programmer_plan
 
 
 class TaskKindTests(unittest.TestCase):
@@ -22,6 +22,16 @@ class TaskKindTests(unittest.TestCase):
         self.assertEqual(infer_task_kind("Fix unit test failure"), "coding")
         self.assertEqual(infer_task_kind("Return JSON from API"), "coding")
 
+    def test_infer_task_kind_does_not_let_housekeeping_notes_dominate(self):
+        self.assertEqual(
+            infer_task_kind(
+                "補助金について調べる",
+                description="利用可能な補助金を調査する。",
+                notes="Proposed by mew from event #1.",
+            ),
+            "research",
+        )
+
     def test_task_kind_prefers_explicit_override(self):
         task = {
             "title": "Research API pricing",
@@ -29,6 +39,20 @@ class TaskKindTests(unittest.TestCase):
         }
 
         self.assertEqual(task_kind(task), "coding")
+
+    def test_task_kind_report_detects_explicit_mismatch(self):
+        report = task_kind_report({"id": 1, "title": "補助金について調べる", "kind": "coding", "status": "todo"})
+
+        self.assertEqual(report["stored_kind"], "coding")
+        self.assertEqual(report["inferred_kind"], "research")
+        self.assertEqual(report["effective_kind"], "coding")
+        self.assertTrue(report["mismatch"])
+
+    def test_task_kind_report_does_not_treat_unknown_inference_as_mismatch(self):
+        report = task_kind_report({"id": 1, "title": "Ambiguous thing", "kind": "coding", "status": "todo"})
+
+        self.assertEqual(report["inferred_kind"], "unknown")
+        self.assertFalse(report["mismatch"])
 
     def test_task_needs_programmer_plan_uses_resolvable_latest_plan(self):
         task = {

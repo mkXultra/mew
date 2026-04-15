@@ -1,7 +1,12 @@
 import unittest
 
 from mew.brief import build_brief, build_brief_data, next_move, review_runs_needing_followup
-from mew.programmer import create_follow_up_task_from_review, create_implementation_run_from_plan, create_task_plan
+from mew.programmer import (
+    create_follow_up_task_from_review,
+    create_implementation_run_from_plan,
+    create_review_run_for_implementation,
+    create_task_plan,
+)
 from mew.state import add_outbox_message, add_question, default_state, mark_question_deferred
 
 
@@ -56,6 +61,18 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(next_move(state), "review implementation run #1 with `mew agent review 1`")
         self.assertIn("review needed: run #1", build_brief(state))
 
+    def test_dry_run_review_does_not_hide_needed_real_review(self):
+        state = default_state()
+        task = add_task(state)
+        plan = create_task_plan(state, task)
+        implementation = create_implementation_run_from_plan(state, task, plan, dry_run=True)
+        implementation["status"] = "completed"
+        review = create_review_run_for_implementation(state, task, implementation, plan=plan)
+        review["status"] = "dry_run"
+
+        self.assertEqual(next_move(state), "review implementation run #1 with `mew agent review 1`")
+        self.assertIn("review needed: run #1", build_brief(state))
+
     def test_next_move_recommends_dispatch_for_ready_planned_task(self):
         state = default_state()
         task = add_task(state, status="ready", auto_execute=True)
@@ -63,6 +80,17 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("mew task dispatch 1", next_move(state))
         self.assertIn("dispatchable: task #1", build_brief(state))
+
+    def test_next_move_recommends_starting_buddy_dry_run(self):
+        state = default_state()
+        task = add_task(state, status="ready", auto_execute=False)
+        plan = create_task_plan(state, task)
+        create_implementation_run_from_plan(state, task, plan, dry_run=True)
+
+        self.assertEqual(next_move(state), "start dry-run task #1 with `mew buddy --task 1 --dispatch`")
+        self.assertIn("dry-run ready: run #1 task=#1", build_brief(state))
+        data = build_brief_data(state)
+        self.assertEqual(data["programmer_queue"]["dry_run_ready"][0]["id"], 1)
 
     def test_next_move_recommends_plan_for_unplanned_task(self):
         state = default_state()
