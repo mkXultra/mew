@@ -217,13 +217,13 @@ def build_parser():
     run_parser.add_argument(
         "--auto-archive",
         action="store_true",
-        help="archive old processed inbox and read outbox records after runtime cycles",
+        help="archive old processed/read runtime records and effect log entries after runtime cycles",
     )
     run_parser.add_argument(
         "--archive-keep-recent",
         type=int,
         default=100,
-        help="processed/read records to keep active per section when --auto-archive is enabled",
+        help="records to keep active per section when --auto-archive is enabled",
     )
     run_parser.add_argument(
         "--task-timeout",
@@ -748,13 +748,13 @@ def build_parser():
     attention_parser.add_argument("--resolve-all", action="store_true", help="resolve all open attention items")
     attention_parser.set_defaults(func=cmd_attention)
 
-    archive_parser = subparsers.add_parser("archive", help="archive old processed inbox and read outbox records")
+    archive_parser = subparsers.add_parser("archive", help="archive old runtime records and effect log entries")
     archive_parser.add_argument("--apply", action="store_true", help="write archive and compact active state")
     archive_parser.add_argument(
         "--keep-recent",
         type=int,
         default=100,
-        help="processed/read records to keep active per section",
+        help="records to keep active per section",
     )
     archive_parser.set_defaults(func=cmd_archive)
 
