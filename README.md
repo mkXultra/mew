@@ -8,7 +8,7 @@ It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, a
 
 ```sh
 uv run mew doctor --auth auth.json
-uv run mew task add "Improve mew" --description "Pick one small useful improvement"
+uv run mew task add "Improve mew" --kind coding --ready --description "Pick one small useful improvement"
 uv run mew run --autonomous --autonomy-level propose --echo-outbox
 uv run mew run --ai --model-backend codex --auth auth.json --echo-outbox
 # or run it in the background:
@@ -22,9 +22,17 @@ uv run mew chat
 uv run mew attach -m "今日のタスクは何？"
 uv run mew message "今日のタスクは何？" --wait
 printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
+uv run mew focus
+uv run mew daily
 uv run mew brief
 uv run mew next
 ```
+
+`focus` and `daily` are the quiet daily views: they show the current next move,
+open questions, and the top tasks without the full operational brief. Tasks can
+be tagged with `--kind coding|research|personal|admin|unknown`; only coding
+tasks are routed into the programmer plan queue by `mew next` and autonomous
+propose mode.
 
 ## Programmer Loop
 
@@ -41,9 +49,15 @@ uv run mew agent retry <failed-run-id>
 uv run mew agent sweep
 ```
 
+Programmer plans and direct task agent runs are intentionally limited to tasks classified as `coding`.
+For a misclassified implementation task, run `uv run mew task update <id> --kind coding`
+or `/kind <id> coding` in chat first.
+
 Autonomous dispatch is intentionally gated:
 
 ```sh
+uv run mew task add "Implement the next small fix" --kind coding --ready --auto-execute
+# or:
 uv run mew task update <task-id> --status ready --auto-execute
 uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 ```
@@ -87,6 +101,9 @@ uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
 uv run mew chat
 uv run mew session
+uv run mew focus
+uv run mew focus --json
+uv run mew daily
 uv run mew brief
 uv run mew brief --json
 uv run mew activity
@@ -100,6 +117,7 @@ uv run mew dogfood --source-workspace . --cycles 3 --report .mew/dogfood-latest.
 uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json
+uv run mew task list --kind coding
 uv run mew verification
 uv run mew writes
 uv run mew thoughts --details
@@ -107,6 +125,8 @@ uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
 uv run mew ack --all
 uv run mew questions
+uv run mew questions --defer <question-id> --reason "not now"
+uv run mew questions --reopen <question-id>
 uv run mew reply <question-id> "answer"
 uv run mew attention
 uv run mew attention --resolve-all
@@ -173,6 +193,7 @@ sent to mew as a user message, and slash commands let you inspect or update
 state without leaving the session:
 
 ```text
+/focus
 /brief
 /next
 /perception
@@ -181,6 +202,9 @@ state without leaving the session:
 /add "調査する" | "対象を小さく確認する"
 /show 4
 /note 4 次はここを見る
+/kind 4 research
+/defer 3 later
+/reopen 3
 /reply 3 それで進めて
 /attention
 /resolve all
@@ -214,9 +238,12 @@ state without leaving the session:
 
 `mew session` is the JSON Lines control surface for scripts and future richer
 frontends. It reads one JSON object per line and writes one JSON object per
-line. Supported request types include `status`, `brief`, `activity`, `outbox`,
-`ack`, `message`, `reply`, `next`, and `stop`. `stop` exits the JSONL session;
-it does not stop the background runtime:
+line. Supported request types include `status`, `brief`, `focus`, `daily`, `activity`,
+`questions`, `attention`, `outbox`, `ack`, `message`, `reply`, `next`, and
+`defer_question`, `reopen_question`, `wait_outbox`, and `stop`. `message`
+requests may also pass `"wait": true`. `stop` exits the JSONL session;
+it does not stop the background runtime. `focus` responses contain a `focus`
+payload; `daily` responses contain the same shape under `daily`:
 
 ```sh
 printf '{"id":"m1","type":"message","text":"今日のタスクは何？"}\n{"id":"s1","type":"status"}\n{"type":"stop"}\n' | uv run mew session

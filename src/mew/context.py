@@ -4,7 +4,7 @@ from .config import LOG_FILE
 from .perception import perceive_workspace
 from .project_snapshot import snapshot_for_context
 from .state import open_attention_items, open_questions
-from .tasks import open_tasks, summarize_tasks, task_sort_key
+from .tasks import open_tasks, summarize_tasks, task_kind, task_sort_key
 from .thoughts import dropped_thread_warning_for_context, recent_thoughts_for_context
 from .timeutil import elapsed_hours
 
@@ -87,6 +87,7 @@ def task_for_context(task):
     return {
         "id": task.get("id"),
         "title": clip_context_text(task.get("title"), 400),
+        "kind": task_kind(task),
         "description": clip_context_text(task.get("description"), MAX_CONTEXT_TEXT_CHARS),
         "status": task.get("status"),
         "priority": task.get("priority"),

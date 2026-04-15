@@ -52,6 +52,7 @@ def create_self_improve_task(
         task = {
             "id": next_id(state, "task"),
             "title": title,
+            "kind": "coding",
             "description": description or build_self_improve_description(state, focus=focus),
             "status": "ready" if ready else "todo",
             "priority": priority,

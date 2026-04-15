@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import shlex
 import subprocess
 
@@ -7,9 +8,213 @@ from .errors import MewError
 from .state import add_outbox_message, has_unread_outbox_message
 from .timeutil import now_iso
 
+TASK_KINDS = ("coding", "research", "personal", "admin", "unknown")
+
+CODING_DECISIVE_KEYWORDS = (
+    "bug",
+    "cli",
+    "code",
+    "codex",
+    "commit",
+    "debug",
+    "deploy",
+    "feature",
+    "implement",
+    "integration",
+    "json",
+    "lint",
+    "mew",
+    "patch",
+    "pr",
+    "pytest",
+    "refactor",
+    "repo",
+    "script",
+    "sdk",
+    "source",
+    "typescript",
+    "uv",
+)
+
+CODING_STRONG_KEYWORDS = (
+    "agent",
+    "api",
+    "json",
+    "source",
+)
+
+CODING_WEAK_KEYWORDS = (
+    "build",
+    "docs",
+    "error",
+    "fail",
+    "failure",
+    "fix",
+    "interface",
+    "package",
+    "review",
+    "test",
+)
+
+CODING_CONTEXT_KEYWORDS = (
+    "ai-cli",
+    "cli",
+    "code",
+    "codex",
+    "git",
+    "mew",
+    "pytest",
+    "python",
+    "repo",
+    "repository",
+    "runtime",
+    "script",
+    "unittest",
+    "uv",
+)
+
+CODING_PHRASES = (
+    "agent run",
+    "build error",
+    "build failure",
+    "ci failure",
+    "code review",
+    "command line",
+    "failing test",
+    "pull request",
+    "review run",
+    "test failure",
+    "type error",
+    "unit test",
+)
+
+RESEARCH_KEYWORDS = (
+    "compare",
+    "調査",
+    "research",
+    "investigate",
+    "evaluate",
+    "explore",
+    "look up",
+    "survey",
+    "検証",
+)
+
+RESEARCH_PHRASES = (
+    "look up",
+)
+
+ADMIN_KEYWORDS = (
+    "bill",
+    "document",
+    "documents",
+    "email",
+    "invoice",
+    "payment",
+    "passport",
+    "tax",
+)
+
+ADMIN_PHRASES = (
+    "pay ",
+    "申請",
+    "支払い",
+    "税",
+    "請求",
+)
+
+PERSONAL_KEYWORDS = (
+    "dentist",
+    "doctor",
+    "library",
+    "appointment",
+    "買う",
+    "予約",
+    "返却",
+)
+
+PERSONAL_PHRASES = (
+    "book dentist",
+    "買う",
+    "予約",
+    "返却",
+)
+
 
 def open_tasks(state):
     return [task for task in state["tasks"] if task.get("status") != "done"]
+
+def normalize_task_kind(kind):
+    if not isinstance(kind, str):
+        return ""
+    normalized = kind.strip().casefold()
+    return normalized if normalized in TASK_KINDS else ""
+
+def infer_task_kind(title="", description="", notes="", command="", cwd="", agent_prompt=""):
+    text = " ".join(
+        value.strip()
+        for value in (title or "", description or "", notes or "", command or "", cwd or "", agent_prompt or "")
+        if isinstance(value, str) and value.strip()
+    ).casefold()
+    tokens = set(re.findall(r"[a-z0-9_.+-]+|[ぁ-んァ-ン一-龯]+", text))
+    if not text:
+        return "unknown"
+    if command or agent_prompt:
+        return "coding"
+    if any(keyword in text for keyword in PERSONAL_PHRASES) or any(keyword in tokens for keyword in PERSONAL_KEYWORDS):
+        return "personal"
+    if any(keyword in tokens for keyword in CODING_DECISIVE_KEYWORDS):
+        return "coding"
+    if any(phrase in text for phrase in CODING_PHRASES):
+        return "coding"
+    if (
+        any(keyword in text for keyword in RESEARCH_PHRASES)
+        or any(keyword in text for keyword in ("調査", "検証"))
+        or "調べる" in text
+        or any(keyword in tokens for keyword in RESEARCH_KEYWORDS)
+    ):
+        return "research"
+    if any(keyword in text for keyword in ADMIN_PHRASES) or any(keyword in tokens for keyword in ADMIN_KEYWORDS):
+        return "admin"
+    if any(keyword in tokens for keyword in CODING_STRONG_KEYWORDS):
+        return "coding"
+    if any(keyword in tokens for keyword in CODING_WEAK_KEYWORDS) and any(
+        keyword in tokens for keyword in CODING_CONTEXT_KEYWORDS
+    ):
+        return "coding"
+    return "unknown"
+
+def task_kind(task):
+    explicit = normalize_task_kind(task.get("kind"))
+    if explicit:
+        return explicit
+    return infer_task_kind(
+        task.get("title") or "",
+        task.get("description") or "",
+        task.get("notes") or "",
+        task.get("command") or "",
+        task.get("cwd") or "",
+        task.get("agent_prompt") or "",
+    )
+
+def is_programmer_task(task):
+    return task_kind(task) == "coding"
+
+def latest_task_plan_record(task):
+    plans = task.get("plans") or []
+    latest_id = task.get("latest_plan_id")
+    if latest_id is not None:
+        for plan in plans:
+            if str(plan.get("id")) == str(latest_id):
+                return plan
+    return plans[-1] if plans else None
+
+def task_needs_programmer_plan(task):
+    return (
+        is_programmer_task(task)
+        and task.get("status") in ("todo", "ready")
+        and not latest_task_plan_record(task)
+    )
 
 def task_sort_key(task):
     status_order = {"ready": 0, "todo": 1, "blocked": 2, "done": 3}
@@ -164,7 +369,7 @@ def normalize_task_id(value):
     if value is None:
         return None
     try:
-        return int(value)
+        return int(str(value).strip().lstrip("#"))
     except (TypeError, ValueError):
         return None
 
@@ -244,10 +449,7 @@ def execute_task_action(state, action, task_timeout):
     return 1
 
 def format_task(task):
-    return f"#{task['id']} [{task['status']}/{task['priority']}] {task['title']}"
+    return f"#{task['id']} [{task['status']}/{task['priority']}/{task_kind(task)}] {task['title']}"
 
 def find_task(state, task_id):
-    for task in state["tasks"]:
-        if str(task["id"]) == str(task_id):
-            return task
-    return None
+    return task_by_id(state, task_id)

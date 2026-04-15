@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from .agent_runs import (
     build_ai_cli_run_command,
@@ -22,7 +23,9 @@ from .brief import (
     build_activity_data,
     build_brief,
     build_brief_data,
+    build_focus_data,
     format_activity,
+    format_focus,
     next_move,
     verification_outcome,
 )
@@ -58,6 +61,7 @@ from .state import (
     find_question,
     load_state,
     mark_message_read,
+    mark_question_deferred,
     mark_question_answered,
     next_id,
     open_attention_items,
@@ -67,6 +71,7 @@ from .state import (
     read_guidance,
     read_policy,
     read_self,
+    reopen_question,
     read_lock,
     read_last_state_effect,
     reconcile_next_ids,
@@ -76,7 +81,16 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
-from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_key
+from .tasks import (
+    clip_output,
+    find_task,
+    format_task,
+    is_programmer_task,
+    normalize_task_kind,
+    open_tasks,
+    task_kind,
+    task_sort_key,
+)
 from .thoughts import format_thought_entry
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
@@ -91,8 +105,9 @@ def cmd_task_add(args):
         task = {
             "id": next_id(state, "task"),
             "title": args.title,
+            "kind": args.kind or "",
             "description": args.description or "",
-            "status": "todo",
+            "status": "ready" if getattr(args, "ready", False) else "todo",
             "priority": args.priority,
             "notes": args.notes or "",
             "command": args.command or "",
@@ -116,6 +131,8 @@ def cmd_task_add(args):
 def cmd_task_list(args):
     state = load_state()
     tasks = state["tasks"] if args.all else open_tasks(state)
+    if args.kind:
+        tasks = [task for task in tasks if task_kind(task) == args.kind]
     tasks = sorted(tasks, key=task_sort_key)
     if not tasks:
         print("No tasks.")
@@ -133,6 +150,8 @@ def cmd_task_show(args):
 
     print(format_task(task))
     print(f"description: {task.get('description') or ''}")
+    print(f"kind: {task_kind(task)}")
+    print(f"kind_override: {task.get('kind') or ''}")
     print(f"notes: {task.get('notes') or ''}")
     print(f"command: {task.get('command') or ''}")
     print(f"cwd: {task.get('cwd') or ''}")
@@ -172,6 +191,7 @@ def cmd_task_update(args):
         changed = False
         for field in (
             "title",
+            "kind",
             "description",
             "status",
             "priority",
@@ -273,7 +293,7 @@ def queue_user_message(text, reply_to_question_id=None, require_open_question=Fa
             question = find_question(state, reply_to_question_id)
             if require_open_question and not question:
                 raise MewError(f"question not found: {reply_to_question_id}")
-            if require_open_question and question.get("status") != "open":
+            if require_open_question and question.get("status") not in ("open", "deferred"):
                 raise MewError(f"question already answered: {reply_to_question_id}")
         else:
             question = None
@@ -292,7 +312,7 @@ def queue_user_message(text, reply_to_question_id=None, require_open_question=Fa
 
 def cmd_message(args):
     event = queue_user_message(args.message)
-    print(f"queued message event #{event['id']}")
+    print(f"queued message event #{event['id']}", flush=True)
     if not getattr(args, "wait", False):
         return 0
     warn_if_runtime_inactive()
@@ -314,6 +334,25 @@ def unread_outbox_messages(state, include_all=False):
     if include_all:
         return list(state.get("outbox", []))
     return [message for message in state.get("outbox", []) if not message.get("read_at")]
+
+def wait_for_event_messages(event_id, timeout=60.0, poll_interval=1.0, mark_read=False):
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        state = load_state()
+        messages = outbox_for_event(state, event_id)
+        if messages:
+            if mark_read:
+                mark_outbox_read(message.get("id") for message in messages)
+            return {"status": "messages", "messages": messages}
+
+        event = find_event_by_id(state, event_id)
+        if event and event.get("processed_at"):
+            return {"status": "processed_without_response", "messages": []}
+
+        if time.monotonic() >= deadline:
+            return {"status": "timeout", "messages": []}
+
+        time.sleep(max(0.01, poll_interval))
 
 def load_state_locked():
     with state_lock():
@@ -360,6 +399,14 @@ def handle_session_request(request):
             if not isinstance(text, str) or not text.strip():
                 return session_message("error", request_id, error="message.text is required")
             event = queue_user_message(text)
+            if request.get("wait"):
+                result = wait_for_event_messages(
+                    event["id"],
+                    timeout=float(request.get("timeout", 60.0)),
+                    poll_interval=float(request.get("poll_interval", 1.0)),
+                    mark_read=bool(request.get("mark_read")),
+                )
+                return session_message("event_result", request_id, event=event, **result)
             return session_message("event_queued", request_id, event=event)
 
         if request_type == "reply":
@@ -372,6 +419,26 @@ def handle_session_request(request):
             event = queue_user_message(text, reply_to_question_id=question_id, require_open_question=True)
             return session_message("event_queued", request_id, event=event)
 
+        if request_type in ("defer_question", "reopen_question"):
+            question_id = request.get("question_id")
+            if question_id is None:
+                return session_message("error", request_id, error=f"{request_type}.question_id is required")
+            with state_lock():
+                state = load_state()
+                question = find_question(state, question_id)
+                if not question:
+                    return session_message("error", request_id, error=f"question not found: {question_id}")
+                if question.get("status") == "answered":
+                    return session_message("error", request_id, error=f"question already answered: {question_id}")
+                if request_type == "defer_question":
+                    mark_question_deferred(state, question, reason=request.get("reason") or "")
+                    response_type = "question_deferred"
+                else:
+                    reopen_question(state, question)
+                    response_type = "question_reopened"
+                save_state(state)
+            return session_message(response_type, request_id, question=question)
+
         if request_type == "status":
             return session_message("status", request_id, **session_status_payload(load_state_locked()))
 
@@ -381,11 +448,29 @@ def handle_session_request(request):
                 limit = 5
             return session_message("brief", request_id, brief=build_brief_data(load_state_locked(), limit=limit))
 
+        if request_type in ("focus", "daily"):
+            limit = request.get("limit", 3)
+            if not isinstance(limit, int):
+                limit = 3
+            data = build_focus_data(load_state_locked(), limit=limit)
+            payload_key = "daily" if request_type == "daily" else "focus"
+            return session_message(request_type, request_id, **{payload_key: data})
+
         if request_type == "activity":
             limit = request.get("limit", 10)
             if not isinstance(limit, int):
                 limit = 10
             return session_message("activity", request_id, activity=build_activity_data(load_state_locked(), limit=limit))
+
+        if request_type == "questions":
+            state = load_state_locked()
+            questions = state["questions"] if request.get("all") else open_questions(state)
+            return session_message("questions", request_id, questions=questions)
+
+        if request_type == "attention":
+            state = load_state_locked()
+            items = state["attention"]["items"] if request.get("all") else open_attention_items(state)
+            return session_message("attention", request_id, attention=items)
 
         if request_type == "outbox":
             state = load_state_locked()
@@ -394,6 +479,18 @@ def handle_session_request(request):
                 request_id,
                 messages=unread_outbox_messages(state, include_all=bool(request.get("all"))),
             )
+
+        if request_type == "wait_outbox":
+            event_id = request.get("event_id")
+            if event_id is None:
+                return session_message("error", request_id, error="wait_outbox.event_id is required")
+            result = wait_for_event_messages(
+                event_id,
+                timeout=float(request.get("timeout", 60.0)),
+                poll_interval=float(request.get("poll_interval", 1.0)),
+                mark_read=bool(request.get("mark_read")),
+            )
+            return session_message("event_result", request_id, event_id=event_id, **result)
 
         if request_type == "ack":
             ids = request.get("message_ids") or []
@@ -589,11 +686,17 @@ def cmd_start(args):
         run_args = run_args[1:]
     command = [sys.executable, "-m", "mew", "run", *run_args]
     output_path = STATE_DIR / "runtime.out"
+    env = os.environ.copy()
+    source_root = Path(__file__).resolve().parents[1]
+    if (source_root / "mew" / "__main__.py").exists():
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = str(source_root) if not existing_pythonpath else str(source_root) + os.pathsep + existing_pythonpath
     with output_path.open("ab") as output:
         process = subprocess.Popen(
             command,
             stdout=output,
             stderr=subprocess.STDOUT,
+            env=env,
             start_new_session=True,
         )
 
@@ -843,6 +946,15 @@ def cmd_brief(args):
         print(json.dumps(build_brief_data(state, limit=args.limit), ensure_ascii=False, indent=2))
         return 0
     print(build_brief(state, limit=args.limit))
+    return 0
+
+def cmd_focus(args):
+    state = load_state()
+    data = build_focus_data(state, limit=args.limit)
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(format_focus(data))
     return 0
 
 def cmd_activity(args):
@@ -1449,6 +1561,39 @@ def cmd_outbox(args):
     return 0
 
 def cmd_questions(args):
+    if args.defer or args.reopen:
+        with state_lock():
+            state = load_state()
+            changed = []
+            for question_id in args.defer:
+                question = find_question(state, question_id)
+                if not question:
+                    print(f"mew: question not found: {question_id}", file=sys.stderr)
+                    return 1
+                if question.get("status") == "answered":
+                    print(f"mew: question already answered: {question_id}", file=sys.stderr)
+                    return 1
+                mark_question_deferred(state, question, reason=args.reason or "")
+                changed.append(question)
+            for question_id in args.reopen:
+                question = find_question(state, question_id)
+                if not question:
+                    print(f"mew: question not found: {question_id}", file=sys.stderr)
+                    return 1
+                if question.get("status") == "answered":
+                    print(f"mew: question already answered: {question_id}", file=sys.stderr)
+                    return 1
+                reopen_question(state, question)
+                changed.append(question)
+            save_state(state)
+        action = "updated"
+        if args.defer and not args.reopen:
+            action = "deferred"
+        elif args.reopen and not args.defer:
+            action = "reopened"
+        print(f"{action} {len(changed)} question(s)")
+        return 0
+
     state = load_state()
     questions = state["questions"] if args.all else open_questions(state)
     if not questions:
@@ -1580,6 +1725,12 @@ def cmd_task_run(args):
         if not task:
             print(f"mew: task not found: {args.task_id}", file=sys.stderr)
             return 1
+        if not is_programmer_task(task):
+            print(
+                f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; update --kind coding first",
+                file=sys.stderr,
+            )
+            return 1
         backend = args.agent_backend or task.get("agent_backend") or "ai-cli"
         model = args.agent_model or task.get("agent_model") or "codex-ultra"
         prompt = args.agent_prompt or task.get("agent_prompt") or None
@@ -1612,6 +1763,12 @@ def cmd_task_plan(args):
         if not task:
             print(f"mew: task not found: {args.task_id}", file=sys.stderr)
             return 1
+        if not is_programmer_task(task):
+            print(
+                f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; update --kind coding first",
+                file=sys.stderr,
+            )
+            return 1
         if latest_task_plan(task) and not args.force:
             plan = latest_task_plan(task)
         else:
@@ -1639,6 +1796,12 @@ def cmd_task_dispatch(args):
         task = find_task(state, args.task_id)
         if not task:
             print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+            return 1
+        if not is_programmer_task(task):
+            print(
+                f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; update --kind coding first",
+                file=sys.stderr,
+            )
             return 1
         plan = find_task_plan(task, args.plan_id) if args.plan_id else latest_task_plan(task)
         if not plan:
@@ -2102,6 +2265,8 @@ def cmd_listen(args):
 
 CHAT_HELP = """Commands:
 /help                 show this help
+/focus                show the quiet next-action view
+/daily                alias for /focus
 /brief                show the current operational brief
 /next                 show the next useful move
 /status               show compact runtime status
@@ -2110,7 +2275,10 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /note <task-id> <txt> append a task note
+/kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /questions [all]      list open questions, or all questions
+/defer <id> [reason]  defer a question so /next can move on
+/reopen <id>          reopen a deferred question
 /attention [all]      list open attention items, or all attention items
 /resolve all|<ids>    resolve attention items
 /outbox [all]         list unread outbox messages, or all messages
@@ -2192,6 +2360,8 @@ def print_chat_task(task_id):
         return
     print(format_task(task))
     print(f"description: {task.get('description') or ''}")
+    print(f"kind: {task_kind(task)}")
+    print(f"kind_override: {task.get('kind') or ''}")
     print(f"notes: {task.get('notes') or ''}")
     print(f"command: {task.get('command') or ''}")
     print(f"cwd: {task.get('cwd') or ''}")
@@ -2255,6 +2425,24 @@ def chat_append_task_note(rest):
     print(f"noted task #{task_id}")
 
 
+def chat_set_task_kind(rest):
+    task_id, _, kind = rest.partition(" ")
+    normalized = normalize_task_kind(kind)
+    if not task_id or not normalized:
+        print("usage: /kind <task-id> coding|research|personal|admin|unknown")
+        return
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}")
+            return
+        task["kind"] = normalized
+        task["updated_at"] = now_iso()
+        save_state(state)
+    print(f"task #{task['id']} kind={normalized}")
+
+
 def print_chat_questions(show_all=False):
     state = load_state()
     questions = state["questions"] if show_all else open_questions(state)
@@ -2266,6 +2454,44 @@ def print_chat_questions(show_all=False):
         task = question.get("related_task_id")
         task_text = f" task=#{task}" if task else ""
         print(f"#{question['id']} [{status}]{task_text} {question['text']}")
+
+
+def chat_defer_question(rest):
+    question_id, _, reason = rest.partition(" ")
+    if not question_id:
+        print("usage: /defer <question-id> [reason]")
+        return
+    with state_lock():
+        state = load_state()
+        question = find_question(state, question_id)
+        if not question:
+            print(f"mew: question not found: {question_id}")
+            return
+        if question.get("status") == "answered":
+            print(f"mew: question already answered: {question_id}")
+            return
+        mark_question_deferred(state, question, reason=reason.strip())
+        save_state(state)
+    print(f"deferred question #{question_id}")
+
+
+def chat_reopen_question(rest):
+    question_id = rest.strip()
+    if not question_id:
+        print("usage: /reopen <question-id>")
+        return
+    with state_lock():
+        state = load_state()
+        question = find_question(state, question_id)
+        if not question:
+            print(f"mew: question not found: {question_id}")
+            return
+        if question.get("status") == "answered":
+            print(f"mew: question already answered: {question_id}")
+            return
+        reopen_question(state, question)
+        save_state(state)
+    print(f"reopened question #{question_id}")
 
 
 def print_chat_attention(show_all=False):
@@ -2803,6 +3029,9 @@ def chat_plan_task(rest):
         if not task:
             print(f"mew: task not found: {task_id}")
             return
+        if not is_programmer_task(task):
+            print(f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; use /kind {task['id']} coding first")
+            return
         plan = latest_task_plan(task)
         created = False
         if force or not plan:
@@ -2835,6 +3064,9 @@ def chat_dispatch_task(rest):
         task = find_task(state, task_id)
         if not task:
             print(f"mew: task not found: {task_id}")
+            return
+        if not is_programmer_task(task):
+            print(f"mew: task #{task['id']} kind={task_kind(task)} is not a coding task; use /kind {task['id']} coding first")
             return
         plan = latest_task_plan(task)
         plan_created = False
@@ -2938,6 +3170,9 @@ def run_chat_slash_command(line, chat_state):
     if command in ("help", "?"):
         print(CHAT_HELP)
         return "continue"
+    if command in ("focus", "daily"):
+        print(format_focus(build_focus_data(load_state(), limit=3)))
+        return "continue"
     if command == "brief":
         print(build_brief(load_state()))
         return "continue"
@@ -2965,8 +3200,17 @@ def run_chat_slash_command(line, chat_state):
     if command == "note":
         chat_append_task_note(rest)
         return "continue"
+    if command == "kind":
+        chat_set_task_kind(rest)
+        return "continue"
     if command in ("questions", "question"):
         print_chat_questions(show_all=rest.casefold() == "all")
+        return "continue"
+    if command == "defer":
+        chat_defer_question(rest)
+        return "continue"
+    if command == "reopen":
+        chat_reopen_question(rest)
         return "continue"
     if command == "attention":
         print_chat_attention(show_all=rest.casefold() == "all")
@@ -3138,7 +3382,6 @@ def read_chat_line(poll_interval, prompt_state):
 
 
 def cmd_chat(args):
-    warn_if_runtime_inactive()
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     if not args.no_brief:
         print(build_brief(load_state(), limit=args.limit), flush=True)
@@ -3181,6 +3424,7 @@ def cmd_chat(args):
                     return 0
                 continue
 
+            warn_if_runtime_inactive()
             event = queue_user_message(text)
             print(f"queued message event #{event['id']}", flush=True)
     except KeyboardInterrupt:

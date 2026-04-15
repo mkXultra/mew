@@ -451,6 +451,35 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(state["agent_runs"], [])
         self.assertIn("--allow-agent-run is required", state["outbox"][-1]["text"])
 
+    def test_dispatch_task_refuses_non_coding_task(self):
+        state = default_state()
+        task = add_task(state)
+        task["kind"] = "admin"
+        task["title"] = "Pay the electric bill"
+        task["status"] = "ready"
+        task["auto_execute"] = True
+        plan = create_task_plan(state, task)
+        event = {"id": 1, "type": "passive_tick"}
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "dispatch task", "decisions": []},
+            {
+                "summary": "dispatch task",
+                "actions": [{"type": "dispatch_task", "task_id": task["id"], "plan_id": plan["id"]}],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_agent_run=True,
+        )
+
+        self.assertEqual(state["agent_runs"], [])
+        self.assertIn("is not a coding task", state["outbox"][-1]["text"])
+
     def test_execute_task_does_not_start_agent_backend(self):
         state = default_state()
         task = add_task(state)
@@ -1041,6 +1070,28 @@ class ProgrammerTests(unittest.TestCase):
 
         self.assertNotIn("dispatch_task", [decision["type"] for decision in blocked_plan["decisions"]])
         self.assertIn("dispatch_task", [decision["type"] for decision in allowed_plan["decisions"]])
+
+    def test_autonomous_decision_does_not_dispatch_non_coding_task(self):
+        state = default_state()
+        task = add_task(state)
+        task["kind"] = "admin"
+        task["title"] = "Pay the electric bill"
+        task["status"] = "ready"
+        task["auto_execute"] = True
+        create_task_plan(state, task)
+        event = {"id": 1, "type": "passive_tick"}
+
+        plan = deterministic_decision_plan(
+            state,
+            event,
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_agent_run=True,
+        )
+
+        self.assertNotIn("dispatch_task", [decision["type"] for decision in plan["decisions"]])
 
     def test_migration_adds_plan_and_run_defaults(self):
         state = default_state()

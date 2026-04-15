@@ -1,5 +1,5 @@
 from .programmer import find_review_run_for_implementation, latest_task_plan
-from .tasks import open_tasks, task_sort_key
+from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import now_iso
 
@@ -66,16 +66,29 @@ def review_runs_needing_followup(state):
 
 
 def tasks_needing_plan(tasks):
-    return [
-        task
-        for task in tasks
-        if task.get("status") in ("todo", "ready") and not latest_task_plan(task)
-    ]
+    return [task for task in tasks if task_needs_programmer_plan(task)]
+
+
+def practical_next_step(task):
+    kind = task_kind(task)
+    task_id = task.get("id")
+    title = task.get("title") or "untitled task"
+    if kind == "coding":
+        return f"advance coding task #{task_id}: {title}"
+    if kind == "research":
+        return f"spend 10 minutes researching task #{task_id}: {title}"
+    if kind == "admin":
+        return f"take one concrete admin step on task #{task_id}: {title}"
+    if kind == "personal":
+        return f"take one 5-minute personal step on task #{task_id}: {title}"
+    return f"clarify or take one small step on task #{task_id}: {title}"
 
 
 def dispatchable_planned_tasks(tasks):
     result = []
     for task in tasks:
+        if task_kind(task) != "coding":
+            continue
         plan = latest_task_plan(task)
         if (
             plan
@@ -139,6 +152,7 @@ def _task_item(task):
     return {
         "id": task.get("id"),
         "title": task.get("title"),
+        "kind": task_kind(task),
         "status": task.get("status"),
         "priority": task.get("priority"),
         "auto_execute": task.get("auto_execute"),
@@ -348,6 +362,66 @@ def build_brief_data(state, limit=5):
         "next_move": next_move(state),
     }
 
+def build_focus_data(state, limit=3):
+    tasks = sorted(open_tasks(state), key=task_sort_key)
+    questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
+    attention = [
+        item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
+    ]
+    unread = open_unread_messages(state)
+    return {
+        "next_move": next_move(state),
+        "unread_outbox_count": len(unread),
+        "open_questions": [_question_item(question) for question in questions[:limit]],
+        "attention": [_attention_item(item) for item in attention[:limit]],
+        "tasks": [
+            {
+                **_task_item(task),
+                "next_step": practical_next_step(task),
+            }
+            for task in tasks[:limit]
+        ],
+        "open_task_count": len(tasks),
+    }
+
+
+def format_focus(data):
+    lines = ["Mew focus", f"Next: {data.get('next_move')}"]
+    unread = data.get("unread_outbox_count") or 0
+    if unread:
+        lines.append(f"Unread: {unread}")
+
+    questions = data.get("open_questions") or []
+    if questions:
+        lines.append("")
+        lines.append("Questions")
+        for question in questions:
+            task = f" task=#{question.get('related_task_id')}" if question.get("related_task_id") else ""
+            lines.append(f"- #{question.get('id')}{task}: {question.get('text')}")
+
+    attention = data.get("attention") or []
+    if attention:
+        lines.append("")
+        lines.append("Attention")
+        for item in attention:
+            lines.append(f"- #{item.get('id')} [{item.get('priority')}] {item.get('title')}")
+
+    tasks = data.get("tasks") or []
+    if tasks:
+        lines.append("")
+        lines.append("Tasks")
+        for task in tasks:
+            lines.append(
+                f"- #{task.get('id')} [{task.get('kind')}/{task.get('status')}/{task.get('priority')}] "
+                f"{task.get('title')}"
+            )
+            lines.append(f"  next: {task.get('next_step')}")
+
+    omitted = (data.get("open_task_count") or 0) - len(tasks)
+    if omitted > 0:
+        lines.append(f"... {omitted} more open task(s)")
+    return "\n".join(lines)
+
 
 def next_move(state):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
@@ -380,7 +454,7 @@ def next_move(state):
     if attention:
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
-        return f"advance task #{tasks[0].get('id')}: {tasks[0].get('title')}"
+        return practical_next_step(tasks[0])
     return "ask the user what to track next"
 
 
@@ -462,7 +536,7 @@ def build_brief(state, limit=5):
         for task in tasks[:limit]:
             run = f" agent_run=#{task.get('agent_run_id')}" if task.get("agent_run_id") else ""
             lines.append(
-                f"- #{task.get('id')} [{task.get('status')}/{task.get('priority')}] "
+                f"- #{task.get('id')} [{task.get('status')}/{task.get('priority')}/{task_kind(task)}] "
                 f"{task.get('title')}{run}"
             )
         lines.append("")

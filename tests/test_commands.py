@@ -45,6 +45,22 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_add_ready_shortcut(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Implement thing", "--kind", "coding", "--ready"]), 0)
+                self.assertIn("#1 [ready/normal/coding] Implement thing", stdout.getvalue())
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "ready")
+            finally:
+                os.chdir(old_cwd)
+
     def test_ack_can_mark_multiple_and_all(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -76,15 +92,20 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_outbox_message, load_state, save_state, state_lock
+                from mew.state import add_outbox_message, add_question, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()
                     add_outbox_message(state, "info", "hello from mew")
+                    add_question(state, "What should happen next?", related_task_id=1)
                     save_state(state)
 
                 stdin = StringIO(
                     '{"id":"s","type":"status"}\n'
+                    '{"id":"f","type":"focus"}\n'
+                    '{"id":"d","type":"daily"}\n'
+                    '{"id":"q","type":"questions"}\n'
+                    '{"id":"t","type":"attention"}\n'
                     '{"id":"o","type":"outbox"}\n'
                     '{"id":"a","type":"ack","message_ids":[1]}\n'
                     '{"id":"m","type":"message","text":"hello session"}\n'
@@ -98,14 +119,22 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(responses[0]["type"], "ready")
                 self.assertEqual(responses[0]["protocol"], "mew.session.v1")
                 self.assertEqual(responses[1]["type"], "status")
-                self.assertEqual(responses[1]["counts"]["unread_outbox"], 1)
-                self.assertEqual(responses[2]["type"], "outbox")
-                self.assertEqual(responses[2]["messages"][0]["text"], "hello from mew")
-                self.assertEqual(responses[3]["type"], "acknowledged")
-                self.assertEqual(responses[3]["count"], 1)
-                self.assertEqual(responses[4]["type"], "event_queued")
-                self.assertEqual(responses[4]["event"]["payload"]["text"], "hello session")
-                self.assertEqual(responses[5]["type"], "bye")
+                self.assertEqual(responses[1]["counts"]["unread_outbox"], 2)
+                self.assertEqual(responses[2]["type"], "focus")
+                self.assertEqual(responses[2]["focus"]["open_questions"][0]["text"], "What should happen next?")
+                self.assertEqual(responses[3]["type"], "daily")
+                self.assertEqual(responses[3]["daily"]["open_questions"][0]["text"], "What should happen next?")
+                self.assertEqual(responses[4]["type"], "questions")
+                self.assertEqual(responses[4]["questions"][0]["text"], "What should happen next?")
+                self.assertEqual(responses[5]["type"], "attention")
+                self.assertEqual(responses[5]["attention"][0]["title"], "Question #1 needs a reply")
+                self.assertEqual(responses[6]["type"], "outbox")
+                self.assertEqual(responses[6]["messages"][0]["text"], "hello from mew")
+                self.assertEqual(responses[7]["type"], "acknowledged")
+                self.assertEqual(responses[7]["count"], 1)
+                self.assertEqual(responses[8]["type"], "event_queued")
+                self.assertEqual(responses[8]["event"]["payload"]["text"], "hello session")
+                self.assertEqual(responses[9]["type"], "bye")
 
                 state = load_state()
                 self.assertEqual(state["inbox"][0]["payload"]["text"], "hello session")
@@ -139,6 +168,36 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_session_wait_outbox_returns_event_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    event = add_event(state, "user_message", "test", {"text": "hello"})
+                    add_outbox_message(state, "assistant", "event response", event_id=event["id"])
+                    save_state(state)
+
+                stdin = StringIO(
+                    '{"id":"w","type":"wait_outbox","event_id":1,"timeout":0,"mark_read":true}\n'
+                    '{"id":"x","type":"stop"}\n'
+                )
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout:
+                    code = main(["session"])
+
+                self.assertEqual(code, 0)
+                responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual(responses[1]["type"], "event_result")
+                self.assertEqual(responses[1]["status"], "messages")
+                self.assertEqual(responses[1]["messages"][0]["text"], "event response")
+                state = load_state()
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_reply_rejects_already_answered_question(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,6 +227,94 @@ class CommandTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(state["inbox"], [])
                 self.assertEqual(len(state["replies"]), 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_questions_can_defer_reopen_and_reply(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_question(state, "Can this wait?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions", "--defer", "1", "--reason", "not now"]), 0)
+                self.assertIn("deferred 1 question", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(state["questions"][0]["status"], "deferred")
+                self.assertEqual(state["questions"][0]["defer_reason"], "not now")
+                self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions"]), 0)
+                self.assertIn("No questions.", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions", "--reopen", "1"]), 0)
+                self.assertIn("reopened 1 question", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(state["questions"][0]["status"], "open")
+                self.assertIsNone(state["questions"][0].get("acknowledged_at"))
+                self.assertIsNone(state["outbox"][0].get("read_at"))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["outbox"]), 0)
+                self.assertIn("#1 [question/unread] Can this wait?", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["reply", "1", "yes"]), 0)
+                self.assertIn("answered question #1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_list_can_filter_by_kind(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement API client", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "add", "Pay invoice", "--kind", "admin"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--kind", "coding"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Implement API client", output)
+                self.assertNotIn("Pay invoice", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_plan_refuses_non_coding_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Pay invoice", "--kind", "admin"]), 0)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["task", "plan", "1"]), 1)
+                self.assertIn("is not a coding task", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_run_refuses_non_coding_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Pay invoice", "--kind", "admin"]), 0)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["task", "run", "1", "--dry-run"]), 1)
+                self.assertIn("is not a coding task", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 
@@ -483,7 +630,7 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_event, load_state, save_state, state_lock
+                from mew.state import add_event, add_question, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()
@@ -521,7 +668,7 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_event, load_state, save_state, state_lock
+                from mew.state import add_event, add_question, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()
@@ -844,6 +991,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("runtime is active", stdout.getvalue())
                 command = popen.call_args.args[0]
                 self.assertEqual(command[-2:], ["run", "--autonomous"])
+                env = popen.call_args.kwargs["env"]
+                self.assertIn(str(Path(__file__).resolve().parents[1] / "src"), env["PYTHONPATH"])
                 self.assertTrue((Path(".mew") / "runtime.out").exists())
             finally:
                 os.chdir(old_cwd)
@@ -976,6 +1125,55 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["activity"]), 0)
 
                 self.assertIn("Read README", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_focus_and_daily_show_quiet_next_action_view(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Pay the electric bill",
+                            "kind": "admin",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": "",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["focus"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Mew focus", output)
+                self.assertIn("take one concrete admin step", output)
+                self.assertIn("[admin/todo/normal] Pay the electric bill", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["daily", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["tasks"][0]["kind"], "admin")
+                self.assertEqual(data["tasks"][0]["title"], "Pay the electric bill")
             finally:
                 os.chdir(old_cwd)
 
@@ -1184,17 +1382,19 @@ class CommandTests(unittest.TestCase):
                     )
                     save_state(state)
 
-                stdin = StringIO("/next\n/agents\n/verification\n/writes\n/thoughts details\nhello mew\n/exit\n")
+                stdin = StringIO("/focus\n/next\n/agents\n/verification\n/writes\n/thoughts details\nhello mew\n/exit\n")
                 with (
                     patch("sys.stdin", stdin),
                     redirect_stdout(StringIO()) as stdout,
-                    redirect_stderr(StringIO()),
+                    redirect_stderr(StringIO()) as stderr,
                 ):
                     code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
 
                 self.assertEqual(code, 0)
+                self.assertIn("no active runtime", stderr.getvalue())
                 output = stdout.getvalue()
                 self.assertIn("mew chat", output)
+                self.assertIn("Mew focus", output)
                 self.assertIn("mew agent result 1", output)
                 self.assertIn("#1 [running/implementation]", output)
                 self.assertIn("#1 [passed]", output)
@@ -1213,7 +1413,7 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_event, load_state, save_state, state_lock
+                from mew.state import add_event, add_question, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()
@@ -1221,6 +1421,7 @@ class CommandTests(unittest.TestCase):
                         {
                             "id": 1,
                             "title": "Cockpit task",
+                            "kind": "coding",
                             "description": "Exercise chat controls.",
                             "status": "todo",
                             "priority": "normal",
@@ -1249,12 +1450,17 @@ class CommandTests(unittest.TestCase):
                         "summary": "Proposed a task.",
                         "actions": [{"type": "propose_task", "title": "Cockpit task"}],
                     }
+                    add_question(state, "Can this wait?", related_task_id=1)
                     save_state(state)
 
                 stdin = StringIO(
                     "/add New cockpit task | Created inside chat\n"
                     "/show 2\n"
                     "/note 2 remember this detail\n"
+                    "/kind #2 admin\n"
+                    "/defer 1 later\n"
+                    "/questions\n"
+                    "/reopen 1\n"
                     "/why\n"
                     "/digest\n"
                     "/pause testing\n"
@@ -1271,15 +1477,19 @@ class CommandTests(unittest.TestCase):
                 with (
                     patch("sys.stdin", stdin),
                     redirect_stdout(StringIO()) as stdout,
-                    redirect_stderr(StringIO()),
+                    redirect_stderr(StringIO()) as stderr,
                 ):
                     code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
 
                 self.assertEqual(code, 0)
+                self.assertEqual(stderr.getvalue(), "")
                 output = stdout.getvalue()
-                self.assertIn("created #2 [todo/normal] New cockpit task", output)
+                self.assertIn("created #2 [todo/normal/unknown] New cockpit task", output)
                 self.assertIn("description: Created inside chat", output)
                 self.assertIn("noted task #2", output)
+                self.assertIn("task #2 kind=admin", output)
+                self.assertIn("deferred question #1", output)
+                self.assertIn("reopened question #1", output)
                 self.assertIn("Latest processed event", output)
                 self.assertIn("Digest since", output)
                 self.assertIn("autonomy paused", output)
@@ -1583,7 +1793,7 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
-                self.assertIn("created #1 [ready/normal] Improve mew itself", output)
+                self.assertIn("created #1 [ready/normal/coding] Improve mew itself", output)
                 self.assertIn("created plan #1", output)
                 self.assertIn("implementation_prompt:", output)
                 self.assertIn("created dry-run self-improve run #1", output)

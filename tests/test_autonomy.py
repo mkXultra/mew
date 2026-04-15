@@ -8,6 +8,7 @@ from unittest.mock import patch
 from mew.agent import (
     act_phase,
     apply_action_plan,
+    apply_event_plans,
     build_act_prompt,
     build_context,
     build_think_prompt,
@@ -325,6 +326,60 @@ class AutonomyTests(unittest.TestCase):
         thought = state["thought_journal"][-1]
         self.assertIn("Continue workspace inspection.", thought["open_threads"])
         self.assertEqual(thought["dropped_threads"], [])
+
+    def test_user_status_clears_waiting_after_response(self):
+        state = default_state()
+        state["user_status"]["mode"] = "waiting_for_agent"
+        event = add_event(state, "user_message", "user", {"text": "status?"})
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "answer"},
+            {"summary": "answer", "actions": [{"type": "send_message", "text": "ok"}]},
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+
+        self.assertEqual(state["user_status"]["mode"], "idle")
+
+    def test_user_status_needs_user_when_response_asks_question(self):
+        state = default_state()
+        state["user_status"]["mode"] = "waiting_for_agent"
+        event = add_event(state, "user_message", "user", {"text": "status?"})
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "ask"},
+            {"summary": "ask", "actions": [{"type": "ask_user", "question": "Which task?"}]},
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+
+        self.assertEqual(state["user_status"]["mode"], "needs_user")
+
+    def test_user_status_clears_waiting_after_processed_without_response(self):
+        state = default_state()
+        state["user_status"]["mode"] = "waiting_for_agent"
+        event = add_event(state, "user_message", "user", {"text": "status?"})
+
+        apply_event_plans(
+            state,
+            event["id"],
+            {"summary": "no response", "decisions": []},
+            {"summary": "no response", "actions": []},
+            "now",
+            reason="user_input",
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(state["user_status"]["mode"], "idle")
 
     def test_build_context_compacts_large_task_and_agent_run_payloads(self):
         state = default_state()
@@ -772,6 +827,7 @@ class AutonomyTests(unittest.TestCase):
             {
                 "id": 1,
                 "title": "Needs a plan",
+                "kind": "coding",
                 "description": "",
                 "status": "todo",
                 "priority": "normal",
@@ -820,6 +876,118 @@ class AutonomyTests(unittest.TestCase):
         decision_types = [decision["type"] for decision in plan["decisions"]]
         self.assertIn("read_file", decision_types)
         self.assertIn("plan_task", decision_types)
+        plan_tasks = [decision for decision in plan["decisions"] if decision["type"] == "plan_task"]
+        self.assertEqual(plan_tasks[0]["task_id"], 1)
+
+    def test_think_phase_does_not_programmer_plan_admin_task(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Pay the electric bill",
+                "kind": "admin",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+        auth = {"access_token": "token"}
+
+        with patch(
+            "mew.agent.call_model_json",
+            return_value={
+                "summary": "remember only",
+                "decisions": [{"type": "remember", "summary": "No user-visible change."}],
+            },
+        ):
+            plan = think_phase(
+                state,
+                event,
+                current_time,
+                auth,
+                "test-model",
+                "https://example.invalid",
+                5,
+                False,
+                False,
+                "",
+                "",
+                autonomous=True,
+                autonomy_level="propose",
+                model_backend="codex",
+            )
+
+        self.assertNotIn("plan_task", [decision["type"] for decision in plan["decisions"]])
+
+    def test_think_phase_deferred_question_does_not_block_programmer_plan(self):
+        from mew.state import add_question, mark_question_deferred
+
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Implement wait_outbox fix",
+                "kind": "coding",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        question, _created = add_question(state, "Should this wait?", related_task_id=1)
+        mark_question_deferred(state, question, reason="not now")
+        event = add_event(state, "passive_tick", "test")
+        auth = {"access_token": "token"}
+
+        with patch(
+            "mew.agent.call_model_json",
+            return_value={"summary": "remember", "decisions": [{"type": "remember", "summary": "No change."}]},
+        ):
+            plan = think_phase(
+                state,
+                event,
+                current_time,
+                auth,
+                "test-model",
+                "https://example.invalid",
+                5,
+                False,
+                False,
+                "",
+                "",
+                autonomous=True,
+                autonomy_level="propose",
+                model_backend="codex",
+            )
+
         plan_tasks = [decision for decision in plan["decisions"] if decision["type"] == "plan_task"]
         self.assertEqual(plan_tasks[0]["task_id"], 1)
 
@@ -993,6 +1161,7 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(len(state["tasks"]), 1)
         self.assertEqual(state["tasks"][0]["title"], "Define next useful task")
+        self.assertEqual(state["tasks"][0]["kind"], "")
         self.assertEqual(state["tasks"][0]["status"], "todo")
         self.assertGreaterEqual(counts["messages"], 1)
         self.assertIn("Self review:", state["memory"]["deep"]["decisions"][0])

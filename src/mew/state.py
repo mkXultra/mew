@@ -226,6 +226,7 @@ def migrate_state(state):
         state["user_status"] = migrated_user
 
     for task in state.get("tasks", []):
+        task.setdefault("kind", "")
         task.setdefault("description", "")
         task.setdefault("notes", "")
         task.setdefault("command", "")
@@ -804,8 +805,9 @@ def open_questions(state):
     return [question for question in state["questions"] if question.get("status") == "open"]
 
 def find_question(state, question_id):
+    wanted = str(question_id).strip().lstrip("#")
     for question in state["questions"]:
-        if str(question.get("id")) == str(question_id):
+        if str(question.get("id")) == wanted:
             return question
     return None
 
@@ -841,6 +843,42 @@ def mark_question_answered(state, question, answer_text, event_id=None):
             item["resolved_at"] = current_time
             item["updated_at"] = current_time
     return reply
+
+def mark_question_deferred(state, question, reason=""):
+    current_time = now_iso()
+    question["status"] = "deferred"
+    question["deferred_at"] = current_time
+    question["defer_reason"] = reason or ""
+    question["updated_at"] = current_time
+    for message in state["outbox"]:
+        if message.get("question_id") == question["id"]:
+            message["read_at"] = message.get("read_at") or current_time
+    for item in state["attention"]["items"]:
+        if item.get("question_id") == question["id"] and item.get("status") == "open":
+            item["status"] = "resolved"
+            item["resolved_at"] = current_time
+            item["updated_at"] = current_time
+    return question
+
+def reopen_question(state, question):
+    current_time = now_iso()
+    question["status"] = "open"
+    question["acknowledged_at"] = None
+    question["reopened_at"] = current_time
+    question["updated_at"] = current_time
+    for message in state["outbox"]:
+        if message.get("question_id") == question["id"]:
+            message["read_at"] = None
+    add_attention_item(
+        state,
+        "question",
+        f"Question #{question['id']} needs a reply",
+        question.get("text") or "",
+        related_task_id=question.get("related_task_id"),
+        question_id=question["id"],
+        priority="high",
+    )
+    return question
 
 def mark_message_read(state, message_id):
     current_time = now_iso()

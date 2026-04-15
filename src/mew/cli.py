@@ -24,6 +24,7 @@ from .commands import (
     cmd_dogfood,
     cmd_doctor,
     cmd_effects,
+    cmd_focus,
     cmd_guidance_init,
     cmd_guidance_show,
     cmd_listen,
@@ -305,6 +306,16 @@ def build_parser():
     brief_parser.add_argument("--json", action="store_true", help="print structured JSON")
     brief_parser.set_defaults(func=cmd_brief)
 
+    focus_parser = subparsers.add_parser("focus", help="show the quiet daily next-action view")
+    focus_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
+    focus_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    focus_parser.set_defaults(func=cmd_focus)
+
+    daily_parser = subparsers.add_parser("daily", help="alias for the quiet focus view")
+    daily_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
+    daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daily_parser.set_defaults(func=cmd_focus)
+
     activity_parser = subparsers.add_parser("activity", help="show recent mew activity")
     activity_parser.add_argument("--limit", type=int, default=10, help="maximum activity items")
     activity_parser.add_argument("--json", action="store_true", help="print structured JSON")
@@ -540,7 +551,10 @@ def build_parser():
     outbox_parser.set_defaults(func=cmd_outbox)
 
     questions_parser = subparsers.add_parser("questions", help="show open questions")
-    questions_parser.add_argument("--all", action="store_true", help="include answered questions")
+    questions_parser.add_argument("--all", action="store_true", help="include answered and deferred questions")
+    questions_parser.add_argument("--defer", action="append", default=[], help="defer an open question id")
+    questions_parser.add_argument("--reopen", action="append", default=[], help="reopen a deferred question id")
+    questions_parser.add_argument("--reason", help="short reason stored when deferring")
     questions_parser.set_defaults(func=cmd_questions)
 
     attention_parser = subparsers.add_parser("attention", help="show attention items")
@@ -700,6 +714,7 @@ def build_parser():
 
     add_parser = task_subparsers.add_parser("add", help="add a task")
     add_parser.add_argument("title")
+    add_parser.add_argument("--kind", choices=("coding", "research", "personal", "admin", "unknown"), help="task kind; inferred when omitted")
     add_parser.add_argument("--description")
     add_parser.add_argument("--notes")
     add_parser.add_argument("--command", help="command to run when the task is auto-executed")
@@ -712,11 +727,13 @@ def build_parser():
         action="store_true",
         help="allow passive runtime to execute this task command",
     )
+    add_parser.add_argument("--ready", action="store_true", help="create the task in ready status")
     add_parser.add_argument("--priority", choices=("low", "normal", "high"), default="normal")
     add_parser.set_defaults(func=cmd_task_add)
 
     list_parser = task_subparsers.add_parser("list", help="list tasks")
     list_parser.add_argument("--all", action="store_true", help="include done tasks")
+    list_parser.add_argument("--kind", choices=("coding", "research", "personal", "admin", "unknown"), help="filter by task kind")
     list_parser.set_defaults(func=cmd_task_list)
 
     show_parser = task_subparsers.add_parser("show", help="show a task")
@@ -758,6 +775,7 @@ def build_parser():
     update_parser = task_subparsers.add_parser("update", help="update a task")
     update_parser.add_argument("task_id")
     update_parser.add_argument("--title")
+    update_parser.add_argument("--kind", choices=("coding", "research", "personal", "admin", "unknown"))
     update_parser.add_argument("--description")
     update_parser.add_argument("--notes")
     update_parser.add_argument("--command")

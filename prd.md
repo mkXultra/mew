@@ -713,6 +713,8 @@ The first user-facing version should likely include:
 - `mew effects --json`: expose state checkpoint records as structured JSON.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
+- `mew focus`: show a quiet daily next-action view with open questions, attention, top tasks, and the current next useful move.
+- `mew daily`: alias for the quiet focus view.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
 - `mew context`: show resident prompt context diagnostics and approximate section sizes.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
@@ -734,9 +736,11 @@ The first user-facing version should likely include:
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
 - `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
-- `mew session`: open a JSON Lines control session for scripts and future richer frontends. It accepts typed requests such as `status`, `brief`, `activity`, `outbox`, `ack`, `message`, `reply`, `next`, and `stop`, and returns typed JSON responses with request ids when provided.
+- `mew session`: open a JSON Lines control session for scripts and future richer frontends. It accepts typed requests such as `status`, `brief`, `focus`, `daily`, `activity`, `questions`, `attention`, `outbox`, `ack`, `message`, `reply`, `defer_question`, `reopen_question`, `wait_outbox`, `next`, and `stop`, and returns typed JSON responses with request ids when provided. `focus` returns a `focus` payload, `daily` returns the same shape as a `daily` payload, and `message` requests may pass `wait=true` to wait for outbox responses from the queued event.
 - `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/thoughts`, `/digest`, `/attention`, `/resolve`, `/approve`, `/plan`, `/dispatch`, `/self`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
 - `mew questions`: show open questions that block progress.
+- `mew questions --defer <question-id>`: defer a question so `mew next` can move on without treating it as blocking.
+- `mew questions --reopen <question-id>`: make a deferred question active again.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.
 - `mew ack <message-id...>`: mark one or more outbox messages as read.
 - `mew ack --all`: mark all unread outbox messages as read.
@@ -746,7 +750,7 @@ The first user-facing version should likely include:
 - `mew archive --apply`: write `.mew/archive/` and compact active state.
 - `mew memory`: show shallow memory and recent remembered events.
 - `mew memory --compact`: compact recent shallow events into durable project memory.
-- `mew task run <task-id>`: start an agent run for a task.
+- `mew task run <task-id>`: start an agent run for a coding task.
 - `mew task plan <task-id>`: create a programmer plan for implementation and review.
 - `mew task dispatch <task-id>`: start an implementation agent run from a programmer plan.
 - `mew agent list/show/wait/result`: inspect and collect agent-run results.
@@ -763,7 +767,8 @@ The first user-facing version should likely include:
 - `mew self show`: show the current self/personality instructions.
 - `mew desires init`: create `.mew/desires.md`.
 - `mew desires show`: show the current self-directed desires.
-- `mew task add <text>`: add a task.
+- `mew task add <text>`: add a task. `--kind coding|research|personal|admin|unknown` may be used to override task classification, and `--ready` can create an immediately actionable task.
+- `mew task list --kind <kind>`: list only tasks matching a specific task kind.
 - `mew task list`: list tasks.
 - `mew task show <task-id>`: show task details.
 - `mew task update <task-id>`: update task fields.
@@ -877,7 +882,7 @@ The CLI should be able to:
 
 The programmer loop turns a task into a reviewable agent workflow:
 
-1. `mew task plan <task-id>` creates a structured plan on the task.
+1. `mew task plan <task-id>` creates a structured plan on a coding task.
 2. `mew task dispatch <task-id>` starts an implementation `ai-cli` run from that plan.
 3. `mew agent wait <run-id>` or `mew agent result <run-id>` collects the implementation result.
 4. `mew agent review <run-id>` starts a separate review run.
@@ -888,7 +893,7 @@ Implementation runs may update the task status. Review runs must not mark the or
 
 Autonomous programmer behavior uses the same loop:
 
-- `propose` mode may create a programmer plan for an unplanned open task.
+- `propose` mode may create a programmer plan for an unplanned open coding task. Personal, admin, research, and unknown tasks should stay in the general next-action flow until the user explicitly routes them into programmer work.
 - `act` mode may dispatch a planned implementation only when `--allow-agent-run` is enabled and the task is `ready` with `auto_execute=true`.
 - Existing running agent runs may be checked on passive wakes.
 - Completed implementation runs may receive review runs only when `act` and `--allow-agent-run` are both enabled.
@@ -964,7 +969,7 @@ The MVP does not require arbitrary project work execution. It may execute only e
 Autonomy levels:
 
 - `observe`: remember and self-review only.
-- `propose`: `observe` plus creating proposed tasks and programmer plans.
+- `propose`: `observe` plus creating proposed tasks and programmer plans for coding tasks.
 - `act`: `propose` plus bounded read-only inspection under `--allow-read`, gated writes under `--allow-write`, and programmer dispatch/review when `--allow-agent-run` is enabled.
 
 Local command execution still requires `--execute-tasks`, `auto_execute=true`, and an explicit command. Autonomous programmer agent dispatch requires `--allow-agent-run`, `auto_execute=true`, `status=ready`, and a programmer plan.

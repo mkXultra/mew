@@ -11,8 +11,9 @@ REQUIRED_LISTS = (
 )
 
 TASK_STATUSES = {"todo", "ready", "running", "blocked", "done"}
+TASK_KINDS = {"", "coding", "research", "personal", "admin", "unknown"}
 AGENT_RUN_STATUSES = {"created", "dry_run", "running", "completed", "failed"}
-QUESTION_STATUSES = {"open", "answered"}
+QUESTION_STATUSES = {"open", "answered", "deferred"}
 ATTENTION_STATUSES = {"open", "resolved"}
 
 
@@ -76,6 +77,11 @@ def _check_status(item, allowed, path, issues, level="error"):
     status = item.get("status")
     if status not in allowed:
         issues.append(issue(level, path, f"unknown status {status!r}"))
+
+def _check_field_value(item, field, allowed, path, issues, level="error"):
+    value = item.get(field)
+    if value not in allowed:
+        issues.append(issue(level, path, f"unknown value {value!r}"))
 
 
 def _task_ids(state):
@@ -145,6 +151,7 @@ def validate_state(state):
             continue
         task_path = f"tasks[{index}]"
         _check_status(task, TASK_STATUSES, f"{task_path}.status", issues, level="warning")
+        _check_field_value(task, "kind", TASK_KINDS, f"{task_path}.kind", issues, level="warning")
         title = task.get("title")
         if not isinstance(title, str) or not title.strip():
             issues.append(issue("error", f"{task_path}.title", "must be a non-empty string"))

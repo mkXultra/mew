@@ -49,10 +49,13 @@ from .state import (
 from .tasks import (
     clip_output,
     execute_task_action,
+    is_programmer_task,
     normalize_task_id,
     open_tasks,
     task_by_id,
     task_question,
+    task_kind,
+    task_needs_programmer_plan,
     task_sort_key,
 )
 from .timeutil import elapsed_hours, now_iso
@@ -130,7 +133,7 @@ def build_think_prompt(
         "When autonomous mode is false, do not do self-directed work unless it directly answers the user.\n"
         "When autonomous mode is true and there is no user input, use Self and Desires to choose useful small work.\n"
         "Use perception as passive read-only workspace observations; do not treat it as permission to read more.\n"
-        "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task; "
+        "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task for coding tasks only; "
         "act can also use allowed read-only inspection and programmer-loop actions. "
         "Starting agent runs requires allow_agent_run in local state, even at act level. "
         "Local task command execution still requires allow_task_execution. "
@@ -145,6 +148,7 @@ def build_think_prompt(
         "Use complete_task only for a task whose objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only when it directly helps the current task or memory, and only under allowed_read_roots.\n"
         "Use write actions only for small targeted changes under allowed_write_roots; prefer dry_run before writing.\n"
+        "Do not emit plan_task for personal, admin, research, or unknown tasks; use ask_user, send_message, or remember instead.\n"
         "Do not ask the same question if it already appears in unanswered_questions.\n"
         "Schema:\n"
         "{\n"
@@ -236,7 +240,7 @@ def build_act_prompt(
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
         f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
-        "Respect the autonomy level: observe may record/self_review only; propose may propose_task/plan_task; "
+        "Respect the autonomy level: observe may record/self_review only; propose may propose_task/plan_task for coding tasks only; "
         "act may use allowed read-only inspection and programmer-loop actions. "
         "Use perception as passive read-only workspace observations; it does not expand allowed_read_roots. "
         "Starting agent runs requires allow_agent_run in local state. "
@@ -250,7 +254,7 @@ def build_act_prompt(
         "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
         "Use write actions only under allowed_write_roots. If no write root is allowed, do not emit write actions.\n"
-        "Do not invent shell commands. Reference tasks by task_id only.\n"
+        "Do not invent shell commands. Reference tasks by task_id only. Do not emit plan_task for personal, admin, research, or unknown tasks.\n"
         "Do not repeat unanswered questions already present in state.\n"
         "Schema:\n"
         "{\n"
@@ -559,8 +563,7 @@ def append_autonomous_decisions(
     if autonomy_level in ("propose", "act"):
         for task in sorted(open_tasks(state), key=task_sort_key):
             if (
-                task.get("status") in ("todo", "ready")
-                and not latest_task_plan(task)
+                task_needs_programmer_plan(task)
                 and not pending_question_for_task(state, task.get("id"))
             ):
                 decisions.append(
@@ -578,6 +581,7 @@ def append_autonomous_decisions(
             if (
                 plan
                 and plan.get("status") in ("planned", "dry_run")
+                and is_programmer_task(task)
                 and task.get("status") == "ready"
                 and task.get("auto_execute")
                 and not pending_question_for_task(state, task.get("id"))
@@ -1184,6 +1188,17 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
     agent["last_thought"] = planned_status.get("last_thought") or decision_plan.get("summary") or action_plan.get("summary") or ""
     agent["updated_at"] = current_time
 
+def update_user_status_after_plan(state, event, action_plan, counts, current_time):
+    if event.get("type") != "user_message":
+        return
+    user = state.setdefault("user_status", {})
+    actions = action_plan.get("actions", [])
+    if any(action.get("type") in ("ask_user", "wait_for_user") for action in actions):
+        user["mode"] = "needs_user"
+    elif counts.get("messages", 0) > 0 or event.get("processed_at"):
+        user["mode"] = "idle"
+    user["updated_at"] = current_time
+
 def apply_read_action(state, event, action, current_time, allowed_read_roots):
     action_type = action.get("type")
     try:
@@ -1253,6 +1268,7 @@ def add_proposed_task(state, title, description, priority, notes, current_time):
     task = {
         "id": next_id(state, "task"),
         "title": title,
+        "kind": "",
         "description": description or "",
         "status": "todo",
         "priority": priority,
@@ -1406,6 +1422,18 @@ def apply_plan_task_action(state, event, action, current_time, autonomous, auton
     if not task:
         add_outbox_message(state, "warning", f"Cannot plan missing task #{action.get('task_id')}", event_id=event["id"])
         return 1
+    if not is_programmer_task(task):
+        add_outbox_message(
+            state,
+            "warning",
+            (
+                f"Refused plan_task for task #{task['id']}: "
+                f"task kind {task_kind(task)!r} is not a coding task."
+            ),
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
     plan = latest_task_plan(task)
     if plan:
         return 0
@@ -1449,6 +1477,18 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
     task = task_by_id(state, action.get("task_id"))
     if not task:
         add_outbox_message(state, "warning", f"Cannot dispatch missing task #{action.get('task_id')}", event_id=event["id"])
+        return 1
+    if not is_programmer_task(task):
+        add_outbox_message(
+            state,
+            "warning",
+            (
+                f"Refused dispatch_task for task #{task['id']}: "
+                f"task kind {task_kind(task)!r} is not a coding task."
+            ),
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
         return 1
     if autonomous and not (task.get("status") == "ready" and task.get("auto_execute")):
         add_outbox_message(
@@ -2087,6 +2127,7 @@ def apply_action_plan(
 
     update_shallow_knowledge(state, event, memory_summary, current_time)
     update_agent_work_context_from_plan(state, event, decision_plan, action_plan, current_time)
+    update_user_status_after_plan(state, event, action_plan, counts, current_time)
     record_thought_journal_entry(
         state,
         event,
@@ -2265,6 +2306,7 @@ def apply_event_plans(
     event["decision_plan"] = decision_plan
     event["action_plan"] = public_action_plan(action_plan)
     event["processed_at"] = current_time
+    update_user_status_after_plan(state, event, action_plan, counts, current_time)
     return counts
 
 def update_runtime_processing_summary(

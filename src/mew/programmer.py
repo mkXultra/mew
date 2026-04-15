@@ -423,6 +423,7 @@ def create_follow_up_task_from_review(state, task, review_run):
     new_task = {
         "id": next_id(state, "task"),
         "title": f"Follow up review #{review_run['id']} for task #{task['id']}",
+        "kind": "coding",
         "description": follow_up,
         "status": "todo",
         "priority": "normal",

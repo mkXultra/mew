@@ -2,7 +2,7 @@ import unittest
 
 from mew.brief import build_brief, build_brief_data, next_move, review_runs_needing_followup
 from mew.programmer import create_follow_up_task_from_review, create_implementation_run_from_plan, create_task_plan
-from mew.state import add_outbox_message, add_question, default_state
+from mew.state import add_outbox_message, add_question, default_state, mark_question_deferred
 
 
 def add_task(state, status="todo", auto_execute=False):
@@ -38,6 +38,14 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("mew reply", next_move(state))
 
+    def test_next_move_ignores_deferred_question(self):
+        state = default_state()
+        add_task(state)
+        question, _ = add_question(state, "What should I do?", related_task_id=1)
+        mark_question_deferred(state, question, reason="later")
+
+        self.assertEqual(next_move(state), "plan task #1 with `mew task plan 1`")
+
     def test_next_move_recommends_review_for_completed_implementation(self):
         state = default_state()
         task = add_task(state)
@@ -61,6 +69,30 @@ class BriefTests(unittest.TestCase):
         add_task(state)
 
         self.assertEqual(next_move(state), "plan task #1 with `mew task plan 1`")
+
+    def test_next_move_does_not_programmer_plan_admin_task(self):
+        state = default_state()
+        task = add_task(state)
+        task["title"] = "Pay the electric bill"
+        task["kind"] = "admin"
+
+        self.assertEqual(
+            next_move(state),
+            "take one concrete admin step on task #1: Pay the electric bill",
+        )
+
+    def test_next_move_does_not_dispatch_admin_task_with_existing_plan(self):
+        state = default_state()
+        task = add_task(state, status="ready", auto_execute=True)
+        task["title"] = "Pay the electric bill"
+        task["kind"] = "admin"
+        task["plans"] = [{"id": 1, "status": "planned"}]
+        task["latest_plan_id"] = 1
+
+        self.assertEqual(
+            next_move(state),
+            "take one concrete admin step on task #1: Pay the electric bill",
+        )
 
     def test_processed_review_does_not_keep_needing_followup(self):
         state = default_state()
