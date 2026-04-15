@@ -148,6 +148,7 @@ def build_think_prompt(
         "Use complete_task only for a task whose objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only when it directly helps the current task or memory, and only under allowed_read_roots.\n"
         "Use recent step_runs, thought_journal, and memory before inspecting; autonomous cycles should not repeat the same read-only action.\n"
+        "If memory says a read was skipped as repeated, choose a different target or synthesize the next step instead of retrying it.\n"
         "Use write actions only for small targeted changes under allowed_write_roots; prefer dry_run before writing.\n"
         "Do not emit plan_task for personal, admin, research, or unknown tasks; use ask_user, send_message, or remember instead.\n"
         "Do not ask the same question if it already appears in unanswered_questions.\n"
@@ -255,6 +256,7 @@ def build_act_prompt(
         "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
         "Do not repeat the same read-only action shown in recent step_runs or thought_journal during autonomous cycles.\n"
+        "If the DecisionPlan repeats a read that memory says was skipped, convert it to memory/self_review/propose_task instead.\n"
         "Use write actions only under allowed_write_roots. If no write root is allowed, do not emit write actions.\n"
         "Do not invent shell commands. Reference tasks by task_id only. Do not emit plan_task for personal, admin, research, or unknown tasks.\n"
         "Do not repeat unanswered questions already present in state.\n"
@@ -2013,17 +2015,21 @@ def apply_action_plan(
                 counts["messages"] += 1
                 continue
             if event["type"] != "user_message" and recently_repeated_read_action(state, action):
+                skip_text = (
+                    f"Skipped repeated {action_type} for {action.get('path') or '.'}; "
+                    "recent context already contains that inspection. Choose a different target "
+                    "or synthesize the next step instead of retrying the same read."
+                )
                 message = add_outbox_message(
                     state,
                     "info",
-                    (
-                        f"Skipped repeated {action_type} for {action.get('path') or '.'}; "
-                        "recent context already contains that inspection."
-                    ),
+                    skip_text,
                     event_id=event["id"],
                     related_task_id=action.get("task_id"),
                 )
                 message["read_at"] = current_time
+                record_deep_memory(state, "decisions", skip_text, current_time)
+                memory_summary = skip_text
                 counts["messages"] += 1
                 continue
             counts["messages"] += apply_read_action(

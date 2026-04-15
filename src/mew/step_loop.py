@@ -168,13 +168,21 @@ def compact_step_effect(effect_type, item):
     return {key: value for key, value in effect.items() if value is not None}
 
 
+def _is_protected_step_effect(effect):
+    return effect.get("type") in ("question", "verification_run", "write_run") or (
+        effect.get("type") == "message"
+        and effect.get("message_type") == "question"
+        and effect.get("question_id") is not None
+    )
+
+
 def _cap_step_effects(effects):
     if len(effects) <= MAX_STEP_EFFECTS:
         return effects
     protected = [
         effect
         for effect in effects
-        if effect.get("type") in ("question", "verification_run", "write_run")
+        if _is_protected_step_effect(effect)
     ]
     capped = list(effects[:MAX_STEP_EFFECTS])
     missing_protected = [effect for effect in protected if effect not in capped]

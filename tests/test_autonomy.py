@@ -589,6 +589,47 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(context["context_stats"]["included_counts"]["step_runs"], 5)
         self.assertEqual(context["context_stats"]["omitted_counts"]["step_runs"], 2)
 
+    def test_build_context_preserves_important_step_effects_when_capped(self):
+        state = default_state()
+        state["step_runs"].append(
+            {
+                "id": 1,
+                "at": "now",
+                "event_id": 2,
+                "summary": "many effects",
+                "stop_reason": "max_steps",
+                "actions": [{"type": "read_file", "path": "README.md"}],
+                "skipped_actions": [],
+                "effects": [
+                    {"type": "message", "id": index + 1, "text": f"message {index}"}
+                    for index in range(12)
+                ]
+                + [
+                    {
+                        "type": "message",
+                        "id": 90,
+                        "message_type": "question",
+                        "question_id": 91,
+                        "text": "Need input?",
+                    },
+                    {"type": "question", "id": 91, "text": "Need input?"},
+                    {"type": "verification_run", "id": 99, "exit_code": 1},
+                    {"type": "write_run", "id": 100, "action_type": "edit_file"},
+                ],
+                "counts": {"actions": 1},
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        effects = context["step_runs"][0]["effects"]
+        self.assertEqual(len(effects), 8)
+        self.assertIn(("message", 90), [(effect["type"], effect["id"]) for effect in effects])
+        self.assertIn(("question", 91), [(effect["type"], effect["id"]) for effect in effects])
+        self.assertIn("verification_run", [effect["type"] for effect in effects])
+        self.assertIn("write_run", [effect["type"] for effect in effects])
+
     def test_build_context_preserves_attention_reason(self):
         state = default_state()
         long_reason = "verification failed because " + ("stderr detail " * 500)
@@ -1606,6 +1647,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(counts["messages"], 1)
         self.assertIn("Skipped repeated read_file", state["outbox"][0]["text"])
         self.assertIsNotNone(state["outbox"][0]["read_at"])
+        self.assertIn("Choose a different target", state["memory"]["shallow"]["current_context"])
+        self.assertIn("Skipped repeated read_file", state["memory"]["deep"]["decisions"][0])
         self.assertEqual(state["memory"]["deep"]["project"], [])
 
     def test_user_requested_read_action_can_repeat_recent_read(self):

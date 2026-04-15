@@ -191,9 +191,9 @@ class StepLoopTests(unittest.TestCase):
     def test_collect_step_effects_preserves_important_effects_when_capped(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
-        question, _created = add_question(state, "Need input?", event_id=event["id"])
         for index in range(MAX_STEP_EFFECTS + 5):
             add_outbox_message(state, "info", f"message {index}", event_id=event["id"])
+        question, _created = add_question(state, "Need input?", event_id=event["id"])
         state["verification_runs"].append(
             {
                 "id": next_id(state, "verification_run"),
@@ -216,7 +216,9 @@ class StepLoopTests(unittest.TestCase):
         effects = collect_step_effects(state, event["id"])
 
         self.assertEqual(len(effects), MAX_STEP_EFFECTS)
-        self.assertIn(("question", question["id"]), [(effect["type"], effect["id"]) for effect in effects])
+        effect_pairs = [(effect["type"], effect["id"]) for effect in effects]
+        self.assertIn(("message", question["outbox_message_id"]), effect_pairs)
+        self.assertIn(("question", question["id"]), effect_pairs)
         self.assertIn("verification_run", [effect["type"] for effect in effects])
         self.assertIn("write_run", [effect["type"] for effect in effects])
 

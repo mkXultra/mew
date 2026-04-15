@@ -16,6 +16,7 @@ MAX_CONTEXT_QUESTION_BLOCKS = 5
 MAX_CONTEXT_ATTENTION_ITEMS = 25
 MAX_CONTEXT_AGENT_RUNS = 8
 MAX_CONTEXT_STEP_RUNS = 5
+MAX_CONTEXT_STEP_EFFECTS = 8
 MAX_CONTEXT_RUN_OUTPUT_CHARS = 600
 MAX_CONTEXT_MEMORY_CHARS = 800
 MAX_CONTEXT_QUESTION_BLOCK_CHARS = 200
@@ -564,7 +565,33 @@ def _step_effect_for_context(effect):
     }
 
 
+def _is_protected_step_effect(effect):
+    return effect.get("type") in ("question", "verification_run", "write_run") or (
+        effect.get("type") == "message"
+        and effect.get("message_type") == "question"
+        and effect.get("question_id") is not None
+    )
+
+
+def _cap_step_effects_for_context(effects):
+    values = list(effects or [])
+    if len(values) <= MAX_CONTEXT_STEP_EFFECTS:
+        return values
+    capped = values[:MAX_CONTEXT_STEP_EFFECTS]
+    missing_protected = [
+        effect
+        for effect in values
+        if _is_protected_step_effect(effect)
+        and effect not in capped
+    ]
+    if not missing_protected:
+        return capped
+    protected_slots = min(len(missing_protected), MAX_CONTEXT_STEP_EFFECTS)
+    return capped[: MAX_CONTEXT_STEP_EFFECTS - protected_slots] + missing_protected[-protected_slots:]
+
+
 def step_run_for_context(run):
+    effects = _cap_step_effects_for_context(run.get("effects"))
     return {
         "id": run.get("id"),
         "at": run.get("at"),
@@ -581,7 +608,7 @@ def step_run_for_context(run):
         ],
         "effects": [
             _step_effect_for_context(effect)
-            for effect in list(run.get("effects") or [])[:8]
+            for effect in effects
         ],
         "counts": dict(run.get("counts") or {}),
     }
