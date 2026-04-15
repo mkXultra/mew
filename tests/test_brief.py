@@ -36,6 +36,9 @@ def add_task(state, status="todo", auto_execute=False):
 
 
 class BriefTests(unittest.TestCase):
+    def test_next_move_waits_when_idle(self):
+        self.assertEqual(next_move(default_state()), "wait for the next user request")
+
     def test_next_move_prefers_open_question(self):
         state = default_state()
         add_task(state)

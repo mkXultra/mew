@@ -805,7 +805,7 @@ def deterministic_decision_plan(
 
 def passive_wait_reason(state):
     move = next_move(state)
-    if move and move != "ask the user what to track next":
+    if move and move not in ("ask the user what to track next", "wait for the next user request"):
         return f"Next: {move}"
     return "No actionable task."
 

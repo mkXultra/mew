@@ -496,7 +496,7 @@ def next_move(state):
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
         return practical_next_step(tasks[0])
-    return "ask the user what to track next"
+    return "wait for the next user request"
 
 
 def build_brief(state, limit=5):
