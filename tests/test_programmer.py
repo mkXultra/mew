@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from mew.agent import apply_action_plan, deterministic_decision_plan
 from mew.agent_runs import (
+    build_ai_cli_run_command,
     extract_ai_cli_session_id,
     get_agent_run_result,
     parse_ai_cli_status,
@@ -24,7 +25,9 @@ from mew.programmer import (
     create_retry_run_for_implementation,
     create_review_run_for_implementation,
     create_task_plan,
+    extract_follow_up_text,
     extract_review_text,
+    parse_review_report,
     parse_review_status,
 )
 from mew.state import add_attention_item, add_question, default_state, load_state, migrate_state, save_state
@@ -149,6 +152,41 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(task["agent_run_id"], retry["id"])
         self.assertIn("Retry context", retry["prompt"])
 
+    def test_retry_run_resumes_matching_failed_session(self):
+        state = default_state()
+        task = add_task(state)
+        plan = create_task_plan(state, task, model="codex-ultra")
+        failed = create_implementation_run_from_plan(state, task, plan, dry_run=True)
+        failed["status"] = "failed"
+        failed["model"] = "codex-ultra"
+        failed["session_id"] = "session-123"
+
+        retry = create_retry_run_for_implementation(state, task, failed, plan=plan, dry_run=True)
+
+        self.assertEqual(retry["resume_session_id"], "session-123")
+        command = build_ai_cli_run_command(retry)
+        self.assertIn("--session-id", command)
+        self.assertIn("session-123", command)
+
+    def test_retry_run_does_not_resume_different_model_session(self):
+        state = default_state()
+        task = add_task(state)
+        plan = create_task_plan(state, task, model="codex-ultra")
+        failed = create_implementation_run_from_plan(state, task, plan, dry_run=True)
+        failed["model"] = "codex-ultra"
+        failed["session_id"] = "session-123"
+
+        retry = create_retry_run_for_implementation(
+            state,
+            task,
+            failed,
+            plan=plan,
+            model="gpt-5.1-codex-mini",
+            dry_run=True,
+        )
+
+        self.assertEqual(retry["resume_session_id"], "")
+
     def test_followup_task_from_review_result(self):
         state = default_state()
         task = add_task(state)
@@ -167,6 +205,8 @@ class ProgrammerTests(unittest.TestCase):
         self.assertIsNotNone(followup)
         self.assertIn("Add tests", followup["description"])
         self.assertEqual(task["status"], "blocked")
+        self.assertEqual(review["review_report"]["summary"], "x")
+        self.assertEqual(review["review_report"]["follow_up"], ["Add tests for programmer loop"])
         self.assertTrue(review["followup_processed_at"])
 
     def test_review_status_uses_agent_message_not_prompt_template(self):
@@ -217,6 +257,39 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(parse_review_status("STATUS: needs fix"), "needs_fix")
         self.assertEqual(parse_review_status("STATUS: pass|needs_fix|unknown"), "unknown")
         self.assertEqual(parse_review_status("no explicit status"), "unknown")
+
+    def test_parse_review_report_sections(self):
+        report = parse_review_report(
+            "STATUS: needs_fix\n"
+            "SUMMARY: The change is close.\n"
+            "FINDINGS:\n"
+            "- Missing regression test\n"
+            "- none\n"
+            "FOLLOW_UP:\n"
+            "- Add the test\n"
+        )
+
+        self.assertEqual(report["status"], "needs_fix")
+        self.assertEqual(report["summary"], "The change is close.")
+        self.assertEqual(report["findings"], ["Missing regression test"])
+        self.assertEqual(report["follow_up"], ["Add the test"])
+
+    def test_parse_review_report_preserves_leading_flag_text(self):
+        report = parse_review_report(
+            "STATUS: needs_fix\n"
+            "FOLLOW_UP:\n"
+            "- --timeout should be configurable\n"
+            "- -v flag should be documented\n"
+        )
+
+        self.assertEqual(
+            report["follow_up"],
+            ["--timeout should be configurable", "-v flag should be documented"],
+        )
+        self.assertEqual(
+            extract_follow_up_text("FOLLOW_UP:\n- --strict mode"),
+            "--strict mode",
+        )
 
     def test_parse_ai_cli_pid_does_not_accept_unlabeled_numbers(self):
         self.assertEqual(parse_ai_cli_pid('{"pid": 12345}'), 12345)

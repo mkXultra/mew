@@ -196,16 +196,21 @@ def create_review_run_for_implementation(state, task, implementation_run, plan=N
 
 
 def create_retry_run_for_implementation(state, task, failed_run, plan=None, model=None, dry_run=False):
+    target_model = model or (plan or {}).get("model") or task.get("agent_model") or DEFAULT_AGENT_MODEL
+    resume_session_id = ""
+    if failed_run.get("session_id") and failed_run.get("model") == target_model:
+        resume_session_id = failed_run.get("session_id")
     run = create_agent_run(
         state,
         task,
         backend=DEFAULT_AGENT_BACKEND,
-        model=model or (plan or {}).get("model") or task.get("agent_model") or DEFAULT_AGENT_MODEL,
+        model=target_model,
         cwd=failed_run.get("cwd") or (plan or {}).get("cwd") or task.get("cwd") or ".",
         prompt=build_retry_prompt(task, failed_run, plan=plan),
         purpose="implementation",
         plan_id=(plan or {}).get("id") or failed_run.get("plan_id"),
         parent_run_id=failed_run.get("id"),
+        resume_session_id=resume_session_id,
     )
     if dry_run:
         run["status"] = "dry_run"
@@ -222,17 +227,23 @@ def find_review_run_for_implementation(state, implementation_run_id):
     return None
 
 
+def _normalize_review_status(value):
+    normalized = (value or "").strip().casefold().replace("-", "_")
+    if normalized == "pass":
+        return "pass"
+    if normalized in ("needs_fix", "needs fix", "fail", "failed"):
+        return "needs_fix"
+    if normalized == "unknown":
+        return "unknown"
+    return "unknown"
+
+
 def parse_review_status(text):
     for line in (text or "").splitlines():
         stripped = line.strip()
         if not stripped.casefold().startswith("status:"):
             continue
-        value = stripped.split(":", 1)[1].strip().casefold()
-        normalized = value.replace("-", "_")
-        if normalized == "pass":
-            return "pass"
-        if normalized in ("needs_fix", "needs fix", "fail", "failed"):
-            return "needs_fix"
+        return _normalize_review_status(stripped.split(":", 1)[1])
     return "unknown"
 
 
@@ -298,21 +309,68 @@ def extract_review_text(review_run):
 
 
 def extract_follow_up_text(text):
+    return "\n".join(parse_review_report(text)["follow_up"]).strip()
+
+
+def _review_list_item(text):
+    item = (text or "").strip()
+    if item == "-":
+        item = ""
+    elif item.startswith("- "):
+        item = item[2:].strip()
+    elif item.startswith("-\t"):
+        item = item[2:].strip()
+    if not item or item.casefold() == "none":
+        return ""
+    return item
+
+
+def parse_review_report(text):
+    report = {
+        "status": "unknown",
+        "summary": "",
+        "findings": [],
+        "follow_up": [],
+    }
+    summary_lines = []
+    current_section = None
     lines = (text or "").splitlines()
-    in_follow_up = False
-    collected = []
     for line in lines:
         stripped = line.strip()
-        if stripped.upper().startswith("FOLLOW_UP"):
-            in_follow_up = True
+        if not stripped:
             continue
-        if in_follow_up and stripped.upper().startswith(("STATUS:", "SUMMARY:", "FINDINGS:")):
-            break
-        if in_follow_up and stripped:
-            item = stripped.lstrip("- ").strip()
-            if item and item.casefold() != "none":
-                collected.append(item)
-    return "\n".join(collected).strip()
+        upper = stripped.upper()
+        if upper.startswith("STATUS:"):
+            report["status"] = _normalize_review_status(stripped.split(":", 1)[1])
+            current_section = None
+            continue
+        if upper.startswith("SUMMARY:"):
+            current_section = "summary"
+            summary = stripped.split(":", 1)[1].strip()
+            if summary:
+                summary_lines.append(summary)
+            continue
+        if upper.startswith("FINDINGS:"):
+            current_section = "findings"
+            item = _review_list_item(stripped.split(":", 1)[1])
+            if item:
+                report["findings"].append(item)
+            continue
+        if upper.startswith("FOLLOW_UP:"):
+            current_section = "follow_up"
+            item = _review_list_item(stripped.split(":", 1)[1])
+            if item:
+                report["follow_up"].append(item)
+            continue
+        if current_section == "summary":
+            summary_lines.append(stripped)
+            continue
+        if current_section in ("findings", "follow_up"):
+            item = _review_list_item(stripped)
+            if item:
+                report[current_section].append(item)
+    report["summary"] = " ".join(summary_lines).strip()
+    return report
 
 
 def create_follow_up_task_from_review(state, task, review_run):
@@ -323,8 +381,10 @@ def create_follow_up_task_from_review(state, task, review_run):
                 return existing, review_run.get("review_status") or "unknown"
 
     result = extract_review_text(review_run)
-    status = parse_review_status(result)
+    report = parse_review_report(result)
+    status = report["status"]
     review_run["review_status"] = status
+    review_run["review_report"] = report
     task.setdefault("notes", "")
     current_time = now_iso()
     task["notes"] = (
@@ -334,7 +394,7 @@ def create_follow_up_task_from_review(state, task, review_run):
     review_run["followup_processed_at"] = current_time
     review_run["updated_at"] = current_time
 
-    follow_up = extract_follow_up_text(result)
+    follow_up = "\n".join(report["follow_up"]).strip()
     if status == "needs_fix" and not follow_up:
         follow_up = result or f"Review run #{review_run['id']} reported needs_fix without follow-up details."
     if not follow_up or status == "pass":

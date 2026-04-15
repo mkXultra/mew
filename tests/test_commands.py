@@ -111,6 +111,51 @@ class CommandTests(unittest.TestCase):
                         message = add_outbox_message(state, "info", f"read {index}")
                         message["read_at"] = f"read-{index}"
                     add_outbox_message(state, "info", "unread")
+                    state["agent_runs"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "task_id": 1,
+                                "purpose": "implementation",
+                                "status": "completed",
+                            },
+                            {
+                                "id": 2,
+                                "task_id": 1,
+                                "purpose": "review",
+                                "status": "completed",
+                                "review_of_run_id": 1,
+                                "followup_processed_at": "done",
+                            },
+                            {
+                                "id": 3,
+                                "task_id": 2,
+                                "purpose": "implementation",
+                                "status": "completed",
+                            },
+                            {
+                                "id": 4,
+                                "task_id": 3,
+                                "purpose": "implementation",
+                                "status": "running",
+                            },
+                            {
+                                "id": 5,
+                                "task_id": 4,
+                                "purpose": "implementation",
+                                "status": "failed",
+                            },
+                            {
+                                "id": 6,
+                                "task_id": 5,
+                                "purpose": "implementation",
+                                "status": "failed",
+                            },
+                        ]
+                    )
+                    for index in range(3):
+                        state["verification_runs"].append({"id": index + 1, "exit_code": index})
+                        state["write_runs"].append({"id": index + 1, "operation": "write_file"})
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -119,14 +164,94 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn("archived_inbox: 2", stdout.getvalue())
                 self.assertIn("archived_outbox: 2", stdout.getvalue())
+                self.assertIn("archived_agent_runs: 1", stdout.getvalue())
+                self.assertIn("archived_verification_runs: 2", stdout.getvalue())
+                self.assertIn("archived_write_runs: 2", stdout.getvalue())
 
                 state = load_state()
                 self.assertEqual(len(state["inbox"]), 2)
                 self.assertEqual(len(state["outbox"]), 2)
+                self.assertEqual([run["id"] for run in state["agent_runs"]], [2, 3, 4, 5, 6])
+                self.assertEqual([run["id"] for run in state["verification_runs"]], [3])
+                self.assertEqual([run["id"] for run in state["write_runs"]], [3])
                 archives = list((Path(".mew") / "archive").glob("state-*.json"))
                 self.assertEqual(len(archives), 1)
                 archived = json.loads(archives[0].read_text(encoding="utf-8"))
-                self.assertEqual(archived["counts"], {"inbox": 2, "outbox": 2})
+                self.assertEqual(
+                    archived["counts"],
+                    {
+                        "inbox": 2,
+                        "outbox": 2,
+                        "agent_runs": 1,
+                        "verification_runs": 2,
+                        "write_runs": 2,
+                    },
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_archive_agent_runs_preserves_open_lifecycle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.archive import archive_state_records
+                from mew.state import default_state
+
+                state = default_state()
+                state["agent_runs"].extend(
+                    [
+                        {
+                            "id": 1,
+                            "purpose": "implementation",
+                            "status": "completed",
+                        },
+                        {
+                            "id": 2,
+                            "purpose": "review",
+                            "status": "completed",
+                            "review_of_run_id": 1,
+                            "followup_processed_at": "done",
+                        },
+                        {
+                            "id": 3,
+                            "purpose": "implementation",
+                            "status": "completed",
+                        },
+                        {
+                            "id": 4,
+                            "purpose": "review",
+                            "status": "running",
+                            "review_of_run_id": 3,
+                        },
+                        {
+                            "id": 5,
+                            "purpose": "implementation",
+                            "status": "failed",
+                        },
+                        {
+                            "id": 6,
+                            "purpose": "implementation",
+                            "status": "running",
+                            "parent_run_id": 5,
+                        },
+                        {
+                            "id": 7,
+                            "purpose": "implementation",
+                            "status": "failed",
+                        },
+                        {
+                            "id": 8,
+                            "purpose": "implementation",
+                            "status": "dry_run",
+                        },
+                    ]
+                )
+
+                result = archive_state_records(state, keep_recent=0, dry_run=False, current_time="2026-04-15T00:00:00Z")
+
+                self.assertEqual(result["archived"]["agent_runs"], 4)
+                self.assertEqual([run["id"] for run in state["agent_runs"]], [3, 4, 6, 7])
             finally:
                 os.chdir(old_cwd)
 
@@ -299,6 +424,12 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(activity["recent_activity"][0]["summary"], "Checked the workspace.")
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["context", "--json"]), 0)
+                context = json.loads(stdout.getvalue())
+                self.assertIn("context_stats", context)
+                self.assertIn("section_chars", context["context_stats"])
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["next", "--json"]), 0)
                 next_data = json.loads(stdout.getvalue())
                 self.assertIn("next_move", next_data)
@@ -331,6 +462,21 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["activity"]), 0)
 
                 self.assertIn("Read README", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_context_command_prints_diagnostics(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["context", "--send-message", "hello"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("Mew context", output)
+                self.assertIn("approx_chars:", output)
+                self.assertIn("Largest sections", output)
             finally:
                 os.chdir(old_cwd)
 

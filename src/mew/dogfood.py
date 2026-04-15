@@ -62,7 +62,10 @@ def build_runtime_command(args, workspace):
     if args.ai:
         command.append("--ai")
         if args.auth:
-            command.extend(["--auth", args.auth])
+            auth_path = Path(args.auth).expanduser()
+            if not auth_path.is_absolute():
+                auth_path = (Path.cwd() / auth_path).resolve()
+            command.extend(["--auth", str(auth_path)])
         if args.model_backend:
             command.extend(["--model-backend", args.model_backend])
         if args.model:

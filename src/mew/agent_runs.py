@@ -44,6 +44,7 @@ def create_agent_run(
     plan_id=None,
     parent_run_id=None,
     review_of_run_id=None,
+    resume_session_id=None,
 ):
     current_time = now_iso()
     run = {
@@ -63,6 +64,7 @@ def create_agent_run(
         "prompt_file": "",
         "status": "created",
         "external_pid": None,
+        "resume_session_id": resume_session_id or "",
         "session_id": None,
         "command": [],
         "started_at": None,
@@ -94,6 +96,8 @@ def build_ai_cli_run_command(run):
         command.extend(["--prompt-file", run["prompt_file"]])
     else:
         command.extend(["--prompt", run["prompt"]])
+    if run.get("resume_session_id"):
+        command.extend(["--session-id", run["resume_session_id"]])
     return command
 
 

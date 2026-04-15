@@ -18,6 +18,7 @@ from .commands import (
     cmd_attention,
     cmd_brief,
     cmd_chat,
+    cmd_context,
     cmd_desires_init,
     cmd_desires_show,
     cmd_dogfood,
@@ -295,6 +296,23 @@ def build_parser():
     activity_parser.add_argument("--limit", type=int, default=10, help="maximum activity items")
     activity_parser.add_argument("--json", action="store_true", help="print structured JSON")
     activity_parser.set_defaults(func=cmd_activity)
+
+    context_parser = subparsers.add_parser("context", help="show resident prompt context diagnostics")
+    context_parser.add_argument(
+        "--event-type",
+        default="passive_tick",
+        choices=("startup", "passive_tick", "tick", "user_message"),
+        help="synthetic event type used to build diagnostics",
+    )
+    context_parser.add_argument("--send-message", dest="context_message", help="synthetic user message payload")
+    context_parser.add_argument(
+        "--allowed-read-root",
+        action="append",
+        default=[],
+        help="allowed read root for passive perception; may be repeated",
+    )
+    context_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    context_parser.set_defaults(func=cmd_context)
 
     dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")

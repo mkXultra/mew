@@ -674,6 +674,7 @@ The first user-facing version should likely include:
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
+- `mew context`: show resident prompt context diagnostics and approximate section sizes.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew next`: print the single next useful command or move.
 - `mew next --json`: print the next move and extracted command as structured JSON.
@@ -695,7 +696,7 @@ The first user-facing version should likely include:
 - `mew ack --all`: mark all unread outbox messages as read.
 - `mew attention`: show what currently needs the user's attention.
 - `mew attention --resolve <attention-id>` and `--resolve-all`: close attention items the user has handled.
-- `mew archive`: dry-run archival for processed inbox and read outbox records.
+- `mew archive`: dry-run archival for processed inbox, read outbox, completed agent runs, and old verification/write records.
 - `mew archive --apply`: write `.mew/archive/` and compact active state.
 - `mew memory`: show shallow memory and recent remembered events.
 - `mew memory --compact`: compact recent shallow events into durable project memory.

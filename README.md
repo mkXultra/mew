@@ -80,6 +80,7 @@ uv run mew chat
 uv run mew brief
 uv run mew brief --json
 uv run mew activity
+uv run mew context
 uv run mew dogfood --ai --duration 60
 uv run mew perceive --allow-read .
 uv run mew next
@@ -250,8 +251,8 @@ uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 - `.mew/state.json`: durable state.
 - `.mew/runtime.md`: runtime log.
 - `.mew/runtime.out`: background runtime output when started with `mew start`.
-- `.mew/archive/`: archived processed inbox and read outbox records.
-- `mew run --auto-archive` writes old processed/read records to `.mew/archive/`.
+- `.mew/archive/`: archived processed inbox, read outbox, completed agent runs, and old verification/write records.
+- `mew run --auto-archive` writes old inactive records to `.mew/archive/`.
 - `.mew/guidance.md`: human-written think-phase priority.
 - `.mew/policy.md`: local safety policy.
 - `.mew/self.md`: mew identity and behavior.

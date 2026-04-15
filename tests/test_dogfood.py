@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,33 @@ class DogfoodTests(unittest.TestCase):
 
         self.assertIn("--autonomous", command)
         self.assertNotIn("--ai", command)
+
+    def test_build_runtime_command_resolves_relative_auth_before_workspace_cwd(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                args = SimpleNamespace(
+                    interval=3,
+                    poll_interval=0.2,
+                    autonomy_level="act",
+                    model_timeout=45,
+                    ai=True,
+                    auth="auth.json",
+                    model_backend="codex",
+                    model="",
+                    base_url="",
+                    allow_write=False,
+                    allow_verify=False,
+                    verify_command="",
+                    verify_interval_minutes=0.05,
+                )
+
+                command = build_runtime_command(args, Path("/tmp/work"))
+
+                self.assertEqual(command[command.index("--auth") + 1], str((Path(tmp) / "auth.json").resolve()))
+            finally:
+                os.chdir(old_cwd)
 
     def test_build_report_summarizes_state_and_runtime_log(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,6 +28,7 @@ from .brief import (
 )
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
+from .context import build_context
 from .dogfood import format_dogfood_report, run_dogfood
 from .errors import MewError
 from .memory import compact_memory
@@ -538,6 +539,71 @@ def cmd_activity(args):
         return 0
     print(format_activity(state, limit=args.limit))
     return 0
+
+
+def format_context_report(context, current_time):
+    stats = context.get("context_stats", {})
+    lines = [
+        f"Mew context at {current_time}",
+        f"approx_chars: {stats.get('approx_chars', 0)}",
+    ]
+    limits = stats.get("limits", {})
+    if limits:
+        limit_text = ", ".join(f"{key}={value}" for key, value in sorted(limits.items()))
+        lines.append(f"limits: {limit_text}")
+
+    for label, values in (
+        ("source", stats.get("source_counts", {})),
+        ("included", stats.get("included_counts", {})),
+        ("omitted", stats.get("omitted_counts", {})),
+    ):
+        if values:
+            value_text = ", ".join(f"{key}={value}" for key, value in sorted(values.items()))
+            lines.append(f"{label}: {value_text}")
+
+    section_chars = stats.get("section_chars", {})
+    if section_chars:
+        lines.append("")
+        lines.append("Largest sections")
+        largest = sorted(section_chars.items(), key=lambda item: item[1], reverse=True)[:8]
+        for key, chars in largest:
+            lines.append(f"- {key}: {chars}")
+    return "\n".join(lines)
+
+
+def cmd_context(args):
+    state = load_state()
+    current_time = now_iso()
+    message = getattr(args, "context_message", None)
+    event = {
+        "id": 0,
+        "type": "user_message" if message else args.event_type,
+        "source": "context_command",
+        "payload": {"text": message} if message else {},
+        "created_at": current_time,
+        "processed_at": None,
+    }
+    autonomy = state.get("autonomy", {})
+    context = build_context(
+        state,
+        event,
+        current_time,
+        allowed_read_roots=args.allowed_read_root or [],
+        self_text=read_self(),
+        desires=read_desires(),
+        autonomous=bool(autonomy.get("enabled")),
+        autonomy_level=autonomy.get("level") or "off",
+        allow_agent_run=bool(autonomy.get("allow_agent_run")),
+        allow_verify=bool(autonomy.get("allow_verify")),
+        verify_command="configured" if autonomy.get("verify_command_configured") else "",
+        allow_write=bool(autonomy.get("allow_write")),
+    )
+    if args.json:
+        print(json.dumps(context, ensure_ascii=False, indent=2))
+        return 0
+    print(format_context_report(context, current_time))
+    return 0
+
 
 def cmd_perceive(args):
     roots = args.allow_read or []
@@ -1267,7 +1333,9 @@ def cmd_agent_show(args):
         "prompt_file",
         "status",
         "external_pid",
+        "resume_session_id",
         "session_id",
+        "review_report",
         "supervisor_verification",
         "created_at",
         "started_at",

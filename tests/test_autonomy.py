@@ -326,6 +326,12 @@ class AutonomyTests(unittest.TestCase):
                 "stdout": long_text,
                 "stderr": long_text,
                 "result": long_text,
+                "review_report": {
+                    "status": "needs_fix",
+                    "summary": long_text,
+                    "findings": [long_text] * 8,
+                    "follow_up": [long_text] * 8,
+                },
                 "created_at": current_time,
                 "updated_at": current_time,
             }
@@ -341,6 +347,9 @@ class AutonomyTests(unittest.TestCase):
         self.assertNotIn("prompt", context["agent_runs"][0])
         self.assertIn("prompt_chars", context["agent_runs"][0])
         self.assertLessEqual(len(context["agent_runs"][0]["result_tail"]), 620)
+        self.assertLessEqual(len(context["agent_runs"][0]["review_report"]["summary"]), 620)
+        self.assertEqual(len(context["agent_runs"][0]["review_report"]["findings"]), 5)
+        self.assertLessEqual(len(context["agent_runs"][0]["review_report"]["findings"][0]), 620)
         self.assertEqual(context["context_stats"]["source_counts"]["agent_runs"], 1)
         self.assertGreater(context["context_stats"]["section_chars"]["todo"], 0)
         self.assertGreater(context["context_stats"]["section_chars"]["agent_runs"], 0)
