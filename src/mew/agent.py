@@ -1309,6 +1309,17 @@ def apply_self_review_action(state, event, action, current_time, autonomous, aut
 
     title = action.get("proposed_task_title")
     if title:
+        if event["type"] != "user_message" and autonomous and open_tasks(state):
+            record_deep_memory(
+                state,
+                "decisions",
+                (
+                    "Deferred self-review task proposal because open tasks already exist: "
+                    f"{title}"
+                ),
+                current_time,
+            )
+            return message_count
         can_propose = event["type"] == "user_message" or (
             autonomous and autonomy_level in ("propose", "act")
         )

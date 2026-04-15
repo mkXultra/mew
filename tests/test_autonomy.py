@@ -877,6 +877,57 @@ class AutonomyTests(unittest.TestCase):
         self.assertGreaterEqual(counts["messages"], 1)
         self.assertIn("Self review:", state["memory"]["deep"]["decisions"][0])
 
+    def test_self_review_defers_task_proposal_when_open_tasks_exist(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Existing autonomous task",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "review"},
+            {
+                "summary": "review",
+                "actions": [
+                    {
+                        "type": "self_review",
+                        "summary": "Another idea.",
+                        "proposed_task_title": "Second autonomous task",
+                    }
+                ],
+            },
+            current_time,
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertIn("Deferred self-review task proposal", state["memory"]["deep"]["decisions"][-1])
+
     def test_complete_task_can_finish_self_proposed_task_at_act_level(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
