@@ -951,13 +951,17 @@ State should be stored locally.
 Recommended core validation option:
 
 - `.mew/state.json` for structured state.
+- Save-time state invariant validation and `next_ids` reconciliation.
+- `.mew/effects.jsonl` for append-only state checkpoint records.
 - `.mew/runtime.md` for human-readable runtime logs.
 
 Optional later support:
 
-- SQLite database.
+- Per-session JSONL event logs with write-time persistence modes.
+- SQLite database for queryable thread/session metadata.
+- Recovery commands that rebuild state from checkpoints and event logs.
 
-The initial goal is to prove behavior, not storage sophistication. SQLite can be introduced later if concurrent writes, querying, or migration complexity justify it.
+The initial goal is to prove behavior, not storage sophistication. SQLite can be introduced later if concurrent writes, querying, resume, or migration complexity justify it.
 
 ## 12. Safety Requirements
 
@@ -1023,3 +1027,7 @@ After the task management MVP works, later versions can add:
 - Desktop notifications and richer interruption policy.
 - Richer agent-run review loops, retries, and task decomposition.
 - Memory compression and long-term project knowledge synthesis.
+- Typed local control plane for machine-facing sessions and health checks.
+- Per-session append-only transcript/event logs with compaction checkpoints.
+- Platform-aware sandbox and execution policy layers before broader autonomous command execution.
+- Resume/recovery pipeline that sanitizes interrupted turns before model replay.
