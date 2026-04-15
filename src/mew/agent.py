@@ -808,6 +808,49 @@ def normalize_decision_plan(plan, fallback_summary):
         "decisions": normalized,
     }
 
+REQUIRED_MODEL_GUARDRAIL_DECISIONS = {
+    "collect_agent_result",
+    "review_agent_run",
+    "followup_review",
+    "run_verification",
+    "propose_task",
+    "plan_task",
+    "dispatch_task",
+}
+
+
+def required_model_guardrail_decision(decision):
+    decision_type = decision.get("type")
+    if decision_type in REQUIRED_MODEL_GUARDRAIL_DECISIONS:
+        return True
+    return decision_type == "self_review" and bool(decision.get("proposed_task_title"))
+
+
+def decision_matches(candidate, existing):
+    if candidate.get("type") != existing.get("type"):
+        return False
+    target_keys = ("task_id", "run_id", "plan_id")
+    compared = False
+    for key in target_keys:
+        if candidate.get(key) is None and existing.get(key) is None:
+            continue
+        compared = True
+        if candidate.get(key) != existing.get(key):
+            return False
+    return compared or candidate.get("type") == existing.get("type")
+
+
+def append_missing_guardrail_decisions(plan, fallback):
+    decisions = plan.setdefault("decisions", [])
+    for candidate in fallback.get("decisions", []):
+        if not required_model_guardrail_decision(candidate):
+            continue
+        if any(decision_matches(candidate, existing) for existing in decisions):
+            continue
+        decisions.append(dict(candidate))
+    return plan
+
+
 def think_phase(
     state,
     event,
@@ -882,7 +925,7 @@ def think_phase(
             }
         )
         return fallback
-    return normalize_decision_plan(plan, fallback["summary"])
+    return append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
 
 def deterministic_action_plan(decision_plan):
     actions = []

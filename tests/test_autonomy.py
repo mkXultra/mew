@@ -621,6 +621,98 @@ class AutonomyTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_think_phase_preserves_required_guardrail_decisions(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Needs a plan",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+        auth = {"access_token": "token"}
+
+        with patch(
+            "mew.agent.call_model_json",
+            return_value={
+                "summary": "inspect first",
+                "decisions": [{"type": "read_file", "path": "README.md"}],
+            },
+        ):
+            plan = think_phase(
+                state,
+                event,
+                current_time,
+                auth,
+                "test-model",
+                "https://example.invalid",
+                5,
+                False,
+                False,
+                "",
+                "",
+                autonomous=True,
+                autonomy_level="propose",
+                model_backend="codex",
+            )
+
+        decision_types = [decision["type"] for decision in plan["decisions"]]
+        self.assertIn("read_file", decision_types)
+        self.assertIn("plan_task", decision_types)
+        plan_tasks = [decision for decision in plan["decisions"] if decision["type"] == "plan_task"]
+        self.assertEqual(plan_tasks[0]["task_id"], 1)
+
+    def test_think_phase_preserves_self_directed_task_guardrail(self):
+        state = default_state()
+        current_time = now_iso()
+        event = add_event(state, "startup", "test")
+        auth = {"access_token": "token"}
+
+        with patch(
+            "mew.agent.call_model_json",
+            return_value={
+                "summary": "inspect first",
+                "decisions": [{"type": "read_file", "path": "README.md"}],
+            },
+        ):
+            plan = think_phase(
+                state,
+                event,
+                current_time,
+                auth,
+                "test-model",
+                "https://example.invalid",
+                5,
+                False,
+                False,
+                "",
+                "",
+                autonomous=True,
+                autonomy_level="act",
+                model_backend="codex",
+            )
+
+        self_reviews = [decision for decision in plan["decisions"] if decision["type"] == "self_review"]
+        self.assertEqual(len(self_reviews), 1)
+        self.assertEqual(self_reviews[0]["proposed_task_title"], "Define the next useful mew task")
+
     def test_act_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
