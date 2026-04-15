@@ -284,7 +284,14 @@ def task_question(task):
     if task.get("status") == "todo":
         return f"Task #{task['id']} is todo. Should I make it ready, block it, or add execution details?"
     if task.get("status") == "ready" and not task.get("command") and not task.get("agent_backend"):
-        return f"Task #{task['id']} is ready but has no command. What should I execute for it?"
+        kind = task_kind(task)
+        if kind == "coding":
+            return f"Task #{task['id']} is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?"
+        if kind == "research":
+            return f"Task #{task['id']} is ready research work. Should I assign it to an agent, add research criteria, or block it?"
+        if kind in ("personal", "admin"):
+            return f"Task #{task['id']} is ready. What concrete next step should I track, or should it stay as a reminder?"
+        return f"Task #{task['id']} is ready but has no clear next action. Should I add execution details, assign an agent, or block it?"
     if task.get("status") == "blocked":
         return f"Task #{task['id']} is blocked. What information is needed to unblock it?"
     return ""

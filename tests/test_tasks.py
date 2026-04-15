@@ -1,6 +1,13 @@
 import unittest
 
-from mew.tasks import infer_task_kind, normalize_task_id, task_kind, task_kind_report, task_needs_programmer_plan
+from mew.tasks import (
+    infer_task_kind,
+    normalize_task_id,
+    task_kind,
+    task_kind_report,
+    task_needs_programmer_plan,
+    task_question,
+)
 
 
 class TaskKindTests(unittest.TestCase):
@@ -66,6 +73,37 @@ class TaskKindTests(unittest.TestCase):
 
         task["plans"] = [{"id": 1, "status": "planned"}]
         self.assertFalse(task_needs_programmer_plan(task))
+
+    def test_ready_research_task_question_does_not_ask_for_command_execution(self):
+        question = task_question(
+            {
+                "id": 20,
+                "title": "補助金について調べる",
+                "kind": "research",
+                "status": "ready",
+                "command": "",
+                "agent_backend": "",
+            }
+        )
+
+        self.assertIn("ready research work", question)
+        self.assertIn("research criteria", question)
+        self.assertNotIn("What should I execute", question)
+
+    def test_ready_coding_task_question_offers_agent_or_command(self):
+        question = task_question(
+            {
+                "id": 21,
+                "title": "Implement runtime cleanup",
+                "kind": "coding",
+                "status": "ready",
+                "command": "",
+                "agent_backend": "",
+            }
+        )
+
+        self.assertIn("dispatch it to an agent", question)
+        self.assertIn("add a command", question)
 
 
 if __name__ == "__main__":
