@@ -10,6 +10,8 @@ DEFAULT_REVIEW_MODEL = "gpt-5.1-codex-mini"
 SAFE_TOOL_PROMPT_GUIDANCE = (
     "Safe local tool layer:\n"
     "- Prefer `uv run mew tool status` and `uv run mew tool git status` for workspace status.\n"
+    "- If `uv run mew ...` cannot initialize in a source checkout, use the local `./mew ...` "
+    "wrapper for the same safe tools.\n"
     "- Use `uv run mew tool list`, `uv run mew tool read`, and `uv run mew tool search` "
     "for bounded inspection.\n"
     "- Use `uv run mew tool write --dry-run` or `uv run mew tool edit --dry-run` to preview "

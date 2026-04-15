@@ -83,6 +83,7 @@ class ProgrammerTests(unittest.TestCase):
 
         self.assertIn("Safe local tool layer:", plan["implementation_prompt"])
         self.assertIn("uv run mew tool status", plan["implementation_prompt"])
+        self.assertIn("local `./mew ...` wrapper", plan["implementation_prompt"])
         self.assertIn("uv run mew tool read", plan["implementation_prompt"])
         self.assertIn("uv run mew tool test --command", plan["implementation_prompt"])
         self.assertIn("uv run mew tool write --dry-run", plan["implementation_prompt"])
