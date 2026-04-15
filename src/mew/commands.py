@@ -448,9 +448,41 @@ def cmd_task_done(args):
             reason="task marked done",
         )
         record_user_reported_verification(state, None, task, summary, current_time)
+        sync_task_done_state(state, task, summary, current_time)
         save_state(state)
     print(format_task(task))
     return 0
+
+def sync_task_done_state(state, task, summary, current_time):
+    task_id = task["id"]
+    text = f"Task #{task_id} completed: {task['title']}."
+    if summary:
+        text = f"{text} {summary}"
+    shallow = state.setdefault("memory", {}).setdefault("shallow", {})
+    shallow["current_context"] = text
+    shallow["latest_task_summary"] = text
+    state.setdefault("knowledge", {}).setdefault("shallow", {})["latest_task_summary"] = text
+
+    agent = state.get("agent_status", {})
+    if str(agent.get("active_task_id")) == str(task_id):
+        agent["mode"] = "idle"
+        agent["current_focus"] = ""
+        agent["active_task_id"] = None
+        agent["pending_question"] = None
+        agent["updated_at"] = current_time
+    user = state.get("user_status", {})
+    if not open_questions(state):
+        user["mode"] = "idle"
+        user["current_focus"] = ""
+        user["updated_at"] = current_time
+
+    task_markers = (f"task #{task_id}", f"task {task_id}")
+    for message in state.get("outbox", []):
+        if message.get("read_at") or message.get("requires_reply"):
+            continue
+        message_text = (message.get("text") or "").casefold()
+        if any(marker in message_text for marker in task_markers):
+            message["read_at"] = current_time
 
 def cmd_task_update(args):
     with state_lock():

@@ -175,10 +175,19 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import load_state
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
 
                 with redirect_stdout(StringIO()):
                     self.assertEqual(main(["task", "add", "Finish docs"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["memory"]["shallow"]["current_context"] = "1 open task(s) (ready: 1)"
+                    state["agent_status"]["mode"] = "reviewing_tasks"
+                    state["agent_status"]["active_task_id"] = 1
+                    add_outbox_message(state, "info", "Next: plan task #1 with `mew task plan 1`")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
                     self.assertEqual(
                         main(
                             [
@@ -195,6 +204,9 @@ class CommandTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["status"], "done")
                 self.assertIn("2 passed", state["tasks"][0]["notes"])
+                self.assertIn("Task #1 completed", state["memory"]["shallow"]["current_context"])
+                self.assertEqual(state["agent_status"]["mode"], "idle")
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
                 self.assertEqual(len(state["verification_runs"]), 1)
                 self.assertEqual(state["verification_runs"][0]["command"], "user-reported")
                 self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
