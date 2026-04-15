@@ -249,6 +249,163 @@ def cmd_task_show(args):
     print(f"updated_at: {task.get('updated_at')}")
     return 0
 
+def _latest_agent_run_for_task(state, task_id, purpose=None):
+    wanted = str(task_id)
+    for run in reversed(state.get("agent_runs", [])):
+        if str(run.get("task_id")) != wanted:
+            continue
+        if purpose and run.get("purpose", "implementation") != purpose:
+            continue
+        return run
+    return None
+
+
+def _review_for_run(state, run_id):
+    wanted = str(run_id)
+    for run in reversed(state.get("agent_runs", [])):
+        if run.get("purpose") == "review" and str(run.get("review_of_run_id")) == wanted:
+            return run
+    return None
+
+
+def build_workbench_data(state, task):
+    task_id = task.get("id")
+    plan = latest_task_plan(task)
+    agent_runs = [
+        run for run in state.get("agent_runs", [])
+        if str(run.get("task_id")) == str(task_id)
+    ][-8:]
+    verification_runs = [
+        run for run in state.get("verification_runs", [])
+        if str(run.get("task_id")) == str(task_id)
+    ][-5:]
+    write_runs = [
+        run for run in state.get("write_runs", [])
+        if str(run.get("task_id")) == str(task_id)
+    ][-5:]
+    questions = [
+        question for question in state.get("questions", [])
+        if str(question.get("related_task_id")) == str(task_id)
+        and question.get("status") == "open"
+    ]
+    latest_implementation = _latest_agent_run_for_task(state, task_id, purpose="implementation")
+    latest_review = (
+        _review_for_run(state, latest_implementation.get("id"))
+        if latest_implementation
+        else None
+    )
+
+    next_action = "mew task show {task_id}".format(task_id=task_id)
+    if questions:
+        next_action = f"mew reply {questions[0]['id']} \"...\""
+    elif not is_programmer_task(task):
+        next_action = f"mew task update {task_id} --kind coding"
+    elif not plan:
+        next_action = f"mew task plan {task_id}"
+    elif not latest_implementation:
+        next_action = f"mew buddy --task {task_id} --dispatch --dry-run"
+    elif latest_implementation.get("status") in ("created", "running"):
+        next_action = f"mew agent wait {latest_implementation['id']}"
+    elif latest_implementation.get("status") == "failed":
+        next_action = f"mew agent retry {latest_implementation['id']} --dry-run"
+    elif latest_implementation.get("status") == "completed" and not latest_review:
+        next_action = f"mew agent review {latest_implementation['id']}"
+    elif latest_review and latest_review.get("status") in ("created", "running"):
+        next_action = f"mew agent wait {latest_review['id']}"
+    elif latest_review and latest_review.get("status") == "completed" and not latest_review.get("followup_processed_at"):
+        next_action = f"mew agent followup {latest_review['id']}"
+
+    return {
+        "task": task,
+        "kind": task_kind(task),
+        "plan": plan,
+        "agent_runs": agent_runs,
+        "verification_runs": verification_runs,
+        "write_runs": write_runs,
+        "open_questions": questions,
+        "next_action": next_action,
+    }
+
+
+def format_workbench(data):
+    task = data["task"]
+    lines = [
+        f"Work task #{task.get('id')}: {task.get('title')}",
+        format_task(task),
+        f"kind: {data.get('kind')}",
+        f"description: {task.get('description') or ''}",
+        f"cwd: {task.get('cwd') or ''}",
+        "",
+        "Plan",
+    ]
+    plan = data.get("plan")
+    if plan:
+        lines.append(format_task_plan(plan))
+        lines.append(f"objective: {plan.get('objective') or ''}")
+        lines.append(f"approach: {plan.get('approach') or ''}")
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("Agent runs")
+    if data.get("agent_runs"):
+        for run in data["agent_runs"]:
+            purpose = run.get("purpose", "implementation")
+            lines.append(
+                f"#{run.get('id')} [{run.get('status')}/{purpose}] "
+                f"plan={run.get('plan_id') or ''} model={run.get('model') or ''}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("Verification")
+    if data.get("verification_runs"):
+        for run in data["verification_runs"]:
+            outcome = verification_outcome(run)
+            lines.append(f"#{run.get('id')} [{outcome}] {run.get('command') or ''}")
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("Writes")
+    if data.get("write_runs"):
+        for run in data["write_runs"]:
+            lines.append(
+                f"#{run.get('id')} [{run.get('operation') or 'write'}] "
+                f"{run.get('path') or ''} changed={bool(run.get('changed'))} "
+                f"rolled_back={bool(run.get('rolled_back'))}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("Open questions")
+    if data.get("open_questions"):
+        for question in data["open_questions"]:
+            lines.append(f"#{question.get('id')} {question.get('text') or ''}")
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("Next action")
+    lines.append(data.get("next_action") or "")
+    return "\n".join(lines)
+
+
+def cmd_work(args):
+    state = load_state()
+    task = find_task(state, args.task_id)
+    if not task:
+        print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+        return 1
+    data = build_workbench_data(state, task)
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(format_workbench(data))
+    return 0
+
 def cmd_task_done(args):
     with state_lock():
         state = load_state()

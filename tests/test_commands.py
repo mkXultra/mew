@@ -668,6 +668,82 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_summarizes_task_resume_surface(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.programmer import create_task_plan
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Implement workbench",
+                        "kind": "coding",
+                        "description": "Show the coding task resume state.",
+                        "status": "ready",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    state["tasks"].append(task)
+                    create_task_plan(state, task)
+                    state["agent_runs"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "plan_id": 1,
+                            "purpose": "implementation",
+                            "status": "completed",
+                            "model": "codex-ultra",
+                        }
+                    )
+                    state["verification_runs"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "command": "uv run pytest",
+                            "exit_code": 0,
+                        }
+                    )
+                    state["write_runs"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "operation": "edit_file",
+                            "path": "src/mew/commands.py",
+                            "changed": True,
+                            "rolled_back": False,
+                        }
+                    )
+                    add_question(state, "Need scope?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Work task #1: Implement workbench", output)
+                self.assertIn("plan #1 task=#1", output)
+                self.assertIn("#1 [completed/implementation]", output)
+                self.assertIn("#1 [passed] uv run pytest", output)
+                self.assertIn("#1 [edit_file] src/mew/commands.py changed=True", output)
+                self.assertIn("mew reply 1", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_plan_refuses_non_coding_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

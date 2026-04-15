@@ -70,6 +70,7 @@ from .commands import (
     cmd_tool_write,
     cmd_verification,
     cmd_webhook,
+    cmd_work,
     cmd_writes,
 )
 from .config import (
@@ -594,6 +595,11 @@ def build_parser():
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
     next_parser.add_argument("--json", action="store_true", help="print structured JSON")
     next_parser.set_defaults(func=cmd_next)
+
+    work_parser = subparsers.add_parser("work", help="show a task coding workbench")
+    work_parser.add_argument("task_id")
+    work_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    work_parser.set_defaults(func=cmd_work)
 
     verification_parser = subparsers.add_parser("verification", help="show runtime verification runs")
     verification_parser.add_argument("--all", action="store_true", help="show all verification runs")
