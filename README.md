@@ -21,6 +21,7 @@ In another shell:
 uv run mew chat
 uv run mew attach -m "今日のタスクは何？"
 uv run mew message "今日のタスクは何？" --wait
+uv run mew event github_webhook --source local --payload '{"ref":"main"}' --wait
 printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
 uv run mew focus
 uv run mew daily
@@ -137,6 +138,10 @@ uv run mew next --json
 uv run mew task list --kind coding
 uv run mew verification
 uv run mew writes
+uv run mew event file_change --payload '{"path":"src/mew/runtime.py"}'
+uv run mew event github_webhook --source github --payload '{"ref":"main"}' --wait
+MEW_WEBHOOK_TOKEN=secret uv run mew webhook --host 127.0.0.1 --port 8765
+uv run mew run --notify-command "scripts/notify-mew" --notify-bell
 uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
@@ -179,6 +184,16 @@ Resident prompts include a bounded raw conversation history from recent
 `user_message` events and human-facing outbox replies/questions, so follow-up
 turns can see the human's wording and mew's last replies instead of relying
 only on summaries.
+
+External systems can wake the same event loop without waiting for the passive
+interval. `mew event <type> --payload '{"key":"value"}'` queues a non-reserved
+external event, and `--wait` waits for outbox linked to that event. `mew
+webhook` exposes the same ingress over HTTP: `POST /event/<type>` with a JSON
+object body. Non-loopback webhook binds require `--token` or
+`MEW_WEBHOOK_TOKEN`; tokenless non-loopback serving must be explicitly enabled
+with `--allow-unauthenticated`. Runtime notifications are opt-in:
+`--notify-command` runs once per new outbox message with `MEW_OUTBOX_*`
+environment variables, and `--notify-bell` emits a terminal bell.
 
 `mew step` is a bounded manual feedback loop. It plans one small passive step,
 filters out writes, task execution, and agent dispatch, applies only safe
