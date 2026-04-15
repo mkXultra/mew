@@ -87,6 +87,7 @@ from .state import (
     read_lock,
     read_last_state_effect,
     reconcile_next_ids,
+    record_user_reported_verification,
     resolve_open_questions_for_task,
     save_state,
     state_digest,
@@ -435,13 +436,18 @@ def cmd_task_done(args):
         if not task:
             print(f"mew: task not found: {args.task_id}", file=sys.stderr)
             return 1
+        current_time = now_iso()
+        summary = getattr(args, "summary", "") or ""
         task["status"] = "done"
-        task["updated_at"] = now_iso()
+        if summary:
+            append_task_note(task, f"{current_time} done: {summary}")
+        task["updated_at"] = current_time
         resolve_open_questions_for_task(
             state,
             task["id"],
             reason="task marked done",
         )
+        record_user_reported_verification(state, None, task, summary, current_time)
         save_state(state)
     print(format_task(task))
     return 0

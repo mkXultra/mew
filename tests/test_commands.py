@@ -170,6 +170,37 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_done_summary_records_user_reported_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Finish docs"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "done",
+                                "1",
+                                "--summary",
+                                "Ran python -m pytest -q; result: 2 passed.",
+                            ]
+                        ),
+                        0,
+                    )
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "done")
+                self.assertIn("2 passed", state["tasks"][0]["notes"])
+                self.assertEqual(len(state["verification_runs"]), 1)
+                self.assertEqual(state["verification_runs"][0]["command"], "user-reported")
+                self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_ack_can_mark_multiple_and_all(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

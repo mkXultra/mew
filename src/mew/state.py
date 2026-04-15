@@ -1004,6 +1004,36 @@ def resolve_open_questions_for_task(state, task_id, reason="", event_id=None):
         user["updated_at"] = current_time
     return len(resolved_ids)
 
+def summary_reports_passing_verification(summary):
+    text = (summary or "").casefold()
+    if not any(token in text for token in ("test", "pytest", "unittest", "verification", "check")):
+        return False
+    if any(token in text for token in ("fail", "failed", "failing", "error", "traceback")):
+        return False
+    return any(token in text for token in ("pass", "passed", "passing", "ok", "succeed", "success"))
+
+def record_user_reported_verification(state, event_id, task, summary, current_time):
+    if not summary_reports_passing_verification(summary):
+        return None
+    run = {
+        "id": next_id(state, "verification_run"),
+        "event_id": event_id,
+        "task_id": task["id"],
+        "reason": "user-reported completion verification",
+        "command": "user-reported",
+        "argv": [],
+        "cwd": task.get("cwd") or ".",
+        "exit_code": 0,
+        "stdout": summary,
+        "stderr": "",
+        "started_at": current_time,
+        "finished_at": current_time,
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    state.setdefault("verification_runs", []).append(run)
+    return run
+
 def mark_question_deferred(state, question, reason=""):
     current_time = now_iso()
     question["status"] = "deferred"

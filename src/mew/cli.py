@@ -947,6 +947,7 @@ def build_parser():
 
     done_parser = task_subparsers.add_parser("done", help="mark a task done")
     done_parser.add_argument("task_id")
+    done_parser.add_argument("--summary", help="completion summary; passing test reports create a user-reported verification")
     done_parser.set_defaults(func=cmd_task_done)
 
     run_task_parser = task_subparsers.add_parser("run", help="start an agent run for a task")

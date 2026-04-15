@@ -47,6 +47,7 @@ from .state import (
     next_id,
     open_attention_items,
     pending_question_for_task,
+    record_user_reported_verification,
     resolve_open_questions_for_task,
 )
 from .tasks import (
@@ -1917,7 +1918,7 @@ def apply_complete_task_action(state, event, action, current_time, autonomous, a
         reason="task completed",
         event_id=event["id"],
     )
-    record_user_reported_verification(state, event, task, summary, current_time)
+    record_user_reported_verification(state, event["id"], task, summary, current_time)
     add_outbox_message(
         state,
         "info",
@@ -1926,36 +1927,6 @@ def apply_complete_task_action(state, event, action, current_time, autonomous, a
         related_task_id=task["id"],
     )
     return 1
-
-def summary_reports_passing_verification(summary):
-    text = (summary or "").casefold()
-    if not any(token in text for token in ("test", "pytest", "unittest", "verification", "check")):
-        return False
-    if any(token in text for token in ("fail", "failed", "failing", "error", "traceback")):
-        return False
-    return any(token in text for token in ("pass", "passed", "passing", "ok", "succeed", "success"))
-
-def record_user_reported_verification(state, event, task, summary, current_time):
-    if not summary_reports_passing_verification(summary):
-        return
-    run = {
-        "id": next_id(state, "verification_run"),
-        "event_id": event["id"],
-        "task_id": task["id"],
-        "reason": "user-reported completion verification",
-        "command": "user-reported",
-        "argv": [],
-        "cwd": task.get("cwd") or ".",
-        "exit_code": 0,
-        "stdout": summary,
-        "stderr": "",
-        "started_at": current_time,
-        "finished_at": current_time,
-        "created_at": current_time,
-        "updated_at": current_time,
-    }
-    state.setdefault("verification_runs", []).append(run)
-
 
 def record_verification_result(state, event, action, current_time, verify_command, result):
     run = {
