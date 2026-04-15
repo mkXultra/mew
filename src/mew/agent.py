@@ -819,6 +819,24 @@ def should_skip_outbox_send(state, message_type, text, event_id):
             return True
     return False
 
+def action_targets_done_task(state, action):
+    if action.get("type") not in ("ask_user", "wait_for_user"):
+        return False
+    task_id = action.get("task_id")
+    if task_id is None:
+        return False
+    task = task_by_id(state, task_id)
+    return bool(task and task.get("status") == "done")
+
+def suppress_done_task_wait_actions(state, action_plan):
+    actions = action_plan.get("actions", [])
+    filtered = [action for action in actions if not action_targets_done_task(state, action)]
+    if len(filtered) == len(actions):
+        return action_plan
+    sanitized = dict(action_plan)
+    sanitized["actions"] = filtered
+    return sanitized
+
 def normalize_decision_plan(plan, fallback_summary):
     schema_issues = []
     if not isinstance(plan, dict):
@@ -2185,6 +2203,7 @@ def apply_action_plan(
     agent_result_timeout=None,
 ):
     counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
+    action_plan = suppress_done_task_wait_actions(state, action_plan)
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
 
     for action in action_plan.get("actions", []):

@@ -1709,6 +1709,36 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(second_counts["messages"], 0)
         self.assertEqual(len(state["outbox"]), 1)
 
+    def test_wait_action_for_done_task_does_not_reopen_completion_question(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "done"
+
+        counts = apply_action_plan(
+            state,
+            event,
+            {"summary": "stale closeout"},
+            {
+                "summary": "stale closeout",
+                "actions": [
+                    {
+                        "type": "ask_user",
+                        "task_id": task["id"],
+                        "question": "Anything else you'd like help with?",
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(counts["messages"], 0)
+        self.assertEqual(state["questions"], [])
+        self.assertEqual(state["attention"]["items"], [])
+        self.assertNotEqual(state["agent_status"]["mode"], "waiting_for_user")
+
     def test_complete_task_refuses_user_task_during_autonomous_cycle(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
