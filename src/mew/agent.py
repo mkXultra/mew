@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 from .config import (
     DEFAULT_CODEX_MODEL,
@@ -72,6 +73,8 @@ from .write_tools import (
     summarize_write_result,
     write_file,
 )
+
+MODEL_RETRY_DELAYS = (0.25, 1.0)
 
 def build_codex_prompt(state, event, current_time):
     context = build_context(state, event, current_time)
@@ -304,6 +307,42 @@ def should_use_ai_for_event(event, reason, ai_ticks):
     if event["type"] == "tick":
         return bool(ai_ticks)
     return True
+
+def transient_model_error(exc):
+    text = str(exc).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "timeout",
+            "timed out",
+            "429",
+            "rate limit",
+            "temporarily",
+            "temporary",
+            "connection",
+            "503",
+            "504",
+            "529",
+            "overload",
+            "502",
+            "500",
+        )
+    )
+
+def call_model_json_with_retries(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None):
+    last_error = None
+    for attempt, delay in enumerate((0.0, *MODEL_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
+        except ModelBackendError as exc:
+            last_error = exc
+            if attempt > len(MODEL_RETRY_DELAYS) or not transient_model_error(exc):
+                raise
+            if log_prefix:
+                append_log(f"- {log_prefix} retry={attempt} error={exc}")
+    raise last_error
 
 def update_shallow_knowledge(state, event, summary, current_time):
     memory = state.setdefault("memory", {})
@@ -941,7 +980,15 @@ def think_phase(
     try:
         if log_phases:
             append_log(f"- {current_time}: think_phase {model_backend} start event={event['id']}")
-        plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
+        plan = call_model_json_with_retries(
+            model_backend,
+            model_auth,
+            prompt,
+            model,
+            base_url,
+            timeout,
+            log_prefix=f"{current_time}: think_phase {model_backend} event={event['id']}" if log_phases else None,
+        )
         if log_phases:
             append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:
@@ -1136,7 +1183,15 @@ def act_phase(
     try:
         if log_phases:
             append_log(f"- {current_time}: act_phase {model_backend} start event={event['id']}")
-        action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
+        action_plan = call_model_json_with_retries(
+            model_backend,
+            model_auth,
+            prompt,
+            model,
+            base_url,
+            timeout,
+            log_prefix=f"{current_time}: act_phase {model_backend} event={event['id']}" if log_phases else None,
+        )
         if log_phases:
             append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:

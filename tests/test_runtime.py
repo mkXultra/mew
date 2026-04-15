@@ -8,6 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
+from mew.errors import ModelBackendError
 from mew.runtime import run_runtime_post_run_pipeline
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
 
@@ -196,6 +197,39 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(should_use_ai_for_event(event, "external_event", ai_ticks=False))
         call_model.assert_called_once()
         self.assertEqual(plan["summary"], "handled webhook")
+
+    def test_think_phase_retries_transient_model_errors(self):
+        state = default_state()
+        event = add_event(state, "github_webhook", "test", {"ref": "main"})
+
+        with patch(
+            "mew.agent.call_model_json",
+            side_effect=[
+                ModelBackendError("HTTP 529 overloaded"),
+                {"summary": "retried successfully", "decisions": []},
+            ],
+        ) as call_model:
+            with patch("mew.agent.time.sleep") as sleep:
+                with patch("mew.agent.append_log") as append_log:
+                    plan = think_phase(
+                        state,
+                        event,
+                        "now",
+                        model_auth={"path": "auth.json"},
+                        model="model",
+                        base_url="base",
+                        timeout=1,
+                        ai_ticks=False,
+                        allow_task_execution=False,
+                        guidance="",
+                        policy="",
+                        log_phases=False,
+                    )
+
+        self.assertEqual(call_model.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+        append_log.assert_not_called()
+        self.assertEqual(plan["summary"], "retried successfully")
 
 
 if __name__ == "__main__":
