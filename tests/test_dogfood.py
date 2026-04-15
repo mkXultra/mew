@@ -99,6 +99,9 @@ class DogfoodTests(unittest.TestCase):
             workspace = Path(tmp)
             (workspace / ".mew").mkdir()
             state = default_state()
+            state["runtime_status"]["last_cycle_reason"] = "passive_tick"
+            state["runtime_status"]["last_cycle_duration_seconds"] = 1.25
+            state["runtime_status"]["last_processed_count"] = 1
             event = add_event(state, "passive_tick", "runtime")
             event["processed_at"] = "done"
             event["decision_plan"] = {
@@ -144,12 +147,14 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["events"]["processed"], 1)
             self.assertEqual(report["model_phases"]["think_ok"], 1)
+            self.assertEqual(report["runtime_status"]["last_cycle_reason"], "passive_tick")
             self.assertEqual(report["actions"], {"inspect_dir": 1})
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
             self.assertIn("Project snapshot", text)
+            self.assertIn("runtime_cycle:", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
@@ -179,6 +184,11 @@ class DogfoodTests(unittest.TestCase):
                 "exit_codes": [0, 0],
                 "final_events": {"processed": 3, "total": 3},
                 "final_model_phases": {"think_ok": 2, "act_ok": 2},
+                "final_runtime_status": {
+                    "last_cycle_reason": "passive_tick",
+                    "last_cycle_duration_seconds": 1.2,
+                    "last_processed_count": 3,
+                },
                 "final_plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
                 "final_dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
                 "final_active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
@@ -219,6 +229,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("active_dropped_threads=1", text)
         self.assertIn("schema_issues=1", text)
         self.assertIn("final_plan_schema_issues", text)
+        self.assertIn("final_runtime_cycle", text)
         self.assertIn("Final project snapshot", text)
         self.assertIn("Final next useful move: keep going", text)
 

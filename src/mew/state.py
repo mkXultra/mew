@@ -49,6 +49,11 @@ def default_state():
             "last_woke_at": None,
             "last_evaluated_at": None,
             "last_action": None,
+            "current_reason": None,
+            "cycle_started_at": None,
+            "last_cycle_reason": None,
+            "last_cycle_duration_seconds": None,
+            "last_processed_count": None,
         },
         "agent_status": {
             "mode": "idle",

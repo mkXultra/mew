@@ -342,6 +342,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
             "processed": len(processed),
             "by_type": count_by(inbox, "type"),
         },
+        "runtime_status": state.get("runtime_status", {}) if state else {},
         "model_phases": parse_phase_counts(log_text),
         "plan_schema_issues": plan_schema_issues(inbox),
         "outbox": {
@@ -382,6 +383,10 @@ def format_dogfood_report(report):
         "model_phases: " + ", ".join(
             f"{key}={value}" for key, value in report.get("model_phases", {}).items()
         ),
+        "runtime_cycle: "
+        f"last_reason={report.get('runtime_status', {}).get('last_cycle_reason')} "
+        f"duration={report.get('runtime_status', {}).get('last_cycle_duration_seconds')} "
+        f"processed={report.get('runtime_status', {}).get('last_processed_count')}",
         "outbox: "
         f"total={report['outbox']['total']} unread={report['outbox']['unread']} "
         f"by_type={report['outbox']['by_type']}",
@@ -573,6 +578,7 @@ def run_dogfood_loop(args):
         "final_next_move": final_report.get("next_move"),
         "final_events": final_report.get("events", {}),
         "final_model_phases": final_report.get("model_phases", {}),
+        "final_runtime_status": final_report.get("runtime_status", {}),
         "final_plan_schema_issues": final_report.get("plan_schema_issues", {}),
         "final_dropped_threads": final_report.get("dropped_threads", {}),
         "final_active_dropped_threads": final_report.get("active_dropped_threads", {}),
@@ -606,6 +612,14 @@ def format_dogfood_loop_report(report):
         lines.append(
             "final_plan_schema_issues: "
             f"count={final_schema_issues.get('count')} by_level={final_schema_issues.get('by_level')}"
+        )
+    final_runtime = report.get("final_runtime_status") or {}
+    if final_runtime:
+        lines.append(
+            "final_runtime_cycle: "
+            f"last_reason={final_runtime.get('last_cycle_reason')} "
+            f"duration={final_runtime.get('last_cycle_duration_seconds')} "
+            f"processed={final_runtime.get('last_processed_count')}"
         )
     final_snapshot = report.get("final_project_snapshot") or {}
     if final_snapshot:

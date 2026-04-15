@@ -409,6 +409,8 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["status", "--json"]), 0)
                 status = json.loads(stdout.getvalue())
                 self.assertEqual(status["counts"]["open_tasks"], 1)
+                self.assertIn("last_cycle_duration_seconds", status["runtime_status"])
+                self.assertIn("last_processed_count", status["runtime_status"])
                 self.assertIn("next_move", status)
 
                 with redirect_stdout(StringIO()) as stdout:

@@ -57,6 +57,8 @@ def set_runtime_stopped(state, stopped_at):
     runtime["state"] = "stopped"
     runtime["pid"] = None
     runtime["stopped_at"] = stopped_at
+    runtime["current_reason"] = None
+    runtime["cycle_started_at"] = None
     runtime["last_action"] = "runtime stopped"
 
 def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
@@ -209,6 +211,12 @@ def run_runtime(args):
                     desires = read_desires(args.desires)
                     allow_task_execution = args.execute_tasks and not pending_user
                     current_time = now_iso()
+                    cycle_started_monotonic = time.monotonic()
+                    runtime_status = state["runtime_status"]
+                    runtime_status["current_reason"] = reason
+                    runtime_status["cycle_started_at"] = current_time
+                    runtime_status["last_action"] = f"processing {reason}"
+                    save_state(state)
                     autonomy_controls = apply_runtime_autonomy_controls(
                         state,
                         args,
@@ -242,6 +250,15 @@ def run_runtime(args):
                         allow_write=bool(args.allow_write),
                         allowed_write_roots=args.allow_write,
                     )
+                    runtime_status = state["runtime_status"]
+                    runtime_status["current_reason"] = None
+                    runtime_status["cycle_started_at"] = None
+                    runtime_status["last_cycle_reason"] = reason
+                    runtime_status["last_cycle_duration_seconds"] = round(
+                        time.monotonic() - cycle_started_monotonic,
+                        3,
+                    )
+                    runtime_status["last_processed_count"] = processed_count
                     if args.auto_archive:
                         archive_result = archive_state_records(
                             state,
