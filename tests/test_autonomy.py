@@ -565,6 +565,14 @@ class AutonomyTests(unittest.TestCase):
                     "stop_reason": "max_steps",
                     "actions": [{"type": "read_file", "path": f"file-{index}.md"}],
                     "skipped_actions": [{"type": "write_file", "path": f"file-{index}.md"}],
+                    "effects": [
+                        {
+                            "type": "message",
+                            "id": index + 20,
+                            "message_type": "info",
+                            "text": f"effect {index}",
+                        }
+                    ],
                     "counts": {"actions": 1},
                 }
             )
@@ -576,6 +584,7 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(context["step_runs"][-1]["id"], 7)
         self.assertEqual(context["step_runs"][-1]["stop_reason"], "max_steps")
         self.assertEqual(context["step_runs"][-1]["actions"][0]["type"], "read_file")
+        self.assertEqual(context["step_runs"][-1]["effects"][0]["text"], "effect 6")
         self.assertEqual(context["context_stats"]["source_counts"]["step_runs"], 7)
         self.assertEqual(context["context_stats"]["included_counts"]["step_runs"], 5)
         self.assertEqual(context["context_stats"]["omitted_counts"]["step_runs"], 2)
@@ -1541,6 +1550,65 @@ class AutonomyTests(unittest.TestCase):
         snapshot = state["memory"]["deep"]["project_snapshot"]
         self.assertEqual(snapshot["project_types"], ["python"])
         self.assertEqual(snapshot["roots"][0]["key_dirs"], ["src", "tests"])
+
+    def test_autonomous_read_action_skips_recent_duplicate(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "README.md"
+            target.write_text("hello", encoding="utf-8")
+            state["thought_journal"].append(
+                {"actions": [{"type": "read_file", "path": str(target)}]}
+            )
+
+            counts = apply_action_plan(
+                state,
+                event,
+                {"summary": "read"},
+                {
+                    "summary": "read",
+                    "actions": [{"type": "read_file", "path": str(target)}],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                allowed_read_roots=[tmp],
+                autonomous=True,
+                autonomy_level="act",
+            )
+
+        self.assertEqual(counts["messages"], 1)
+        self.assertIn("Skipped repeated read_file", state["outbox"][0]["text"])
+        self.assertEqual(state["memory"]["deep"]["project"], [])
+
+    def test_user_requested_read_action_can_repeat_recent_read(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "read it again"})
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "README.md"
+            target.write_text("hello", encoding="utf-8")
+            state["thought_journal"].append(
+                {"actions": [{"type": "read_file", "path": str(target)}]}
+            )
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "read"},
+                {
+                    "summary": "read",
+                    "actions": [{"type": "read_file", "path": str(target)}],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                allowed_read_roots=[tmp],
+                autonomous=False,
+                autonomy_level="off",
+            )
+
+        self.assertIn("Read file", state["outbox"][0]["text"])
+        self.assertTrue(state["memory"]["deep"]["project"])
 
     def test_autonomous_self_review_has_cooldown(self):
         state = default_state()

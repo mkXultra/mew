@@ -30,6 +30,8 @@ STEP_ACTION_TYPES = {
 }
 
 MAX_STEP_RUNS = 100
+MAX_STEP_EFFECTS = 12
+MAX_STEP_TEXT_CHARS = 240
 
 
 def _synthetic_step_event(state, step_index, source="manual_step_planning"):
@@ -103,17 +105,81 @@ def step_stop_reason(action_plan, dry_run=False):
     return ""
 
 
+def clip_step_text(value, limit=MAX_STEP_TEXT_CHARS):
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
 def compact_step_action(action):
     compact = {"type": action.get("type") or "unknown"}
     for key in ("task_id", "path", "query", "title", "question", "reason", "summary", "text"):
         value = action.get(key)
         if value is None:
             continue
-        text = str(value)
-        if len(text) > 240:
-            text = text[:237] + "..."
-        compact[key] = text
+        compact[key] = clip_step_text(value)
     return compact
+
+
+def compact_step_effect(effect_type, item):
+    effect = {"type": effect_type, "id": item.get("id")}
+    if effect_type == "message":
+        effect.update(
+            {
+                "message_type": item.get("type"),
+                "text": clip_step_text(item.get("text")),
+                "related_task_id": item.get("related_task_id"),
+                "question_id": item.get("question_id"),
+                "agent_run_id": item.get("agent_run_id"),
+            }
+        )
+    elif effect_type == "question":
+        effect.update(
+            {
+                "text": clip_step_text(item.get("text")),
+                "related_task_id": item.get("related_task_id"),
+                "status": item.get("status"),
+            }
+        )
+    elif effect_type == "verification_run":
+        effect.update(
+            {
+                "task_id": item.get("task_id"),
+                "exit_code": item.get("exit_code"),
+                "reason": clip_step_text(item.get("reason")),
+            }
+        )
+    elif effect_type == "write_run":
+        effect.update(
+            {
+                "task_id": item.get("task_id"),
+                "action_type": item.get("action_type"),
+                "path": clip_step_text(item.get("path")),
+                "dry_run": bool(item.get("dry_run")),
+                "changed": item.get("changed"),
+                "written": item.get("written"),
+                "rolled_back": item.get("rolled_back"),
+            }
+        )
+    return {key: value for key, value in effect.items() if value is not None}
+
+
+def collect_step_effects(state, event_id):
+    effects = []
+    for message in state.get("outbox", []):
+        if message.get("event_id") == event_id:
+            effects.append(compact_step_effect("message", message))
+    for question in state.get("questions", []):
+        if question.get("event_id") == event_id:
+            effects.append(compact_step_effect("question", question))
+    for run in state.get("verification_runs", []):
+        if run.get("event_id") == event_id:
+            effects.append(compact_step_effect("verification_run", run))
+    for run in state.get("write_runs", []):
+        if run.get("event_id") == event_id:
+            effects.append(compact_step_effect("write_run", run))
+    return effects[:MAX_STEP_EFFECTS]
 
 
 def record_step_run(state, step, stop_reason, at):
@@ -127,6 +193,10 @@ def record_step_run(state, step, stop_reason, at):
         "actions": [compact_step_action(action) for action in step.get("actions") or []],
         "skipped_actions": [
             compact_step_action(action) for action in step.get("skipped_actions") or []
+        ],
+        "effects": [
+            dict(effect)
+            for effect in list(step.get("effects") or [])[:MAX_STEP_EFFECTS]
         ],
         "counts": dict(step.get("counts") or {}),
     }
@@ -255,6 +325,7 @@ def run_step_loop(
                     "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
                     "actions": filtered_action_plan.get("actions", []),
                     "skipped_actions": filtered_action_plan.get("skipped_actions", []),
+                    "effects": collect_step_effects(state, event_id),
                     "counts": counts,
                 }
                 record_step_run(state, step, step_stop, apply_time)

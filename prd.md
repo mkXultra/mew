@@ -719,8 +719,11 @@ The first user-facing version should likely include:
 - `mew context`: show resident prompt context diagnostics and approximate section sizes.
 - `mew step`: run a bounded manual feedback loop. It plans a passive step,
   filters out writes, task execution, and agent dispatch, applies safe
-  read/memory/question/task-proposal actions, and records the result for the
-  next step.
+  read/memory/question/task-proposal actions, and records the actions, skipped
+  actions, and visible effects for the next step.
+- Autonomous read-only actions should use recent memory, thoughts, and step
+  results before inspecting again; short-term duplicate inspections should be
+  skipped unless the user explicitly requested them.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.

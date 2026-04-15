@@ -236,6 +236,7 @@ class BriefTests(unittest.TestCase):
                 "stop_reason": "max_steps",
                 "actions": [{"type": "read_file", "path": "README.md"}],
                 "skipped_actions": [{"type": "write_file", "path": "README.md"}],
+                "effects": [{"type": "message", "id": 3, "message_type": "info", "text": "Read."}],
                 "counts": {"actions": 1, "messages": 1},
             }
         )
@@ -246,6 +247,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Recent steps", brief)
         self.assertIn("stop=max_steps", brief)
         self.assertIn("skipped=1", brief)
+        self.assertIn("effects=1", brief)
         self.assertEqual(data["recent_steps"][0]["summary"], "Read and remembered one thing.")
 
     def test_brief_surfaces_project_snapshot(self):

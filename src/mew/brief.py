@@ -614,10 +614,12 @@ def build_brief(state, limit=5):
             )
             skipped = run.get("skipped_actions") or []
             skipped_text = f" skipped={len(skipped)}" if skipped else ""
+            effects = run.get("effects") or []
+            effects_text = f" effects={len(effects)}" if effects else ""
             suffix = f" actions={action_types}" if action_types else ""
             lines.append(
                 f"- #{run.get('id')} event=#{run.get('event_id')} "
-                f"stop={run.get('stop_reason')}{suffix}{skipped_text}: "
+                f"stop={run.get('stop_reason')}{suffix}{skipped_text}{effects_text}: "
                 f"{run.get('summary') or ''}"
             )
         lines.append("")

@@ -181,8 +181,11 @@ only on summaries.
 
 `mew step` is a bounded manual feedback loop. It plans one small passive step,
 filters out writes, task execution, and agent dispatch, applies only safe
-read/memory/question/task-proposal actions, then records the result so the next
-step can see the feedback.
+read/memory/question/task-proposal actions, then records the actions, skipped
+actions, and visible effects so the next step can see the feedback. Autonomous
+read-only actions are also guarded against short-term repeats, so mew should
+synthesize or choose a different inspection target instead of reading the same
+file over and over.
 
 ## Resident Model
 

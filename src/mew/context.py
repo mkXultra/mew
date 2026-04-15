@@ -541,6 +541,28 @@ def _step_action_for_context(action):
     }
 
 
+def _step_effect_for_context(effect):
+    return {
+        "type": effect.get("type") or "unknown",
+        "id": effect.get("id"),
+        "message_type": effect.get("message_type"),
+        "text": clip_context_text(effect.get("text"), MAX_CONTEXT_TEXT_CHARS),
+        "related_task_id": effect.get("related_task_id"),
+        "question_id": effect.get("question_id"),
+        "agent_run_id": effect.get("agent_run_id"),
+        "task_id": effect.get("task_id"),
+        "status": effect.get("status"),
+        "exit_code": effect.get("exit_code"),
+        "action_type": effect.get("action_type"),
+        "path": clip_context_text(effect.get("path"), 500),
+        "dry_run": effect.get("dry_run"),
+        "changed": effect.get("changed"),
+        "written": effect.get("written"),
+        "rolled_back": effect.get("rolled_back"),
+        "reason": clip_context_text(effect.get("reason"), MAX_CONTEXT_TEXT_CHARS),
+    }
+
+
 def step_run_for_context(run):
     return {
         "id": run.get("id"),
@@ -555,6 +577,10 @@ def step_run_for_context(run):
         "skipped_actions": [
             _step_action_for_context(action)
             for action in list(run.get("skipped_actions") or [])[:8]
+        ],
+        "effects": [
+            _step_effect_for_context(effect)
+            for effect in list(run.get("effects") or [])[:8]
         ],
         "counts": dict(run.get("counts") or {}),
     }

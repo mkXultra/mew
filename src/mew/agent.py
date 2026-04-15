@@ -147,6 +147,7 @@ def build_think_prompt(
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
         "Use complete_task only for a task whose objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only when it directly helps the current task or memory, and only under allowed_read_roots.\n"
+        "Use recent step_runs, thought_journal, and memory before inspecting; do not repeat the same read-only action without new reason.\n"
         "Use write actions only for small targeted changes under allowed_write_roots; prefer dry_run before writing.\n"
         "Do not emit plan_task for personal, admin, research, or unknown tasks; use ask_user, send_message, or remember instead.\n"
         "Do not ask the same question if it already appears in unanswered_questions.\n"
@@ -253,6 +254,7 @@ def build_act_prompt(
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
         "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
+        "Do not repeat the same read-only action shown in recent step_runs or thought_journal unless the DecisionPlan gives a new reason.\n"
         "Use write actions only under allowed_write_roots. If no write root is allowed, do not emit write actions.\n"
         "Do not invent shell commands. Reference tasks by task_id only. Do not emit plan_task for personal, admin, research, or unknown tasks.\n"
         "Do not repeat unanswered questions already present in state.\n"
@@ -1207,6 +1209,37 @@ def update_user_status_after_plan(state, event, action_plan, counts, current_tim
         user["mode"] = "idle"
     user["updated_at"] = current_time
 
+
+def read_action_key(action):
+    action_type = action.get("type")
+    if action_type == "inspect_dir":
+        return ("inspect_dir", str(action.get("path") or "."))
+    if action_type == "read_file":
+        return ("read_file", str(action.get("path") or ""))
+    if action_type == "search_text":
+        return (
+            "search_text",
+            str(action.get("path") or "."),
+            str(action.get("query") or ""),
+        )
+    return None
+
+
+def recently_repeated_read_action(state, action, limit=5):
+    key = read_action_key(action)
+    if not key:
+        return False
+    for thought in reversed(state.get("thought_journal", [])[-limit:]):
+        for previous in thought.get("actions") or []:
+            if read_action_key(previous) == key:
+                return True
+    for run in reversed(state.get("step_runs", [])[-limit:]):
+        for previous in run.get("actions") or []:
+            if read_action_key(previous) == key:
+                return True
+    return False
+
+
 def apply_read_action(state, event, action, current_time, allowed_read_roots):
     action_type = action.get("type")
     try:
@@ -1972,6 +2005,19 @@ def apply_action_plan(
                     state,
                     "warning",
                     f"Refused {action_type}: current mode does not allow inspection.",
+                    event_id=event["id"],
+                    related_task_id=action.get("task_id"),
+                )
+                counts["messages"] += 1
+                continue
+            if event["type"] != "user_message" and recently_repeated_read_action(state, action):
+                add_outbox_message(
+                    state,
+                    "info",
+                    (
+                        f"Skipped repeated {action_type} for {action.get('path') or '.'}; "
+                        "recent context already contains that inspection."
+                    ),
                     event_id=event["id"],
                     related_task_id=action.get("task_id"),
                 )

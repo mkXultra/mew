@@ -140,6 +140,35 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(state["step_runs"][0]["event_id"], state["inbox"][0]["id"])
         self.assertEqual(state["step_runs"][0]["skipped_actions"][0]["type"], "write_file")
 
+    def test_step_run_records_visible_effects(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Ask one thing.",
+                    "open_threads": ["Need user input."],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [{"type": "ask_user", "question": "Which task should I handle?"}],
+                }
+                fake_actions = {
+                    "summary": "Ask one thing.",
+                    "actions": [{"type": "ask_user", "question": "Which task should I handle?"}],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(max_steps=1)
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(report["stop_reason"], "waiting_for_user")
+        effects = state["step_runs"][0]["effects"]
+        self.assertEqual([effect["type"] for effect in effects], ["message", "question"])
+        self.assertEqual(effects[0]["message_type"], "question")
+        self.assertEqual(effects[0]["question_id"], state["questions"][0]["id"])
+        self.assertEqual(effects[1]["text"], "Which task should I handle?")
+
     def test_step_does_not_expose_unprocessed_manual_event_while_planning(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
