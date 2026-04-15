@@ -256,7 +256,7 @@ def build_act_prompt(
         "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
         "Do not repeat the same read-only action shown in recent step_runs or thought_journal during autonomous cycles.\n"
-        "If the DecisionPlan repeats a read that memory says was skipped, convert it to memory/self_review/propose_task instead.\n"
+        "If the DecisionPlan repeats a read that memory says was skipped, convert it to record_memory, update_memory, self_review, or propose_task instead.\n"
         "Use write actions only under allowed_write_roots. If no write root is allowed, do not emit write actions.\n"
         "Do not invent shell commands. Reference tasks by task_id only. Do not emit plan_task for personal, admin, research, or unknown tasks.\n"
         "Do not repeat unanswered questions already present in state.\n"
