@@ -321,6 +321,11 @@ def build_parser():
         "--source-workspace",
         help="copy a repository snapshot into the dogfood workspace before running",
     )
+    dogfood_parser.add_argument(
+        "--pre-snapshot",
+        action="store_true",
+        help="refresh project snapshot memory before starting the dogfood runtime",
+    )
     dogfood_parser.add_argument("--duration", type=float, default=45.0, help="seconds to run the runtime")
     dogfood_parser.add_argument("--interval", type=float, default=10.0, help="passive wake interval in seconds")
     dogfood_parser.add_argument("--poll-interval", type=float, default=0.5, help="runtime poll interval in seconds")

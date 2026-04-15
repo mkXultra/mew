@@ -678,6 +678,7 @@ The first user-facing version should likely include:
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.
+- `mew dogfood --pre-snapshot`: refresh project snapshot memory before the dogfood runtime starts.
 - `mew dogfood --cycles <n>`: reuse one dogfood workspace across multiple runtime cycles and report the aggregate.
 - `mew next`: print the single next useful command or move.
 - `mew next --json`: print the next move and extracted command as structured JSON.

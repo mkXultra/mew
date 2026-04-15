@@ -84,6 +84,7 @@ uv run mew context
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
 uv run mew dogfood --source-workspace . --ai --duration 60
+uv run mew dogfood --source-workspace . --pre-snapshot --ai --duration 60
 uv run mew dogfood --source-workspace . --cycles 3 --duration 30
 uv run mew perceive --allow-read .
 uv run mew next

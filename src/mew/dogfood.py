@@ -10,8 +10,9 @@ import time
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, STATE_DIR, STATE_FILE
-from .project_snapshot import format_project_snapshot
+from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
+from .state import default_state
 from .timeutil import now_iso
 
 
@@ -243,6 +244,12 @@ def read_json_file(path, default):
         return default
 
 
+def write_json_file(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def read_text_file(path):
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace")
@@ -324,6 +331,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
             "latest": dropped[-1].get("dropped_threads", []) if dropped else [],
         },
         "project_snapshot": state.get("memory", {}).get("deep", {}).get("project_snapshot", {}) if state else {},
+        "pre_snapshot": state.get("dogfood", {}).get("pre_snapshot") if state else None,
         "recent_activity": recent_activity(state, limit=8) if state else [],
         "next_move": next_move(state) if state else "state was not created",
         "log_tail": log_text.splitlines()[-20:],
@@ -355,6 +363,13 @@ def format_dogfood_report(report):
             "source_copy: "
             f"source={source_copy.get('source')} copied={source_copy.get('copied_files')} "
             f"skipped_files={source_copy.get('skipped_files')} skipped_dirs={source_copy.get('skipped_dirs')}"
+        )
+    pre_snapshot = report.get("pre_snapshot")
+    if pre_snapshot:
+        lines.append(
+            "pre_snapshot: "
+            f"inspected_dirs={len(pre_snapshot.get('inspected_dirs') or [])} "
+            f"read_files={len(pre_snapshot.get('read_files') or [])}"
         )
     dropped = report.get("dropped_threads", {})
     if dropped.get("thought_count"):
@@ -388,7 +403,28 @@ def format_dogfood_report(report):
     return "\n".join(lines)
 
 
-def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None):
+def prepopulate_project_snapshot(workspace):
+    workspace = Path(workspace)
+    state_path = workspace / STATE_FILE
+    state = read_json_file(state_path, default_state())
+    report = refresh_project_snapshot(
+        state,
+        str(workspace),
+        [str(workspace)],
+        now_iso(),
+    )
+    state.setdefault("dogfood", {})["pre_snapshot"] = {
+        "updated_at": report.get("updated_at"),
+        "path": report.get("path"),
+        "inspected_dirs": report.get("inspected_dirs") or [],
+        "read_files": report.get("read_files") or [],
+        "errors": report.get("errors") or [],
+    }
+    write_json_file(state_path, state)
+    return state["dogfood"]["pre_snapshot"]
+
+
+def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, pre_snapshot=None):
     command = build_runtime_command(args, workspace)
     state_dir = workspace / STATE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -432,6 +468,8 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None):
     )
     report["runtime_output_path"] = str(output_path)
     report["source_copy"] = source_copy
+    if pre_snapshot is not None:
+        report["pre_snapshot"] = pre_snapshot
     return report
 
 
@@ -440,7 +478,14 @@ def run_dogfood(args):
     source_copy = None
     if getattr(args, "source_workspace", None):
         source_copy = copy_source_workspace(args.source_workspace, workspace)
-    report = _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=source_copy)
+    pre_snapshot = prepopulate_project_snapshot(workspace) if getattr(args, "pre_snapshot", False) else None
+    report = _run_dogfood_in_workspace(
+        args,
+        workspace,
+        created_temp,
+        source_copy=source_copy,
+        pre_snapshot=pre_snapshot,
+    )
     if args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
     return report
@@ -451,6 +496,7 @@ def run_dogfood_loop(args):
     source_copy = None
     if getattr(args, "source_workspace", None):
         source_copy = copy_source_workspace(args.source_workspace, workspace)
+    pre_snapshot = prepopulate_project_snapshot(workspace) if getattr(args, "pre_snapshot", False) else None
 
     cycles = max(1, int(getattr(args, "cycles", 1) or 1))
     reports = []
@@ -461,6 +507,7 @@ def run_dogfood_loop(args):
                 workspace,
                 created_temp,
                 source_copy=source_copy if index == 0 else None,
+                pre_snapshot=pre_snapshot if index == 0 else None,
             )
             report["cycle"] = index + 1
             reports.append(report)

@@ -12,6 +12,7 @@ from mew.dogfood import (
     copy_source_workspace,
     format_dogfood_loop_report,
     format_dogfood_report,
+    prepopulate_project_snapshot,
     prepare_dogfood_workspace,
 )
 from mew.state import add_event, add_outbox_message, default_state
@@ -146,6 +147,21 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
+
+    def test_prepopulate_project_snapshot_writes_dogfood_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "src").mkdir()
+            (workspace / "tests").mkdir()
+            (workspace / "README.md").write_text("# Demo\n", encoding="utf-8")
+            (workspace / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+            report = prepopulate_project_snapshot(workspace)
+            state = json.loads((workspace / STATE_FILE).read_text(encoding="utf-8"))
+
+            self.assertEqual(len(report["read_files"]), 2)
+            self.assertEqual(state["memory"]["deep"]["project_snapshot"]["package"]["name"], "demo")
+            self.assertEqual(state["dogfood"]["pre_snapshot"]["path"], str(workspace.resolve()))
 
     def test_format_dogfood_loop_report_summarizes_cycles(self):
         text = format_dogfood_loop_report(
