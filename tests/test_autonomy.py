@@ -1739,6 +1739,65 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(state["attention"]["items"], [])
         self.assertNotEqual(state["agent_status"]["mode"], "waiting_for_user")
 
+    def test_complete_task_records_user_reported_passing_verification(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "todo"
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "complete"},
+            {
+                "summary": "complete",
+                "actions": [
+                    {
+                        "type": "complete_task",
+                        "task_id": task["id"],
+                        "summary": "Ran python -m pytest -q; result: 3 passed.",
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(len(state["verification_runs"]), 1)
+        run = state["verification_runs"][0]
+        self.assertEqual(run["task_id"], task["id"])
+        self.assertEqual(run["command"], "user-reported")
+        self.assertEqual(run["exit_code"], 0)
+        self.assertIn("3 passed", run["stdout"])
+
+    def test_complete_task_does_not_record_failed_user_report_as_passed(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "todo"
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "complete"},
+            {
+                "summary": "complete",
+                "actions": [
+                    {
+                        "type": "complete_task",
+                        "task_id": task["id"],
+                        "summary": "Ran pytest and one test failed.",
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(state["verification_runs"], [])
+
     def test_complete_task_refuses_user_task_during_autonomous_cycle(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
