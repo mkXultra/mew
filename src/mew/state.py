@@ -56,6 +56,8 @@ def default_state():
             "last_cycle_reason": None,
             "last_cycle_duration_seconds": None,
             "last_processed_count": None,
+            "last_agent_reflex_at": None,
+            "last_agent_reflex_report": {},
         },
         "agent_status": {
             "mode": "idle",

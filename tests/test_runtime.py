@@ -9,11 +9,26 @@ from contextlib import redirect_stderr, redirect_stdout
 from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
 from mew.errors import ModelBackendError
-from mew.runtime import run_runtime_post_run_pipeline
+from mew.runtime import compact_agent_reflex_report, run_runtime_post_run_pipeline
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_compact_agent_reflex_report_drops_nested_previous_report(self):
+        report = {
+            "collected": [f"run #{index}" for index in range(7)],
+            "runtime_status": {
+                "state": "running",
+                "last_agent_reflex_report": {"collected": ["old"]},
+            },
+        }
+
+        compact = compact_agent_reflex_report(report, limit=3)
+
+        self.assertEqual(compact["collected"], ["run #4", "run #5", "run #6"])
+        self.assertEqual(compact["collected_omitted"], 4)
+        self.assertEqual(compact["runtime_status"], {"state": "running"})
+
     def test_post_run_pipeline_uses_autonomy_gates(self):
         state = default_state()
         args = SimpleNamespace(
@@ -67,7 +82,7 @@ class RuntimeTests(unittest.TestCase):
                 def fake_sweep(state, *args, **kwargs):
                     state["memory"]["shallow"]["latest_task_summary"] = "reflex ran"
                     add_outbox_message(state, "info", "reflex message")
-                    return {"collected": ["run #1 running -> completed"]}
+                    return {"collected": [f"run #{index}" for index in range(10)]}
 
                 def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
                     self.assertEqual(
@@ -100,6 +115,16 @@ class RuntimeTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("reflex message", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(
+                    state["runtime_status"]["last_agent_reflex_report"],
+                    {
+                        "collected": ["run #5", "run #6", "run #7", "run #8", "run #9"],
+                        "collected_omitted": 5,
+                    },
+                )
+                self.assertTrue(state["runtime_status"]["last_agent_reflex_at"])
             finally:
                 os.chdir(old_cwd)
 

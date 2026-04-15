@@ -261,6 +261,32 @@ def run_runtime_post_run_pipeline(state, args, autonomy_controls):
         start_timeout=getattr(args, "agent_start_timeout", 30.0),
     )
 
+def compact_agent_reflex_value(value, limit=5, depth=0):
+    if isinstance(value, list):
+        items = value[-limit:]
+        return [compact_agent_reflex_value(item, limit=limit, depth=depth + 1) for item in items]
+    if isinstance(value, dict):
+        if depth >= 2:
+            return {"omitted": "nested reflex detail"}
+        return {
+            key: compact_agent_reflex_value(child, limit=limit, depth=depth + 1)
+            for key, child in value.items()
+            if key != "last_agent_reflex_report"
+        }
+    if isinstance(value, str) and len(value) > 500:
+        return value[:500] + "...<truncated>"
+    return value
+
+def compact_agent_reflex_report(report, limit=5):
+    compact = {}
+    for key, value in (report or {}).items():
+        compact[key] = compact_agent_reflex_value(value, limit=limit)
+        if isinstance(value, list):
+            omitted = max(0, len(value) - limit)
+            if omitted:
+                compact[f"{key}_omitted"] = omitted
+    return compact
+
 def pending_external_event(state):
     return any(
         not event.get("processed_at")
@@ -453,7 +479,9 @@ def run_runtime(args):
                         current_time,
                     )
                     outbox_ids_before = {str(message.get("id")) for message in state.get("outbox", [])}
-                    run_runtime_post_run_pipeline(state, args, autonomy_controls)
+                    reflex_report = run_runtime_post_run_pipeline(state, args, autonomy_controls)
+                    runtime_status["last_agent_reflex_at"] = current_time
+                    runtime_status["last_agent_reflex_report"] = compact_agent_reflex_report(reflex_report)
                     if create_internal_event:
                         add_event(state, reason, "runtime", {"pid": os.getpid()})
                     if reason == "user_input":

@@ -877,6 +877,11 @@ def cmd_status(args):
     print(f"last_cycle_reason: {runtime.get('last_cycle_reason') or ''}")
     print(f"last_cycle_duration_seconds: {runtime.get('last_cycle_duration_seconds')}")
     print(f"last_processed_count: {runtime.get('last_processed_count')}")
+    print(f"last_agent_reflex_at: {runtime.get('last_agent_reflex_at') or ''}")
+    print(
+        "last_agent_reflex_report: "
+        f"{json.dumps(runtime.get('last_agent_reflex_report') or {}, ensure_ascii=False)}"
+    )
     print(f"agent_mode: {agent.get('mode')}")
     print(f"agent_focus: {agent.get('current_focus')}")
     print(f"agent_last_thought: {agent.get('last_thought')}")

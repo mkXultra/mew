@@ -188,6 +188,8 @@ def runtime_status_for_context(status):
         "current_reason": status.get("current_reason"),
         "current_event_id": status.get("current_event_id"),
         "current_phase": status.get("current_phase"),
+        "last_agent_reflex_at": status.get("last_agent_reflex_at"),
+        "last_agent_reflex_report": status.get("last_agent_reflex_report") or {},
     }
 
 
