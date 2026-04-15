@@ -39,6 +39,7 @@ from .commands import (
     cmd_self_init,
     cmd_self_improve,
     cmd_self_show,
+    cmd_snapshot,
     cmd_start,
     cmd_status,
     cmd_stop,
@@ -547,6 +548,19 @@ def build_parser():
     memory_parser.add_argument("--keep-recent", type=int, default=5, help="recent events to keep when compacting")
     memory_parser.add_argument("--dry-run", action="store_true", help="print compact note without changing state")
     memory_parser.set_defaults(func=cmd_memory)
+
+    snapshot_parser = subparsers.add_parser("snapshot", help="refresh structured project snapshot memory")
+    snapshot_parser.add_argument("--path", default=".", help="directory to inspect")
+    snapshot_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="read root that permits snapshot inspection; can be passed more than once",
+    )
+    snapshot_parser.add_argument("--no-read-files", action="store_true", help="skip key file reads")
+    snapshot_parser.add_argument("--no-inspect-key-dirs", action="store_true", help="skip src/tests directory inspection")
+    snapshot_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    snapshot_parser.set_defaults(func=cmd_snapshot)
 
     reply_parser = subparsers.add_parser("reply", help="answer a question")
     reply_parser.add_argument("question_id")

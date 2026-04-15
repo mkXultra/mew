@@ -675,6 +675,7 @@ The first user-facing version should likely include:
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
 - `mew context`: show resident prompt context diagnostics and approximate section sizes.
+- `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.
 - `mew dogfood --cycles <n>`: reuse one dogfood workspace across multiple runtime cycles and report the aggregate.

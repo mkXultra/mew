@@ -480,6 +480,31 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_snapshot_command_refreshes_project_snapshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src").mkdir()
+                Path("tests").mkdir()
+                Path("README.md").write_text("# Demo\n", encoding="utf-8")
+                Path("pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["snapshot", "--allow-read", "."]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("project_types: python", output)
+                self.assertIn("package: name=demo", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_snapshot_command_requires_allow_read(self):
+        with redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["snapshot"]), 1)
+
+        self.assertIn("--allow-read", stderr.getvalue())
+
     def test_dogfood_command_uses_report_runner(self):
         report = {
             "generated_at": "now",

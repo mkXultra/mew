@@ -143,6 +143,22 @@ class BriefTests(unittest.TestCase):
         self.assertIn("inspect_dir /tmp/project", brief)
         self.assertEqual(data["recent_activity"][0]["summary"], "Inspected the workspace.")
 
+    def test_brief_surfaces_project_snapshot(self):
+        state = default_state()
+        state["memory"]["deep"]["project_snapshot"] = {
+            "updated_at": "now",
+            "project_types": ["python"],
+            "package": {"name": "mew"},
+            "roots": [{"path": "/repo"}],
+            "files": [{"path": "/repo/README.md"}],
+        }
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("project_snapshot: types=python package=mew roots=1 files=1", brief)
+        self.assertEqual(data["memory"]["project_snapshot"]["package_name"], "mew")
+
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()
         state["verification_runs"].append(

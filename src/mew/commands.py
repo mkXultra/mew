@@ -33,7 +33,7 @@ from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogf
 from .errors import MewError
 from .memory import compact_memory
 from .perception import format_perception, perceive_workspace
-from .project_snapshot import format_project_snapshot
+from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
 from .programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -1213,6 +1213,32 @@ def cmd_memory(args):
         print("decisions:")
         for item in deep.get("decisions", []):
             print(f"- {item}")
+    return 0
+
+def cmd_snapshot(args):
+    allowed = args.allow_read or []
+    if not allowed:
+        print("mew: snapshot requires --allow-read PATH", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        try:
+            report = refresh_project_snapshot(
+                state,
+                args.path,
+                allowed,
+                now_iso(),
+                read_files=not args.no_read_files,
+                inspect_key_dirs=not args.no_inspect_key_dirs,
+            )
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        save_state(state)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    print(format_snapshot_refresh_report(report))
     return 0
 
 def cmd_task_run(args):

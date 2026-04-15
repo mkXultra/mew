@@ -1,7 +1,10 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from mew.project_snapshot import (
     format_project_snapshot,
+    refresh_project_snapshot,
     snapshot_for_context,
     update_project_snapshot_from_read_result,
 )
@@ -129,6 +132,69 @@ class ProjectSnapshotTests(unittest.TestCase):
 
         self.assertIn("project_snapshot_updated_at: now", text)
         self.assertIn("project_types: node", text)
+
+    def test_refresh_project_snapshot_reads_key_files_and_dirs(self):
+        state = default_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "README.md").write_text("# Demo\n\nhello", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "[project]\n"
+                'name = "demo"\n'
+                'version = "1.2.3"\n'
+                "[project.scripts]\n"
+                'demo = "demo.cli:main"\n',
+                encoding="utf-8",
+            )
+
+            report = refresh_project_snapshot(state, str(root), [tmp], "now")
+
+        snapshot = state["memory"]["deep"]["project_snapshot"]
+        self.assertEqual(
+            report["read_files"],
+            [str((root / "README.md").resolve()), str((root / "pyproject.toml").resolve())],
+        )
+        self.assertEqual(len(report["inspected_dirs"]), 3)
+        self.assertEqual(snapshot["package"]["name"], "demo")
+        self.assertEqual(snapshot["package"]["scripts"], {"demo": "demo.cli:main"})
+
+    def test_refresh_project_snapshot_finds_key_files_beyond_root_listing_window(self):
+        state = default_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(80):
+                (root / f"aaa-{index:02d}").mkdir()
+            (root / "zz-src").mkdir()
+            (root / "README.md").write_text("# Demo\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+            report = refresh_project_snapshot(state, str(root), [tmp], "now")
+
+        snapshot = state["memory"]["deep"]["project_snapshot"]
+        self.assertIn(str((root / "README.md").resolve()), report["read_files"])
+        self.assertEqual(snapshot["package"]["name"], "demo")
+
+    def test_pyproject_scripts_are_bounded_in_context(self):
+        state = default_state()
+        scripts = "\n".join(f'script{i} = "demo.module{i}:main"' for i in range(40))
+        update_project_snapshot_from_read_result(
+            state,
+            "read_file",
+            {
+                "path": "/repo/pyproject.toml",
+                "size": 2000,
+                "truncated": False,
+                "text": "[project]\nname = \"demo\"\n[project.scripts]\n" + scripts,
+            },
+            "now",
+        )
+
+        context = snapshot_for_context(state["memory"]["deep"]["project_snapshot"])
+
+        self.assertEqual(len(context["package"]["scripts"]), 20)
+        self.assertEqual(len(context["files"][0]["package"]["scripts"]), 20)
 
 
 if __name__ == "__main__":

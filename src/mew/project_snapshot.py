@@ -1,11 +1,15 @@
 from pathlib import Path
 
+from .read_tools import inspect_dir, read_file
+
 
 MAX_SNAPSHOT_ROOTS = 20
 MAX_SNAPSHOT_FILES = 30
 MAX_SNAPSHOT_SEARCHES = 10
 MAX_SNAPSHOT_ENTRIES = 80
 MAX_SNAPSHOT_TEXT = 500
+MAX_SNAPSHOT_SCRIPTS = 20
+MAX_SNAPSHOT_PACKAGE_TEXT = 200
 
 PROJECT_TYPE_FILES = {
     "pyproject.toml": "python",
@@ -35,6 +39,15 @@ KEY_DIR_NAMES = {
     "docs",
     "scripts",
 }
+DEFAULT_REFRESH_FILES = (
+    "README.md",
+    "prd.md",
+    "pyproject.toml",
+    "package.json",
+    "Cargo.toml",
+    "go.mod",
+)
+DEFAULT_REFRESH_DIRS = ("src", "tests")
 
 
 def _clip(text, limit=MAX_SNAPSHOT_TEXT):
@@ -126,6 +139,23 @@ def _strip_toml_string(value):
     return stripped
 
 
+def _bounded_package(package):
+    if not isinstance(package, dict):
+        return {}
+    bounded = {}
+    for key in ("name", "version", "description", "requires_python"):
+        if package.get(key):
+            bounded[key] = _clip(package.get(key), MAX_SNAPSHOT_PACKAGE_TEXT)
+    scripts = package.get("scripts") or {}
+    if isinstance(scripts, dict):
+        bounded_scripts = {}
+        for key, value in list(scripts.items())[:MAX_SNAPSHOT_SCRIPTS]:
+            bounded_scripts[_clip(key, 80)] = _clip(value, MAX_SNAPSHOT_PACKAGE_TEXT)
+        if bounded_scripts:
+            bounded["scripts"] = bounded_scripts
+    return bounded
+
+
 def _parse_pyproject(text):
     package = {}
     scripts = {}
@@ -142,11 +172,11 @@ def _parse_pyproject(text):
         key, value = [part.strip() for part in stripped.split("=", 1)]
         if section == "project" and key in ("name", "version", "description", "requires-python"):
             package[key.replace("-", "_")] = _strip_toml_string(value)
-        elif section == "project.scripts":
+        elif section == "project.scripts" and len(scripts) < MAX_SNAPSHOT_SCRIPTS:
             scripts[key] = _strip_toml_string(value)
     if scripts:
         package["scripts"] = scripts
-    return package
+    return _bounded_package(package)
 
 
 def _python_file_summary(text):
@@ -250,13 +280,75 @@ def update_project_snapshot_from_read_result(state, action_type, result, current
     return snapshot
 
 
+def refresh_project_snapshot(
+    state,
+    path,
+    allowed_read_roots,
+    current_time,
+    read_files=True,
+    inspect_key_dirs=True,
+):
+    report = {
+        "updated_at": current_time,
+        "path": "",
+        "inspected_dirs": [],
+        "read_files": [],
+        "errors": [],
+    }
+    root_result = inspect_dir(path or ".", allowed_read_roots, limit=200)
+    report["path"] = root_result.get("path") or ""
+    update_project_snapshot_from_read_result(state, "inspect_dir", root_result, current_time)
+    report["inspected_dirs"].append(root_result.get("path"))
+
+    root = Path(root_result.get("path") or ".")
+
+    if read_files:
+        for filename in DEFAULT_REFRESH_FILES:
+            candidate = root / filename
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            try:
+                file_result = read_file(str(candidate), allowed_read_roots, max_chars=12000)
+            except ValueError as exc:
+                report["errors"].append(str(exc))
+                continue
+            update_project_snapshot_from_read_result(state, "read_file", file_result, current_time)
+            report["read_files"].append(file_result.get("path"))
+
+    if inspect_key_dirs:
+        for dirname in DEFAULT_REFRESH_DIRS:
+            candidate = root / dirname
+            if not candidate.exists() or not candidate.is_dir():
+                continue
+            try:
+                dir_result = inspect_dir(str(candidate), allowed_read_roots, limit=80)
+            except ValueError as exc:
+                report["errors"].append(str(exc))
+                continue
+            update_project_snapshot_from_read_result(state, "inspect_dir", dir_result, current_time)
+            report["inspected_dirs"].append(dir_result.get("path"))
+
+    report["snapshot"] = snapshot_for_context(_ensure_snapshot(state))
+    return report
+
+
+def _file_for_context(file_item):
+    item = {
+        **file_item,
+        "summary": _clip(file_item.get("summary"), 300),
+    }
+    if "package" in item:
+        item["package"] = _bounded_package(item.get("package"))
+    return item
+
+
 def snapshot_for_context(snapshot):
     if not isinstance(snapshot, dict):
         return {}
     return {
         "updated_at": snapshot.get("updated_at"),
         "project_types": list(snapshot.get("project_types") or [])[-10:],
-        "package": snapshot.get("package") or {},
+        "package": _bounded_package(snapshot.get("package")),
         "roots": [
             {
                 **root,
@@ -264,13 +356,7 @@ def snapshot_for_context(snapshot):
             }
             for root in (snapshot.get("roots") or [])[-10:]
         ],
-        "files": [
-            {
-                **file_item,
-                "summary": _clip(file_item.get("summary"), 300),
-            }
-            for file_item in (snapshot.get("files") or [])[-10:]
-        ],
+        "files": [_file_for_context(file_item) for file_item in (snapshot.get("files") or [])[-10:]],
         "searches": list(snapshot.get("searches") or [])[-5:],
     }
 
@@ -304,4 +390,21 @@ def format_project_snapshot(snapshot):
         for file_item in files[-5:]:
             details = file_item.get("summary") or file_item.get("kind") or ""
             lines.append(f"- {file_item.get('path')} {details}")
+    return "\n".join(lines)
+
+
+def format_snapshot_refresh_report(report):
+    snapshot = report.get("snapshot") or {}
+    lines = [
+        f"snapshot_updated_at: {report.get('updated_at')}",
+        f"path: {report.get('path')}",
+        f"inspected_dirs: {len(report.get('inspected_dirs') or [])}",
+        f"read_files: {len(report.get('read_files') or [])}",
+    ]
+    if report.get("errors"):
+        lines.append("errors:")
+        for error in report.get("errors") or []:
+            lines.append(f"- {error}")
+    lines.append("")
+    lines.append(format_project_snapshot(snapshot))
     return "\n".join(lines)

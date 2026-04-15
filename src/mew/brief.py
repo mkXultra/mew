@@ -11,6 +11,21 @@ def _first_nonempty(*values):
     return ""
 
 
+def _project_snapshot_item(snapshot):
+    if not isinstance(snapshot, dict) or not snapshot.get("updated_at"):
+        return {}
+    roots = snapshot.get("roots") or []
+    files = snapshot.get("files") or []
+    package = snapshot.get("package") or {}
+    return {
+        "updated_at": snapshot.get("updated_at"),
+        "project_types": list(snapshot.get("project_types") or []),
+        "package_name": package.get("name") or "",
+        "root_count": len(roots),
+        "file_count": len(files),
+    }
+
+
 def open_unread_messages(state):
     return [message for message in state.get("outbox", []) if not message.get("read_at")]
 
@@ -280,6 +295,7 @@ def format_activity(state, limit=10):
 def build_brief_data(state, limit=5):
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
+    deep = memory.get("deep", {})
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
@@ -303,6 +319,7 @@ def build_brief_data(state, limit=5):
         "memory": {
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
+            "project_snapshot": _project_snapshot_item(deep.get("project_snapshot")),
         },
         "recent_activity": recent_activity(state, limit=limit),
         "thought_journal": [_thought_item(thought) for thought in recent_thoughts_for_context(state, limit=limit)],
@@ -369,6 +386,7 @@ def build_brief(state, limit=5):
     autonomy = state.get("autonomy", {})
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
+    deep = memory.get("deep", {})
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
@@ -394,6 +412,17 @@ def build_brief(state, limit=5):
         f"memory: {_first_nonempty(shallow.get('current_context'), shallow.get('latest_task_summary'), '(empty)')}",
         "",
     ]
+    snapshot_item = _project_snapshot_item(deep.get("project_snapshot"))
+    if snapshot_item:
+        project_types = ", ".join(snapshot_item.get("project_types") or []) or "(unknown)"
+        package = snapshot_item.get("package_name") or "(unknown)"
+        lines.insert(
+            -1,
+            "project_snapshot: "
+            f"types={project_types} package={package} "
+            f"roots={snapshot_item.get('root_count')} files={snapshot_item.get('file_count')} "
+            f"updated_at={snapshot_item.get('updated_at')}",
+        )
 
     if unread:
         lines.append("Unread messages")
