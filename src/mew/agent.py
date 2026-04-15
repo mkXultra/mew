@@ -27,6 +27,7 @@ from .programmer import (
     create_implementation_run_from_plan,
     create_review_run_for_implementation,
     create_task_plan,
+    find_active_implementation_run_for_plan,
     find_review_run_for_implementation,
     find_task_plan,
     latest_task_plan,
@@ -928,6 +929,7 @@ def think_phase(
         prompt_context=prompt_context,
     )
     try:
+        append_log(f"- {current_time}: think_phase {model_backend} start event={event['id']}")
         plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:
@@ -1116,6 +1118,7 @@ def act_phase(
         prompt_context=prompt_context,
     )
     try:
+        append_log(f"- {current_time}: act_phase {model_backend} start event={event['id']}")
         action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:
@@ -1459,6 +1462,17 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
     plan = find_task_plan(task, action.get("plan_id")) if action.get("plan_id") else latest_task_plan(task)
     if not plan:
         plan = create_task_plan(state, task)
+    existing_run = find_active_implementation_run_for_plan(state, task["id"], plan.get("id"))
+    if existing_run:
+        add_outbox_message(
+            state,
+            "info",
+            f"Skipped dispatch_task for task #{task['id']}: implementation run #{existing_run['id']} is already {existing_run.get('status')}.",
+            event_id=event["id"],
+            related_task_id=task["id"],
+            agent_run_id=existing_run["id"],
+        )
+        return 1
     run = create_implementation_run_from_plan(state, task, plan)
     start_agent_run(state, run)
     if run.get("status") == "running":
@@ -1700,7 +1714,18 @@ def apply_run_verification_action(
         )
         return 1
 
-    result = run_command_record(verify_command, cwd=".", timeout=verify_timeout)
+    if action.get("_precomputed_verification_error"):
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused run_verification: {action.get('_precomputed_verification_error')}",
+            event_id=event["id"],
+            related_task_id=action.get("task_id"),
+        )
+        return 1
+    result = action.get("_precomputed_verification")
+    if not isinstance(result, dict):
+        result = run_command_record(verify_command, cwd=".", timeout=verify_timeout)
     record_verification_result(state, event, action, current_time, verify_command, result)
     return 1
 
@@ -2073,6 +2098,200 @@ def apply_action_plan(
     )
     return counts
 
+def next_unprocessed_event(state, event_type=None):
+    for event in state["inbox"]:
+        if event_type is not None and event.get("type") != event_type:
+            continue
+        if not event.get("processed_at"):
+            return event
+    return None
+
+def plan_event(
+    state,
+    event,
+    current_time,
+    model_auth=None,
+    model=DEFAULT_CODEX_MODEL,
+    base_url=DEFAULT_CODEX_WEB_BASE_URL,
+    model_backend=DEFAULT_MODEL_BACKEND,
+    timeout=60,
+    ai_ticks=False,
+    allow_task_execution=False,
+    guidance="",
+    policy="",
+    self_text="",
+    desires="",
+    autonomous=False,
+    autonomy_level="off",
+    allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_interval_seconds=3600,
+    allow_write=False,
+    allowed_read_roots=None,
+    allowed_write_roots=None,
+):
+    prompt_context = build_context(
+        state,
+        event,
+        current_time,
+        allowed_read_roots=allowed_read_roots,
+        self_text=self_text,
+        desires=desires,
+        autonomous=autonomous,
+        autonomy_level=autonomy_level,
+        allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        allow_write=allow_write,
+        allowed_write_roots=allowed_write_roots,
+    )
+    decision_plan = think_phase(
+        state,
+        event,
+        current_time,
+        model_auth,
+        model,
+        base_url=base_url,
+        timeout=timeout,
+        ai_ticks=ai_ticks,
+        allow_task_execution=allow_task_execution,
+        guidance=guidance,
+        policy=policy,
+        self_text=self_text,
+        desires=desires,
+        autonomous=autonomous,
+        autonomy_level=autonomy_level,
+        allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        verify_interval_seconds=verify_interval_seconds,
+        allow_write=allow_write,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        model_backend=model_backend,
+        prompt_context=prompt_context,
+    )
+    action_plan = act_phase(
+        state,
+        event,
+        decision_plan,
+        current_time,
+        model_auth,
+        model,
+        base_url=base_url,
+        timeout=timeout,
+        ai_ticks=ai_ticks,
+        allow_task_execution=allow_task_execution,
+        policy=policy,
+        self_text=self_text,
+        desires=desires,
+        autonomous=autonomous,
+        autonomy_level=autonomy_level,
+        allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        allow_write=allow_write,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        model_backend=model_backend,
+        prompt_context=prompt_context,
+    )
+    return decision_plan, action_plan
+
+def find_event(state, event_id):
+    wanted = str(event_id)
+    for event in state["inbox"]:
+        if str(event.get("id")) == wanted:
+            return event
+    return None
+
+def public_action_plan(action_plan):
+    if not isinstance(action_plan, dict):
+        return action_plan
+    clean = dict(action_plan)
+    clean["actions"] = [
+        {
+            key: value
+            for key, value in action.items()
+            if not str(key).startswith("_")
+        }
+        for action in action_plan.get("actions", [])
+    ]
+    return clean
+
+def apply_event_plans(
+    state,
+    event_id,
+    decision_plan,
+    action_plan,
+    current_time,
+    reason,
+    allow_task_execution=False,
+    task_timeout=DEFAULT_TASK_TIMEOUT_SECONDS,
+    allowed_read_roots=None,
+    autonomous=False,
+    autonomy_level="off",
+    allow_agent_run=False,
+    allow_verify=False,
+    verify_command="",
+    verify_timeout=300,
+    allow_write=False,
+    allowed_write_roots=None,
+):
+    event = find_event(state, event_id)
+    if not event or event.get("processed_at"):
+        return None
+
+    counts = apply_action_plan(
+        state,
+        event,
+        decision_plan,
+        action_plan,
+        current_time,
+        allow_task_execution,
+        task_timeout,
+        allowed_read_roots=allowed_read_roots,
+        autonomous=autonomous,
+        autonomy_level=autonomy_level,
+        allow_agent_run=allow_agent_run,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        verify_timeout=verify_timeout,
+        allow_write=allow_write,
+        allowed_write_roots=allowed_write_roots,
+        cycle_reason=reason,
+    )
+    event["decision_plan"] = decision_plan
+    event["action_plan"] = public_action_plan(action_plan)
+    event["processed_at"] = current_time
+    return counts
+
+def update_runtime_processing_summary(
+    state,
+    reason,
+    current_time,
+    processed_count,
+    action_count,
+    message_count,
+    executed_count,
+    autonomous=False,
+):
+    runtime = state["runtime_status"]
+    autonomy = state.setdefault("autonomy", {})
+    if autonomous and reason in ("startup", "passive_tick"):
+        autonomy["cycles"] = int(autonomy.get("cycles") or 0) + 1
+        autonomy["last_cycle_reason"] = reason
+        autonomy["last_autonomous_action_at"] = current_time
+        autonomy["updated_at"] = current_time
+    runtime["last_woke_at"] = current_time
+    runtime["last_evaluated_at"] = current_time
+    runtime["last_action"] = (
+        f"processed {processed_count} event(s), planned {action_count} action(s), "
+        f"sent {message_count} message(s), executed {executed_count} task(s)"
+    )
+    append_log(f"- {current_time}: {runtime['last_action']} reason={reason}")
+
 def process_events(
     state,
     reason,
@@ -2112,22 +2331,7 @@ def process_events(
         if event.get("processed_at"):
             continue
 
-        prompt_context = build_context(
-            state,
-            event,
-            current_time,
-            allowed_read_roots=allowed_read_roots,
-            self_text=self_text,
-            desires=desires,
-            autonomous=autonomous,
-            autonomy_level=autonomy_level,
-            allow_agent_run=allow_agent_run,
-            allow_verify=allow_verify,
-            verify_command=verify_command,
-            allow_write=allow_write,
-            allowed_write_roots=allowed_write_roots,
-        )
-        decision_plan = think_phase(
+        decision_plan, action_plan = plan_event(
             state,
             event,
             current_time,
@@ -2151,41 +2355,16 @@ def process_events(
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
             model_backend=model_backend,
-            prompt_context=prompt_context,
         )
-        action_plan = act_phase(
+        counts = apply_event_plans(
             state,
-            event,
-            decision_plan,
-            current_time,
-            model_auth,
-            model,
-            base_url=base_url,
-            timeout=timeout,
-            ai_ticks=ai_ticks,
-            allow_task_execution=allow_task_execution,
-            policy=policy,
-            self_text=self_text,
-            desires=desires,
-            autonomous=autonomous,
-            autonomy_level=autonomy_level,
-            allow_agent_run=allow_agent_run,
-            allow_verify=allow_verify,
-            verify_command=verify_command,
-            allow_write=allow_write,
-            allowed_read_roots=allowed_read_roots,
-            allowed_write_roots=allowed_write_roots,
-            model_backend=model_backend,
-            prompt_context=prompt_context,
-        )
-        counts = apply_action_plan(
-            state,
-            event,
+            event["id"],
             decision_plan,
             action_plan,
             current_time,
-            allow_task_execution,
-            task_timeout,
+            reason,
+            allow_task_execution=allow_task_execution,
+            task_timeout=task_timeout,
             allowed_read_roots=allowed_read_roots,
             autonomous=autonomous,
             autonomy_level=autonomy_level,
@@ -2195,28 +2374,22 @@ def process_events(
             verify_timeout=verify_timeout,
             allow_write=allow_write,
             allowed_write_roots=allowed_write_roots,
-            cycle_reason=reason,
         )
-        event["decision_plan"] = decision_plan
-        event["action_plan"] = action_plan
-        event["processed_at"] = current_time
+        if counts is None:
+            continue
         processed_count += 1
         action_count += counts["actions"]
         message_count += counts["messages"]
         executed_count += counts["executed"]
 
-    runtime = state["runtime_status"]
-    autonomy = state.setdefault("autonomy", {})
-    if autonomous and reason in ("startup", "passive_tick"):
-        autonomy["cycles"] = int(autonomy.get("cycles") or 0) + 1
-        autonomy["last_cycle_reason"] = reason
-        autonomy["last_autonomous_action_at"] = current_time
-        autonomy["updated_at"] = current_time
-    runtime["last_woke_at"] = current_time
-    runtime["last_evaluated_at"] = current_time
-    runtime["last_action"] = (
-        f"processed {processed_count} event(s), planned {action_count} action(s), "
-        f"sent {message_count} message(s), executed {executed_count} task(s)"
+    update_runtime_processing_summary(
+        state,
+        reason,
+        current_time,
+        processed_count,
+        action_count,
+        message_count,
+        executed_count,
+        autonomous=autonomous,
     )
-    append_log(f"- {current_time}: {runtime['last_action']} reason={reason}")
     return processed_count

@@ -18,7 +18,7 @@ from mew.agent import (
     think_phase,
 )
 from mew.read_tools import read_file
-from mew.state import add_attention_item, add_event, default_state, migrate_state
+from mew.state import add_attention_item, add_event, add_outbox_message, default_state, migrate_state
 from mew.thoughts import format_thought_entry
 from mew.timeutil import now_iso
 
@@ -416,6 +416,87 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(context["context_stats"]["source_counts"]["agent_runs"], 1)
         self.assertGreater(context["context_stats"]["section_chars"]["todo"], 0)
         self.assertGreater(context["context_stats"]["section_chars"]["agent_runs"], 0)
+
+    def test_build_context_includes_bounded_conversation_history(self):
+        state = default_state()
+        long_text = "conversation detail " * 200
+        first = add_event(state, "user_message", "test", {"text": "first user message"})
+        add_outbox_message(state, "assistant", "first assistant response", event_id=first["id"])
+        add_outbox_message(state, "info", "internal progress without event")
+        add_outbox_message(state, "assistant", "unlinked assistant")
+        add_outbox_message(state, "question", "unlinked question")
+        second = add_event(state, "user_message", "test", {"text": long_text})
+        add_outbox_message(state, "info", "direct user reply", event_id=second["id"])
+        add_outbox_message(state, "question", "Need a decision?", event_id=second["id"], requires_reply=True)
+
+        context = build_context(state, second, "later")
+
+        self.assertEqual([item["role"] for item in context["conversation"]], ["user", "mew", "user", "mew", "mew"])
+        self.assertEqual(context["conversation"][0]["text"], "first user message")
+        self.assertEqual(context["conversation"][1]["text"], "first assistant response")
+        self.assertEqual(context["conversation"][3]["text"], "direct user reply")
+        self.assertEqual(context["conversation"][4]["kind"], "question")
+        self.assertTrue(context["conversation"][4]["requires_reply"])
+        self.assertNotIn(
+            "internal progress without event",
+            [item["text"] for item in context["conversation"]],
+        )
+        self.assertNotIn(
+            "unlinked assistant",
+            [item["text"] for item in context["conversation"]],
+        )
+        self.assertNotIn(
+            "unlinked question",
+            [item["text"] for item in context["conversation"]],
+        )
+        self.assertLessEqual(len(context["conversation"][2]["text"]), 1020)
+        self.assertEqual(context["context_stats"]["source_counts"]["conversation_items"], 5)
+        self.assertEqual(context["context_stats"]["included_counts"]["conversation_items"], 5)
+
+    def test_build_context_excludes_future_pending_conversation_turns(self):
+        state = default_state()
+        first = add_event(state, "user_message", "test", {"text": "first turn"})
+        second = add_event(state, "user_message", "test", {"text": "second pending turn"})
+        add_outbox_message(state, "assistant", "future response", event_id=second["id"])
+        add_outbox_message(state, "assistant", "unlinked future assistant")
+
+        context = build_context(state, first, "later")
+        texts = [item["text"] for item in context["conversation"]]
+
+        self.assertIn("first turn", texts)
+        self.assertNotIn("second pending turn", texts)
+        self.assertNotIn("future response", texts)
+        self.assertNotIn("unlinked future assistant", texts)
+
+    def test_build_context_clips_write_run_actual_fields(self):
+        state = default_state()
+        state["write_runs"].append(
+            {
+                "id": 1,
+                "action_type": "edit_file",
+                "path": "/tmp/example.py",
+                "dry_run": False,
+                "changed": True,
+                "written": True,
+                "rolled_back": True,
+                "rollback_error": "rollback detail " * 100,
+                "diff": "-old\n+new\n" * 200,
+                "reason": "Update example",
+                "created_at": "now",
+                "updated_at": "later",
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+        write_run = context["write_runs"][0]
+
+        self.assertEqual(write_run["action_type"], "edit_file")
+        self.assertTrue(write_run["changed"])
+        self.assertTrue(write_run["written"])
+        self.assertTrue(write_run["rolled_back"])
+        self.assertIn("rollback detail", write_run["rollback_error"])
+        self.assertLessEqual(len(write_run["diff_tail"]), 620)
 
     def test_build_context_preserves_attention_reason(self):
         state = default_state()

@@ -263,16 +263,22 @@ def apply_reply_to_related_task(state, question, answer_text, event_id):
     task["updated_at"] = current_time
     return task
 
-def queue_user_message(text, reply_to_question_id=None):
+def queue_user_message(text, reply_to_question_id=None, require_open_question=False):
     current_time = now_iso()
     with state_lock():
         state = load_state()
         payload = {"text": text}
         if reply_to_question_id is not None:
             payload["reply_to_question_id"] = reply_to_question_id
+            question = find_question(state, reply_to_question_id)
+            if require_open_question and not question:
+                raise MewError(f"question not found: {reply_to_question_id}")
+            if require_open_question and question.get("status") != "open":
+                raise MewError(f"question already answered: {reply_to_question_id}")
+        else:
+            question = None
         event = add_event(state, "user_message", "user", payload)
         if reply_to_question_id is not None:
-            question = find_question(state, reply_to_question_id)
             if question:
                 mark_question_answered(state, question, text, event_id=event["id"])
                 apply_reply_to_related_task(state, question, text, event["id"])
@@ -297,6 +303,149 @@ def cmd_message(args):
         mark_read=getattr(args, "mark_read", False),
     )
 
+def session_message(kind, request_id=None, **payload):
+    data = {"type": kind}
+    if request_id is not None:
+        data["id"] = request_id
+    data.update(payload)
+    return data
+
+def unread_outbox_messages(state, include_all=False):
+    if include_all:
+        return list(state.get("outbox", []))
+    return [message for message in state.get("outbox", []) if not message.get("read_at")]
+
+def load_state_locked():
+    with state_lock():
+        return load_state()
+
+def session_status_payload(state):
+    lock = read_lock()
+    lock_state = "none"
+    if lock:
+        lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
+    questions = open_questions(state)
+    attention = open_attention_items(state)
+    running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    unread = unread_outbox_messages(state)
+    return {
+        "runtime_status": state["runtime_status"],
+        "agent_status": state["agent_status"],
+        "user_status": state["user_status"],
+        "autonomy": state.get("autonomy", {}),
+        "lock": {
+            "state": lock_state,
+            "pid": (lock or {}).get("pid") if lock else None,
+            "started_at": (lock or {}).get("started_at") if lock else None,
+        },
+        "counts": {
+            "open_tasks": len(open_tasks(state)),
+            "open_questions": len(questions),
+            "open_attention": len(attention),
+            "running_agent_runs": len(running_agents),
+            "unread_outbox": len(unread),
+        },
+        "next_move": next_move(state),
+    }
+
+def handle_session_request(request):
+    if not isinstance(request, dict):
+        return session_message("error", error="request must be a JSON object")
+    request_id = request.get("id")
+    request_type = request.get("type") or request.get("command")
+
+    try:
+        if request_type == "message":
+            text = request.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return session_message("error", request_id, error="message.text is required")
+            event = queue_user_message(text)
+            return session_message("event_queued", request_id, event=event)
+
+        if request_type == "reply":
+            question_id = request.get("question_id")
+            text = request.get("text")
+            if question_id is None:
+                return session_message("error", request_id, error="reply.question_id is required")
+            if not isinstance(text, str) or not text.strip():
+                return session_message("error", request_id, error="reply.text is required")
+            event = queue_user_message(text, reply_to_question_id=question_id, require_open_question=True)
+            return session_message("event_queued", request_id, event=event)
+
+        if request_type == "status":
+            return session_message("status", request_id, **session_status_payload(load_state_locked()))
+
+        if request_type == "brief":
+            limit = request.get("limit", 5)
+            if not isinstance(limit, int):
+                limit = 5
+            return session_message("brief", request_id, brief=build_brief_data(load_state_locked(), limit=limit))
+
+        if request_type == "activity":
+            limit = request.get("limit", 10)
+            if not isinstance(limit, int):
+                limit = 10
+            return session_message("activity", request_id, activity=build_activity_data(load_state_locked(), limit=limit))
+
+        if request_type == "outbox":
+            state = load_state_locked()
+            return session_message(
+                "outbox",
+                request_id,
+                messages=unread_outbox_messages(state, include_all=bool(request.get("all"))),
+            )
+
+        if request_type == "ack":
+            ids = request.get("message_ids") or []
+            if request.get("all"):
+                with state_lock():
+                    state = load_state()
+                    messages = unread_outbox_messages(state)
+                    for message in messages:
+                        mark_message_read(state, message["id"])
+                    save_state(state)
+                return session_message("acknowledged", request_id, count=len(messages))
+            if not isinstance(ids, list) or not ids:
+                return session_message("error", request_id, error="ack.message_ids or ack.all is required")
+            with state_lock():
+                state = load_state()
+                acknowledged = []
+                for message_id in ids:
+                    message = mark_message_read(state, message_id)
+                    if not message:
+                        return session_message("error", request_id, error=f"message not found: {message_id}")
+                    acknowledged.append(message)
+                save_state(state)
+            return session_message("acknowledged", request_id, count=len(acknowledged))
+
+        if request_type == "next":
+            move = next_move(load_state_locked())
+            return session_message("next", request_id, next_move=move, command=command_from_next_move(move))
+
+        if request_type in ("stop", "exit"):
+            return session_message("bye", request_id)
+
+        return session_message("error", request_id, error=f"unsupported request type: {request_type}")
+    except Exception as exc:
+        return session_message("error", request_id, error=str(exc))
+
+def cmd_session(args):
+    print(json.dumps(session_message("ready", protocol="mew.session.v1"), ensure_ascii=False), flush=True)
+    for line in sys.stdin:
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            request = json.loads(text)
+        except json.JSONDecodeError as exc:
+            response = session_message("error", error=f"invalid json: {exc}")
+        else:
+            response = handle_session_request(request)
+        print(json.dumps(response, ensure_ascii=False), flush=True)
+        if response.get("type") == "bye":
+            return 0
+    return 0
+
 def cmd_reply(args):
     with state_lock():
         state = load_state()
@@ -304,7 +453,11 @@ def cmd_reply(args):
         if not question:
             print(f"mew: question not found: {args.question_id}", file=sys.stderr)
             return 1
-    event = queue_user_message(args.text, reply_to_question_id=question["id"])
+    try:
+        event = queue_user_message(args.text, reply_to_question_id=question["id"], require_open_question=True)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     print(f"answered question #{question['id']} with event #{event['id']}")
     return 0
 
@@ -392,6 +545,8 @@ def cmd_status(args):
     print(f"last_evaluated_at: {runtime.get('last_evaluated_at')}")
     print(f"last_action: {runtime.get('last_action')}")
     print(f"current_reason: {runtime.get('current_reason') or ''}")
+    print(f"current_event_id: {runtime.get('current_event_id') or ''}")
+    print(f"current_phase: {runtime.get('current_phase') or ''}")
     print(f"cycle_started_at: {runtime.get('cycle_started_at') or ''}")
     print(f"last_cycle_reason: {runtime.get('last_cycle_reason') or ''}")
     print(f"last_cycle_duration_seconds: {runtime.get('last_cycle_duration_seconds')}")

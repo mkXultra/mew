@@ -178,6 +178,20 @@ def create_implementation_run_from_plan(state, task, plan, dry_run=False):
     plan["updated_at"] = now_iso()
     return run
 
+def find_active_implementation_run_for_plan(state, task_id, plan_id):
+    wanted_task_id = str(task_id)
+    wanted_plan_id = str(plan_id) if plan_id is not None else ""
+    for run in reversed(state.get("agent_runs", [])):
+        if run.get("purpose", "implementation") != "implementation":
+            continue
+        if str(run.get("task_id")) != wanted_task_id:
+            continue
+        if wanted_plan_id and str(run.get("plan_id")) != wanted_plan_id:
+            continue
+        if run.get("status") in ("created", "running"):
+            return run
+    return None
+
 
 def create_review_run_for_implementation(state, task, implementation_run, plan=None, model=None):
     prompt = build_review_prompt(task, implementation_run, plan)

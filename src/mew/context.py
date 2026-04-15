@@ -18,6 +18,8 @@ MAX_CONTEXT_AGENT_RUNS = 8
 MAX_CONTEXT_RUN_OUTPUT_CHARS = 600
 MAX_CONTEXT_MEMORY_CHARS = 800
 MAX_CONTEXT_QUESTION_BLOCK_CHARS = 200
+MAX_CONTEXT_CONVERSATION_ITEMS = 12
+MAX_CONTEXT_CONVERSATION_TEXT_CHARS = 1000
 
 
 def clip_context_text(value, limit=MAX_CONTEXT_TEXT_CHARS):
@@ -180,6 +182,9 @@ def runtime_status_for_context(status):
         "last_woke_at": status.get("last_woke_at"),
         "last_evaluated_at": status.get("last_evaluated_at"),
         "last_action": clip_context_text(status.get("last_action"), MAX_CONTEXT_TEXT_CHARS),
+        "current_reason": status.get("current_reason"),
+        "current_event_id": status.get("current_event_id"),
+        "current_phase": status.get("current_phase"),
     }
 
 
@@ -202,6 +207,111 @@ def user_status_for_context(status):
         "last_interaction_at": status.get("last_interaction_at"),
         "updated_at": status.get("updated_at"),
     }
+
+
+def conversation_for_context(state, current_event=None, limit=MAX_CONTEXT_CONVERSATION_ITEMS):
+    items = []
+    user_event_ids = set()
+    cutoff_event_id = None
+    if current_event and current_event.get("id"):
+        try:
+            cutoff_event_id = int(current_event.get("id"))
+        except (TypeError, ValueError):
+            cutoff_event_id = None
+    for inbox_event in state.get("inbox", []):
+        if inbox_event.get("type") != "user_message":
+            continue
+        try:
+            event_id = int(inbox_event.get("id") or 0)
+        except (TypeError, ValueError):
+            event_id = 0
+        if cutoff_event_id and event_id > cutoff_event_id:
+            continue
+        user_event_ids.add(str(inbox_event.get("id")))
+        payload = inbox_event.get("payload") or {}
+        items.append(
+            {
+                "_sort_at": inbox_event.get("created_at") or "",
+                "_event_id": event_id,
+                "_phase": 0,
+                "_own_id": event_id,
+                "role": "user",
+                "kind": "message",
+                "event_id": inbox_event.get("id"),
+                "reply_to_question_id": payload.get("reply_to_question_id"),
+                "text": clip_context_text(
+                    payload.get("text"),
+                    MAX_CONTEXT_CONVERSATION_TEXT_CHARS,
+                ),
+                "created_at": inbox_event.get("created_at"),
+                "processed_at": inbox_event.get("processed_at"),
+            }
+        )
+
+    for message in state.get("outbox", []):
+        kind = message.get("type") or "message"
+        linked_user_message = str(message.get("event_id")) in user_event_ids
+        try:
+            message_event_id = int(message.get("event_id") or 0)
+        except (TypeError, ValueError):
+            message_event_id = 0
+        if cutoff_event_id and message_event_id and message_event_id > cutoff_event_id:
+            continue
+        linked_agent_message = kind in ("assistant", "question") and bool(message_event_id)
+        if not linked_agent_message and not (
+            kind in ("info", "warning") and linked_user_message
+        ):
+            continue
+        items.append(
+            {
+                "_sort_at": message.get("created_at") or "",
+                "_event_id": message_event_id,
+                "_phase": 1,
+                "_own_id": int(message.get("id") or 0),
+                "role": "mew",
+                "kind": kind,
+                "message_id": message.get("id"),
+                "event_id": message.get("event_id"),
+                "question_id": message.get("question_id"),
+                "requires_reply": bool(message.get("requires_reply")),
+                "text": clip_context_text(
+                    message.get("text"),
+                    MAX_CONTEXT_CONVERSATION_TEXT_CHARS,
+                ),
+                "created_at": message.get("created_at"),
+                "read_at": message.get("read_at"),
+                "answered_at": message.get("answered_at"),
+            }
+        )
+
+    items.sort(key=lambda item: (item["_sort_at"], item["_event_id"], item["_phase"], item["_own_id"]))
+    selected = items[-limit:]
+    return [
+        {
+            key: value
+            for key, value in item.items()
+            if not key.startswith("_")
+        }
+        for item in selected
+    ]
+
+
+def conversation_item_count(state):
+    user_event_ids = {
+        str(event.get("id"))
+        for event in state.get("inbox", [])
+        if event.get("type") == "user_message"
+    }
+    count = len(user_event_ids)
+    for message in state.get("outbox", []):
+        kind = message.get("type") or "message"
+        linked_user_message = str(message.get("event_id")) in user_event_ids
+        linked_agent_message = kind in ("assistant", "question") and bool(message.get("event_id"))
+        if linked_agent_message or (
+            kind in ("info", "warning") and linked_user_message
+        ):
+            count += 1
+    return count
 
 
 def autonomy_for_context(state, autonomous, autonomy_level, allow_agent_run, allow_verify, verify_command, allow_write):
@@ -398,13 +508,19 @@ def verification_run_for_context(run):
 def write_run_for_context(run):
     return {
         "id": run.get("id"),
-        "action_type": run.get("action_type"),
+        "operation": run.get("operation") or run.get("action_type"),
+        "action_type": run.get("action_type") or run.get("operation"),
         "path": clip_context_text(run.get("path"), 500),
         "dry_run": bool(run.get("dry_run")),
-        "applied": bool(run.get("applied")),
-        "verified": bool(run.get("verified")),
-        "verification_exit_code": run.get("verification_exit_code"),
-        "summary": clip_context_text(run.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+        "changed": run.get("changed"),
+        "written": run.get("written"),
+        "rolled_back": run.get("rolled_back"),
+        "rollback_error": clip_context_text(run.get("rollback_error"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "diff_tail": clip_context_text(run.get("diff"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "summary": clip_context_text(
+            run.get("summary") or run.get("message") or run.get("reason"),
+            MAX_CONTEXT_TEXT_CHARS,
+        ),
         "error": clip_context_text(run.get("error"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
         "created_at": run.get("created_at"),
         "updated_at": run.get("updated_at"),
@@ -456,6 +572,8 @@ def build_context_stats(state, context):
             "long_text_chars": MAX_CONTEXT_LONG_TEXT_CHARS,
             "run_output_chars": MAX_CONTEXT_RUN_OUTPUT_CHARS,
             "memory_chars": MAX_CONTEXT_MEMORY_CHARS,
+            "conversation_items": MAX_CONTEXT_CONVERSATION_ITEMS,
+            "conversation_text_chars": MAX_CONTEXT_CONVERSATION_TEXT_CHARS,
         },
         "source_counts": {
             "open_tasks": open_task_count,
@@ -465,6 +583,7 @@ def build_context_stats(state, context):
             "active_agent_runs": active_agent_run_count(state),
             "verification_runs": len(state.get("verification_runs", [])),
             "write_runs": len(state.get("write_runs", [])),
+            "conversation_items": conversation_item_count(state),
         },
         "included_counts": {
             "open_tasks": len(context.get("todo", [])),
@@ -480,6 +599,7 @@ def build_context_stats(state, context):
             ),
             "verification_runs": len(context.get("verification_runs", [])),
             "write_runs": len(context.get("write_runs", [])),
+            "conversation_items": len(context.get("conversation", [])),
         },
         "omitted_counts": {
             "open_tasks": max(0, open_task_count - len(context.get("todo", []))),
@@ -490,6 +610,10 @@ def build_context_stats(state, context):
             ),
             "agent_runs": max(0, agent_run_count - len(context.get("agent_runs", []))),
             "active_agent_runs": context.get("agent_runs_active_omitted_count", 0),
+            "conversation_items": max(
+                0,
+                conversation_item_count(state) - len(context.get("conversation", [])),
+            ),
         },
     }
 
@@ -559,6 +683,7 @@ def build_context(
         "runtime_status": runtime_status_for_context(state["runtime_status"]),
         "agent_status": agent_status_for_context(state["agent_status"]),
         "user_status": user_status_for_context(state["user_status"]),
+        "conversation": conversation_for_context(state, event),
         "todo_summary": summarize_tasks(state),
         "todo": [task_for_context(task) for task in tasks[:MAX_CONTEXT_TASKS]],
         "todo_omitted_count": max(0, len(tasks) - MAX_CONTEXT_TASKS),

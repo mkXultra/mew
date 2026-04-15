@@ -71,6 +71,106 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_session_jsonl_handles_status_outbox_ack_and_message(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(state, "info", "hello from mew")
+                    save_state(state)
+
+                stdin = StringIO(
+                    '{"id":"s","type":"status"}\n'
+                    '{"id":"o","type":"outbox"}\n'
+                    '{"id":"a","type":"ack","message_ids":[1]}\n'
+                    '{"id":"m","type":"message","text":"hello session"}\n'
+                    '{"id":"x","type":"stop"}\n'
+                )
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout:
+                    code = main(["session"])
+
+                self.assertEqual(code, 0)
+                responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual(responses[0]["type"], "ready")
+                self.assertEqual(responses[0]["protocol"], "mew.session.v1")
+                self.assertEqual(responses[1]["type"], "status")
+                self.assertEqual(responses[1]["counts"]["unread_outbox"], 1)
+                self.assertEqual(responses[2]["type"], "outbox")
+                self.assertEqual(responses[2]["messages"][0]["text"], "hello from mew")
+                self.assertEqual(responses[3]["type"], "acknowledged")
+                self.assertEqual(responses[3]["count"], 1)
+                self.assertEqual(responses[4]["type"], "event_queued")
+                self.assertEqual(responses[4]["event"]["payload"]["text"], "hello session")
+                self.assertEqual(responses[5]["type"], "bye")
+
+                state = load_state()
+                self.assertEqual(state["inbox"][0]["payload"]["text"], "hello session")
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_session_jsonl_reports_errors_and_keeps_running(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                stdin = StringIO(
+                    "{bad json}\n"
+                    '{"id":"u","type":"unknown"}\n'
+                    '{"id":"s","type":"status"}\n'
+                    '{"id":"x","type":"stop"}\n'
+                )
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout:
+                    code = main(["session"])
+
+                self.assertEqual(code, 0)
+                responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual(responses[1]["type"], "error")
+                self.assertIn("invalid json", responses[1]["error"])
+                self.assertEqual(responses[2]["type"], "error")
+                self.assertEqual(responses[2]["id"], "u")
+                self.assertEqual(responses[3]["type"], "status")
+                self.assertEqual(responses[3]["id"], "s")
+                self.assertEqual(responses[4]["type"], "bye")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_session_reply_rejects_already_answered_question(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, mark_question_answered, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    question, _created = add_question(state, "answer me")
+                    mark_question_answered(state, question, "old answer")
+                    save_state(state)
+
+                stdin = StringIO(
+                    '{"id":"r","type":"reply","question_id":1,"text":"new answer"}\n'
+                    '{"id":"x","type":"stop"}\n'
+                )
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout:
+                    code = main(["session"])
+
+                self.assertEqual(code, 0)
+                responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual(responses[1]["type"], "error")
+                self.assertEqual(responses[1]["id"], "r")
+                self.assertIn("already answered", responses[1]["error"])
+
+                state = load_state()
+                self.assertEqual(state["inbox"], [])
+                self.assertEqual(len(state["replies"]), 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_attention_can_resolve_items(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -309,6 +409,418 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue((Path(".mew") / "policy.md").exists())
                 self.assertTrue((Path(".mew") / "self.md").exists())
                 self.assertTrue((Path(".mew") / "desires.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_releases_state_lock_while_planning_model_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import queue_user_message
+                from mew.state import load_state
+
+                planning_started = threading.Event()
+                release_planning = threading.Event()
+                runtime_result = []
+                errors = []
+
+                def fake_plan_runtime_event(*args, **kwargs):
+                    planning_started.set()
+                    if not release_planning.wait(2):
+                        errors.append("planning was not released")
+                    return (
+                        {
+                            "summary": "startup remembered",
+                            "decisions": [{"type": "remember", "summary": "startup remembered"}],
+                        },
+                        {
+                            "summary": "startup remembered",
+                            "actions": [{"type": "record_memory", "summary": "startup remembered"}],
+                        },
+                    )
+
+                def run_once():
+                    with (
+                        patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                        patch("mew.runtime.signal.signal", return_value=None),
+                    ):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            runtime_result.append(main(["run", "--once", "--poll-interval", "0.01"]))
+
+                runtime_thread = threading.Thread(target=run_once)
+                runtime_thread.start()
+                self.assertTrue(planning_started.wait(2))
+
+                queued = []
+                queue_thread = threading.Thread(
+                    target=lambda: queued.append(queue_user_message("hello while model is thinking")["id"])
+                )
+                queue_thread.start()
+                queue_thread.join(0.5)
+                blocked = queue_thread.is_alive()
+
+                release_planning.set()
+                queue_thread.join(2)
+                runtime_thread.join(3)
+
+                self.assertFalse(blocked, "message queue blocked while runtime was planning")
+                self.assertFalse(runtime_thread.is_alive())
+                self.assertEqual(runtime_result, [0])
+                self.assertEqual(errors, [])
+
+                state = load_state()
+                user_events = [event for event in state["inbox"] if event.get("type") == "user_message"]
+                self.assertEqual(len(user_events), 1)
+                self.assertEqual(user_events[0]["payload"]["text"], "hello while model is thinking")
+                self.assertIsNone(user_events[0].get("processed_at"))
+            finally:
+                release_planning.set()
+                os.chdir(old_cwd)
+
+    def test_run_prefers_pending_user_message_over_stale_internal_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    internal = add_event(state, "passive_tick", "test")
+                    user = add_event(state, "user_message", "test", {"text": "process me first"})
+                    save_state(state)
+
+                def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
+                    return (
+                        {
+                            "summary": event_snapshot["type"],
+                            "decisions": [{"type": "remember", "summary": event_snapshot["type"]}],
+                        },
+                        {
+                            "summary": event_snapshot["type"],
+                            "actions": [{"type": "record_memory", "summary": event_snapshot["type"]}],
+                        },
+                    )
+
+                with patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                state = load_state()
+                by_id = {event["id"]: event for event in state["inbox"]}
+                self.assertIsNone(by_id[internal["id"]].get("processed_at"))
+                self.assertIsNotNone(by_id[user["id"]].get("processed_at"))
+                self.assertEqual(by_id[user["id"]]["decision_plan"]["summary"], "user_message")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_does_not_apply_stale_plan_if_event_was_processed_before_commit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    queued = add_event(state, "user_message", "test", {"text": "hello"})
+                    save_state(state)
+
+                planning_started = threading.Event()
+                release_planning = threading.Event()
+                runtime_result = []
+
+                def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
+                    self.assertEqual(event_snapshot["id"], queued["id"])
+                    planning_started.set()
+                    release_planning.wait(2)
+                    return (
+                        {
+                            "summary": "stale plan",
+                            "decisions": [{"type": "send_message", "text": "stale"}],
+                        },
+                        {
+                            "summary": "stale plan",
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "message_type": "assistant",
+                                    "text": "stale response",
+                                }
+                            ],
+                        },
+                    )
+
+                def run_once():
+                    with (
+                        patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                        patch("mew.runtime.signal.signal", return_value=None),
+                    ):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            runtime_result.append(main(["run", "--once", "--poll-interval", "0.01"]))
+
+                runtime_thread = threading.Thread(target=run_once)
+                runtime_thread.start()
+                self.assertTrue(planning_started.wait(2))
+
+                with state_lock():
+                    state = load_state()
+                    event = next(event for event in state["inbox"] if event["id"] == queued["id"])
+                    event["processed_at"] = "external"
+                    event["decision_plan"] = {"summary": "external", "decisions": []}
+                    event["action_plan"] = {"summary": "external", "actions": []}
+                    save_state(state)
+
+                release_planning.set()
+                runtime_thread.join(3)
+
+                self.assertFalse(runtime_thread.is_alive())
+                self.assertEqual(runtime_result, [0])
+
+                state = load_state()
+                event = next(event for event in state["inbox"] if event["id"] == queued["id"])
+                self.assertEqual(event["processed_at"], "external")
+                self.assertEqual(event["action_plan"]["summary"], "external")
+                self.assertEqual(state["outbox"], [])
+                self.assertEqual(state["thought_journal"], [])
+                self.assertEqual(state["runtime_status"]["last_processed_count"], 0)
+            finally:
+                release_planning.set()
+                os.chdir(old_cwd)
+
+    def test_run_does_not_precompute_verification_for_stale_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    queued = add_event(state, "user_message", "test", {"text": "verify"})
+                    save_state(state)
+
+                planning_started = threading.Event()
+                release_planning = threading.Event()
+                runtime_result = []
+                verification_calls = []
+
+                def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
+                    self.assertEqual(event_snapshot["id"], queued["id"])
+                    planning_started.set()
+                    release_planning.wait(2)
+                    return (
+                        {
+                            "summary": "verify",
+                            "decisions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                        {
+                            "summary": "verify",
+                            "actions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                    )
+
+                def fake_run_command_record(*args, **kwargs):
+                    verification_calls.append(args)
+                    return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+                def run_once():
+                    with (
+                        patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                        patch("mew.runtime.run_command_record", side_effect=fake_run_command_record),
+                        patch("mew.runtime.signal.signal", return_value=None),
+                    ):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            runtime_result.append(
+                                main(
+                                    [
+                                        "run",
+                                        "--once",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "echo ok",
+                                        "--poll-interval",
+                                        "0.01",
+                                    ]
+                                )
+                            )
+
+                runtime_thread = threading.Thread(target=run_once)
+                runtime_thread.start()
+                self.assertTrue(planning_started.wait(2))
+
+                with state_lock():
+                    state = load_state()
+                    event = next(event for event in state["inbox"] if event["id"] == queued["id"])
+                    event["processed_at"] = "external"
+                    event["decision_plan"] = {"summary": "external", "decisions": []}
+                    event["action_plan"] = {"summary": "external", "actions": []}
+                    save_state(state)
+
+                release_planning.set()
+                runtime_thread.join(3)
+
+                self.assertFalse(runtime_thread.is_alive())
+                self.assertEqual(runtime_result, [0])
+                self.assertEqual(verification_calls, [])
+
+                state = load_state()
+                self.assertEqual(state["verification_runs"], [])
+                self.assertEqual(state["outbox"], [])
+                self.assertEqual(state["runtime_status"]["last_processed_count"], 0)
+            finally:
+                release_planning.set()
+                os.chdir(old_cwd)
+
+    def test_run_releases_state_lock_while_precomputing_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import queue_user_message
+                from mew.state import load_state
+
+                verification_started = threading.Event()
+                release_verification = threading.Event()
+                runtime_result = []
+
+                def fake_plan_runtime_event(*args, **kwargs):
+                    return (
+                        {
+                            "summary": "verify",
+                            "decisions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                        {
+                            "summary": "verify",
+                            "actions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                    )
+
+                def fake_run_command_record(command, cwd=None, timeout=300):
+                    verification_started.set()
+                    release_verification.wait(2)
+                    return {
+                        "command": command,
+                        "argv": ["echo", "ok"],
+                        "cwd": str(Path(".").resolve()),
+                        "started_at": "start",
+                        "finished_at": "finish",
+                        "exit_code": 0,
+                        "stdout": "ok\n",
+                        "stderr": "",
+                    }
+
+                def run_once():
+                    with (
+                        patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                        patch("mew.runtime.run_command_record", side_effect=fake_run_command_record),
+                        patch("mew.runtime.signal.signal", return_value=None),
+                    ):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            runtime_result.append(
+                                main(
+                                    [
+                                        "run",
+                                        "--once",
+                                        "--autonomous",
+                                        "--autonomy-level",
+                                        "act",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "echo ok",
+                                        "--poll-interval",
+                                        "0.01",
+                                    ]
+                                )
+                            )
+
+                runtime_thread = threading.Thread(target=run_once)
+                runtime_thread.start()
+                self.assertTrue(verification_started.wait(2))
+
+                queued = []
+                queue_thread = threading.Thread(
+                    target=lambda: queued.append(queue_user_message("hello during verification")["id"])
+                )
+                queue_thread.start()
+                queue_thread.join(0.5)
+                blocked = queue_thread.is_alive()
+
+                release_verification.set()
+                queue_thread.join(2)
+                runtime_thread.join(3)
+
+                self.assertFalse(blocked, "message queue blocked while runtime verification was running")
+                self.assertFalse(runtime_thread.is_alive())
+                self.assertEqual(runtime_result, [0])
+
+                state = load_state()
+                self.assertEqual(len(state["verification_runs"]), 1)
+                self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+                processed = next(event for event in state["inbox"] if event.get("type") == "startup")
+                self.assertNotIn(
+                    "_precomputed_verification",
+                    processed["action_plan"]["actions"][0],
+                )
+                user_events = [event for event in state["inbox"] if event.get("type") == "user_message"]
+                self.assertEqual(user_events[0]["payload"]["text"], "hello during verification")
+            finally:
+                release_verification.set()
+                os.chdir(old_cwd)
+
+    def test_run_reports_precomputed_verification_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                def fake_plan_runtime_event(*args, **kwargs):
+                    return (
+                        {
+                            "summary": "verify",
+                            "decisions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                        {
+                            "summary": "verify",
+                            "actions": [{"type": "run_verification", "reason": "check"}],
+                        },
+                    )
+
+                def fake_run_command_record(*args, **kwargs):
+                    raise ValueError("bad verification command")
+
+                with (
+                    patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                    patch("mew.runtime.run_command_record", side_effect=fake_run_command_record),
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-verify",
+                                "--verify-command",
+                                "bad command",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                state = load_state()
+                self.assertEqual(state["verification_runs"], [])
+                self.assertIn("bad verification command", state["outbox"][-1]["text"])
+                processed = next(event for event in state["inbox"] if event.get("type") == "startup")
+                self.assertNotIn(
+                    "_precomputed_verification_error",
+                    processed["action_plan"]["actions"][0],
+                )
             finally:
                 os.chdir(old_cwd)
 

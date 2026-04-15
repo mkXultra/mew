@@ -50,6 +50,8 @@ def default_state():
             "last_evaluated_at": None,
             "last_action": None,
             "current_reason": None,
+            "current_event_id": None,
+            "current_phase": None,
             "cycle_started_at": None,
             "last_cycle_reason": None,
             "last_cycle_duration_seconds": None,

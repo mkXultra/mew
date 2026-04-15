@@ -325,6 +325,10 @@ For the first passive prototype:
 - The runtime should poll for user input more frequently than the passive wake interval.
 - If there are pending `user_message` events, it processes those first.
 - If there is no pending user input, it creates a `passive_tick` event.
+- Runtime cycles should hold the state mutation lock only while selecting or
+  committing an event. Resident model calls should run outside the lock so
+  `mew message`, `mew chat`, and status commands remain responsive while the
+  model is thinking.
 - On every event, the agent runs `think` first to create a `DecisionPlan`.
 - The agent then runs `act` to convert the `DecisionPlan` into an `ActionPlan`.
 - On `passive_tick`, the plan decides whether to ask a question, suggest a next action, or execute an explicitly executable task.
@@ -343,6 +347,9 @@ The runtime should separate decision-making from execution.
 `think` phase:
 
 - Reads `Date`, `Runtime status`, `Agent status`, `User status`, `ToDo`, `Inbox`, `Outbox`, and `Knowledge: shallow`.
+- Reads a bounded raw conversation history of recent user messages and
+  human-facing mew replies/questions so multi-turn follow-up can preserve
+  wording and not only summary memory.
 - Reads human-written `Guidance`.
 - Reads human-written `Policy`.
 - Reads human-written `Self`.
@@ -391,6 +398,32 @@ Use simple local files:
 `mew run` should initialize default guidance and policy files if they are
 missing. When autonomous mode is enabled, it should also initialize default self
 and desires files so the first autonomous run has explicit editable instructions.
+
+The JSON state remains the source of truth for now, but runtime model latency
+must not keep the state lock held. The current safe pattern is:
+
+1. Acquire `.mew/state.lock`.
+2. Load state, create/select one pending event, update runtime status, and save.
+3. Release `.mew/state.lock`.
+4. Build context and call resident model THINK/ACT.
+5. Reacquire `.mew/state.lock`.
+6. Reload state, apply the selected event's action plan if it is still pending,
+   save, and release the lock.
+
+This is intentionally optimistic concurrency. If the user queues a new message
+while the resident model is thinking, that new message is saved immediately and
+handled by a later cycle. The in-flight model plan is not rebuilt unless its
+selected event was already processed before commit. If that selected event has
+already been processed, the stale plan must be discarded without emitting
+messages or effects.
+
+Read-only verification actions may also be precomputed outside the state lock.
+Before doing so, the runtime must briefly re-read the selected event under the
+state lock and skip precompute if that event is no longer pending. The runtime
+should commit only the verification result and resulting messages under the
+lock. Mutating effects such as task command execution and file writes need
+stricter effect-intent/recovery semantics before they can safely move out of
+the commit phase.
 
 Use a `uv` Python project layout:
 
@@ -701,6 +734,7 @@ The first user-facing version should likely include:
 - `mew listen --activity`: stream newly created outbox messages and runtime activity.
 - `mew attach -m <message>`: send a message and listen for responses in one client process.
 - `mew chat`: open a human-facing REPL with message input, outbox streaming, activity streaming, and slash commands.
+- `mew session`: open a JSON Lines control session for scripts and future richer frontends. It accepts typed requests such as `status`, `brief`, `activity`, `outbox`, `ack`, `message`, `reply`, `next`, and `stop`, and returns typed JSON responses with request ids when provided.
 - `mew chat` slash commands should expose cockpit controls such as `/add`, `/show`, `/note`, `/why`, `/thoughts`, `/digest`, `/attention`, `/resolve`, `/approve`, `/plan`, `/dispatch`, `/self`, `/result`, `/wait`, `/review`, `/followup`, `/retry`, `/sweep`, `/verify`, `/pause`, `/resume`, and `/mode`.
 - `mew questions`: show open questions that block progress.
 - `mew reply <question-id> <text>`: answer a specific question and preserve the conversation link.

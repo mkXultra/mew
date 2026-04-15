@@ -846,6 +846,38 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(state["agent_runs"][0]["status"], "running")
         self.assertEqual(task["status"], "running")
 
+    def test_dispatch_task_skips_existing_active_implementation_run(self):
+        state = default_state()
+        task = add_task(state)
+        task["status"] = "ready"
+        task["auto_execute"] = True
+        plan = create_task_plan(state, task)
+        existing = create_implementation_run_from_plan(state, task, plan)
+        existing["status"] = "running"
+        event = {"id": 1, "type": "passive_tick"}
+
+        with patch("mew.agent.start_agent_run") as start_agent_run:
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "dispatch task", "decisions": []},
+                {
+                    "summary": "dispatch task",
+                    "actions": [{"type": "dispatch_task", "task_id": task["id"], "plan_id": plan["id"]}],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                allow_agent_run=True,
+            )
+
+        self.assertEqual(len(state["agent_runs"]), 1)
+        self.assertFalse(start_agent_run.called)
+        self.assertIn("already running", state["outbox"][-1]["text"])
+        self.assertEqual(state["outbox"][-1]["agent_run_id"], existing["id"])
+
     def test_autonomous_review_run_does_not_change_task_status(self):
         state = default_state()
         task = add_task(state)

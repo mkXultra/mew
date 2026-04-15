@@ -41,6 +41,7 @@ from .commands import (
     cmd_self_init,
     cmd_self_improve,
     cmd_self_show,
+    cmd_session,
     cmd_snapshot,
     cmd_start,
     cmd_status,
@@ -295,6 +296,9 @@ def build_parser():
     )
     message_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     message_parser.set_defaults(func=cmd_message)
+
+    session_parser = subparsers.add_parser("session", help="JSONL control session for automation")
+    session_parser.set_defaults(func=cmd_session)
 
     brief_parser = subparsers.add_parser("brief", help="show a compact operational brief")
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")

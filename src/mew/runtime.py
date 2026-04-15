@@ -1,9 +1,16 @@
+from copy import deepcopy
 import os
 import signal
 import sys
 import time
 
-from .agent import process_events
+from .agent import (
+    apply_event_plans,
+    find_event,
+    next_unprocessed_event,
+    plan_event,
+    update_runtime_processing_summary,
+)
 from .archive import archive_state_records
 from .config import (
     DEFAULT_CODEX_MODEL,
@@ -26,6 +33,7 @@ from .model_backends import (
 )
 from .state import (
     acquire_lock,
+    add_event,
     append_log,
     ensure_desires,
     ensure_guidance,
@@ -42,6 +50,7 @@ from .state import (
     state_lock,
 )
 from .timeutil import now_iso
+from .toolbox import run_command_record
 
 
 def set_runtime_running(state, started_at):
@@ -58,6 +67,8 @@ def set_runtime_stopped(state, stopped_at):
     runtime["pid"] = None
     runtime["stopped_at"] = stopped_at
     runtime["current_reason"] = None
+    runtime["current_event_id"] = None
+    runtime["current_phase"] = None
     runtime["cycle_started_at"] = None
     runtime["last_action"] = "runtime stopped"
 
@@ -96,6 +107,138 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
         "autonomy_level": effective_level if autonomous_for_cycle else "off",
         "allow_agent_run": bool(args.allow_agent_run) and autonomous_for_cycle,
     }
+
+def plan_runtime_event(
+    state_snapshot,
+    event_snapshot,
+    current_time,
+    model_auth,
+    model,
+    base_url,
+    model_backend,
+    args,
+    allow_task_execution,
+    guidance,
+    policy,
+    self_text,
+    desires,
+    autonomy_controls,
+):
+    return plan_event(
+        state_snapshot,
+        event_snapshot,
+        current_time,
+        model_auth=model_auth,
+        model=model,
+        base_url=base_url,
+        model_backend=model_backend,
+        timeout=args.timeout,
+        ai_ticks=args.ai_ticks,
+        allow_task_execution=allow_task_execution,
+        guidance=guidance,
+        policy=policy,
+        self_text=self_text,
+        desires=desires,
+        autonomous=autonomy_controls["autonomous"],
+        autonomy_level=autonomy_controls["autonomy_level"],
+        allow_agent_run=autonomy_controls["allow_agent_run"],
+        allow_verify=args.allow_verify,
+        verify_command=args.verify_command or "",
+        verify_interval_seconds=max(0.0, args.verify_interval_minutes * 60.0),
+        allow_write=bool(args.allow_write),
+        allowed_read_roots=args.allow_read,
+        allowed_write_roots=args.allow_write,
+    )
+
+def apply_runtime_event_plans(
+    state,
+    event_id,
+    decision_plan,
+    action_plan,
+    current_time,
+    reason,
+    args,
+    allow_task_execution,
+    autonomy_controls,
+):
+    counts = apply_event_plans(
+        state,
+        event_id,
+        decision_plan,
+        action_plan,
+        current_time,
+        reason,
+        allow_task_execution=allow_task_execution,
+        task_timeout=args.task_timeout,
+        allowed_read_roots=args.allow_read,
+        autonomous=autonomy_controls["autonomous"],
+        autonomy_level=autonomy_controls["autonomy_level"],
+        allow_agent_run=autonomy_controls["allow_agent_run"],
+        allow_verify=args.allow_verify,
+        verify_command=args.verify_command or "",
+        verify_timeout=args.verify_timeout,
+        allow_write=bool(args.allow_write),
+        allowed_write_roots=args.allow_write,
+    )
+    if counts is None:
+        counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
+        processed_count = 0
+    else:
+        processed_count = 1
+    update_runtime_processing_summary(
+        state,
+        reason,
+        current_time,
+        processed_count,
+        counts["actions"],
+        counts["messages"],
+        counts["executed"],
+        autonomous=autonomy_controls["autonomous"],
+    )
+    return processed_count, counts
+
+def precompute_runtime_action_effects(
+    event_snapshot,
+    action_plan,
+    args,
+    autonomy_controls,
+):
+    if not action_plan:
+        return action_plan
+    for action in action_plan.get("actions", []):
+        if not runtime_action_effect_needs_precompute(
+            event_snapshot,
+            action,
+            args,
+            autonomy_controls,
+        ):
+            continue
+        try:
+            action["_precomputed_verification"] = run_command_record(
+                args.verify_command,
+                cwd=".",
+                timeout=args.verify_timeout,
+            )
+        except ValueError as exc:
+            action["_precomputed_verification_error"] = str(exc)
+    return action_plan
+
+def runtime_action_effect_needs_precompute(event_snapshot, action, args, autonomy_controls):
+    if action.get("type") != "run_verification":
+        return False
+    allowed_by_mode = event_snapshot.get("type") == "user_message" or (
+        autonomy_controls["autonomous"]
+        and autonomy_controls["autonomy_level"] == "act"
+    )
+    return bool(allowed_by_mode and args.allow_verify and args.verify_command)
+
+def action_plan_needs_runtime_precompute(event_snapshot, action_plan, args, autonomy_controls):
+    if not action_plan:
+        return False
+    return any(
+        runtime_action_effect_needs_precompute(event_snapshot, action, args, autonomy_controls)
+        for action in action_plan.get("actions", [])
+    )
 
 def run_runtime(args):
     model_auth = None
@@ -182,9 +325,28 @@ def run_runtime(args):
         while not stop_requested["value"]:
             sleep_for = None
             processed_count = None
+            processing_counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
             new_outbox_messages = []
             archive_result = None
             reason = None
+            event_id = None
+            event_snapshot = None
+            state_snapshot = None
+            decision_plan = None
+            action_plan = None
+            current_time = None
+            cycle_started_monotonic = None
+            allow_task_execution = False
+            guidance = ""
+            policy = ""
+            self_text = ""
+            desires = ""
+            autonomy_controls = {
+                "autonomous": False,
+                "autonomy_level": "off",
+                "allow_agent_run": False,
+            }
+            outbox_ids_before = set()
             with state_lock():
                 state = load_state()
                 if state["runtime_status"].get("state") != "running":
@@ -204,11 +366,6 @@ def run_runtime(args):
                     sleep_for = min(args.poll_interval, max(0.0, next_passive_at - current_monotonic))
 
                 if sleep_for is None:
-                    outbox_len_before = len(state.get("outbox", []))
-                    guidance = read_guidance(args.guidance)
-                    policy = read_policy(args.policy)
-                    self_text = read_self(args.self_file)
-                    desires = read_desires(args.desires)
                     allow_task_execution = args.execute_tasks and not pending_user
                     current_time = now_iso()
                     cycle_started_monotonic = time.monotonic()
@@ -216,71 +373,137 @@ def run_runtime(args):
                     runtime_status["current_reason"] = reason
                     runtime_status["cycle_started_at"] = current_time
                     runtime_status["last_action"] = f"processing {reason}"
-                    save_state(state)
                     autonomy_controls = apply_runtime_autonomy_controls(
                         state,
                         args,
                         pending_user,
                         current_time,
                     )
-                    processed_count = process_events(
+                    if create_internal_event:
+                        add_event(state, reason, "runtime", {"pid": os.getpid()})
+                    event = next_unprocessed_event(
                         state,
-                        reason,
-                        model_auth=model_auth,
-                        model=model,
-                        base_url=base_url,
-                        model_backend=model_backend,
-                        timeout=args.timeout,
-                        ai_ticks=args.ai_ticks,
-                        create_internal_event=create_internal_event,
-                        allow_task_execution=allow_task_execution,
-                        task_timeout=args.task_timeout,
-                        guidance=guidance,
-                        policy=policy,
-                        self_text=self_text,
-                        desires=desires,
-                        autonomous=autonomy_controls["autonomous"],
-                        autonomy_level=autonomy_controls["autonomy_level"],
-                        allow_agent_run=autonomy_controls["allow_agent_run"],
-                        allow_verify=args.allow_verify,
-                        verify_command=args.verify_command or "",
-                        verify_timeout=args.verify_timeout,
-                        verify_interval_seconds=max(0.0, args.verify_interval_minutes * 60.0),
-                        allowed_read_roots=args.allow_read,
-                        allow_write=bool(args.allow_write),
-                        allowed_write_roots=args.allow_write,
+                        "user_message" if reason == "user_input" else None,
                     )
-                    runtime_status = state["runtime_status"]
-                    runtime_status["current_reason"] = None
-                    runtime_status["cycle_started_at"] = None
-                    runtime_status["last_cycle_reason"] = reason
-                    runtime_status["last_cycle_duration_seconds"] = round(
-                        time.monotonic() - cycle_started_monotonic,
-                        3,
-                    )
-                    runtime_status["last_processed_count"] = processed_count
-                    if args.auto_archive:
-                        archive_result = archive_state_records(
-                            state,
-                            keep_recent=args.archive_keep_recent,
-                            dry_run=False,
-                        )
-                        if archive_result.get("total_archived"):
-                            append_log(
-                                "- "
-                                f"{now_iso()}: archived {archive_result['total_archived']} record(s) "
-                                f"path={archive_result.get('archive_path')}"
-                            )
-                    if args.echo_outbox:
-                        new_outbox_messages = list(state.get("outbox", [])[outbox_len_before:])
+                    if event:
+                        event_id = event["id"]
+                        event_snapshot = deepcopy(event)
+                        state_snapshot = deepcopy(state)
+                        runtime_status["current_event_id"] = event_id
+                        runtime_status["current_phase"] = "planning"
+                    outbox_ids_before = {str(message.get("id")) for message in state.get("outbox", [])}
                     save_state(state)
-                    first = False
-                    if reason in ("startup", "passive_tick"):
-                        next_passive_at = time.time() + args.interval
 
             if sleep_for is not None:
                 time.sleep(sleep_for)
                 continue
+
+            guidance = read_guidance(args.guidance)
+            policy = read_policy(args.policy)
+            self_text = read_self(args.self_file)
+            desires = read_desires(args.desires)
+
+            if event_snapshot and state_snapshot:
+                decision_plan, action_plan = plan_runtime_event(
+                    state_snapshot,
+                    event_snapshot,
+                    current_time,
+                    model_auth,
+                    model,
+                    base_url,
+                    model_backend,
+                    args,
+                    allow_task_execution,
+                    guidance,
+                    policy,
+                    self_text,
+                    desires,
+                    autonomy_controls,
+                )
+                if action_plan_needs_runtime_precompute(
+                    event_snapshot,
+                    action_plan,
+                    args,
+                    autonomy_controls,
+                ):
+                    with state_lock():
+                        state = load_state()
+                        event = find_event(state, event_id)
+                        if not event or event.get("processed_at"):
+                            action_plan = None
+                        else:
+                            state["runtime_status"]["current_phase"] = "precomputing"
+                            save_state(state)
+                    if action_plan is not None:
+                        action_plan = precompute_runtime_action_effects(
+                            event_snapshot,
+                            action_plan,
+                            args,
+                            autonomy_controls,
+                        )
+
+            with state_lock():
+                state = load_state()
+                if event_id is not None and decision_plan is not None and action_plan is not None:
+                    commit_time = now_iso()
+                    state["runtime_status"]["current_phase"] = "committing"
+                    save_state(state)
+                    processed_count, processing_counts = apply_runtime_event_plans(
+                        state,
+                        event_id,
+                        decision_plan,
+                        action_plan,
+                        commit_time,
+                        reason,
+                        args,
+                        allow_task_execution,
+                        autonomy_controls,
+                    )
+                else:
+                    processed_count = 0
+                    update_runtime_processing_summary(
+                        state,
+                        reason,
+                        current_time,
+                        0,
+                        0,
+                        0,
+                        0,
+                        autonomous=autonomy_controls["autonomous"],
+                    )
+                runtime_status = state["runtime_status"]
+                runtime_status["current_reason"] = None
+                runtime_status["current_event_id"] = None
+                runtime_status["current_phase"] = None
+                runtime_status["cycle_started_at"] = None
+                runtime_status["last_cycle_reason"] = reason
+                runtime_status["last_cycle_duration_seconds"] = round(
+                    time.monotonic() - cycle_started_monotonic,
+                    3,
+                )
+                runtime_status["last_processed_count"] = processed_count
+                if args.auto_archive:
+                    archive_result = archive_state_records(
+                        state,
+                        keep_recent=args.archive_keep_recent,
+                        dry_run=False,
+                    )
+                    if archive_result.get("total_archived"):
+                        append_log(
+                            "- "
+                            f"{now_iso()}: archived {archive_result['total_archived']} record(s) "
+                            f"path={archive_result.get('archive_path')}"
+                        )
+                if args.echo_outbox:
+                    new_outbox_messages = [
+                        message
+                        for message in state.get("outbox", [])
+                        if str(message.get("id")) not in outbox_ids_before
+                    ]
+                save_state(state)
+                first = False
+                if reason in ("startup", "passive_tick"):
+                    next_passive_at = time.time() + args.interval
 
             print(f"processed {processed_count} event(s) reason={reason}")
             for message in new_outbox_messages:
@@ -295,6 +518,8 @@ def run_runtime(args):
 
             if args.once:
                 break
+            if processing_counts.get("actions") or processing_counts.get("messages"):
+                continue
     finally:
         stopped_at = now_iso()
         with state_lock():

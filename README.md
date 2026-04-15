@@ -21,6 +21,7 @@ In another shell:
 uv run mew chat
 uv run mew attach -m "今日のタスクは何？"
 uv run mew message "今日のタスクは何？" --wait
+printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
 uv run mew brief
 uv run mew next
 ```
@@ -85,6 +86,7 @@ uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
 uv run mew chat
+uv run mew session
 uv run mew brief
 uv run mew brief --json
 uv run mew activity
@@ -125,6 +127,21 @@ and the final project snapshot.
 Every state save is validated, reconciles `next_ids`, and appends a compact
 checkpoint to `.mew/effects.jsonl`; `mew doctor` reports validation issues and
 the latest checkpoint hash.
+Runtime cycles select and persist the next event under `.mew/state.lock`, then
+release the lock while the resident model runs THINK/ACT. The runtime reacquires
+the lock only to commit the resulting action plan, so `mew chat`, `mew message`,
+and `mew status` can keep working during slow model calls.
+This is an optimistic snapshot design: messages queued while a model call is in
+flight are preserved and handled by a later cycle, but the in-flight plan does
+not see them. Before commit, the runtime rechecks that the selected event is
+still unprocessed; if another command has already handled it, the stale plan is
+discarded without emitting messages or effects.
+The same pending-event check runs before read-only verification is precomputed
+outside the lock, so stale events do not start a verification command.
+Resident prompts include a bounded raw conversation history from recent
+`user_message` events and human-facing outbox replies/questions, so follow-up
+turns can see the human's wording and mew's last replies instead of relying
+only on summaries.
 
 ## Resident Model
 
@@ -193,6 +210,16 @@ state without leaving the session:
 /ack all
 /activity off
 /exit
+```
+
+`mew session` is the JSON Lines control surface for scripts and future richer
+frontends. It reads one JSON object per line and writes one JSON object per
+line. Supported request types include `status`, `brief`, `activity`, `outbox`,
+`ack`, `message`, `reply`, `next`, and `stop`. `stop` exits the JSONL session;
+it does not stop the background runtime:
+
+```sh
+printf '{"id":"m1","type":"message","text":"今日のタスクは何？"}\n{"id":"s1","type":"status"}\n{"type":"stop"}\n' | uv run mew session
 ```
 
 ## Safe Tools
