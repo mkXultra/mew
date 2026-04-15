@@ -220,6 +220,63 @@ def recent_activity(state, limit=5):
     return items
 
 
+def build_activity_data(state, limit=10):
+    thoughts = list(state.get("thought_journal", []))
+    dropped = [
+        {
+            "id": thought.get("id"),
+            "event_id": thought.get("event_id"),
+            "event_type": thought.get("event_type"),
+            "dropped_thread_ratio": thought.get("dropped_thread_ratio", 0.0),
+            "dropped_threads": thought.get("dropped_threads", []),
+        }
+        for thought in reversed(thoughts)
+        if thought.get("dropped_threads")
+    ]
+    action_counts = {}
+    for thought in thoughts:
+        for action in thought.get("actions") or []:
+            action_type = action.get("type") or "unknown"
+            action_counts[action_type] = action_counts.get(action_type, 0) + 1
+    return {
+        "generated_at": now_iso(),
+        "recent_activity": recent_activity(state, limit=limit),
+        "action_counts": dict(sorted(action_counts.items())),
+        "dropped_threads": dropped[:limit],
+    }
+
+
+def format_activity(state, limit=10):
+    data = build_activity_data(state, limit=limit)
+    activity = data["recent_activity"]
+    lines = [f"Mew activity at {data['generated_at']}"]
+    if not activity:
+        lines.append("No recent activity.")
+    else:
+        for item in activity:
+            actions = item.get("actions") or []
+            suffix = f" actions={', '.join(actions)}" if actions else ""
+            lines.append(
+                f"- #{item.get('id')} {item.get('event_type')}: "
+                f"{item.get('summary')}{suffix}"
+            )
+
+    if data["action_counts"]:
+        counts = ", ".join(
+            f"{key}={value}" for key, value in data["action_counts"].items()
+        )
+        lines.append(f"action_counts: {counts}")
+
+    if data["dropped_threads"]:
+        lines.append("Dropped thread warnings")
+        for item in data["dropped_threads"][:limit]:
+            lines.append(
+                f"- thought #{item.get('id')} ratio={item.get('dropped_thread_ratio')}: "
+                f"{len(item.get('dropped_threads') or [])} thread(s)"
+            )
+    return "\n".join(lines)
+
+
 def build_brief_data(state, limit=5):
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})

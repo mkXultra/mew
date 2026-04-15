@@ -673,6 +673,8 @@ The first user-facing version should likely include:
 - `mew doctor`: check local state, runtime lock, and required local tools.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
+- `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
+- `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew next`: print the single next useful command or move.
 - `mew next --json`: print the next move and extracted command as structured JSON.
 - `mew verification`: show recent runtime verification runs.

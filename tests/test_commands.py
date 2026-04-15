@@ -268,6 +268,16 @@ class CommandTests(unittest.TestCase):
                             "updated_at": "now",
                         }
                     )
+                    state["thought_journal"].append(
+                        {
+                            "id": 1,
+                            "event_id": 2,
+                            "event_type": "passive_tick",
+                            "summary": "Checked the workspace.",
+                            "actions": [{"type": "inspect_dir", "path": "."}],
+                            "counts": {"actions": 1, "messages": 1},
+                        }
+                    )
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -281,6 +291,12 @@ class CommandTests(unittest.TestCase):
                 brief = json.loads(stdout.getvalue())
                 self.assertEqual(brief["open_tasks"][0]["title"], "JSON interface")
                 self.assertIn("programmer_queue", brief)
+                self.assertIn("recent_activity", brief)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["activity", "--json"]), 0)
+                activity = json.loads(stdout.getvalue())
+                self.assertEqual(activity["recent_activity"][0]["summary"], "Checked the workspace.")
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["next", "--json"]), 0)
@@ -289,6 +305,69 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(next_data["command"], "mew task plan 1")
             finally:
                 os.chdir(old_cwd)
+
+    def test_activity_command_prints_text(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["thought_journal"].append(
+                        {
+                            "id": 1,
+                            "event_id": 2,
+                            "event_type": "passive_tick",
+                            "summary": "Read README.",
+                            "actions": [{"type": "read_file", "path": "README.md"}],
+                            "counts": {"actions": 1},
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["activity"]), 0)
+
+                self.assertIn("Read README", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_dogfood_command_uses_report_runner(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "command": ["mew", "run"],
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+            "events": {"processed": 1, "total": 1, "by_type": {"startup": 1}},
+            "model_phases": {"think_ok": 0, "think_error": 0, "act_ok": 0, "act_error": 0},
+            "outbox": {"total": 0, "unread": 0, "by_type": {}},
+            "actions": {},
+            "tasks": {},
+            "verification_runs": 0,
+            "write_runs": 0,
+            "dropped_threads": {"thought_count": 0, "latest": []},
+            "recent_activity": [],
+            "next_move": "ask the user what to track next",
+            "log_tail": [],
+        }
+        with patch("mew.commands.run_dogfood", return_value=report) as runner:
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(["dogfood", "--duration", "0", "--send-message", "hello"])
+
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+        self.assertEqual(runner.call_args.args[0].send_message, ["hello"])
+        self.assertIn("Mew dogfood report", stdout.getvalue())
+
+    def test_dogfood_requires_verify_command_when_verify_enabled(self):
+        with redirect_stderr(StringIO()) as stderr:
+            code = main(["dogfood", "--allow-verify"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--allow-verify requires --verify-command", stderr.getvalue())
 
     def test_perceive_command_supports_json(self):
         old_cwd = os.getcwd()

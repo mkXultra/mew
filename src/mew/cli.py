@@ -14,11 +14,13 @@ from .commands import (
     cmd_agent_sweep,
     cmd_agent_wait,
     cmd_archive,
+    cmd_activity,
     cmd_attention,
     cmd_brief,
     cmd_chat,
     cmd_desires_init,
     cmd_desires_show,
+    cmd_dogfood,
     cmd_doctor,
     cmd_guidance_init,
     cmd_guidance_show,
@@ -288,6 +290,57 @@ def build_parser():
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")
     brief_parser.add_argument("--json", action="store_true", help="print structured JSON")
     brief_parser.set_defaults(func=cmd_brief)
+
+    activity_parser = subparsers.add_parser("activity", help="show recent mew activity")
+    activity_parser.add_argument("--limit", type=int, default=10, help="maximum activity items")
+    activity_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    activity_parser.set_defaults(func=cmd_activity)
+
+    dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
+    dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")
+    dogfood_parser.add_argument("--duration", type=float, default=45.0, help="seconds to run the runtime")
+    dogfood_parser.add_argument("--interval", type=float, default=10.0, help="passive wake interval in seconds")
+    dogfood_parser.add_argument("--poll-interval", type=float, default=0.5, help="runtime poll interval in seconds")
+    dogfood_parser.add_argument("--startup-timeout", type=float, default=15.0, help="seconds to wait for startup")
+    dogfood_parser.add_argument("--stop-timeout", type=float, default=10.0, help="seconds to wait for shutdown")
+    dogfood_parser.add_argument("--message-timeout", type=float, default=30.0, help="seconds to wait while queueing messages")
+    dogfood_parser.add_argument(
+        "--send-message",
+        action="append",
+        default=[],
+        help="message to queue inside the dogfood runtime after startup",
+    )
+    dogfood_parser.add_argument("--ai", action="store_true", help="use resident model backend during dogfood")
+    dogfood_parser.add_argument("--auth", help="model auth file passed to runtime")
+    dogfood_parser.add_argument(
+        "--model-backend",
+        default=os.environ.get("MEW_MODEL_BACKEND", DEFAULT_MODEL_BACKEND),
+        help=f"resident model backend ({', '.join(SUPPORTED_MODEL_BACKENDS)})",
+    )
+    dogfood_parser.add_argument("--model", default=os.environ.get("MEW_MODEL", os.environ.get("MEW_CODEX_MODEL", "")))
+    dogfood_parser.add_argument(
+        "--base-url",
+        default=os.environ.get("MEW_MODEL_BASE_URL", os.environ.get("MEW_CODEX_BASE_URL", "")),
+    )
+    dogfood_parser.add_argument("--model-timeout", type=float, default=60.0, help="resident model request timeout")
+    dogfood_parser.add_argument(
+        "--autonomy-level",
+        choices=("observe", "propose", "act"),
+        default="act",
+        help="autonomy level to dogfood",
+    )
+    dogfood_parser.add_argument("--allow-write", action="store_true", help="allow runtime writes inside dogfood workspace")
+    dogfood_parser.add_argument("--allow-verify", action="store_true", help="allow runtime verification")
+    dogfood_parser.add_argument("--verify-command", help="verification command for dogfood runtime")
+    dogfood_parser.add_argument(
+        "--verify-interval-minutes",
+        type=float,
+        default=0.05,
+        help="minimum minutes between dogfood verification runs",
+    )
+    dogfood_parser.add_argument("--cleanup", action="store_true", help="remove a temporary dogfood workspace after reporting")
+    dogfood_parser.add_argument("--json", action="store_true", help="print structured JSON report")
+    dogfood_parser.set_defaults(func=cmd_dogfood)
 
     perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")
     perceive_parser.add_argument("--cwd", default=".", help="workspace directory to observe")

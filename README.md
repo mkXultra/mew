@@ -79,6 +79,8 @@ uv run mew message "今日のタスクは何？" --wait
 uv run mew chat
 uv run mew brief
 uv run mew brief --json
+uv run mew activity
+uv run mew dogfood --ai --duration 60
 uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json

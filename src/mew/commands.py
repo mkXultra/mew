@@ -18,9 +18,17 @@ from .agent_runs import (
     wait_agent_run,
 )
 from .archive import archive_state_records, format_archive_result
-from .brief import build_brief, build_brief_data, next_move, verification_outcome
+from .brief import (
+    build_activity_data,
+    build_brief,
+    build_brief_data,
+    format_activity,
+    next_move,
+    verification_outcome,
+)
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
+from .dogfood import format_dogfood_report, run_dogfood
 from .errors import MewError
 from .memory import compact_memory
 from .perception import format_perception, perceive_workspace
@@ -523,6 +531,14 @@ def cmd_brief(args):
     print(build_brief(state, limit=args.limit))
     return 0
 
+def cmd_activity(args):
+    state = load_state()
+    if args.json:
+        print(json.dumps(build_activity_data(state, limit=args.limit), ensure_ascii=False, indent=2))
+        return 0
+    print(format_activity(state, limit=args.limit))
+    return 0
+
 def cmd_perceive(args):
     roots = args.allow_read or []
     perception = perceive_workspace(allowed_read_roots=roots, cwd=args.cwd)
@@ -545,6 +561,17 @@ def cmd_next(args):
         )
         return 0
     print(move)
+    return 0
+
+def cmd_dogfood(args):
+    if args.allow_verify and not args.verify_command:
+        print("mew: --allow-verify requires --verify-command", file=sys.stderr)
+        return 1
+    report = run_dogfood(args)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    print(format_dogfood_report(report))
     return 0
 
 def command_from_next_move(move):
