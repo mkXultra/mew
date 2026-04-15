@@ -13,6 +13,7 @@ from .config import LOG_FILE, STATE_DIR, STATE_FILE
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import default_state
+from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso
 
 
@@ -302,6 +303,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
     outbox = state.get("outbox", [])
     thoughts = state.get("thought_journal", [])
     dropped = [thought for thought in thoughts if thought.get("dropped_threads")]
+    active_dropped = dropped_thread_warning_for_context(state) if state else None
     processed = [event for event in inbox if event.get("processed_at")]
 
     return {
@@ -329,6 +331,11 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "dropped_threads": {
             "thought_count": len(dropped),
             "latest": dropped[-1].get("dropped_threads", []) if dropped else [],
+        },
+        "active_dropped_threads": {
+            "thought_count": len(active_dropped.get("dropped_threads", [])) if active_dropped else 0,
+            "latest": active_dropped.get("dropped_threads", []) if active_dropped else [],
+            "thought_id": active_dropped.get("thought_id") if active_dropped else None,
         },
         "project_snapshot": state.get("memory", {}).get("deep", {}).get("project_snapshot", {}) if state else {},
         "pre_snapshot": state.get("dogfood", {}).get("pre_snapshot") if state else None,
@@ -374,8 +381,14 @@ def format_dogfood_report(report):
     dropped = report.get("dropped_threads", {})
     if dropped.get("thought_count"):
         lines.append(
-            "dropped_threads: "
+            "dropped_threads_history: "
             f"thought_count={dropped.get('thought_count')} latest={dropped.get('latest')}"
+        )
+    active_dropped = report.get("active_dropped_threads") or {}
+    if active_dropped.get("thought_count"):
+        lines.append(
+            "active_dropped_threads: "
+            f"thought_id={active_dropped.get('thought_id')} latest={active_dropped.get('latest')}"
         )
     project_snapshot = report.get("project_snapshot") or {}
     if project_snapshot:
@@ -529,6 +542,7 @@ def run_dogfood_loop(args):
         "final_events": final_report.get("events", {}),
         "final_model_phases": final_report.get("model_phases", {}),
         "final_dropped_threads": final_report.get("dropped_threads", {}),
+        "final_active_dropped_threads": final_report.get("active_dropped_threads", {}),
         "final_project_snapshot": final_report.get("project_snapshot", {}),
     }
 
@@ -547,6 +561,13 @@ def format_dogfood_loop_report(report):
             "final_dropped_threads: "
             f"thought_count={final_dropped.get('thought_count')} latest={final_dropped.get('latest')}"
         )
+    final_active_dropped = report.get("final_active_dropped_threads") or {}
+    if final_active_dropped.get("thought_count"):
+        lines.append(
+            "final_active_dropped_threads: "
+            f"thought_id={final_active_dropped.get('thought_id')} "
+            f"latest={final_active_dropped.get('latest')}"
+        )
     final_snapshot = report.get("final_project_snapshot") or {}
     if final_snapshot:
         lines.append("")
@@ -558,12 +579,14 @@ def format_dogfood_loop_report(report):
         events = cycle.get("events") or {}
         phases = cycle.get("model_phases") or {}
         dropped = cycle.get("dropped_threads") or {}
+        active_dropped = cycle.get("active_dropped_threads") or {}
         lines.append(
             f"- #{cycle.get('cycle')} exit={cycle.get('exit_code')} "
             f"duration={cycle.get('duration_seconds'):.1f}s "
             f"processed={events.get('processed')}/{events.get('total')} "
             f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
             f"dropped_threads={dropped.get('thought_count', 0)} "
+            f"active_dropped_threads={active_dropped.get('thought_count', 0)} "
             f"next={cycle.get('next_move')}"
         )
     lines.append("")

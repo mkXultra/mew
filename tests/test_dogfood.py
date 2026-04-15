@@ -142,6 +142,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertEqual(report["actions"], {"inspect_dir": 1})
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
+            self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
             self.assertIn("Project snapshot", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
@@ -173,6 +174,7 @@ class DogfoodTests(unittest.TestCase):
                 "final_events": {"processed": 3, "total": 3},
                 "final_model_phases": {"think_ok": 2, "act_ok": 2},
                 "final_dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
+                "final_active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                 "final_next_move": "keep going",
                 "final_project_snapshot": {"updated_at": "now", "project_types": ["python"]},
                 "cycles": [
@@ -183,6 +185,7 @@ class DogfoodTests(unittest.TestCase):
                         "events": {"processed": 1, "total": 1},
                         "model_phases": {"think_ok": 1, "act_ok": 1},
                         "dropped_threads": {"thought_count": 0, "latest": []},
+                        "active_dropped_threads": {"thought_count": 0, "latest": []},
                         "next_move": "cycle one",
                     },
                     {
@@ -192,6 +195,7 @@ class DogfoodTests(unittest.TestCase):
                         "events": {"processed": 3, "total": 3},
                         "model_phases": {"think_ok": 2, "act_ok": 2},
                         "dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
+                        "active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                         "next_move": "keep going",
                     },
                 ],
@@ -201,7 +205,9 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("cycles: 2", text)
         self.assertIn("Cycle summaries", text)
         self.assertIn("final_dropped_threads", text)
+        self.assertIn("final_active_dropped_threads", text)
         self.assertIn("dropped_threads=1", text)
+        self.assertIn("active_dropped_threads=1", text)
         self.assertIn("Final project snapshot", text)
         self.assertIn("Final next useful move: keep going", text)
 
