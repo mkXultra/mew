@@ -862,6 +862,7 @@ class AutonomyTests(unittest.TestCase):
         self.assertNotIn("GUIDANCE_END", think_prompt)
         self.assertIn("record_memory, update_memory, self_review, or propose_task", act_prompt)
         self.assertNotIn("memory/self_review", act_prompt)
+        self.assertNotIn("record/self_review", act_prompt)
 
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()

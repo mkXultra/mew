@@ -242,7 +242,7 @@ def build_act_prompt(
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
         f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
-        "Respect the autonomy level: observe may record/self_review only; propose may propose_task/plan_task for coding tasks only; "
+        "Respect the autonomy level: observe may record_memory and self_review only; propose may propose_task/plan_task for coding tasks only; "
         "act may use allowed read-only inspection and programmer-loop actions. "
         "Use perception as passive read-only workspace observations; it does not expand allowed_read_roots. "
         "Starting agent runs requires allow_agent_run in local state. "
