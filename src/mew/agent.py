@@ -1598,6 +1598,21 @@ def apply_collect_agent_result_action(state, event, action, result_timeout=None)
     return 0
 
 def apply_review_agent_run_action(state, event, action, autonomous, autonomy_level, allow_agent_run):
+    implementation_run = find_agent_run(state, action.get("run_id"))
+    if not implementation_run:
+        add_outbox_message(state, "warning", f"Cannot review missing agent run #{action.get('run_id')}", event_id=event["id"])
+        return 1
+    if (
+        implementation_run.get("purpose") == "review"
+        and implementation_run.get("status") in ("completed", "failed")
+    ):
+        return apply_followup_review_action(
+            state,
+            event,
+            {"type": "followup_review", "run_id": implementation_run["id"]},
+            autonomous,
+            autonomy_level,
+        )
     if not programmer_action_allowed(event, autonomous, autonomy_level, "act"):
         add_outbox_message(
             state,
@@ -1613,10 +1628,6 @@ def apply_review_agent_run_action(state, event, action, autonomous, autonomy_lev
             f"Refused review_agent_run #{action.get('run_id')}: --allow-agent-run is required.",
             event_id=event["id"],
         )
-        return 1
-    implementation_run = find_agent_run(state, action.get("run_id"))
-    if not implementation_run:
-        add_outbox_message(state, "warning", f"Cannot review missing agent run #{action.get('run_id')}", event_id=event["id"])
         return 1
     if implementation_run.get("purpose", "implementation") != "implementation":
         add_outbox_message(state, "warning", f"Cannot review non-implementation run #{implementation_run['id']}", event_id=event["id"], agent_run_id=implementation_run["id"])

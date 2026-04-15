@@ -1045,6 +1045,43 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(len(state["tasks"]), 2)
         self.assertEqual(review["followup_task_id"], state["tasks"][1]["id"])
 
+    def test_review_action_on_review_run_applies_followup(self):
+        state = default_state()
+        task = add_task(state)
+        task["status"] = "done"
+        review = {
+            "id": 9,
+            "task_id": task["id"],
+            "purpose": "review",
+            "status": "completed",
+            "result": "STATUS: needs_fix\nFOLLOW_UP:\n- Add a regression test",
+            "stdout": "",
+            "followup_task_id": None,
+        }
+        state["agent_runs"].append(review)
+        event = {"id": 1, "type": "passive_tick"}
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "mistaken review action", "decisions": []},
+            {
+                "summary": "mistaken review action",
+                "actions": [{"type": "review_agent_run", "run_id": review["id"]}],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="propose",
+            allow_agent_run=False,
+        )
+
+        self.assertEqual(review["followup_task_id"], state["tasks"][1]["id"])
+        self.assertEqual(task["status"], "blocked")
+        self.assertIn("Created follow-up task", state["outbox"][-1]["text"])
+        self.assertNotIn("Cannot review non-implementation", state["outbox"][-1]["text"])
+
     def test_autonomous_decision_skips_processed_review_followup(self):
         state = default_state()
         task = add_task(state)
