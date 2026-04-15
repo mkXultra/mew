@@ -1396,6 +1396,24 @@ def cmd_tool_status(args):
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+    if result.get("exit_code") == 128 and "not a git repository" in (result.get("stderr") or ""):
+        result = {
+            **result,
+            "git": {
+                "available": False,
+                "exit_code": result.get("exit_code"),
+                "reason": "not a git repository",
+            },
+        }
+        text = "\n".join(
+            [
+                "workspace status",
+                f"cwd: {result.get('cwd')}",
+                "git: unavailable (not a git repository)",
+            ]
+        )
+        _print_json_or_text(result, args.json, text)
+        return 0
     _print_json_or_text(result, args.json, format_command_record(result))
     return 0 if result.get("exit_code") == 0 else 1
 

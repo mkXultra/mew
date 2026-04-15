@@ -2256,6 +2256,27 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tool_status_tolerates_non_git_workspace(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "status"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("git: unavailable (not a git repository)", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "status", "--json"])
+
+                self.assertEqual(code, 0)
+                data = json.loads(stdout.getvalue())
+                self.assertFalse(data["git"]["available"])
+                self.assertEqual(data["git"]["reason"], "not a git repository")
+            finally:
+                os.chdir(old_cwd)
+
     def test_tool_git_diff_supports_staged_stat(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
