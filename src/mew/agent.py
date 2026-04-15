@@ -62,6 +62,471 @@ from .write_tools import (
     write_file,
 )
 
+MAX_CONTEXT_TEXT_CHARS = 1200
+MAX_CONTEXT_LONG_TEXT_CHARS = 2000
+MAX_CONTEXT_TASKS = 25
+MAX_CONTEXT_QUESTIONS = 20
+MAX_CONTEXT_QUESTION_BLOCKS = 5
+MAX_CONTEXT_ATTENTION_ITEMS = 25
+MAX_CONTEXT_AGENT_RUNS = 8
+MAX_CONTEXT_RUN_OUTPUT_CHARS = 600
+MAX_CONTEXT_MEMORY_CHARS = 800
+MAX_CONTEXT_QUESTION_BLOCK_CHARS = 200
+
+
+def clip_context_text(value, limit=MAX_CONTEXT_TEXT_CHARS):
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n... truncated ..."
+
+
+def json_char_count(value):
+    try:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    except (TypeError, ValueError):
+        return len(str(value))
+
+
+def latest_item(items):
+    return items[-1] if items else None
+
+
+def compact_recent_items(items, limit):
+    values = list(items or [])
+    return values[-limit:]
+
+
+def task_plan_for_context(plan):
+    if not plan:
+        return None
+    return {
+        "id": plan.get("id"),
+        "status": plan.get("status"),
+        "backend": plan.get("backend"),
+        "model": plan.get("model"),
+        "review_model": plan.get("review_model"),
+        "cwd": clip_context_text(plan.get("cwd"), 400),
+        "objective": clip_context_text(plan.get("objective"), MAX_CONTEXT_TEXT_CHARS),
+        "approach": clip_context_text(plan.get("approach"), MAX_CONTEXT_TEXT_CHARS),
+        "done_criteria": clip_context_text(plan.get("done_criteria"), MAX_CONTEXT_TEXT_CHARS),
+        "implementation_prompt_chars": len(plan.get("implementation_prompt") or ""),
+        "review_prompt_chars": len(plan.get("review_prompt") or ""),
+        "created_at": plan.get("created_at"),
+        "updated_at": plan.get("updated_at"),
+    }
+
+
+def task_run_for_context(run):
+    if not run:
+        return None
+    return {
+        "command": clip_context_text(run.get("command"), 400),
+        "cwd": clip_context_text(run.get("cwd"), 400),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "exit_code": run.get("exit_code"),
+        "stdout_tail": clip_context_text(run.get("stdout"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "stderr_tail": clip_context_text(run.get("stderr"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+    }
+
+
+def task_for_context(task):
+    plans = list(task.get("plans") or [])
+    runs = list(task.get("runs") or [])
+    return {
+        "id": task.get("id"),
+        "title": clip_context_text(task.get("title"), 400),
+        "description": clip_context_text(task.get("description"), MAX_CONTEXT_TEXT_CHARS),
+        "status": task.get("status"),
+        "priority": task.get("priority"),
+        "notes": clip_context_text(task.get("notes"), MAX_CONTEXT_TEXT_CHARS),
+        "command": clip_context_text(task.get("command"), 400),
+        "cwd": clip_context_text(task.get("cwd"), 400),
+        "auto_execute": bool(task.get("auto_execute")),
+        "agent_backend": task.get("agent_backend") or "",
+        "agent_model": task.get("agent_model") or "",
+        "has_agent_prompt": bool(task.get("agent_prompt")),
+        "agent_prompt_chars": len(task.get("agent_prompt") or ""),
+        "agent_run_id": task.get("agent_run_id"),
+        "latest_plan_id": task.get("latest_plan_id"),
+        "plan_count": len(plans),
+        "latest_plan": task_plan_for_context(latest_item(plans)),
+        "run_count": len(runs),
+        "latest_run": task_run_for_context(latest_item(runs)),
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
+    }
+
+
+def attention_item_for_context(item):
+    return {
+        "id": item.get("id"),
+        "key": item.get("key"),
+        "kind": item.get("kind"),
+        "title": clip_context_text(item.get("title"), 400),
+        "description": clip_context_text(item.get("description"), MAX_CONTEXT_TEXT_CHARS),
+        "reason": clip_context_text(item.get("reason"), MAX_CONTEXT_TEXT_CHARS),
+        "priority": item.get("priority"),
+        "status": item.get("status"),
+        "related_task_id": item.get("related_task_id"),
+        "question_id": item.get("question_id"),
+        "agent_run_id": item.get("agent_run_id"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def attention_items_for_context(items, limit=MAX_CONTEXT_ATTENTION_ITEMS):
+    values = list(items or [])
+    priority_rank = {"high": 0, "normal": 1, "low": 2}
+    values.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)
+    values.sort(key=lambda item: priority_rank.get(item.get("priority"), 9))
+    return [
+        attention_item_for_context(item)
+        for item in values[:limit]
+    ]
+
+
+def question_for_context(question):
+    blocks = [
+        clip_context_text(block, MAX_CONTEXT_QUESTION_BLOCK_CHARS)
+        for block in list(question.get("blocks") or [])[:MAX_CONTEXT_QUESTION_BLOCKS]
+    ]
+    return {
+        "id": question.get("id"),
+        "text": clip_context_text(question.get("text"), MAX_CONTEXT_TEXT_CHARS),
+        "source": question.get("source"),
+        "event_id": question.get("event_id"),
+        "related_task_id": question.get("related_task_id"),
+        "blocks": blocks,
+        "blocks_omitted_count": max(0, len(question.get("blocks") or []) - len(blocks)),
+        "status": question.get("status"),
+        "outbox_message_id": question.get("outbox_message_id"),
+        "created_at": question.get("created_at"),
+        "answered_at": question.get("answered_at"),
+        "acknowledged_at": question.get("acknowledged_at"),
+    }
+
+
+def questions_for_context(questions, limit=MAX_CONTEXT_QUESTIONS):
+    values = list(questions or [])
+    return [question_for_context(question) for question in values[-limit:]]
+
+
+def request_history_for_context(value, limit=5):
+    if isinstance(value, list):
+        return [
+            clip_context_text(item, MAX_CONTEXT_TEXT_CHARS)
+            for item in value[-limit:]
+        ]
+    return clip_context_text(value, MAX_CONTEXT_TEXT_CHARS)
+
+
+def runtime_status_for_context(status):
+    return {
+        "state": status.get("state"),
+        "pid": status.get("pid"),
+        "started_at": status.get("started_at"),
+        "stopped_at": status.get("stopped_at"),
+        "last_woke_at": status.get("last_woke_at"),
+        "last_evaluated_at": status.get("last_evaluated_at"),
+        "last_action": clip_context_text(status.get("last_action"), MAX_CONTEXT_TEXT_CHARS),
+    }
+
+
+def agent_status_for_context(status):
+    return {
+        "mode": status.get("mode"),
+        "current_focus": clip_context_text(status.get("current_focus"), MAX_CONTEXT_TEXT_CHARS),
+        "active_task_id": status.get("active_task_id"),
+        "pending_question": clip_context_text(status.get("pending_question"), MAX_CONTEXT_TEXT_CHARS),
+        "last_thought": clip_context_text(status.get("last_thought"), MAX_CONTEXT_TEXT_CHARS),
+        "updated_at": status.get("updated_at"),
+    }
+
+
+def user_status_for_context(status):
+    return {
+        "mode": status.get("mode"),
+        "current_focus": clip_context_text(status.get("current_focus"), MAX_CONTEXT_TEXT_CHARS),
+        "last_request": request_history_for_context(status.get("last_request")),
+        "last_interaction_at": status.get("last_interaction_at"),
+        "updated_at": status.get("updated_at"),
+    }
+
+
+def autonomy_for_context(state, autonomous, autonomy_level, allow_agent_run, allow_verify, verify_command, allow_write):
+    autonomy = dict(state.get("autonomy", {}))
+    for key in ("pause_reason", "level_override", "last_cycle_reason", "last_desire"):
+        if key in autonomy:
+            autonomy[key] = clip_context_text(autonomy.get(key), MAX_CONTEXT_TEXT_CHARS)
+    autonomy.update(
+        {
+            "requested_enabled": bool(autonomous),
+            "requested_level": autonomy_level,
+            "allow_agent_run": bool(allow_agent_run),
+            "allow_verify": bool(allow_verify),
+            "verify_command_configured": bool(verify_command),
+            "allow_write": bool(allow_write),
+            "configured_allow_agent_run": bool(state.get("autonomy", {}).get("allow_agent_run")),
+        }
+    )
+    return autonomy
+
+
+def resident_text_for_context(text):
+    value = text or ""
+    return {
+        "chars": len(value),
+        "truncated_for_prompt": len(value) > MAX_CONTEXT_LONG_TEXT_CHARS,
+    }
+
+
+def resident_text_for_prompt(text):
+    return clip_context_text(text, MAX_CONTEXT_LONG_TEXT_CHARS) or "(none)"
+
+
+def memory_for_context(state, limit=20):
+    memory = state.get("memory", {})
+    shallow = memory.get("shallow", {})
+    deep = memory.get("deep", {})
+    shallow_recent = shallow.get("recent_events", [])
+    return {
+        "shallow": {
+            "current_context": clip_context_text(shallow.get("current_context"), MAX_CONTEXT_LONG_TEXT_CHARS),
+            "latest_task_summary": clip_context_text(
+                shallow.get("latest_task_summary"),
+                MAX_CONTEXT_LONG_TEXT_CHARS,
+            ),
+            "recent_events": [
+                {
+                    **event,
+                    "summary": clip_context_text(event.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+                }
+                for event in compact_recent_items(shallow_recent, limit)
+            ],
+        },
+        "deep": {
+            "preferences": [
+                clip_context_text(item, MAX_CONTEXT_MEMORY_CHARS)
+                for item in compact_recent_items(deep.get("preferences", []), limit)
+            ],
+            "project": [
+                clip_context_text(item, MAX_CONTEXT_MEMORY_CHARS)
+                for item in compact_recent_items(deep.get("project", []), limit)
+            ],
+            "decisions": [
+                clip_context_text(item, MAX_CONTEXT_MEMORY_CHARS)
+                for item in compact_recent_items(deep.get("decisions", []), limit)
+            ],
+        },
+    }
+
+
+def knowledge_shallow_for_context(state, limit=20):
+    shallow = state.get("knowledge", {}).get("shallow", {})
+    return {
+        "latest_task_summary": clip_context_text(
+            shallow.get("latest_task_summary"),
+            MAX_CONTEXT_LONG_TEXT_CHARS,
+        ),
+        "recent_events": [
+            {
+                **event,
+                "summary": clip_context_text(event.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+            }
+            for event in compact_recent_items(shallow.get("recent_events", []), limit)
+        ],
+    }
+
+
+def agent_run_for_context(run):
+    return {
+        "id": run.get("id"),
+        "task_id": run.get("task_id"),
+        "purpose": run.get("purpose"),
+        "status": run.get("status"),
+        "backend": run.get("backend"),
+        "model": run.get("model"),
+        "cwd": clip_context_text(run.get("cwd"), 400),
+        "external_pid": run.get("external_pid"),
+        "session_id": run.get("session_id"),
+        "review_status": run.get("review_status"),
+        "plan_id": run.get("plan_id"),
+        "parent_run_id": run.get("parent_run_id"),
+        "review_of_run_id": run.get("review_of_run_id"),
+        "followup_task_id": run.get("followup_task_id"),
+        "prompt_file": run.get("prompt_file"),
+        "prompt_chars": len(run.get("prompt") or ""),
+        "command": [clip_context_text(part, 400) for part in run.get("command", [])],
+        "stdout_tail": clip_context_text(run.get("stdout"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "stderr_tail": clip_context_text(run.get("stderr"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "result_tail": clip_context_text(run.get("result"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "created_at": run.get("created_at"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "updated_at": run.get("updated_at"),
+    }
+
+
+def agent_runs_for_context(state, limit=MAX_CONTEXT_AGENT_RUNS):
+    runs = list(state.get("agent_runs", []))
+    active = [
+        run
+        for run in runs
+        if run.get("status") in ("created", "running")
+    ]
+    active = active[-limit:]
+    active_ids = {run.get("id") for run in active}
+    remaining = max(0, limit - len(active))
+    recent = []
+    if remaining:
+        for run in reversed(runs):
+            if run.get("id") in active_ids:
+                continue
+            recent.append(run)
+            if len(recent) >= remaining:
+                break
+    selected = active + list(reversed(recent))
+    return [agent_run_for_context(run) for run in selected]
+
+
+def active_agent_run_count(state):
+    return len(
+        [
+            run
+            for run in state.get("agent_runs", [])
+            if run.get("status") in ("created", "running")
+        ]
+    )
+
+
+def active_agent_runs_omitted_count(state, included_runs):
+    included_active = len(
+        [
+            run
+            for run in included_runs
+            if run.get("status") in ("created", "running")
+        ]
+    )
+    return max(0, active_agent_run_count(state) - included_active)
+
+
+def verification_run_for_context(run):
+    return {
+        "id": run.get("id"),
+        "command": clip_context_text(run.get("command"), 400),
+        "reason": clip_context_text(run.get("reason"), MAX_CONTEXT_TEXT_CHARS),
+        "exit_code": run.get("exit_code"),
+        "stdout_tail": clip_context_text(run.get("stdout"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "stderr_tail": clip_context_text(run.get("stderr"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "updated_at": run.get("updated_at"),
+    }
+
+
+def write_run_for_context(run):
+    return {
+        "id": run.get("id"),
+        "action_type": run.get("action_type"),
+        "path": clip_context_text(run.get("path"), 500),
+        "dry_run": bool(run.get("dry_run")),
+        "applied": bool(run.get("applied")),
+        "verified": bool(run.get("verified")),
+        "verification_exit_code": run.get("verification_exit_code"),
+        "summary": clip_context_text(run.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+        "error": clip_context_text(run.get("error"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "created_at": run.get("created_at"),
+        "updated_at": run.get("updated_at"),
+    }
+
+
+def event_for_context(event):
+    payload = event.get("payload") or {}
+    return {
+        "id": event.get("id"),
+        "type": event.get("type"),
+        "source": event.get("source"),
+        "payload": {
+            key: clip_context_text(value, MAX_CONTEXT_LONG_TEXT_CHARS)
+            for key, value in payload.items()
+        },
+        "created_at": event.get("created_at"),
+        "processed_at": event.get("processed_at"),
+    }
+
+
+def context_size_report(context):
+    section_chars = {
+        key: json_char_count(value)
+        for key, value in context.items()
+    }
+    return {
+        "total_chars": sum(section_chars.values()),
+        "section_chars": section_chars,
+    }
+
+
+def build_context_stats(state, context):
+    open_task_count = len(open_tasks(state))
+    attention_count = len(open_attention_items(state))
+    agent_run_count = len(state.get("agent_runs", []))
+    size_report = context_size_report(context)
+    return {
+        "approx_chars": size_report["total_chars"],
+        "section_chars": size_report["section_chars"],
+        "limits": {
+            "tasks": MAX_CONTEXT_TASKS,
+            "attention": MAX_CONTEXT_ATTENTION_ITEMS,
+            "agent_runs": MAX_CONTEXT_AGENT_RUNS,
+            "questions": MAX_CONTEXT_QUESTIONS,
+            "question_blocks": MAX_CONTEXT_QUESTION_BLOCKS,
+            "question_block_chars": MAX_CONTEXT_QUESTION_BLOCK_CHARS,
+            "text_chars": MAX_CONTEXT_TEXT_CHARS,
+            "long_text_chars": MAX_CONTEXT_LONG_TEXT_CHARS,
+            "run_output_chars": MAX_CONTEXT_RUN_OUTPUT_CHARS,
+            "memory_chars": MAX_CONTEXT_MEMORY_CHARS,
+        },
+        "source_counts": {
+            "open_tasks": open_task_count,
+            "attention_items": attention_count,
+            "unanswered_questions": len(open_questions(state)),
+            "agent_runs": agent_run_count,
+            "active_agent_runs": active_agent_run_count(state),
+            "verification_runs": len(state.get("verification_runs", [])),
+            "write_runs": len(state.get("write_runs", [])),
+        },
+        "included_counts": {
+            "open_tasks": len(context.get("todo", [])),
+            "attention_items": len(context.get("attention", [])),
+            "unanswered_questions": len(context.get("unanswered_questions", [])),
+            "agent_runs": len(context.get("agent_runs", [])),
+            "active_agent_runs": len(
+                [
+                    run
+                    for run in context.get("agent_runs", [])
+                    if run.get("status") in ("created", "running")
+                ]
+            ),
+            "verification_runs": len(context.get("verification_runs", [])),
+            "write_runs": len(context.get("write_runs", [])),
+        },
+        "omitted_counts": {
+            "open_tasks": max(0, open_task_count - len(context.get("todo", []))),
+            "attention_items": max(0, attention_count - len(context.get("attention", []))),
+            "unanswered_questions": max(
+                0,
+                len(open_questions(state)) - len(context.get("unanswered_questions", [])),
+            ),
+            "agent_runs": max(0, agent_run_count - len(context.get("agent_runs", []))),
+            "active_agent_runs": context.get("agent_runs_active_omitted_count", 0),
+        },
+    }
+
 
 def build_recall_summary(state, event, current_time):
     runtime = state["runtime_status"]
@@ -83,19 +548,6 @@ def build_recall_summary(state, event, current_time):
         parts.append(f"User asked: {text}")
 
     return " ".join(parts)
-
-def memory_for_context(state, limit=20):
-    memory = state.get("memory", {})
-    shallow = memory.get("shallow", {})
-    deep = memory.get("deep", {})
-    return {
-        "shallow": shallow,
-        "deep": {
-            "preferences": list(deep.get("preferences", []))[-limit:],
-            "project": list(deep.get("project", []))[-limit:],
-            "decisions": list(deep.get("decisions", []))[-limit:],
-        },
-    }
 
 def read_runtime_log_tail(limit=20):
     if not LOG_FILE.exists():
@@ -121,17 +573,11 @@ def build_context(
     allow_write=False,
     allowed_write_roots=None,
 ):
-    unanswered_questions = [
-        {
-            "id": question.get("id"),
-            "text": question.get("text"),
-            "related_task_id": question.get("related_task_id"),
-            "blocks": question.get("blocks", []),
-            "created_at": question.get("created_at"),
-        }
-        for question in open_questions(state)
-    ]
-    return {
+    unanswered_questions = open_questions(state)
+    tasks = sorted(open_tasks(state), key=task_sort_key)
+    attention = open_attention_items(state)
+    agent_runs_context = agent_runs_for_context(state)
+    context = {
         "date": {
             "now": current_time,
             "hours_since_last_wake": elapsed_hours(
@@ -144,37 +590,55 @@ def build_context(
                 state["user_status"].get("last_interaction_at"), current_time
             ),
         },
-        "runtime_status": state["runtime_status"],
-        "agent_status": state["agent_status"],
-        "user_status": state["user_status"],
-        "todo": sorted(open_tasks(state), key=task_sort_key),
-        "unanswered_questions": unanswered_questions,
-        "attention": open_attention_items(state),
+        "runtime_status": runtime_status_for_context(state["runtime_status"]),
+        "agent_status": agent_status_for_context(state["agent_status"]),
+        "user_status": user_status_for_context(state["user_status"]),
+        "todo_summary": summarize_tasks(state),
+        "todo": [task_for_context(task) for task in tasks[:MAX_CONTEXT_TASKS]],
+        "todo_omitted_count": max(0, len(tasks) - MAX_CONTEXT_TASKS),
+        "unanswered_questions": questions_for_context(unanswered_questions),
+        "unanswered_questions_omitted_count": max(
+            0,
+            len(unanswered_questions) - MAX_CONTEXT_QUESTIONS,
+        ),
+        "attention": attention_items_for_context(attention),
+        "attention_omitted_count": max(0, len(attention) - MAX_CONTEXT_ATTENTION_ITEMS),
         "memory": memory_for_context(state),
-        "knowledge_shallow": state["knowledge"]["shallow"],
-        "agent_runs": state.get("agent_runs", [])[-10:],
-        "autonomy": {
-            **state.get("autonomy", {}),
-            "requested_enabled": bool(autonomous),
-            "requested_level": autonomy_level,
-            "allow_agent_run": bool(allow_agent_run),
-            "allow_verify": bool(allow_verify),
-            "verify_command_configured": bool(verify_command),
-            "allow_write": bool(allow_write),
-            "configured_allow_agent_run": bool(state.get("autonomy", {}).get("allow_agent_run")),
-        },
-        "self": self_text,
-        "desires": desires,
+        "knowledge_shallow": knowledge_shallow_for_context(state),
+        "agent_runs": agent_runs_context,
+        "agent_runs_active_omitted_count": active_agent_runs_omitted_count(
+            state,
+            agent_runs_context,
+        ),
+        "autonomy": autonomy_for_context(
+            state,
+            autonomous,
+            autonomy_level,
+            allow_agent_run,
+            allow_verify,
+            verify_command,
+            allow_write,
+        ),
+        "self": resident_text_for_context(self_text),
+        "desires": resident_text_for_context(desires),
         "runtime_log_tail": read_runtime_log_tail(),
         "thought_journal": recent_thoughts_for_context(state),
         "thought_thread_warning": dropped_thread_warning_for_context(state),
         "perception": perceive_workspace(allowed_read_roots=allowed_read_roots),
         "allowed_read_roots": allowed_read_roots or [],
         "allowed_write_roots": allowed_write_roots or [],
-        "verification_runs": state.get("verification_runs", [])[-10:],
-        "write_runs": state.get("write_runs", [])[-10:],
-        "event": event,
+        "verification_runs": [
+            verification_run_for_context(run)
+            for run in compact_recent_items(state.get("verification_runs", []), 10)
+        ],
+        "write_runs": [
+            write_run_for_context(run)
+            for run in compact_recent_items(state.get("write_runs", []), 10)
+        ],
+        "event": event_for_context(event),
     }
+    context["context_stats"] = build_context_stats(state, context)
+    return context
 
 def build_codex_prompt(state, event, current_time):
     context = build_context(state, event, current_time)
@@ -202,8 +666,9 @@ def build_think_prompt(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    prompt_context=None,
 ):
-    context = build_context(
+    context = prompt_context or build_context(
         state,
         event,
         current_time,
@@ -287,10 +752,10 @@ def build_think_prompt(
         '    {"type": "execute_task", "task_id": 1, "reason": "..."}\n'
         "  ]\n"
         "}\n\n"
-        f"Human guidance:\n{guidance or '(none)'}\n\n"
+        f"Human guidance:\n{resident_text_for_prompt(guidance)}\n\n"
         f"Human policy:\n{policy or '(none)'}\n\n"
-        f"Self:\n{self_text or '(none)'}\n\n"
-        f"Desires:\n{desires or '(none)'}\n\n"
+        f"Self:\n{resident_text_for_prompt(self_text)}\n\n"
+        f"Desires:\n{resident_text_for_prompt(desires)}\n\n"
         f"State JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
 
@@ -311,8 +776,9 @@ def build_act_prompt(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    prompt_context=None,
 ):
-    context = build_context(
+    context = prompt_context or build_context(
         state,
         event,
         current_time,
@@ -386,8 +852,8 @@ def build_act_prompt(
         "  ]\n"
         "}\n\n"
         f"Human policy:\n{policy or '(none)'}\n\n"
-        f"Self:\n{self_text or '(none)'}\n\n"
-        f"Desires:\n{desires or '(none)'}\n\n"
+        f"Self:\n{resident_text_for_prompt(self_text)}\n\n"
+        f"Desires:\n{resident_text_for_prompt(desires)}\n\n"
         f"State JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
         f"DecisionPlan JSON:\n{json.dumps(decision_plan, ensure_ascii=False, indent=2)}"
     )
@@ -944,6 +1410,7 @@ def think_phase(
     allowed_read_roots=None,
     allowed_write_roots=None,
     model_backend=DEFAULT_MODEL_BACKEND,
+    prompt_context=None,
 ):
     fallback = deterministic_decision_plan(
         state,
@@ -978,6 +1445,7 @@ def think_phase(
         allow_write=allow_write,
         allowed_read_roots=allowed_read_roots,
         allowed_write_roots=allowed_write_roots,
+        prompt_context=prompt_context,
     )
     try:
         plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
@@ -1148,6 +1616,7 @@ def act_phase(
     allowed_read_roots=None,
     allowed_write_roots=None,
     model_backend=DEFAULT_MODEL_BACKEND,
+    prompt_context=None,
 ):
     fallback = deterministic_action_plan(decision_plan)
     if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
@@ -1170,6 +1639,7 @@ def act_phase(
         allow_write=allow_write,
         allowed_read_roots=allowed_read_roots,
         allowed_write_roots=allowed_write_roots,
+        prompt_context=prompt_context,
     )
     try:
         action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
@@ -2136,6 +2606,21 @@ def process_events(
         if event.get("processed_at"):
             continue
 
+        prompt_context = build_context(
+            state,
+            event,
+            current_time,
+            allowed_read_roots=allowed_read_roots,
+            self_text=self_text,
+            desires=desires,
+            autonomous=autonomous,
+            autonomy_level=autonomy_level,
+            allow_agent_run=allow_agent_run,
+            allow_verify=allow_verify,
+            verify_command=verify_command,
+            allow_write=allow_write,
+            allowed_write_roots=allowed_write_roots,
+        )
         decision_plan = think_phase(
             state,
             event,
@@ -2160,6 +2645,7 @@ def process_events(
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
             model_backend=model_backend,
+            prompt_context=prompt_context,
         )
         action_plan = act_phase(
             state,
@@ -2184,6 +2670,7 @@ def process_events(
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
             model_backend=model_backend,
+            prompt_context=prompt_context,
         )
         counts = apply_action_plan(
             state,

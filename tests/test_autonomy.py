@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -7,8 +8,11 @@ from unittest.mock import patch
 from mew.agent import (
     act_phase,
     apply_action_plan,
+    build_act_prompt,
     build_context,
+    build_think_prompt,
     deterministic_decision_plan,
+    process_events,
     think_phase,
 )
 from mew.read_tools import read_file
@@ -259,6 +263,319 @@ class AutonomyTests(unittest.TestCase):
         self.assertIn("Continue workspace inspection.", thought["open_threads"])
         self.assertEqual(thought["dropped_threads"], [])
 
+    def test_build_context_compacts_large_task_and_agent_run_payloads(self):
+        state = default_state()
+        current_time = now_iso()
+        long_text = "large-context-payload " * 1000
+        task = {
+            "id": 1,
+            "title": "Compress context",
+            "description": long_text,
+            "status": "todo",
+            "priority": "high",
+            "notes": long_text,
+            "command": "python -m unittest",
+            "cwd": ".",
+            "auto_execute": False,
+            "agent_backend": "ai-cli",
+            "agent_model": "claude-ultra",
+            "agent_prompt": long_text,
+            "agent_run_id": 1,
+            "plans": [
+                {
+                    "id": 1,
+                    "status": "planned",
+                    "backend": "ai-cli",
+                    "model": "claude-ultra",
+                    "cwd": ".",
+                    "objective": long_text,
+                    "approach": long_text,
+                    "implementation_prompt": long_text,
+                    "review_prompt": long_text,
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                }
+            ],
+            "latest_plan_id": 1,
+            "runs": [
+                {
+                    "command": "python -m unittest",
+                    "cwd": ".",
+                    "exit_code": 1,
+                    "stdout": long_text,
+                    "stderr": long_text,
+                    "started_at": current_time,
+                    "finished_at": current_time,
+                }
+            ],
+            "created_at": current_time,
+            "updated_at": current_time,
+        }
+        state["tasks"].append(task)
+        state["agent_runs"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "purpose": "implementation",
+                "status": "completed",
+                "backend": "ai-cli",
+                "model": "claude-ultra",
+                "cwd": ".",
+                "prompt": long_text,
+                "command": ["ai-cli", "run", "--prompt", long_text],
+                "stdout": long_text,
+                "stderr": long_text,
+                "result": long_text,
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "user_message", "test", {"text": long_text})
+
+        context = build_context(state, event, "later")
+        context_json = json.dumps(context, ensure_ascii=False)
+
+        self.assertLess(len(context_json), 40000)
+        self.assertNotIn("implementation_prompt", context["todo"][0]["latest_plan"])
+        self.assertNotIn("review_prompt", context["todo"][0]["latest_plan"])
+        self.assertNotIn("prompt", context["agent_runs"][0])
+        self.assertIn("prompt_chars", context["agent_runs"][0])
+        self.assertLessEqual(len(context["agent_runs"][0]["result_tail"]), 620)
+        self.assertEqual(context["context_stats"]["source_counts"]["agent_runs"], 1)
+        self.assertGreater(context["context_stats"]["section_chars"]["todo"], 0)
+        self.assertGreater(context["context_stats"]["section_chars"]["agent_runs"], 0)
+
+    def test_build_context_preserves_attention_reason(self):
+        state = default_state()
+        long_reason = "verification failed because " + ("stderr detail " * 500)
+        add_attention_item(
+            state,
+            "verification",
+            "Verification failed",
+            long_reason,
+            related_task_id=3,
+            question_id=4,
+            priority="high",
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+        attention = context["attention"][0]
+
+        self.assertEqual(attention["title"], "Verification failed")
+        self.assertEqual(attention["related_task_id"], 3)
+        self.assertEqual(attention["question_id"], 4)
+        self.assertIn("verification failed because", attention["reason"])
+        self.assertLessEqual(len(attention["reason"]), 1220)
+
+    def test_build_context_caps_and_clips_unanswered_questions(self):
+        state = default_state()
+        long_text = "question detail " * 500
+        for index in range(60):
+            state["questions"].append(
+                {
+                    "id": index + 1,
+                    "text": f"Question {index} {long_text}",
+                    "source": "agent",
+                    "event_id": index + 1,
+                    "related_task_id": index + 1,
+                    "blocks": [f"block-{block}-{long_text}" for block in range(25)],
+                    "status": "open",
+                    "created_at": now_iso(),
+                    "answered_at": None,
+                    "answer_event_id": None,
+                    "acknowledged_at": None,
+                }
+            )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        self.assertEqual(len(context["unanswered_questions"]), 20)
+        self.assertEqual(context["unanswered_questions"][0]["id"], 41)
+        self.assertEqual(context["unanswered_questions"][-1]["id"], 60)
+        self.assertEqual(context["unanswered_questions_omitted_count"], 40)
+        self.assertLessEqual(len(context["unanswered_questions"][0]["text"]), 1220)
+        self.assertEqual(len(context["unanswered_questions"][0]["blocks"]), 5)
+        self.assertEqual(context["unanswered_questions"][0]["blocks_omitted_count"], 20)
+        self.assertEqual(context["context_stats"]["omitted_counts"]["unanswered_questions"], 40)
+
+    def test_build_context_keeps_high_priority_attention_before_old_normal_items(self):
+        state = default_state()
+        for index in range(30):
+            add_attention_item(
+                state,
+                "waiting",
+                f"Normal item {index}",
+                f"normal reason {index}",
+                priority="normal",
+            )
+        high = add_attention_item(
+            state,
+            "verification",
+            "Latest high priority failure",
+            "critical verification reason",
+            priority="high",
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+        attention_ids = [item["id"] for item in context["attention"]]
+
+        self.assertEqual(context["attention"][0]["id"], high["id"])
+        self.assertIn(high["id"], attention_ids)
+        self.assertEqual(context["attention_omitted_count"], 6)
+
+    def test_build_context_preserves_old_active_agent_runs(self):
+        state = default_state()
+        current_time = now_iso()
+        for run_id in range(1, 3):
+            state["agent_runs"].append(
+                {
+                    "id": run_id,
+                    "task_id": run_id,
+                    "purpose": "implementation",
+                    "status": "running",
+                    "backend": "ai-cli",
+                    "model": "codex-ultra",
+                    "cwd": ".",
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                }
+            )
+        for run_id in range(3, 13):
+            state["agent_runs"].append(
+                {
+                    "id": run_id,
+                    "task_id": run_id,
+                    "purpose": "implementation",
+                    "status": "completed",
+                    "backend": "ai-cli",
+                    "model": "codex-ultra",
+                    "cwd": ".",
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                }
+            )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+        run_ids = [run["id"] for run in context["agent_runs"]]
+
+        self.assertIn(1, run_ids)
+        self.assertIn(2, run_ids)
+        self.assertEqual(len(run_ids), 8)
+        self.assertEqual(context["context_stats"]["omitted_counts"]["agent_runs"], 4)
+
+    def test_build_context_caps_many_active_agent_runs(self):
+        state = default_state()
+        current_time = now_iso()
+        for run_id in range(1, 13):
+            state["agent_runs"].append(
+                {
+                    "id": run_id,
+                    "task_id": run_id,
+                    "purpose": "implementation",
+                    "status": "running",
+                    "backend": "ai-cli",
+                    "model": "codex-ultra",
+                    "cwd": ".",
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                }
+            )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        self.assertEqual(len(context["agent_runs"]), 8)
+        self.assertNotIn(1, [run["id"] for run in context["agent_runs"]])
+        self.assertIn(12, [run["id"] for run in context["agent_runs"]])
+        self.assertEqual(context["agent_runs_active_omitted_count"], 4)
+        self.assertEqual(context["context_stats"]["omitted_counts"]["active_agent_runs"], 4)
+
+    def test_build_context_clips_deep_memory_entries(self):
+        state = default_state()
+        state["memory"]["deep"]["decisions"].append("important decision " + ("detail " * 1000))
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+        decision = context["memory"]["deep"]["decisions"][0]
+
+        self.assertIn("important decision", decision)
+        self.assertLessEqual(len(decision), 820)
+        self.assertEqual(context["context_stats"]["limits"]["memory_chars"], 800)
+
+    def test_build_context_clips_persisted_status_text(self):
+        state = default_state()
+        long_text = "large persisted user request " * 500
+        state["runtime_status"]["last_action"] = long_text
+        state["agent_status"]["current_focus"] = long_text
+        state["agent_status"]["pending_question"] = long_text
+        state["agent_status"]["last_thought"] = long_text
+        state["user_status"]["current_focus"] = long_text
+        state["user_status"]["last_request"] = [long_text for _ in range(8)]
+        state["autonomy"]["last_desire"] = long_text
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        self.assertLessEqual(len(context["runtime_status"]["last_action"]), 1220)
+        self.assertLessEqual(len(context["agent_status"]["current_focus"]), 1220)
+        self.assertLessEqual(len(context["agent_status"]["pending_question"]), 1220)
+        self.assertLessEqual(len(context["agent_status"]["last_thought"]), 1220)
+        self.assertLessEqual(len(context["user_status"]["current_focus"]), 1220)
+        self.assertEqual(len(context["user_status"]["last_request"]), 5)
+        self.assertLessEqual(len(context["user_status"]["last_request"][0]), 1220)
+        self.assertLessEqual(len(context["autonomy"]["last_desire"]), 1220)
+
+    def test_resident_prompt_text_is_capped_and_not_duplicated_in_context(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        self_text = "SELF_START " + ("self body " * 1000) + "SELF_END"
+        desires = "DESIRE_START " + ("desire body " * 1000) + "DESIRE_END"
+        guidance = "GUIDANCE_START " + ("guidance body " * 1000) + "GUIDANCE_END"
+
+        context = build_context(
+            state,
+            event,
+            "later",
+            self_text=self_text,
+            desires=desires,
+        )
+        think_prompt = build_think_prompt(
+            state,
+            event,
+            "later",
+            False,
+            guidance,
+            "policy",
+            self_text=self_text,
+            desires=desires,
+        )
+        act_prompt = build_act_prompt(
+            state,
+            event,
+            {"summary": "decide", "decisions": []},
+            "later",
+            False,
+            "policy",
+            self_text=self_text,
+            desires=desires,
+        )
+
+        self.assertEqual(context["self"]["chars"], len(self_text))
+        self.assertTrue(context["self"]["truncated_for_prompt"])
+        self.assertEqual(context["desires"]["chars"], len(desires))
+        self.assertTrue(context["desires"]["truncated_for_prompt"])
+        for prompt in (think_prompt, act_prompt):
+            self.assertEqual(prompt.count("SELF_START"), 1)
+            self.assertEqual(prompt.count("DESIRE_START"), 1)
+            self.assertNotIn("SELF_END", prompt)
+            self.assertNotIn("DESIRE_END", prompt)
+        self.assertEqual(think_prompt.count("GUIDANCE_START"), 1)
+        self.assertNotIn("GUIDANCE_END", think_prompt)
+
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -334,6 +651,38 @@ class AutonomyTests(unittest.TestCase):
                 self.assertEqual(call.call_args.args[1], auth)
             finally:
                 os.chdir(old_cwd)
+
+    def test_process_events_reuses_prompt_context_for_think_and_act(self):
+        state = default_state()
+        add_event(state, "user_message", "test", {"text": "hello"})
+        responses = [
+            {
+                "summary": "adapter summary",
+                "decisions": [{"type": "remember", "summary": "adapter summary"}],
+            },
+            {
+                "summary": "adapter action",
+                "actions": [{"type": "record_memory", "summary": "adapter action"}],
+            },
+        ]
+
+        with (
+            patch("mew.agent.call_model_json", side_effect=responses),
+            patch("mew.agent.build_context", wraps=build_context) as build,
+        ):
+            processed = process_events(
+                state,
+                "user_input",
+                model_auth={"access_token": "token"},
+                model="test-model",
+                base_url="https://example.invalid",
+                timeout=5,
+                create_internal_event=False,
+                model_backend="codex",
+            )
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(build.call_count, 1)
 
     def test_self_review_can_propose_task_at_propose_level(self):
         state = default_state()
