@@ -1790,6 +1790,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--allow-verify requires --verify-command", stderr.getvalue())
 
+    def test_agent_without_subcommand_lists_runs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["agent"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        self.assertIn("No agent runs.", stdout.getvalue())
+
     def test_agent_sweep_passes_timeout_flags(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

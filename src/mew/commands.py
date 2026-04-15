@@ -2479,7 +2479,7 @@ def cmd_task_dispatch(args):
 def cmd_agent_list(args):
     state = load_state()
     runs = state["agent_runs"]
-    if not args.all:
+    if not getattr(args, "all", False):
         runs = [run for run in runs if run.get("status") in ("created", "running")]
     if not runs:
         print("No agent runs.")

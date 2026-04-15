@@ -972,6 +972,7 @@ def build_parser():
     update_parser.set_defaults(func=cmd_task_update)
 
     agent_parser = subparsers.add_parser("agent", help="manage agent runs")
+    agent_parser.set_defaults(func=cmd_agent_list)
     agent_subparsers = agent_parser.add_subparsers(dest="agent_command")
 
     agent_list_parser = agent_subparsers.add_parser("list", help="list agent runs")
