@@ -191,6 +191,52 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_ack_routine_dry_run_verbose_does_not_mark_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(state, "info", "No open tasks.")
+                    add_outbox_message(state, "warning", "Needs attention.")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["ack", "--routine", "--dry-run", "--verbose"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("would acknowledge 1 routine message(s)", output)
+                self.assertIn("#1 [info] No open tasks.", output)
+                state = load_state()
+                self.assertTrue(all(message.get("read_at") is None for message in state["outbox"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_ack_all_dry_run_does_not_mark_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(state, "info", "one")
+                    add_outbox_message(state, "info", "two")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["ack", "--all", "--dry-run"]), 0)
+
+                self.assertIn("would acknowledge 2 message(s)", stdout.getvalue())
+                state = load_state()
+                self.assertTrue(all(message.get("read_at") is None for message in state["outbox"]))
+            finally:
+                os.chdir(old_cwd)
+
     def test_repair_refreshes_stale_research_task_command_question(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

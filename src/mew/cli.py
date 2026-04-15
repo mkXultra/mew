@@ -773,6 +773,8 @@ def build_parser():
     ack_parser.add_argument("message_ids", nargs="*")
     ack_parser.add_argument("--all", action="store_true", help="mark all unread outbox messages as read")
     ack_parser.add_argument("--routine", action="store_true", help="mark unread routine info messages as read")
+    ack_parser.add_argument("--dry-run", action="store_true", help="show what would be acknowledged without changing state")
+    ack_parser.add_argument("--verbose", action="store_true", help="print acknowledged message ids and types")
     ack_parser.set_defaults(func=cmd_ack)
 
     listen_parser = subparsers.add_parser("listen", help="stream outbox messages")

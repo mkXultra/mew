@@ -793,6 +793,14 @@ def cmd_reply(args):
     print(f"answered question #{question['id']} with event #{event['id']}")
     return 0
 
+def print_ack_messages(messages):
+    for message in messages:
+        print(f"#{message.get('id')} [{message.get('type')}] {message.get('text') or ''}")
+
+def find_ack_messages(state, message_ids):
+    wanted = {str(message_id) for message_id in message_ids}
+    return [message for message in state.get("outbox", []) if str(message.get("id")) in wanted]
+
 def cmd_ack(args):
     with state_lock():
         state = load_state()
@@ -805,22 +813,49 @@ def cmd_ack(args):
                 for message in state["outbox"]
                 if is_routine_outbox_message(state, message)
             ]
+            if getattr(args, "dry_run", False):
+                print(f"would acknowledge {len(messages)} routine message(s)")
+                if getattr(args, "verbose", False):
+                    print_ack_messages(messages)
+                return 0
             for message in messages:
                 mark_message_read(state, message["id"])
             save_state(state)
             print(f"acknowledged {len(messages)} routine message(s)")
+            if getattr(args, "verbose", False):
+                print_ack_messages(messages)
             return 0
         if args.all:
             messages = [message for message in state["outbox"] if not message.get("read_at")]
+            if getattr(args, "dry_run", False):
+                print(f"would acknowledge {len(messages)} message(s)")
+                if getattr(args, "verbose", False):
+                    print_ack_messages(messages)
+                return 0
             for message in messages:
                 mark_message_read(state, message["id"])
             save_state(state)
             print(f"acknowledged {len(messages)} message(s)")
+            if getattr(args, "verbose", False):
+                print_ack_messages(messages)
             return 0
 
         if not args.message_ids:
-            print("mew: ack requires a message id or --all", file=sys.stderr)
+            print("mew: ack requires a message id, --all, or --routine", file=sys.stderr)
             return 1
+
+        if getattr(args, "dry_run", False):
+            messages = find_ack_messages(state, args.message_ids)
+            found_ids = {str(message.get("id")) for message in messages}
+            missing = [message_id for message_id in args.message_ids if str(message_id) not in found_ids]
+            if missing:
+                print(f"mew: message not found: {missing[0]}", file=sys.stderr)
+                return 1
+            messages = [message for message in messages if not message.get("read_at")]
+            print(f"would acknowledge {len(messages)} message(s)")
+            if getattr(args, "verbose", False):
+                print_ack_messages(messages)
+            return 0
 
         acknowledged = []
         for message_id in args.message_ids:
@@ -835,6 +870,8 @@ def cmd_ack(args):
     else:
         ids = ", ".join(f"#{message['id']}" for message in acknowledged)
         print(f"acknowledged messages {ids}")
+    if getattr(args, "verbose", False):
+        print_ack_messages(acknowledged)
     return 0
 
 def cmd_status(args):
