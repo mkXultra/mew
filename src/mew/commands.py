@@ -464,12 +464,13 @@ def sync_task_done_state(state, task, summary, current_time):
     state.setdefault("knowledge", {}).setdefault("shallow", {})["latest_task_summary"] = text
 
     agent = state.get("agent_status", {})
-    if str(agent.get("active_task_id")) == str(task_id):
+    if str(agent.get("active_task_id")) == str(task_id) or not open_tasks(state):
         agent["mode"] = "idle"
         agent["current_focus"] = ""
         agent["active_task_id"] = None
         agent["pending_question"] = None
-        agent["updated_at"] = current_time
+    agent["last_thought"] = text
+    agent["updated_at"] = current_time
     user = state.get("user_status", {})
     if not open_questions(state):
         user["mode"] = "idle"

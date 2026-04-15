@@ -438,7 +438,6 @@ def append_passive_decisions(
     if not tasks:
         if autonomous and latest_open_verification_attention(state):
             return
-        question = "What task should I track next?"
         if autonomous:
             decision = {
                 "type": "self_review",
@@ -450,8 +449,6 @@ def append_passive_decisions(
                     "Use self/desires and current state to choose one small next task."
                 )
             decisions.append(decision)
-        elif not has_unread_outbox_message(state, "question", question):
-            decisions.append({"type": "ask_user", "question": question})
         return
 
     execution_added = False

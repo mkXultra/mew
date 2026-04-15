@@ -206,6 +206,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("2 passed", state["tasks"][0]["notes"])
                 self.assertIn("Task #1 completed", state["memory"]["shallow"]["current_context"])
                 self.assertEqual(state["agent_status"]["mode"], "idle")
+                self.assertIn("Task #1 completed", state["agent_status"]["last_thought"])
                 self.assertIsNotNone(state["outbox"][0]["read_at"])
                 self.assertEqual(len(state["verification_runs"]), 1)
                 self.assertEqual(state["verification_runs"][0]["command"], "user-reported")

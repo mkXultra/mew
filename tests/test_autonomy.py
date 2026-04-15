@@ -342,6 +342,20 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(state["outbox"]), 1)
         self.assertIsNotNone(state["outbox"][0]["read_at"])
 
+    def test_non_autonomous_passive_idle_does_not_ask_for_new_task(self):
+        state = default_state()
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+        waits = [decision for decision in plan["decisions"] if decision["type"] == "wait_for_user"]
+        self.assertEqual(waits[0]["reason"], "No actionable task.")
+
     def test_user_info_and_passive_warnings_stay_unread(self):
         state = default_state()
         user_event = add_event(state, "user_message", "test", {"text": "status?"})
