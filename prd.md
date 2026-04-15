@@ -673,6 +673,8 @@ The first user-facing version should likely include:
 - `mew stop`: stop the active background runtime and wait for shutdown.
 - `mew doctor`: check local state, state validation, latest state checkpoint, runtime lock, and required local tools.
 - `mew doctor --json`: expose the same health check as structured JSON for agents and automation.
+- `mew repair`: reconcile and validate local state, then write a fresh checkpoint when validation passes.
+- `mew repair --json`: expose the repair pass as structured JSON.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.

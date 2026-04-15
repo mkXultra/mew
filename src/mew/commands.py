@@ -69,6 +69,7 @@ from .state import (
     read_self,
     read_lock,
     read_last_state_effect,
+    reconcile_next_ids,
     save_state,
     state_digest,
     state_lock,
@@ -606,6 +607,48 @@ def cmd_doctor(args):
     else:
         print(format_doctor_data(data))
 
+    return 0 if data.get("ok") else 1
+
+def build_repair_data():
+    with state_lock():
+        state = load_state()
+        before_sha = state_digest(state)
+        reconcile_next_ids(state)
+        issues = validate_state(state)
+        errors = validation_errors(issues)
+        if errors:
+            return {
+                "ok": False,
+                "repaired": False,
+                "before_sha256": before_sha,
+                "after_sha256": before_sha,
+                "validation_issues": issues,
+            }
+        save_state(state)
+        after_sha = state_digest(state)
+        return {
+            "ok": True,
+            "repaired": before_sha != after_sha,
+            "before_sha256": before_sha,
+            "after_sha256": after_sha,
+            "validation_issues": validate_state(state),
+            "last_effect": read_last_state_effect(),
+        }
+
+def cmd_repair(args):
+    data = build_repair_data()
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        if data.get("ok"):
+            status = "repaired" if data.get("repaired") else "already valid"
+            print(f"state_repair: {status}")
+            print(f"before_sha256: {str(data.get('before_sha256') or '')[:12]}")
+            print(f"after_sha256: {str(data.get('after_sha256') or '')[:12]}")
+            print(format_validation_issues(data.get("validation_issues") or []))
+        else:
+            print("state_repair: failed")
+            print(format_validation_issues(data.get("validation_issues") or []))
     return 0 if data.get("ok") else 1
 
 def cmd_brief(args):

@@ -94,6 +94,22 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repair_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair", "--json"])
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(code, 0)
+                self.assertTrue(data["ok"])
+                self.assertIn("after_sha256", data)
+                self.assertEqual(data["validation_issues"], [])
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

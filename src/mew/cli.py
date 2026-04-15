@@ -35,6 +35,7 @@ from .commands import (
     cmd_policy_init,
     cmd_policy_show,
     cmd_questions,
+    cmd_repair,
     cmd_reply,
     cmd_self_init,
     cmd_self_improve,
@@ -270,6 +271,10 @@ def build_parser():
     doctor_parser.add_argument("--require-auth", action="store_true", help="fail if Codex OAuth auth is missing")
     doctor_parser.add_argument("--json", action="store_true", help="print structured JSON")
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    repair_parser = subparsers.add_parser("repair", help="reconcile and validate local mew state")
+    repair_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    repair_parser.set_defaults(func=cmd_repair)
 
     message_parser = subparsers.add_parser("message", help="queue a user message")
     message_parser.add_argument("message")
