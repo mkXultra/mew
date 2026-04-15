@@ -32,11 +32,11 @@ STEP_ACTION_TYPES = {
 MAX_STEP_RUNS = 100
 
 
-def _synthetic_step_event(state, step_index):
+def _synthetic_step_event(state, step_index, source="manual_step_planning"):
     return {
         "id": state.get("next_ids", {}).get("event", 1),
         "type": "passive_tick",
-        "source": "manual_step_dry_run",
+        "source": source,
         "payload": {"step_index": step_index},
         "created_at": now_iso(),
         "processed_at": None,
@@ -162,7 +162,7 @@ def run_step_loop(
         current_time = now_iso()
         if dry_run:
             state = load_state_readonly()
-            event = _synthetic_step_event(state, index + 1)
+            event = _synthetic_step_event(state, index + 1, source="manual_step_dry_run")
             state_snapshot = deepcopy(state)
             event_snapshot = deepcopy(event)
         else:
