@@ -256,6 +256,12 @@ def _normalize_review_status(value):
 
 
 def parse_review_status(text):
+    try:
+        parsed = json.loads(text or "")
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return _normalize_review_status(parsed.get("status"))
     for line in (text or "").splitlines():
         stripped = line.strip()
         if not stripped.casefold().startswith("status:"):
@@ -342,7 +348,45 @@ def _review_list_item(text):
     return item
 
 
+def _review_items_from_value(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        values = value
+    else:
+        values = str(value).splitlines()
+    items = []
+    for value_item in values:
+        if isinstance(value_item, str):
+            item = _review_list_item(value_item)
+        else:
+            item = _review_list_item(json.dumps(value_item, ensure_ascii=False))
+        if item:
+            items.append(item)
+    return items
+
+
+def _parse_json_review_report(text):
+    try:
+        parsed = json.loads(text or "")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {
+        "status": _normalize_review_status(parsed.get("status")),
+        "summary": str(parsed.get("summary") or "").strip(),
+        "findings": _review_items_from_value(parsed.get("findings")),
+        "follow_up": _review_items_from_value(
+            parsed.get("follow_up", parsed.get("followup", parsed.get("followUp")))
+        ),
+    }
+
+
 def parse_review_report(text):
+    json_report = _parse_json_review_report(text)
+    if json_report is not None:
+        return json_report
     report = {
         "status": "unknown",
         "summary": "",

@@ -301,6 +301,7 @@ class ProgrammerTests(unittest.TestCase):
 
     def test_parse_review_status(self):
         self.assertEqual(parse_review_status("STATUS: pass"), "pass")
+        self.assertEqual(parse_review_status('{"status": "pass"}'), "pass")
         self.assertEqual(parse_review_status("STATUS: needs_fix"), "needs_fix")
         self.assertEqual(parse_review_status("STATUS: needs fix"), "needs_fix")
         self.assertEqual(parse_review_status("STATUS: pass|needs_fix|unknown"), "unknown")
@@ -319,6 +320,23 @@ class ProgrammerTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "needs_fix")
         self.assertEqual(report["summary"], "The change is close.")
+        self.assertEqual(report["findings"], ["Missing regression test"])
+        self.assertEqual(report["follow_up"], ["Add the test"])
+
+    def test_parse_review_report_accepts_json(self):
+        report = parse_review_report(
+            json.dumps(
+                {
+                    "status": "needs_fix",
+                    "summary": "Structured review.",
+                    "findings": ["Missing regression test", "none"],
+                    "follow_up": ["Add the test"],
+                }
+            )
+        )
+
+        self.assertEqual(report["status"], "needs_fix")
+        self.assertEqual(report["summary"], "Structured review.")
         self.assertEqual(report["findings"], ["Missing regression test"])
         self.assertEqual(report["follow_up"], ["Add the test"])
 
