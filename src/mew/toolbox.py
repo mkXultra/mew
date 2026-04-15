@@ -32,7 +32,7 @@ def split_command_env(command):
     return parts, env_overrides
 
 
-def run_command_record(command, cwd=None, timeout=300):
+def run_command_record(command, cwd=None, timeout=300, extra_env=None):
     argv, env_overrides = split_command_env(command)
     if not argv:
         raise ValueError("command is empty")
@@ -47,7 +47,7 @@ def run_command_record(command, cwd=None, timeout=300):
             capture_output=True,
             timeout=timeout,
             shell=False,
-            env={**os.environ, **env_overrides},
+            env={**os.environ, **env_overrides, **(extra_env or {})},
         )
         return {
             "command": command,

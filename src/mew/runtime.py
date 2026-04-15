@@ -261,6 +261,38 @@ def run_runtime_post_run_pipeline(state, args, autonomy_controls):
         start_timeout=getattr(args, "agent_start_timeout", 30.0),
     )
 
+def outbox_notification_env(message):
+    return {
+        "MEW_OUTBOX_ID": str(message.get("id") or ""),
+        "MEW_OUTBOX_TYPE": str(message.get("type") or ""),
+        "MEW_OUTBOX_TEXT": str(message.get("text") or ""),
+        "MEW_OUTBOX_REQUIRES_REPLY": "1" if message.get("requires_reply") else "0",
+        "MEW_OUTBOX_EVENT_ID": str(message.get("event_id") or ""),
+        "MEW_OUTBOX_RELATED_TASK_ID": str(message.get("related_task_id") or ""),
+        "MEW_OUTBOX_QUESTION_ID": str(message.get("question_id") or ""),
+        "MEW_OUTBOX_AGENT_RUN_ID": str(message.get("agent_run_id") or ""),
+        "MEW_OUTBOX_ATTENTION_ID": str(message.get("attention_id") or ""),
+    }
+
+def notify_outbox_messages(messages, args):
+    if not messages:
+        return []
+    if getattr(args, "notify_bell", False):
+        print("\a", end="", flush=True)
+    command = getattr(args, "notify_command", "") or ""
+    if not command:
+        return []
+    records = []
+    for message in messages:
+        record = run_command_record(
+            command,
+            cwd=".",
+            timeout=getattr(args, "notify_timeout", 5.0),
+            extra_env=outbox_notification_env(message),
+        )
+        records.append(record)
+    return records
+
 def run_runtime(args):
     model_auth = None
     try:
@@ -516,7 +548,7 @@ def run_runtime(args):
                             f"{now_iso()}: archived {archive_result['total_archived']} record(s) "
                             f"path={archive_result.get('archive_path')}"
                         )
-                if args.echo_outbox:
+                if args.echo_outbox or getattr(args, "notify_bell", False) or getattr(args, "notify_command", ""):
                     new_outbox_messages = [
                         message
                         for message in state.get("outbox", [])
@@ -528,9 +560,18 @@ def run_runtime(args):
                     next_passive_at = time.time() + args.interval
 
             print(f"processed {processed_count} event(s) reason={reason}")
-            for message in new_outbox_messages:
-                text = str(message.get("text") or "").replace("\n", "\n  ")
-                print(f"outbox #{message.get('id')} [{message.get('type')}]: {text}")
+            if args.echo_outbox:
+                for message in new_outbox_messages:
+                    text = str(message.get("text") or "").replace("\n", "\n  ")
+                    print(f"outbox #{message.get('id')} [{message.get('type')}]: {text}")
+            notification_records = notify_outbox_messages(new_outbox_messages, args)
+            for record in notification_records:
+                if record.get("exit_code") not in (0,):
+                    append_log(
+                        "- "
+                        f"{now_iso()}: notify command failed "
+                        f"exit_code={record.get('exit_code')} stderr={record.get('stderr')!r}"
+                    )
             if archive_result and archive_result.get("total_archived"):
                 print(
                     "archived "

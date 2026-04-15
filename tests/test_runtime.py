@@ -101,6 +101,46 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_notify_command_receives_new_outbox_env(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_sweep(state, *args, **kwargs):
+                    add_outbox_message(state, "question", "Need a decision?", requires_reply=True)
+                    return {}
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", side_effect=fake_sweep),
+                    patch("mew.runtime.plan_runtime_event", return_value=({"summary": "", "decisions": []}, {"summary": "", "actions": []})),
+                    patch("mew.runtime.run_command_record", return_value={"exit_code": 0, "stderr": ""}) as notify,
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--autonomous",
+                                "--notify-command",
+                                "notify-tool",
+                                "--notify-timeout",
+                                "2",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertNotIn("Need a decision?", stdout.getvalue())
+                notify.assert_called_once()
+                _, kwargs = notify.call_args
+                self.assertEqual(kwargs["timeout"], 2.0)
+                self.assertEqual(kwargs["extra_env"]["MEW_OUTBOX_TYPE"], "question")
+                self.assertEqual(kwargs["extra_env"]["MEW_OUTBOX_TEXT"], "Need a decision?")
+                self.assertEqual(kwargs["extra_env"]["MEW_OUTBOX_REQUIRES_REPLY"], "1")
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

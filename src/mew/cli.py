@@ -113,6 +113,22 @@ def build_parser():
         help="print newly created outbox messages in the runtime terminal",
     )
     run_parser.add_argument(
+        "--notify-command",
+        default="",
+        help="command to run once for each new outbox message; message fields are passed as MEW_OUTBOX_* env vars",
+    )
+    run_parser.add_argument(
+        "--notify-timeout",
+        type=float,
+        default=5.0,
+        help="seconds to wait for each notify command",
+    )
+    run_parser.add_argument(
+        "--notify-bell",
+        action="store_true",
+        help="emit a terminal bell when new outbox messages are created",
+    )
+    run_parser.add_argument(
         "--ai",
         action="store_true",
         help="use the resident model backend for startup and user messages",
