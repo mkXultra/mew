@@ -48,7 +48,12 @@ from .tasks import (
 )
 from .timeutil import elapsed_hours, now_iso
 from .toolbox import format_command_record, run_command_record
-from .thoughts import normalize_thread_list, recent_thoughts_for_context, record_thought_journal_entry
+from .thoughts import (
+    dropped_thread_warning_for_context,
+    normalize_thread_list,
+    recent_thoughts_for_context,
+    record_thought_journal_entry,
+)
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -162,6 +167,7 @@ def build_context(
         "desires": desires,
         "runtime_log_tail": read_runtime_log_tail(),
         "thought_journal": recent_thoughts_for_context(state),
+        "thought_thread_warning": dropped_thread_warning_for_context(state),
         "perception": perceive_workspace(allowed_read_roots=allowed_read_roots),
         "allowed_read_roots": allowed_read_roots or [],
         "allowed_write_roots": allowed_write_roots or [],
@@ -219,6 +225,7 @@ def build_think_prompt(
         "Follow the human-written guidance when prioritizing decisions. "
         "If guidance conflicts with safety rules, safety rules win.\n"
         "Use open_threads for unfinished reasoning that should survive the next wake, and resolved_threads for threads closed now.\n"
+        "If thought_thread_warning is present, explicitly carry those dropped threads forward or mark them resolved.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
         "execute_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
@@ -324,6 +331,7 @@ def build_act_prompt(
         "Your job is to normalize the THINK phase DecisionPlan into concrete actions.\n"
         "You still do not execute shell commands yourself. Local code will execute only validated actions.\n"
         "Preserve or refine open_threads when follow-up is needed, and mark resolved_threads when actions close a thread.\n"
+        "If thought_thread_warning is present, do not silently drop those threads again.\n"
         "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, run_verification, "
         "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"

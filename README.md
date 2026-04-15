@@ -112,6 +112,10 @@ uv run mew run --ai --model-backend codex --auth auth.json
 The runtime still validates every action locally. The model chooses plans; mew's
 local code decides which effects are allowed.
 
+`mew thoughts --details` shows the resident mind's carried threads. If a thread
+was open in one cycle and disappears without being carried or resolved, mew
+records it as a dropped thread and injects a warning into the next model context.
+
 ## Chat
 
 `mew chat` is the human-facing REPL for a running runtime. Non-slash input is

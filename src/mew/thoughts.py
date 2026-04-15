@@ -2,6 +2,7 @@ MAX_THOUGHT_JOURNAL_ENTRIES = 100
 MAX_THOUGHT_TEXT_CHARS = 700
 MAX_THOUGHT_THREADS = 8
 MAX_THOUGHT_ITEMS = 12
+DROPPED_THREAD_WARNING_THRESHOLD = 0.5
 
 
 def clip_thought_text(value, limit=MAX_THOUGHT_TEXT_CHARS):
@@ -89,6 +90,42 @@ def merge_thread_lists(*lists):
     return merged
 
 
+def dropped_threads_from_previous(state, open_threads, resolved_threads):
+    thoughts = state.get("thought_journal", [])
+    if not thoughts:
+        return [], 0.0
+    previous_open = merge_thread_lists(
+        thoughts[-1].get("open_threads"),
+        thoughts[-1].get("dropped_threads"),
+    )
+    if not previous_open:
+        return [], 0.0
+    handled = set(merge_thread_lists(open_threads, resolved_threads))
+    dropped = [thread for thread in previous_open if thread not in handled]
+    ratio = len(dropped) / len(previous_open)
+    return dropped, ratio
+
+
+def dropped_thread_warning_for_context(state):
+    thoughts = state.get("thought_journal", [])
+    if not thoughts:
+        return None
+    latest = thoughts[-1]
+    dropped = normalize_thread_list(latest.get("dropped_threads"))
+    try:
+        ratio = float(latest.get("dropped_thread_ratio") or 0.0)
+    except (TypeError, ValueError):
+        ratio = 0.0
+    if not dropped or ratio < DROPPED_THREAD_WARNING_THRESHOLD:
+        return None
+    return {
+        "thought_id": latest.get("id"),
+        "dropped_thread_ratio": ratio,
+        "dropped_threads": dropped,
+        "message": "Previous open thought threads were dropped without being carried forward or resolved.",
+    }
+
+
 def record_thought_journal_entry(
     state,
     event,
@@ -116,6 +153,11 @@ def record_thought_journal_entry(
         decision_plan.get("resolved_threads"),
         action_plan.get("resolved_threads"),
     )
+    dropped_threads, dropped_thread_ratio = dropped_threads_from_previous(
+        state,
+        open_threads,
+        resolved_threads,
+    )
     try:
         entry_id = int(state["next_ids"].get("thought", 1))
     except (TypeError, ValueError):
@@ -133,6 +175,8 @@ def record_thought_journal_entry(
         "agent_focus": clip_thought_text(state.get("agent_status", {}).get("current_focus"), 220),
         "open_threads": open_threads,
         "resolved_threads": resolved_threads,
+        "dropped_threads": dropped_threads,
+        "dropped_thread_ratio": dropped_thread_ratio,
         "decisions": _compact_items(decision_plan.get("decisions")),
         "actions": _compact_items(action_plan.get("actions")),
         "counts": dict(counts or {}),
@@ -155,6 +199,8 @@ def recent_thoughts_for_context(state, limit=8):
             "summary": thought.get("summary"),
             "open_threads": thought.get("open_threads", []),
             "resolved_threads": thought.get("resolved_threads", []),
+            "dropped_threads": thought.get("dropped_threads", []),
+            "dropped_thread_ratio": thought.get("dropped_thread_ratio", 0.0),
             "counts": thought.get("counts", {}),
         }
         for thought in reversed(thoughts)
@@ -175,6 +221,10 @@ def format_thought_entry(thought, details=False):
     if thought.get("resolved_threads"):
         lines.append("resolved_threads:")
         lines.extend(f"- {item}" for item in thought.get("resolved_threads", []))
+    if thought.get("dropped_threads"):
+        ratio = thought.get("dropped_thread_ratio") or 0.0
+        lines.append(f"dropped_threads: ratio={ratio:.2f}")
+        lines.extend(f"- {item}" for item in thought.get("dropped_threads", []))
     if thought.get("actions"):
         lines.append("actions:")
         for action in thought.get("actions", []):

@@ -13,6 +13,7 @@ from mew.agent import (
 )
 from mew.read_tools import read_file
 from mew.state import add_attention_item, add_event, default_state, migrate_state
+from mew.thoughts import format_thought_entry
 from mew.timeutil import now_iso
 
 
@@ -93,6 +94,70 @@ class AutonomyTests(unittest.TestCase):
         context = build_context(state, event, "later")
         self.assertEqual(context["thought_journal"][0]["summary"], "Recorded continuity.")
         self.assertEqual(context["perception"]["observations"][1]["status"], "disabled")
+
+    def test_thought_journal_records_dropped_threads(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "start", "open_threads": ["Investigate task #1", "Check run #2"]},
+            {"summary": "start", "actions": [{"type": "record_memory", "summary": "start"}]},
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        second = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "continue", "open_threads": ["Investigate task #1"]},
+            {"summary": "continue", "actions": [{"type": "record_memory", "summary": "continue"}]},
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        thought = state["thought_journal"][-1]
+        self.assertEqual(thought["dropped_threads"], ["Check run #2"])
+        self.assertEqual(thought["dropped_thread_ratio"], 0.5)
+
+        context = build_context(state, second, "later")
+        self.assertEqual(context["thought_thread_warning"]["dropped_threads"], ["Check run #2"])
+        self.assertIn("dropped_threads:", format_thought_entry(thought, details=True))
+
+    def test_thought_journal_does_not_drop_resolved_threads(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "start", "open_threads": ["Check run #2"]},
+            {"summary": "start", "actions": [{"type": "record_memory", "summary": "start"}]},
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        second = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "done", "resolved_threads": ["Check run #2"]},
+            {"summary": "done", "actions": [{"type": "record_memory", "summary": "done"}]},
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(state["thought_journal"][-1]["dropped_threads"], [])
+        context = build_context(state, second, "later")
+        self.assertIsNone(context["thought_thread_warning"])
 
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()

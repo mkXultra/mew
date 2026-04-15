@@ -742,7 +742,7 @@ The MVP should persist local state for:
 - `autonomy`: whether autonomous mode is enabled, its level, cycle counts, and last self-review timestamps.
 - `memory`: shallow current context plus deep preferences, project knowledge, and decisions.
 - `thought_journal`: bounded per-event working memory with summaries, open thought
-  threads, resolved threads, and compact action digests.
+  threads, resolved threads, dropped threads, and compact action digests.
 - `questions`: first-class questions with answer status and task/blocking links.
 - `replies`: answers linked to questions and user-message events.
 - `attention`: open items that explain what needs user focus.

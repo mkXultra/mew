@@ -165,6 +165,8 @@ def _thought_item(thought):
         "summary": thought.get("summary"),
         "open_threads": thought.get("open_threads", []),
         "resolved_threads": thought.get("resolved_threads", []),
+        "dropped_threads": thought.get("dropped_threads", []),
+        "dropped_thread_ratio": thought.get("dropped_thread_ratio", 0.0),
         "counts": thought.get("counts", {}),
     }
 
@@ -341,7 +343,10 @@ def build_brief(state, limit=5):
         lines.append("Thought journal")
         for thought in thoughts[:limit]:
             open_count = len(thought.get("open_threads", []))
+            dropped_count = len(thought.get("dropped_threads", []))
             suffix = f" open_threads={open_count}" if open_count else ""
+            if dropped_count:
+                suffix += f" dropped_threads={dropped_count}"
             lines.append(
                 f"- #{thought.get('id')} {thought.get('event_type')}#{thought.get('event_id')}: "
                 f"{thought.get('summary')}{suffix}"
