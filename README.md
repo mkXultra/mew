@@ -82,6 +82,7 @@ uv run mew brief --json
 uv run mew activity
 uv run mew context
 uv run mew dogfood --ai --duration 60
+uv run mew dogfood --source-workspace . --ai --duration 60
 uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json

@@ -9,6 +9,7 @@ from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     build_dogfood_report,
     build_runtime_command,
+    copy_source_workspace,
     format_dogfood_report,
     prepare_dogfood_workspace,
 )
@@ -71,6 +72,25 @@ class DogfoodTests(unittest.TestCase):
                 self.assertEqual(command[command.index("--auth") + 1], str((Path(tmp) / "auth.json").resolve()))
             finally:
                 os.chdir(old_cwd)
+
+    def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
+        with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:
+            source = Path(source_tmp)
+            workspace = Path(workspace_tmp)
+            (source / "src").mkdir()
+            (source / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+            (source / "auth.json").write_text("secret", encoding="utf-8")
+            (source / ".mew").mkdir()
+            (source / ".mew" / "state.json").write_text("{}", encoding="utf-8")
+            (source / "large.txt").write_text("x" * 200, encoding="utf-8")
+
+            result = copy_source_workspace(source, workspace, max_file_bytes=100)
+
+            self.assertEqual(result["copied_files"], 1)
+            self.assertTrue((workspace / "src" / "app.py").exists())
+            self.assertFalse((workspace / "auth.json").exists())
+            self.assertFalse((workspace / ".mew").exists())
+            self.assertFalse((workspace / "large.txt").exists())
 
     def test_build_report_summarizes_state_and_runtime_log(self):
         with tempfile.TemporaryDirectory() as tmp:

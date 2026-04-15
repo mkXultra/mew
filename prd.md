@@ -676,6 +676,7 @@ The first user-facing version should likely include:
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
 - `mew context`: show resident prompt context diagnostics and approximate section sizes.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
+- `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.
 - `mew next`: print the single next useful command or move.
 - `mew next --json`: print the next move and extracted command as structured JSON.
 - `mew verification`: show recent runtime verification runs.

@@ -10,7 +10,24 @@ import time
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, STATE_DIR, STATE_FILE
+from .read_tools import is_sensitive_path
 from .timeutil import now_iso
+
+
+DOGFOOD_SKIP_DIR_NAMES = {
+    ".git",
+    ".mew",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
+DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -38,6 +55,72 @@ def prepare_dogfood_workspace(path=None):
     if not readme.exists():
         readme.write_text(DOGFOOD_README, encoding="utf-8")
     return workspace.resolve(), created_temp
+
+
+def _is_relative_to(path, root):
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def copy_source_workspace(source, workspace, max_file_bytes=DOGFOOD_MAX_COPY_FILE_BYTES):
+    source = Path(source).expanduser()
+    if not source.is_absolute():
+        source = (Path.cwd() / source).resolve()
+    else:
+        source = source.resolve()
+    workspace = Path(workspace).expanduser().resolve()
+    if source == workspace:
+        return {"source": str(source), "copied_files": 0, "skipped_files": 0, "skipped_dirs": 0}
+    if not source.exists() or not source.is_dir():
+        raise ValueError(f"source workspace does not exist or is not a directory: {source}")
+
+    copied_files = 0
+    skipped_files = 0
+    skipped_dirs = 0
+    for current, dirnames, filenames in os.walk(source):
+        current_path = Path(current)
+        kept_dirs = []
+        for dirname in dirnames:
+            candidate = current_path / dirname
+            if (
+                dirname in DOGFOOD_SKIP_DIR_NAMES
+                or is_sensitive_path(candidate)
+                or candidate == workspace
+                or _is_relative_to(workspace, candidate)
+            ):
+                skipped_dirs += 1
+                continue
+            kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in filenames:
+            path = current_path / filename
+            if is_sensitive_path(path):
+                skipped_files += 1
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                skipped_files += 1
+                continue
+            if not path.is_file() or path.is_symlink() or stat.st_size > max_file_bytes:
+                skipped_files += 1
+                continue
+            relative = path.relative_to(source)
+            destination = workspace / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
+            copied_files += 1
+
+    return {
+        "source": str(source),
+        "copied_files": copied_files,
+        "skipped_files": skipped_files,
+        "skipped_dirs": skipped_dirs,
+    }
 
 
 def build_runtime_command(args, workspace):
@@ -264,6 +347,13 @@ def format_dogfood_report(report):
         f"tasks: {report.get('tasks')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
     ]
+    source_copy = report.get("source_copy")
+    if source_copy:
+        lines.append(
+            "source_copy: "
+            f"source={source_copy.get('source')} copied={source_copy.get('copied_files')} "
+            f"skipped_files={source_copy.get('skipped_files')} skipped_dirs={source_copy.get('skipped_dirs')}"
+        )
     dropped = report.get("dropped_threads", {})
     if dropped.get("thought_count"):
         lines.append(
@@ -293,6 +383,9 @@ def format_dogfood_report(report):
 
 def run_dogfood(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
+    source_copy = None
+    if getattr(args, "source_workspace", None):
+        source_copy = copy_source_workspace(args.source_workspace, workspace)
     command = build_runtime_command(args, workspace)
     state_dir = workspace / STATE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -335,6 +428,7 @@ def run_dogfood(args):
         kept=not (args.cleanup and created_temp),
     )
     report["runtime_output_path"] = str(output_path)
+    report["source_copy"] = source_copy
     if args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
     return report
