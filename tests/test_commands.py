@@ -754,6 +754,38 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_recommends_real_dispatch_after_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "add",
+                                "Implement dispatch prompt",
+                                "--kind",
+                                "coding",
+                                "--ready",
+                                "--auto-execute",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(main(["buddy", "--task", "1"]), 0)
+                    self.assertEqual(main(["buddy", "--task", "1", "--dispatch", "--dry-run"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("#1 [dry_run/implementation]", output)
+                self.assertIn("Next action\nmew buddy --task 1 --dispatch", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_plan_refuses_non_coding_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

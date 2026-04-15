@@ -306,6 +306,8 @@ def build_workbench_data(state, task):
         next_action = f"mew buddy --task {task_id} --dispatch --dry-run"
     elif latest_implementation.get("status") in ("created", "running"):
         next_action = f"mew agent wait {latest_implementation['id']}"
+    elif latest_implementation.get("status") == "dry_run":
+        next_action = f"mew buddy --task {task_id} --dispatch"
     elif latest_implementation.get("status") == "failed":
         next_action = f"mew agent retry {latest_implementation['id']} --dry-run"
     elif latest_implementation.get("status") == "completed" and not latest_review:

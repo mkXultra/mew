@@ -87,7 +87,10 @@ class BriefTests(unittest.TestCase):
         plan = create_task_plan(state, task)
         create_implementation_run_from_plan(state, task, plan, dry_run=True)
 
-        self.assertEqual(next_move(state), "start dry-run task #1 with `mew buddy --task 1 --dispatch`")
+        self.assertEqual(
+            next_move(state),
+            "dispatch dry-run task #1 for real with `mew buddy --task 1 --dispatch`",
+        )
         self.assertIn("dry-run ready: run #1 task=#1", build_brief(state))
         data = build_brief_data(state)
         self.assertEqual(data["programmer_queue"]["dry_run_ready"][0]["id"], 1)

@@ -486,7 +486,7 @@ def next_move(state):
         return f"review implementation run #{review_waiting[0].get('id')} with `mew agent review {review_waiting[0].get('id')}`"
     if dry_run_waiting:
         task_id = dry_run_waiting[0].get("task_id")
-        return f"start dry-run task #{task_id} with `mew buddy --task {task_id} --dispatch`"
+        return f"dispatch dry-run task #{task_id} for real with `mew buddy --task {task_id} --dispatch`"
     if dispatchable:
         task, plan = dispatchable[0]
         return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `mew task dispatch {task.get('id')}`"
