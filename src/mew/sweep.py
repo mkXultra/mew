@@ -37,6 +37,8 @@ def sweep_agent_runs(
     stale_minutes=60,
     dry_run=False,
     review_model=None,
+    result_timeout=None,
+    start_timeout=None,
 ):
     current_time = now_iso()
     report = {
@@ -80,10 +82,14 @@ def sweep_agent_runs(
             continue
 
         before = run.get("status")
+        before_timeout = run.get("last_result_timeout_at")
         try:
-            get_agent_run_result(state, run)
+            get_agent_run_result(state, run, timeout=result_timeout)
         except ValueError as exc:
             _append(report, "errors", f"run #{run.get('id')}: {exc}")
+            continue
+        if run.get("last_result_timeout_at") != before_timeout:
+            _append(report, "errors", f"run #{run.get('id')}: result poll timed out")
             continue
         after = run.get("status")
         _append(report, "collected", f"run #{run.get('id')} {before} -> {after}")
@@ -116,7 +122,7 @@ def sweep_agent_runs(
             plan=plan,
             model=review_model,
         )
-        start_agent_run(state, review_run)
+        start_agent_run(state, review_run, timeout=start_timeout)
         _append(
             report,
             "review_started",

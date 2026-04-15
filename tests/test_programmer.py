@@ -1,6 +1,7 @@
 import json
 import unittest
 import os
+import subprocess
 import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
@@ -14,6 +15,7 @@ from mew.agent_runs import (
     get_agent_run_result,
     parse_ai_cli_status,
     parse_ai_cli_pid,
+    start_agent_run,
     sync_task_with_agent_run,
     wait_agent_run,
 )
@@ -387,6 +389,41 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(run["result"], "ai-cli missing")
         self.assertEqual(task["status"], "blocked")
         self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+
+    def test_agent_result_timeout_keeps_running_state(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task), dry_run=True)
+        run["status"] = "running"
+        run["external_pid"] = 12345
+
+        with patch(
+            "mew.agent_runs.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["ai-cli", "result"], 3),
+        ):
+            get_agent_run_result(state, run, timeout=3)
+
+        self.assertEqual(run["status"], "running")
+        self.assertIn("timed out", run["stderr"])
+        self.assertTrue(run["last_result_timeout_at"])
+        self.assertNotEqual(task["status"], "blocked")
+        self.assertEqual(state["outbox"], [])
+
+    def test_start_agent_run_timeout_fails_start(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task))
+
+        with patch(
+            "mew.agent_runs.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["ai-cli", "run"], 5),
+        ):
+            start_agent_run(state, run, timeout=5)
+
+        self.assertEqual(run["status"], "failed")
+        self.assertIn("timed out", run["stderr"])
+        self.assertEqual(task["status"], "blocked")
+        self.assertIn("failed to start", state["outbox"][-1]["text"])
 
     def test_agent_wait_os_error_finalizes_linked_task_and_attention(self):
         state = default_state()
@@ -1040,6 +1077,40 @@ class ProgrammerTests(unittest.TestCase):
 
         self.assertIn("wait_for_user", [decision["type"] for decision in plan["decisions"]])
         self.assertIn("collect_agent_result", [decision["type"] for decision in plan["decisions"]])
+
+    def test_collect_agent_result_action_uses_bounded_timeout(self):
+        state = default_state()
+        task = add_task(state)
+        implementation = create_implementation_run_from_plan(
+            state,
+            task,
+            create_task_plan(state, task),
+            dry_run=True,
+        )
+        implementation["status"] = "running"
+        implementation["external_pid"] = 123
+        event = {"id": 1, "type": "passive_tick"}
+
+        with patch(
+            "mew.agent_runs.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["ai-cli", "result"], 4),
+        ):
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "collect", "decisions": []},
+                {"summary": "collect", "actions": [{"type": "collect_agent_result", "run_id": implementation["id"]}]},
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+                agent_result_timeout=4,
+            )
+
+        self.assertEqual(implementation["status"], "running")
+        self.assertIn("timed out", implementation["stderr"])
+        self.assertTrue(implementation["last_result_timeout_at"])
 
     def test_autonomous_decision_dispatch_requires_allow_agent_run(self):
         state = default_state()

@@ -49,6 +49,7 @@ from .state import (
     save_state,
     state_lock,
 )
+from .sweep import sweep_agent_runs
 from .timeutil import now_iso
 from .toolbox import run_command_record
 
@@ -179,6 +180,7 @@ def apply_runtime_event_plans(
         verify_timeout=args.verify_timeout,
         allow_write=bool(args.allow_write),
         allowed_write_roots=args.allow_write,
+        agent_result_timeout=getattr(args, "agent_result_timeout", 10.0),
     )
     if counts is None:
         counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
@@ -238,6 +240,25 @@ def action_plan_needs_runtime_precompute(event_snapshot, action_plan, args, auto
     return any(
         runtime_action_effect_needs_precompute(event_snapshot, action, args, autonomy_controls)
         for action in action_plan.get("actions", [])
+    )
+
+def run_runtime_post_run_pipeline(state, args, autonomy_controls):
+    return sweep_agent_runs(
+        state,
+        collect=True,
+        start_reviews=bool(
+            autonomy_controls.get("allow_agent_run")
+            and autonomy_controls.get("autonomy_level") == "act"
+        ),
+        followup=bool(
+            autonomy_controls.get("autonomous")
+            and autonomy_controls.get("autonomy_level") in ("propose", "act")
+        ),
+        stale_minutes=getattr(args, "agent_stale_minutes", 60.0),
+        dry_run=False,
+        review_model=getattr(args, "review_model", None),
+        result_timeout=getattr(args, "agent_result_timeout", 10.0),
+        start_timeout=getattr(args, "agent_start_timeout", 30.0),
     )
 
 def run_runtime(args):
@@ -379,6 +400,8 @@ def run_runtime(args):
                         pending_user,
                         current_time,
                     )
+                    outbox_ids_before = {str(message.get("id")) for message in state.get("outbox", [])}
+                    run_runtime_post_run_pipeline(state, args, autonomy_controls)
                     if create_internal_event:
                         add_event(state, reason, "runtime", {"pid": os.getpid()})
                     event = next_unprocessed_event(
@@ -391,7 +414,6 @@ def run_runtime(args):
                         state_snapshot = deepcopy(state)
                         runtime_status["current_event_id"] = event_id
                         runtime_status["current_phase"] = "planning"
-                    outbox_ids_before = {str(message.get("id")) for message in state.get("outbox", [])}
                     save_state(state)
 
             if sleep_for is not None:

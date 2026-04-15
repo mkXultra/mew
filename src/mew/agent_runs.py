@@ -193,7 +193,7 @@ def sync_task_with_agent_run(state, run, current_time=None):
     return task
 
 
-def start_agent_run(state, run):
+def start_agent_run(state, run, timeout=None):
     if run["backend"] != "ai-cli":
         raise ValueError(f"unsupported agent backend: {run['backend']}")
 
@@ -201,7 +201,23 @@ def start_agent_run(state, run):
     command = build_ai_cli_run_command(run)
     current_time = now_iso()
     try:
-        result = subprocess.run(command, text=True, capture_output=True, shell=False)
+        result = subprocess.run(command, text=True, capture_output=True, shell=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        run["command"] = command
+        run["stderr"] = f"timed out after {exc.timeout} second(s)"
+        run["started_at"] = current_time
+        run["updated_at"] = now_iso()
+        run["finished_at"] = run["updated_at"]
+        run["status"] = "failed"
+        sync_task_with_agent_run(state, run, run["updated_at"])
+        add_outbox_message(
+            state,
+            "warning",
+            f"Agent run #{run['id']} failed to start: {run['stderr']}",
+            related_task_id=run["task_id"],
+            agent_run_id=run["id"],
+        )
+        return run
     except OSError as exc:
         run["command"] = command
         run["stderr"] = str(exc)
@@ -321,7 +337,7 @@ def _find_first_status(value):
     return None
 
 
-def get_agent_run_result(state, run, verbose=False):
+def get_agent_run_result(state, run, verbose=False, timeout=None):
     if run["backend"] != "ai-cli":
         raise ValueError(f"unsupported agent backend: {run['backend']}")
     if not run.get("external_pid"):
@@ -331,7 +347,13 @@ def get_agent_run_result(state, run, verbose=False):
     if verbose:
         command.append("--verbose")
     try:
-        result = subprocess.run(command, text=True, capture_output=True, shell=False)
+        result = subprocess.run(command, text=True, capture_output=True, shell=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        current_time = now_iso()
+        run["stderr"] = f"agent result timed out after {exc.timeout} second(s)"
+        run["updated_at"] = current_time
+        run["last_result_timeout_at"] = current_time
+        return run
     except OSError as exc:
         current_time = now_iso()
         run["stderr"] = str(exc)

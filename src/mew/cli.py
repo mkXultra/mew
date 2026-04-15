@@ -144,6 +144,24 @@ def build_parser():
         help="allow autonomous programmer loop to start ai-cli agent runs",
     )
     run_parser.add_argument(
+        "--agent-stale-minutes",
+        type=float,
+        default=60.0,
+        help="minutes before active agent runs are marked stale by the runtime reflex sweep",
+    )
+    run_parser.add_argument(
+        "--agent-result-timeout",
+        type=float,
+        default=10.0,
+        help="seconds to wait when polling agent run results in the runtime reflex sweep",
+    )
+    run_parser.add_argument(
+        "--agent-start-timeout",
+        type=float,
+        default=30.0,
+        help="seconds to wait when starting review runs in the runtime reflex sweep",
+    )
+    run_parser.add_argument(
         "--allow-verify",
         action="store_true",
         help="allow runtime actions to run the configured verification command",

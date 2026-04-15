@@ -1573,14 +1573,14 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
         return 1
     return 1
 
-def apply_collect_agent_result_action(state, event, action):
+def apply_collect_agent_result_action(state, event, action, result_timeout=None):
     run = find_agent_run(state, action.get("run_id"))
     if not run:
         add_outbox_message(state, "warning", f"Cannot collect missing agent run #{action.get('run_id')}", event_id=event["id"])
         return 1
     before = run.get("status")
     try:
-        get_agent_run_result(state, run)
+        get_agent_run_result(state, run, timeout=result_timeout)
     except ValueError as exc:
         add_outbox_message(state, "warning", f"Cannot collect agent run #{run['id']}: {exc}", event_id=event["id"], agent_run_id=run["id"])
         return 1
@@ -2086,6 +2086,7 @@ def apply_action_plan(
     allow_write=False,
     allowed_write_roots=None,
     cycle_reason="",
+    agent_result_timeout=None,
 ):
     counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
@@ -2183,7 +2184,12 @@ def apply_action_plan(
                 allow_agent_run,
             )
         elif action_type == "collect_agent_result":
-            counts["messages"] += apply_collect_agent_result_action(state, event, action)
+            counts["messages"] += apply_collect_agent_result_action(
+                state,
+                event,
+                action,
+                result_timeout=agent_result_timeout,
+            )
         elif action_type == "review_agent_run":
             counts["messages"] += apply_review_agent_run_action(
                 state,
@@ -2451,6 +2457,7 @@ def apply_event_plans(
     verify_timeout=300,
     allow_write=False,
     allowed_write_roots=None,
+    agent_result_timeout=None,
 ):
     event = find_event(state, event_id)
     if not event or event.get("processed_at"):
@@ -2474,6 +2481,7 @@ def apply_event_plans(
         allow_write=allow_write,
         allowed_write_roots=allowed_write_roots,
         cycle_reason=reason,
+        agent_result_timeout=agent_result_timeout,
     )
     event["decision_plan"] = decision_plan
     event["action_plan"] = public_action_plan(action_plan)

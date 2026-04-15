@@ -58,7 +58,7 @@ class SweepTests(unittest.TestCase):
         run["status"] = "completed"
         task["status"] = "done"
 
-        def fake_start_agent_run(state_arg, review_run):
+        def fake_start_agent_run(state_arg, review_run, timeout=None):
             review_run["status"] = "running"
             review_run["external_pid"] = 99
             sync_task_with_agent_run(state_arg, review_run, now_iso())
