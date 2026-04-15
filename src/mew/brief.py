@@ -637,11 +637,22 @@ def build_brief(state, limit=5):
 
     if thoughts:
         lines.append("Thought journal")
+        show_thread_counts = bool(
+            questions
+            or attention
+            or tasks
+            or running_runs
+            or review_waiting
+            or followup_waiting
+            or dry_run_waiting
+            or dispatchable
+            or plan_needed
+        )
         for thought in thoughts[:limit]:
             open_count = len(thought.get("open_threads", []))
             dropped_count = len(thought.get("dropped_threads", []))
-            suffix = f" open_threads={open_count}" if open_count else ""
-            if dropped_count:
+            suffix = f" open_threads={open_count}" if show_thread_counts and open_count else ""
+            if show_thread_counts and dropped_count:
                 suffix += f" dropped_threads={dropped_count}"
             lines.append(
                 f"- #{thought.get('id')} {thought.get('event_type')}#{thought.get('event_id')}: "
