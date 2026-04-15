@@ -103,6 +103,10 @@ uv run mew run --ai --model-backend codex --auth auth.json
 uv run mew memory --compact
 ```
 
+Read-only inspections also maintain a compact `project_snapshot` under deep
+memory, so dogfood runs and resident prompts can reuse repository shape without
+re-reading every file.
+
 ## Resident Model
 
 `mew run --ai` routes `think` and `act` through a resident model backend. The

@@ -10,6 +10,7 @@ import time
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, STATE_DIR, STATE_FILE
+from .project_snapshot import format_project_snapshot
 from .read_tools import is_sensitive_path
 from .timeutil import now_iso
 
@@ -322,6 +323,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
             "thought_count": len(dropped),
             "latest": dropped[-1].get("dropped_threads", []) if dropped else [],
         },
+        "project_snapshot": state.get("memory", {}).get("deep", {}).get("project_snapshot", {}) if state else {},
         "recent_activity": recent_activity(state, limit=8) if state else [],
         "next_move": next_move(state) if state else "state was not created",
         "log_tail": log_text.splitlines()[-20:],
@@ -360,6 +362,11 @@ def format_dogfood_report(report):
             "dropped_threads: "
             f"thought_count={dropped.get('thought_count')} latest={dropped.get('latest')}"
         )
+    project_snapshot = report.get("project_snapshot") or {}
+    if project_snapshot:
+        lines.append("")
+        lines.append("Project snapshot")
+        lines.append(format_project_snapshot(project_snapshot))
 
     activity = report.get("recent_activity") or []
     if activity:

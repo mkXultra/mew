@@ -2,6 +2,7 @@ import json
 
 from .config import LOG_FILE
 from .perception import perceive_workspace
+from .project_snapshot import snapshot_for_context
 from .state import open_attention_items, open_questions
 from .tasks import open_tasks, summarize_tasks, task_sort_key
 from .thoughts import dropped_thread_warning_for_context, recent_thoughts_for_context
@@ -263,6 +264,7 @@ def memory_for_context(state, limit=20):
                 clip_context_text(item, MAX_CONTEXT_MEMORY_CHARS)
                 for item in compact_recent_items(deep.get("project", []), limit)
             ],
+            "project_snapshot": snapshot_for_context(deep.get("project_snapshot")),
             "decisions": [
                 clip_context_text(item, MAX_CONTEXT_MEMORY_CHARS)
                 for item in compact_recent_items(deep.get("decisions", []), limit)

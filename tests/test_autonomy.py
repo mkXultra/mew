@@ -886,6 +886,40 @@ class AutonomyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_file(str(state_file), [tmp])
 
+    def test_user_requested_read_action_updates_project_snapshot(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "inspect repo"})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "inspect"},
+                {
+                    "summary": "inspect",
+                    "actions": [
+                        {
+                            "type": "inspect_dir",
+                            "path": str(root),
+                        }
+                    ],
+                },
+                now_iso(),
+                allow_task_execution=False,
+                task_timeout=1,
+                allowed_read_roots=[tmp],
+                autonomous=False,
+                autonomy_level="off",
+            )
+
+        snapshot = state["memory"]["deep"]["project_snapshot"]
+        self.assertEqual(snapshot["project_types"], ["python"])
+        self.assertEqual(snapshot["roots"][0]["key_dirs"], ["src", "tests"])
+
     def test_autonomous_self_review_has_cooldown(self):
         state = default_state()
         current_time = now_iso()

@@ -104,6 +104,7 @@ def default_state():
             "deep": {
                 "preferences": [],
                 "project": [],
+                "project_snapshot": {},
                 "decisions": [],
             },
         },
@@ -250,6 +251,7 @@ def migrate_state(state):
     memory.setdefault("deep", default_state()["memory"]["deep"])
     memory["deep"].setdefault("preferences", [])
     memory["deep"].setdefault("project", [])
+    memory["deep"].setdefault("project_snapshot", {})
     memory["deep"].setdefault("decisions", [])
 
     state.setdefault("questions", [])

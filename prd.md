@@ -777,6 +777,11 @@ The MVP should provide deterministic memory compaction that summarizes recent
 shallow events into `memory.deep.project` and retains only a configurable recent
 tail. AI-assisted memory synthesis can be added later.
 
+Read-only inspection actions should also refresh a structured
+`memory.deep.project_snapshot` with repository shape, key files, detected project
+types, package metadata, and recent file/search observations. This gives the
+resident model a compact project map without repeatedly reading the same files.
+
 ### 11.3 Task Model
 
 Each task should include:

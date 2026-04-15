@@ -113,6 +113,14 @@ class DogfoodTests(unittest.TestCase):
                     "dropped_threads": [],
                 }
             )
+            state["memory"]["deep"]["project_snapshot"] = {
+                "updated_at": "now",
+                "project_types": ["python"],
+                "roots": [],
+                "files": [],
+                "searches": [],
+                "package": {"name": "mew"},
+            }
             (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             (workspace / LOG_FILE).write_text(
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
@@ -131,7 +139,9 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["events"]["processed"], 1)
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertEqual(report["actions"], {"inspect_dir": 1})
+            self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertIn("Recent activity", text)
+            self.assertIn("Project snapshot", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)

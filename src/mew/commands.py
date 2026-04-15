@@ -33,6 +33,7 @@ from .dogfood import format_dogfood_report, run_dogfood
 from .errors import MewError
 from .memory import compact_memory
 from .perception import format_perception, perceive_workspace
+from .project_snapshot import format_project_snapshot
 from .programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -1201,6 +1202,7 @@ def cmd_memory(args):
         print("project:")
         for item in deep.get("project", []):
             print(f"- {item}")
+        print(format_project_snapshot(deep.get("project_snapshot")))
         print("decisions:")
         for item in deep.get("decisions", []):
             print(f"- {item}")

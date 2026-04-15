@@ -25,6 +25,7 @@ from .programmer import (
     find_task_plan,
     latest_task_plan,
 )
+from .project_snapshot import update_project_snapshot_from_read_result
 from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
 from .state import (
     add_event,
@@ -1152,6 +1153,7 @@ def apply_read_action(state, event, action, current_time, allowed_read_roots):
         return 1
 
     summary = summarize_read_result(action_type, result)
+    update_project_snapshot_from_read_result(state, action_type, result, current_time)
     record_deep_memory(state, "project", summary, current_time)
     if action_type == "read_file":
         text = f"Read file {result.get('path')} and saved the observation to memory."

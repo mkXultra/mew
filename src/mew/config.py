@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-STATE_VERSION = 7
+STATE_VERSION = 8
 STATE_DIR = Path(".mew")
 STATE_FILE = STATE_DIR / "state.json"
 ARCHIVE_DIR = STATE_DIR / "archive"
