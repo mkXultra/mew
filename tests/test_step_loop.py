@@ -70,6 +70,11 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(filtered["skipped_actions"][0]["skip_reason"], "existing_open_question")
         self.assertEqual(step_stop_reason(filtered), "")
 
+    def test_refine_task_counts_as_step_feedback(self):
+        action_plan = {"actions": [{"type": "refine_task", "task_id": 1, "title": "Concrete"}]}
+
+        self.assertEqual(step_stop_reason(action_plan), "")
+
     def test_dry_run_step_does_not_write_state(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

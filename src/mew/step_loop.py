@@ -157,6 +157,7 @@ def step_stop_reason(action_plan, dry_run=False):
         "read_file",
         "search_text",
         "run_verification",
+        "refine_task",
     }
     if not any(action_type in feedback_types for action_type in action_types):
         return "no_feedback_action"
