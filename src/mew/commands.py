@@ -414,9 +414,10 @@ def cmd_work(args):
     if not task:
         if task_id:
             print(f"mew: task not found: {task_id}", file=sys.stderr)
+            return 1
         else:
             print("No tasks.")
-        return 1
+            return 0
     data = build_workbench_data(state, task)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))

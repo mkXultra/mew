@@ -754,6 +754,17 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_without_tasks_is_not_an_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work"]), 0)
+                self.assertEqual(stdout.getvalue(), "No tasks.\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_workbench_recommends_real_dispatch_after_dry_run(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
