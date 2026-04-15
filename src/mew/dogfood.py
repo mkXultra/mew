@@ -293,6 +293,28 @@ def action_counts(thoughts):
             counts[action_type] = counts.get(action_type, 0) + 1
     return dict(sorted(counts.items()))
 
+
+def read_inspection_metrics(outbox, actions):
+    read_progress = [
+        message
+        for message in outbox
+        if str(message.get("text") or "").startswith("Read file ")
+        and "saved the observation to memory" in str(message.get("text") or "")
+    ]
+    repeated_skips = [
+        message
+        for message in outbox
+        if "Skipped repeated read_file" in str(message.get("text") or "")
+    ]
+    return {
+        "read_file_actions": actions.get("read_file", 0),
+        "read_progress_messages": len(read_progress),
+        "read_progress_unread": len([message for message in read_progress if not message.get("read_at")]),
+        "repeated_read_skips": len(repeated_skips),
+        "repeated_read_skips_unread": len([message for message in repeated_skips if not message.get("read_at")]),
+    }
+
+
 def plan_schema_issues(events, limit=5):
     issues = []
     for event in events:
@@ -329,6 +351,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
     dropped = [thought for thought in thoughts if thought.get("dropped_threads")]
     active_dropped = dropped_thread_warning_for_context(state) if state else None
     processed = [event for event in inbox if event.get("processed_at")]
+    actions = action_counts(thoughts)
 
     return {
         "generated_at": now_iso(),
@@ -350,7 +373,8 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
             "unread": len([message for message in outbox if not message.get("read_at")]),
             "by_type": count_by(outbox, "type"),
         },
-        "actions": action_counts(thoughts),
+        "actions": actions,
+        "read_inspection": read_inspection_metrics(outbox, actions),
         "tasks": count_by(state.get("tasks", []), "status"),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
@@ -391,6 +415,7 @@ def format_dogfood_report(report):
         f"total={report['outbox']['total']} unread={report['outbox']['unread']} "
         f"by_type={report['outbox']['by_type']}",
         f"actions: {report.get('actions')}",
+        f"read_inspection: {report.get('read_inspection')}",
         f"tasks: {report.get('tasks')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
     ]

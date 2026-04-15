@@ -109,6 +109,19 @@ class DogfoodTests(unittest.TestCase):
                 "schema_issues": [{"level": "warning", "path": "decisions[0].type", "message": "unsupported"}],
             }
             add_outbox_message(state, "info", "hello", event_id=event["id"])
+            read_message = add_outbox_message(
+                state,
+                "info",
+                f"Read file {workspace / 'README.md'} and saved the observation to memory.",
+                event_id=event["id"],
+            )
+            read_message["read_at"] = "read"
+            add_outbox_message(
+                state,
+                "info",
+                f"Skipped repeated read_file for {workspace / 'README.md'}; recent context already contains that inspection.",
+                event_id=event["id"],
+            )
             state["thought_journal"].append(
                 {
                     "id": 1,
@@ -149,12 +162,17 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertEqual(report["runtime_status"]["last_cycle_reason"], "passive_tick")
             self.assertEqual(report["actions"], {"inspect_dir": 1})
+            self.assertEqual(report["read_inspection"]["read_progress_messages"], 1)
+            self.assertEqual(report["read_inspection"]["read_progress_unread"], 0)
+            self.assertEqual(report["read_inspection"]["repeated_read_skips"], 1)
+            self.assertEqual(report["read_inspection"]["repeated_read_skips_unread"], 1)
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
+            self.assertIn("read_inspection:", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
