@@ -528,6 +528,7 @@ def run_dogfood_loop(args):
         "final_next_move": final_report.get("next_move"),
         "final_events": final_report.get("events", {}),
         "final_model_phases": final_report.get("model_phases", {}),
+        "final_dropped_threads": final_report.get("dropped_threads", {}),
         "final_project_snapshot": final_report.get("project_snapshot", {}),
     }
 
@@ -540,6 +541,12 @@ def format_dogfood_loop_report(report):
         f"final_events: {report.get('final_events')}",
         f"final_model_phases: {report.get('final_model_phases')}",
     ]
+    final_dropped = report.get("final_dropped_threads") or {}
+    if final_dropped.get("thought_count"):
+        lines.append(
+            "final_dropped_threads: "
+            f"thought_count={final_dropped.get('thought_count')} latest={final_dropped.get('latest')}"
+        )
     final_snapshot = report.get("final_project_snapshot") or {}
     if final_snapshot:
         lines.append("")
@@ -550,11 +557,13 @@ def format_dogfood_loop_report(report):
     for cycle in report.get("cycles") or []:
         events = cycle.get("events") or {}
         phases = cycle.get("model_phases") or {}
+        dropped = cycle.get("dropped_threads") or {}
         lines.append(
             f"- #{cycle.get('cycle')} exit={cycle.get('exit_code')} "
             f"duration={cycle.get('duration_seconds'):.1f}s "
             f"processed={events.get('processed')}/{events.get('total')} "
             f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
+            f"dropped_threads={dropped.get('thought_count', 0)} "
             f"next={cycle.get('next_move')}"
         )
     lines.append("")
