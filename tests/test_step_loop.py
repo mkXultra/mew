@@ -200,6 +200,8 @@ class StepLoopTests(unittest.TestCase):
             [line.split()[2] for line in progress],
             ["planning", "planning", "apply", "apply"],
         )
+        self.assertIn("planned_event=next#", progress[0])
+        self.assertIn("event=#", progress[2])
         self.assertIn("actions=1", progress[-1])
 
     def test_dry_run_report_labels_planned_reads_as_not_executed(self):

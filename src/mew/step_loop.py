@@ -46,6 +46,11 @@ def _synthetic_step_event(state, step_index, source="manual_step_planning"):
     }
 
 
+def _planned_event_label(event, dry_run=False):
+    prefix = "dry-run" if dry_run else "next"
+    return f"{prefix}#{event.get('id')}"
+
+
 def load_state_readonly():
     if not STATE_FILE.exists():
         return default_state()
@@ -348,7 +353,10 @@ def run_step_loop(
         snapshot_autonomy["manual_step"] = True
 
         if progress:
-            progress(f"step #{index + 1}: planning start event={event_snapshot.get('id')}")
+            progress(
+                f"step #{index + 1}: planning start "
+                f"planned_event={_planned_event_label(event_snapshot, dry_run=dry_run)}"
+            )
         decision_plan, action_plan = plan_event(
             state_snapshot,
             event_snapshot,
@@ -375,7 +383,10 @@ def run_step_loop(
             log_phases=not dry_run,
         )
         if progress:
-            progress(f"step #{index + 1}: planning ok event={event_snapshot.get('id')}")
+            progress(
+                f"step #{index + 1}: planning ok "
+                f"planned_event={_planned_event_label(event_snapshot, dry_run=dry_run)}"
+            )
         filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
         filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
@@ -397,7 +408,7 @@ def run_step_loop(
                 event_id = event.get("id")
                 apply_time = now_iso()
                 if progress:
-                    progress(f"step #{index + 1}: apply start event={event_id}")
+                    progress(f"step #{index + 1}: apply start event=#{event_id}")
                 counts = apply_event_plans(
                     state,
                     event_id,
@@ -418,7 +429,7 @@ def run_step_loop(
                 ) or counts
                 if progress:
                     progress(
-                        f"step #{index + 1}: apply ok event={event_id} "
+                        f"step #{index + 1}: apply ok event=#{event_id} "
                         f"actions={counts.get('actions', 0)} messages={counts.get('messages', 0)}"
                     )
                 update_runtime_processing_summary(
