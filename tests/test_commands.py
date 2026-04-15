@@ -533,6 +533,37 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(runner.call_args.args[0].send_message, ["hello"])
         self.assertIn("Mew dogfood report", stdout.getvalue())
 
+    def test_dogfood_command_can_write_report_file(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "command": ["mew", "run"],
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+            "events": {"processed": 1, "total": 1, "by_type": {"startup": 1}},
+            "model_phases": {"think_ok": 0, "think_error": 0, "act_ok": 0, "act_error": 0},
+            "outbox": {"total": 0, "unread": 0, "by_type": {}},
+            "actions": {},
+            "tasks": {},
+            "verification_runs": 0,
+            "write_runs": 0,
+            "dropped_threads": {"thought_count": 0, "latest": []},
+            "recent_activity": [],
+            "next_move": "ask the user what to track next",
+            "log_tail": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "dogfood-report.json"
+            with patch("mew.commands.run_dogfood", return_value=report):
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["dogfood", "--duration", "0", "--report", str(report_path)])
+
+            self.assertEqual(code, 0)
+            self.assertIn(f"report_path: {report_path}", stdout.getvalue())
+            written = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(written["workspace"], "/tmp/dog")
+            self.assertEqual(written["report_path"], str(report_path))
+
     def test_dogfood_requires_verify_command_when_verify_enabled(self):
         with redirect_stderr(StringIO()) as stderr:
             code = main(["dogfood", "--allow-verify"])

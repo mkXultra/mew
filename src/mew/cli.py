@@ -369,6 +369,7 @@ def build_parser():
         help="minimum minutes between dogfood verification runs",
     )
     dogfood_parser.add_argument("--cleanup", action="store_true", help="remove a temporary dogfood workspace after reporting")
+    dogfood_parser.add_argument("--report", help="write the structured dogfood report to this JSON file")
     dogfood_parser.add_argument("--json", action="store_true", help="print structured JSON report")
     dogfood_parser.set_defaults(func=cmd_dogfood)
 

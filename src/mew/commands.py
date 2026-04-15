@@ -637,17 +637,37 @@ def cmd_dogfood(args):
         return 1
     if getattr(args, "cycles", 1) and args.cycles > 1:
         report = run_dogfood_loop(args)
+        report_path = write_report_if_requested(args, report)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 0
         print(format_dogfood_loop_report(report))
+        if report_path:
+            print(f"report_path: {report_path}")
         return 0
     report = run_dogfood(args)
+    report_path = write_report_if_requested(args, report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     print(format_dogfood_report(report))
+    if report_path:
+        print(f"report_path: {report_path}")
     return 0
+
+def write_report_if_requested(args, report):
+    path_arg = getattr(args, "report", None)
+    if not path_arg:
+        return ""
+    path = os.path.abspath(os.path.expanduser(path_arg))
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    report["report_path"] = path
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    return path
 
 def command_from_next_move(move):
     parts = (move or "").split("`")
