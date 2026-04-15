@@ -699,6 +699,32 @@ def injected_message_status(state, sent_messages, event_ids=None):
         "unmatched": pending_texts,
     }
 
+def suppress_processed_injected_dropped_threads(report):
+    injected = report.get("injected_messages") or {}
+    processed_texts = {
+        str(event.get("text") or "")
+        for event in injected.get("events", [])
+        if event.get("processed") and event.get("text")
+    }
+    if not processed_texts:
+        return report
+    active = report.get("active_dropped_threads") or {}
+    latest = list(active.get("latest") or [])
+    remaining = [
+        thread
+        for thread in latest
+        if not any(thread == f"User request context: {text}" for text in processed_texts)
+    ]
+    if len(remaining) == len(latest):
+        return report
+    report["active_dropped_threads"] = {
+        **active,
+        "thought_count": len(remaining),
+        "latest": remaining,
+        "thought_id": active.get("thought_id") if remaining else None,
+    }
+    return report
+
 
 def format_dogfood_report(report):
     lines = [
@@ -724,6 +750,7 @@ def format_dogfood_report(report):
         f"agent_runs: {report.get('agent_runs')}",
         f"programmer_loop: {report.get('programmer_loop')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
+        f"model_enabled: {bool(report.get('model_enabled'))}",
     ]
     injected = report.get("injected_messages") or {}
     if injected.get("total"):
@@ -990,11 +1017,13 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         duration,
         kept=not (args.cleanup and created_temp),
     )
+    report["model_enabled"] = bool(getattr(args, "ai", False))
     report["injected_messages"] = injected_message_status(
         read_json_file(workspace / STATE_FILE, {}),
         getattr(args, "send_message", None),
         event_ids=injected_event_ids,
     )
+    suppress_processed_injected_dropped_threads(report)
     report["runtime_output_path"] = str(output_path)
     report["source_copy"] = source_copy
     if pre_snapshot is not None:

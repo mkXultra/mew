@@ -25,6 +25,7 @@ from mew.dogfood import (
     run_dogfood_loop,
     run_post_wait_agent_reflex,
     seed_ready_coding_task,
+    suppress_processed_injected_dropped_threads,
     tail_lines,
     wait_for_active_agent_runs,
 )
@@ -330,6 +331,7 @@ class DogfoodTests(unittest.TestCase):
             "verification_runs": 0,
             "write_runs": 0,
             "injected_messages": {"total": 1, "processed": 0, "unprocessed": 1},
+            "model_enabled": True,
             "next_move": "inspect",
         }
 
@@ -337,6 +339,30 @@ class DogfoodTests(unittest.TestCase):
 
         self.assertIn("injected_messages: processed=0/1 unprocessed=1", text)
         self.assertIn("warning: injected user message(s) were left unprocessed", text)
+        self.assertIn("model_enabled: True", text)
+
+    def test_suppress_processed_injected_dropped_threads(self):
+        report = {
+            "injected_messages": {
+                "events": [
+                    {"text": "handled request", "processed": True},
+                    {"text": "pending request", "processed": False},
+                ]
+            },
+            "active_dropped_threads": {
+                "thought_count": 2,
+                "latest": [
+                    "User request context: handled request",
+                    "User request context: pending request",
+                ],
+                "thought_id": 7,
+            },
+        }
+
+        suppress_processed_injected_dropped_threads(report)
+
+        self.assertEqual(report["active_dropped_threads"]["thought_count"], 1)
+        self.assertEqual(report["active_dropped_threads"]["latest"], ["User request context: pending request"])
 
     def test_prepopulate_project_snapshot_writes_dogfood_state(self):
         with tempfile.TemporaryDirectory() as tmp:

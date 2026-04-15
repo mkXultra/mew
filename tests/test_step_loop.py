@@ -202,6 +202,28 @@ class StepLoopTests(unittest.TestCase):
         )
         self.assertIn("actions=1", progress[-1])
 
+    def test_dry_run_report_labels_planned_reads_as_not_executed(self):
+        report = {
+            "steps": [
+                {
+                    "index": 1,
+                    "event_id": 1,
+                    "summary": "Inspect first.",
+                    "actions": [{"type": "read_file", "path": "README.md"}],
+                    "counts": {},
+                }
+            ],
+            "stop_reason": "dry_run",
+            "dry_run": True,
+            "max_steps": 1,
+        }
+
+        from mew.step_loop import format_step_loop_report
+
+        text = format_step_loop_report(report)
+
+        self.assertIn("dry-run: read actions were planned but not executed", text)
+
     def test_step_run_records_visible_effects(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

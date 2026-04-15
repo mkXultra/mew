@@ -473,6 +473,14 @@ def format_step_loop_report(report):
     ]
     if report.get("dry_run"):
         lines.append("dry_run: true")
+        planned_reads = [
+            action
+            for step in report.get("steps") or []
+            for action in step.get("actions") or []
+            if action.get("type") in ("inspect_dir", "read_file", "search_text")
+        ]
+        if planned_reads:
+            lines.append("dry-run: read actions were planned but not executed")
     for step in report.get("steps") or []:
         lines.append(f"- step #{step.get('index')} event=#{step.get('event_id')}: {step.get('summary')}")
         for action in step.get("actions") or []:
