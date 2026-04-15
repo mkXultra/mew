@@ -405,7 +405,7 @@ Current package boundaries:
 - `src/mew/runtime.py`: long-running runtime loop and startup/shutdown sequence.
 - `src/mew/agent.py`: think/act prompts, plan normalization, and ActionPlan application.
 - `src/mew/model_backends.py`: resident model adapter layer.
-- `src/mew/perception.py`: passive read-only workspace observations for model context.
+- `src/mew/perception.py`: passive read-only workspace observers for model context.
 - `src/mew/codex_api.py`: Codex Web API OAuth loading, streaming call, and JSON extraction.
 - `src/mew/state.py`: local JSON state, runtime locks, inbox/outbox primitives, guidance, policy, self, and desires files.
 - `src/mew/tasks.py`: task queries, formatting, and command execution.

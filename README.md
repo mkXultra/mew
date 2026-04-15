@@ -165,7 +165,8 @@ state without leaving the session:
 ## Safe Tools
 
 `mew perceive` shows the small passive workspace observations that are injected
-into the model context when a read root is allowed:
+into the model context when a read root is allowed. Current observers include
+git status and recent file changes:
 
 ```sh
 uv run mew perceive --allow-read .

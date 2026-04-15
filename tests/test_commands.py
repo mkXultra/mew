@@ -309,8 +309,8 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 data = json.loads(stdout.getvalue())
-                self.assertEqual(data["observations"][-1]["type"], "git_status")
-                self.assertEqual(data["observations"][-1]["branch"], "main")
+                git = next(item for item in data["observations"] if item["type"] == "git_status")
+                self.assertEqual(git["branch"], "main")
             finally:
                 os.chdir(old_cwd)
 
