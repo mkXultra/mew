@@ -5,8 +5,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from mew.state import load_state
-from mew.step_loop import filter_step_action_plan, load_state_readonly, run_step_loop
+from mew.state import add_event, add_outbox_message, add_question, default_state, load_state, next_id
+from mew.step_loop import (
+    MAX_STEP_EFFECTS,
+    collect_step_effects,
+    filter_step_action_plan,
+    load_state_readonly,
+    run_step_loop,
+)
 
 
 class StepLoopTests(unittest.TestCase):
@@ -168,6 +174,51 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(effects[0]["message_type"], "question")
         self.assertEqual(effects[0]["question_id"], state["questions"][0]["id"])
         self.assertEqual(effects[1]["text"], "Which task should I handle?")
+
+    def test_collect_step_effects_keeps_linked_question_with_message(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        add_outbox_message(state, "info", "first", event_id=event["id"])
+        question, _created = add_question(state, "Need input?", event_id=event["id"])
+        add_outbox_message(state, "info", "third", event_id=event["id"])
+
+        effects = collect_step_effects(state, event["id"])
+
+        self.assertEqual([effect["type"] for effect in effects], ["message", "message", "question", "message"])
+        self.assertEqual(effects[2]["id"], question["id"])
+        self.assertEqual(effects[2]["text"], "Need input?")
+
+    def test_collect_step_effects_preserves_important_effects_when_capped(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        question, _created = add_question(state, "Need input?", event_id=event["id"])
+        for index in range(MAX_STEP_EFFECTS + 5):
+            add_outbox_message(state, "info", f"message {index}", event_id=event["id"])
+        state["verification_runs"].append(
+            {
+                "id": next_id(state, "verification_run"),
+                "event_id": event["id"],
+                "exit_code": 1,
+                "reason": "important",
+                "created_at": "verify-time",
+            }
+        )
+        state["write_runs"].append(
+            {
+                "id": next_id(state, "write_run"),
+                "event_id": event["id"],
+                "action_type": "edit_file",
+                "path": "README.md",
+                "created_at": "write-time",
+            }
+        )
+
+        effects = collect_step_effects(state, event["id"])
+
+        self.assertEqual(len(effects), MAX_STEP_EFFECTS)
+        self.assertIn(("question", question["id"]), [(effect["type"], effect["id"]) for effect in effects])
+        self.assertIn("verification_run", [effect["type"] for effect in effects])
+        self.assertIn("write_run", [effect["type"] for effect in effects])
 
     def test_step_does_not_expose_unprocessed_manual_event_while_planning(self):
         old_cwd = os.getcwd()

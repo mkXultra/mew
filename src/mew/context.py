@@ -545,6 +545,7 @@ def _step_effect_for_context(effect):
     return {
         "type": effect.get("type") or "unknown",
         "id": effect.get("id"),
+        "at": effect.get("at"),
         "message_type": effect.get("message_type"),
         "text": clip_context_text(effect.get("text"), MAX_CONTEXT_TEXT_CHARS),
         "related_task_id": effect.get("related_task_id"),

@@ -124,6 +124,9 @@ def compact_step_action(action):
 
 def compact_step_effect(effect_type, item):
     effect = {"type": effect_type, "id": item.get("id")}
+    timestamp = item.get("created_at") or item.get("updated_at")
+    if timestamp:
+        effect["at"] = timestamp
     if effect_type == "message":
         effect.update(
             {
@@ -165,13 +168,40 @@ def compact_step_effect(effect_type, item):
     return {key: value for key, value in effect.items() if value is not None}
 
 
+def _cap_step_effects(effects):
+    if len(effects) <= MAX_STEP_EFFECTS:
+        return effects
+    protected = [
+        effect
+        for effect in effects
+        if effect.get("type") in ("question", "verification_run", "write_run")
+    ]
+    capped = list(effects[:MAX_STEP_EFFECTS])
+    missing_protected = [effect for effect in protected if effect not in capped]
+    if not missing_protected:
+        return capped
+    protected_slots = min(len(missing_protected), MAX_STEP_EFFECTS)
+    return capped[: MAX_STEP_EFFECTS - protected_slots] + missing_protected[-protected_slots:]
+
+
 def collect_step_effects(state, event_id):
     effects = []
+    questions_by_id = {
+        question.get("id"): question
+        for question in state.get("questions", [])
+        if question.get("event_id") == event_id
+    }
+    included_questions = set()
     for message in state.get("outbox", []):
         if message.get("event_id") == event_id:
             effects.append(compact_step_effect("message", message))
+            question_id = message.get("question_id")
+            question = questions_by_id.get(question_id)
+            if question:
+                effects.append(compact_step_effect("question", question))
+                included_questions.add(question_id)
     for question in state.get("questions", []):
-        if question.get("event_id") == event_id:
+        if question.get("event_id") == event_id and question.get("id") not in included_questions:
             effects.append(compact_step_effect("question", question))
     for run in state.get("verification_runs", []):
         if run.get("event_id") == event_id:
@@ -179,7 +209,7 @@ def collect_step_effects(state, event_id):
     for run in state.get("write_runs", []):
         if run.get("event_id") == event_id:
             effects.append(compact_step_effect("write_run", run))
-    return effects[:MAX_STEP_EFFECTS]
+    return _cap_step_effects(effects)
 
 
 def record_step_run(state, step, stop_reason, at):
