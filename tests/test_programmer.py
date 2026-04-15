@@ -19,6 +19,7 @@ from mew.agent_runs import (
 )
 from mew.cli import main
 from mew.programmer import (
+    acknowledge_review_followup,
     build_review_prompt,
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -208,6 +209,25 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(review["review_report"]["summary"], "x")
         self.assertEqual(review["review_report"]["follow_up"], ["Add tests for programmer loop"])
         self.assertTrue(review["followup_processed_at"])
+
+    def test_acknowledge_review_followup_does_not_create_task(self):
+        state = default_state()
+        task = add_task(state)
+        review = {
+            "id": 9,
+            "task_id": task["id"],
+            "purpose": "review",
+            "result": "STATUS: needs_fix\nSUMMARY: x\nFOLLOW_UP:\n- Already handled elsewhere",
+            "stdout": "",
+        }
+
+        status = acknowledge_review_followup(state, task, review, note="fixed in later commit")
+
+        self.assertEqual(status, "needs_fix")
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertTrue(review["followup_processed_at"])
+        self.assertEqual(review["review_report"]["follow_up"], ["Already handled elsewhere"])
+        self.assertIn("acknowledged without creating follow-up task", task["notes"])
 
     def test_review_status_uses_agent_message_not_prompt_template(self):
         state = default_state()

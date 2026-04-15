@@ -785,6 +785,8 @@ def build_parser():
 
     agent_followup_parser = agent_subparsers.add_parser("followup", help="create a follow-up task from a review run")
     agent_followup_parser.add_argument("run_id")
+    agent_followup_parser.add_argument("--ack", action="store_true", help="mark review follow-up processed without creating a task")
+    agent_followup_parser.add_argument("--note", help="note for --ack")
     agent_followup_parser.set_defaults(func=cmd_agent_followup)
 
     agent_retry_parser = agent_subparsers.add_parser("retry", help="start a retry implementation run")

@@ -428,3 +428,21 @@ def create_follow_up_task_from_review(state, task, review_run):
     review_run["followup_task_id"] = new_task["id"]
     review_run["updated_at"] = current_time
     return new_task, status
+
+
+def acknowledge_review_followup(state, task, review_run, note=""):
+    result = extract_review_text(review_run)
+    report = parse_review_report(result)
+    status = report["status"]
+    current_time = now_iso()
+    review_run["review_status"] = status
+    review_run["review_report"] = report
+    review_run["followup_processed_at"] = current_time
+    review_run["updated_at"] = current_time
+    task.setdefault("notes", "")
+    suffix = f"{current_time} review run #{review_run['id']} acknowledged without creating follow-up task: {status}"
+    if note:
+        suffix += f" ({note.strip()})"
+    task["notes"] = f"{task['notes'].rstrip()}\n{suffix}".strip()
+    task["updated_at"] = current_time
+    return status

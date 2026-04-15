@@ -923,6 +923,58 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_agent_followup_ack_does_not_create_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Existing task",
+                            "description": "",
+                            "status": "doing",
+                            "priority": "medium",
+                            "source": "test",
+                            "notes": "",
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    state["agent_runs"].append(
+                        {
+                            "id": 2,
+                            "task_id": 1,
+                            "purpose": "review",
+                            "status": "completed",
+                            "result": "STATUS: needs_fix\nSUMMARY: x\nFOLLOW_UP:\n- Already fixed",
+                            "stdout": "",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["agent", "followup", "2", "--ack", "--note", "fixed later"]), 0)
+
+                self.assertIn("follow-up acknowledged without creating a task", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(len(state["tasks"]), 1)
+                self.assertTrue(state["agent_runs"][0]["followup_processed_at"])
+                self.assertIn("fixed later", state["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_verify_runs_and_records_failure_attention(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

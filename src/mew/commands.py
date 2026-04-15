@@ -35,6 +35,7 @@ from .memory import compact_memory
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
 from .programmer import (
+    acknowledge_review_followup,
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
     create_retry_run_for_implementation,
@@ -1495,9 +1496,16 @@ def cmd_agent_followup(args):
         if not task:
             print(f"mew: task not found for review run #{args.run_id}", file=sys.stderr)
             return 1
-        followup, status = create_follow_up_task_from_review(state, task, review_run)
+        if args.ack:
+            status = acknowledge_review_followup(state, task, review_run, note=args.note or "")
+            followup = None
+        else:
+            followup, status = create_follow_up_task_from_review(state, task, review_run)
         save_state(state)
     print(f"review run #{review_run['id']} status={status}")
+    if args.ack:
+        print("follow-up acknowledged without creating a task")
+        return 0
     if followup:
         print(format_task(followup))
     else:
