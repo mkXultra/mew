@@ -1044,12 +1044,21 @@ def build_parser():
     return parser
 
 
+def require_positive_float(parser, args, attribute, flag):
+    value = getattr(args, attribute, None)
+    if value is not None and value <= 0:
+        parser.error(f"{flag} must be positive")
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if hasattr(args, "interval_minutes") and args.interval_minutes is not None:
+        require_positive_float(parser, args, "interval_minutes", "--interval-minutes")
         args.interval = args.interval_minutes * 60.0
+    require_positive_float(parser, args, "interval", "--interval")
+    require_positive_float(parser, args, "poll_interval", "--poll-interval")
 
     if args.message:
         return cmd_message(args)

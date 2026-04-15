@@ -65,6 +65,21 @@ class CommandTests(unittest.TestCase):
         self.assertIn("resident model override", output)
         self.assertIn("resident model API base URL override", output)
 
+    def test_interval_flags_must_be_positive(self):
+        cases = (
+            (["run", "--interval", "0"], "--interval must be positive"),
+            (["run", "--interval-minutes", "-1"], "--interval-minutes must be positive"),
+            (["run", "--poll-interval", "0"], "--poll-interval must be positive"),
+            (["dogfood", "--poll-interval", "-0.1"], "--poll-interval must be positive"),
+        )
+        for argv, message in cases:
+            with self.subTest(argv=argv):
+                with redirect_stderr(StringIO()) as stderr:
+                    with self.assertRaises(SystemExit) as raised:
+                        main(argv)
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn(message, stderr.getvalue())
+
     def test_doctor_missing_optional_auth_still_succeeds(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -999,6 +1014,7 @@ class CommandTests(unittest.TestCase):
                 archives = list((Path(".mew") / "archive").glob("state-*.json"))
                 self.assertEqual(len(archives), 1)
                 archived = json.loads(archives[0].read_text(encoding="utf-8"))
+                effect_count = archived["counts"].pop("effects")
                 self.assertEqual(
                     archived["counts"],
                     {
@@ -1009,6 +1025,47 @@ class CommandTests(unittest.TestCase):
                         "write_runs": 2,
                     },
                 )
+                self.assertGreaterEqual(effect_count, 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_archive_compacts_effect_log(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.archive import archive_state_records
+                from mew.config import EFFECT_LOG_FILE
+                from mew.state import default_state
+
+                EFFECT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                EFFECT_LOG_FILE.write_text(
+                    "\n".join(
+                        json.dumps({"type": "state_saved", "seq": index})
+                        for index in range(5)
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                state = default_state()
+                result = archive_state_records(
+                    state,
+                    keep_recent=2,
+                    dry_run=False,
+                    current_time="2026-04-15T00:00:00Z",
+                )
+
+                self.assertEqual(result["archived"]["effects"], 3)
+                self.assertEqual(result["remaining"]["effects"], 2)
+                remaining = EFFECT_LOG_FILE.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(len(remaining), 2)
+                self.assertIn('"seq": 3', remaining[0])
+                archives = list((Path(".mew") / "archive").glob("state-*.json"))
+                self.assertEqual(len(archives), 1)
+                archived = json.loads(archives[0].read_text(encoding="utf-8"))
+                self.assertEqual(archived["counts"]["effects"], 3)
+                self.assertEqual([record["seq"] for record in archived["effects"]], [0, 1, 2])
             finally:
                 os.chdir(old_cwd)
 
