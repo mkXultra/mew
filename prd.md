@@ -418,11 +418,14 @@ Current package boundaries:
 This is enough to validate whether the startup sequence, recall flow, and event loop work. SQLite can be reconsidered later only if JSON file coordination becomes a real problem.
 
 The first real resident model backend should be Codex Web API, called directly with an OAuth access token from `auth.json`.
+The second resident model backend is Claude Messages API, called with
+`ANTHROPIC_API_KEY` or an explicit key file.
 
 Backend selection should be explicit at runtime:
 
 ```sh
 mew run --ai --model-backend codex --auth auth.json
+mew run --ai --model-backend claude
 ```
 
 The model adapter layer should keep `think` and `act` independent from any one provider. Codex is the first implementation, not a permanent architectural assumption.

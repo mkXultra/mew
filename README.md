@@ -102,11 +102,14 @@ uv run mew memory --compact
 ## Resident Model
 
 `mew run --ai` routes `think` and `act` through a resident model backend. The
-first backend is `codex`, which calls the Codex Web API directly with OAuth
-credentials from `auth.json` or `~/.codex/auth.json`.
+available backends are `codex` and `claude`. `codex` calls the Codex Web API
+directly with OAuth credentials from `auth.json` or `~/.codex/auth.json`.
+`claude` calls the Claude Messages API with `ANTHROPIC_API_KEY` or a key file
+passed with `--auth`.
 
 ```sh
 uv run mew run --ai --model-backend codex --auth auth.json
+ANTHROPIC_API_KEY=... uv run mew run --ai --model-backend claude
 ```
 
 The runtime still validates every action locally. The model chooses plans; mew's

@@ -17,7 +17,13 @@ from .config import (
     STATE_FILE,
 )
 from .errors import MewError
-from .model_backends import load_model_auth, model_backend_label, normalize_model_backend
+from .model_backends import (
+    load_model_auth,
+    model_backend_default_base_url,
+    model_backend_default_model,
+    model_backend_label,
+    normalize_model_backend,
+)
 from .state import (
     acquire_lock,
     append_log,
@@ -96,6 +102,8 @@ def run_runtime(args):
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+    model = args.model or model_backend_default_model(model_backend)
+    base_url = args.base_url or model_backend_default_base_url(model_backend)
     ensure_guidance(args.guidance)
     ensure_policy(args.policy)
     if args.autonomous:
@@ -136,7 +144,7 @@ def run_runtime(args):
         if model_auth:
             print(
                 f"{model_backend_label(model_backend)} enabled "
-                f"auth={model_auth['path']} model={args.model} base_url={args.base_url}"
+                f"auth={model_auth['path']} model={model} base_url={base_url}"
             )
         if initial_guidance:
             guidance_path = args.guidance or str(GUIDANCE_FILE)
@@ -211,8 +219,8 @@ def run_runtime(args):
                         state,
                         reason,
                         model_auth=model_auth,
-                        model=args.model,
-                        base_url=args.base_url,
+                        model=model,
+                        base_url=base_url,
                         model_backend=model_backend,
                         timeout=args.timeout,
                         ai_ticks=args.ai_ticks,

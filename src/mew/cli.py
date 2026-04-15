@@ -172,7 +172,10 @@ def build_parser():
     )
     run_parser.add_argument(
         "--auth",
-        help="path to model auth file; for codex defaults to ./auth.json then ~/.codex/auth.json",
+        help=(
+            "path to model auth file; codex defaults to ./auth.json then ~/.codex/auth.json; "
+            "claude can use ANTHROPIC_API_KEY"
+        ),
     )
     run_parser.add_argument(
         "--guidance",
@@ -215,17 +218,17 @@ def build_parser():
         "--model",
         default=os.environ.get(
             "MEW_MODEL",
-            os.environ.get("MEW_CODEX_MODEL", DEFAULT_CODEX_MODEL),
+            os.environ.get("MEW_CODEX_MODEL", ""),
         ),
-        help=f"resident model name; default {DEFAULT_CODEX_MODEL}",
+        help=f"resident model name; backend defaults include codex={DEFAULT_CODEX_MODEL}",
     )
     run_parser.add_argument(
         "--base-url",
         default=os.environ.get(
             "MEW_MODEL_BASE_URL",
-            os.environ.get("MEW_CODEX_BASE_URL", DEFAULT_CODEX_WEB_BASE_URL),
+            os.environ.get("MEW_CODEX_BASE_URL", ""),
         ),
-        help=f"resident model API base URL; default {DEFAULT_CODEX_WEB_BASE_URL}",
+        help=f"resident model API base URL; backend defaults include codex={DEFAULT_CODEX_WEB_BASE_URL}",
     )
     run_parser.add_argument(
         "--timeout",

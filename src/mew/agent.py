@@ -9,7 +9,7 @@ from .config import (
     LOG_FILE,
     MAX_RECENT_EVENTS,
 )
-from .errors import CodexApiError
+from .errors import ModelBackendError
 from .agent_runs import find_agent_run, get_agent_run_result, start_agent_run
 from .model_backends import call_model_json, model_backend_label
 from .perception import perceive_workspace
@@ -978,7 +978,7 @@ def think_phase(
     try:
         plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
-    except CodexApiError as exc:
+    except ModelBackendError as exc:
         append_log(f"- {current_time}: think_phase {model_backend} error event={event['id']} error={exc}")
         fallback["decisions"].append(
             {
@@ -1168,7 +1168,7 @@ def act_phase(
     try:
         action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
-    except CodexApiError as exc:
+    except ModelBackendError as exc:
         append_log(f"- {current_time}: act_phase {model_backend} error event={event['id']} error={exc}")
         fallback["actions"].append(
             {
