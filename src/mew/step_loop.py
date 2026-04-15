@@ -85,6 +85,63 @@ def filter_step_action_plan(action_plan, allow_verify=False):
     return filtered
 
 
+def _wait_action_text(action):
+    return action.get("question") or action.get("text") or action.get("reason") or ""
+
+
+def _has_matching_open_question(state, text, task_id):
+    if not text:
+        return False
+    for question in state.get("questions", []):
+        if question.get("status") != "open":
+            continue
+        if question.get("text") != text:
+            continue
+        if question.get("related_task_id") != task_id:
+            continue
+        return True
+    return False
+
+
+def suppress_redundant_wait_actions(action_plan, state):
+    actions = []
+    redundant = []
+    for action in action_plan.get("actions", []):
+        if action.get("type") not in ("ask_user", "wait_for_user"):
+            actions.append(action)
+            continue
+        text = _wait_action_text(action)
+        if _has_matching_open_question(state, text, action.get("task_id")):
+            redundant.append(action)
+        else:
+            actions.append(action)
+
+    if not redundant:
+        return action_plan
+
+    skipped = list(action_plan.get("skipped_actions") or [])
+    skipped.extend({**action, "skip_reason": "existing_open_question"} for action in redundant)
+    if not actions:
+        actions.append(
+            {
+                "type": "self_review",
+                "summary": (
+                    "Skipped a repeated wait_for_user because an existing open question "
+                    "already covers it; continue with non-duplicate work."
+                ),
+            }
+        )
+    return {
+        **action_plan,
+        "summary": (
+            (action_plan.get("summary") or "")
+            + " Skipped repeated wait_for_user already covered by an open question."
+        ).strip(),
+        "actions": actions,
+        "skipped_actions": skipped,
+    }
+
+
 def step_stop_reason(action_plan, dry_run=False):
     if dry_run:
         return "dry_run"
@@ -311,6 +368,7 @@ def run_step_loop(
             log_phases=not dry_run,
         )
         filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
+        filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
         step_stop = reason or ("max_steps" if index == max_steps - 1 else "")
 

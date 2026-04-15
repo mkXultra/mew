@@ -12,6 +12,8 @@ from mew.step_loop import (
     filter_step_action_plan,
     load_state_readonly,
     run_step_loop,
+    step_stop_reason,
+    suppress_redundant_wait_actions,
 )
 
 
@@ -46,6 +48,27 @@ class StepLoopTests(unittest.TestCase):
         filtered = filter_step_action_plan(action_plan, allow_verify=True)
 
         self.assertEqual(filtered["actions"][0]["type"], "run_verification")
+
+    def test_suppress_redundant_wait_actions_keeps_step_moving(self):
+        state = default_state()
+        add_question(state, "Need input?", event_id=1, related_task_id=8)
+        action_plan = {
+            "summary": "Wait again.",
+            "actions": [
+                {
+                    "type": "wait_for_user",
+                    "task_id": 8,
+                    "question": "Need input?",
+                    "reason": "already asked",
+                }
+            ],
+        }
+
+        filtered = suppress_redundant_wait_actions(action_plan, state)
+
+        self.assertEqual(filtered["actions"][0]["type"], "self_review")
+        self.assertEqual(filtered["skipped_actions"][0]["skip_reason"], "existing_open_question")
+        self.assertEqual(step_stop_reason(filtered), "")
 
     def test_dry_run_step_does_not_write_state(self):
         old_cwd = os.getcwd()
