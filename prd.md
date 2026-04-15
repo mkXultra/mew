@@ -727,6 +727,8 @@ The first user-facing version should likely include:
 - Routine autonomous read progress should remain available in history/live
   streams while being marked read by default, so unread outbox focuses on
   user-facing replies, questions, and warnings.
+- `mew step --focus <text>` should inject a short immediate focus for that
+  manual loop without changing persistent guidance.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.

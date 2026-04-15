@@ -17,6 +17,23 @@ from mew.errors import MewError
 
 
 class CommandTests(unittest.TestCase):
+    def test_step_focus_is_injected_into_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                report = {"steps": [], "stop_reason": "max_steps", "dry_run": True, "max_steps": 1}
+                with patch("mew.commands.run_step_loop", return_value=report) as run_step:
+                    with redirect_stdout(StringIO()):
+                        code = main(["step", "--dry-run", "--focus", "Review current mew changes"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        guidance = run_step.call_args.kwargs["guidance"]
+        self.assertIn("Immediate step focus:", guidance)
+        self.assertIn("Review current mew changes", guidance)
+
     def test_doctor_missing_optional_auth_still_succeeds(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

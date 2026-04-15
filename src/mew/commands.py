@@ -1126,6 +1126,19 @@ def cmd_step(args):
         ensure_policy(args.policy)
         ensure_self(args.self_file)
         ensure_desires(args.desires)
+    guidance = read_guidance(args.guidance)
+    if args.focus:
+        focus_text = args.focus.strip()
+        if focus_text:
+            guidance = "\n\n".join(
+                part
+                for part in (
+                    guidance.strip(),
+                    f"Immediate step focus:\n{focus_text}",
+                )
+                if part
+            )
+
     report = run_step_loop(
         max_steps=args.max_steps,
         dry_run=args.dry_run,
@@ -1134,7 +1147,7 @@ def cmd_step(args):
         base_url=base_url,
         model_backend=model_backend,
         timeout=args.timeout,
-        guidance=read_guidance(args.guidance),
+        guidance=guidance,
         policy=read_policy(args.policy),
         self_text=read_self(args.self_file),
         desires=read_desires(args.desires),

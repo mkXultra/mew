@@ -124,6 +124,7 @@ uv run mew activity
 uv run mew context
 uv run mew step --dry-run
 uv run mew step --ai --auth auth.json --allow-read . --max-steps 3
+uv run mew step --ai --auth auth.json --allow-read . --focus "Review the current mew implementation work"
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
 uv run mew dogfood --source-workspace . --ai --duration 60
@@ -188,6 +189,8 @@ synthesize or choose a different inspection target instead of reading the same
 file over and over. Routine autonomous read progress is kept in outbox for
 history and live attach streams, but marked read so the user's unread queue
 stays focused on actual replies, questions, and warnings.
+Use `--focus` to steer a short step loop toward the current development session
+without rewriting persistent guidance.
 
 ## Resident Model
 

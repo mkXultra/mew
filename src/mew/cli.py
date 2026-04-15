@@ -369,6 +369,7 @@ def build_parser():
         ),
     )
     step_parser.add_argument("--guidance", help="human-written think-phase guidance file")
+    step_parser.add_argument("--focus", default="", help="immediate focus to inject into this step loop")
     step_parser.add_argument("--policy", help="human-written safety/boundary policy file")
     step_parser.add_argument("--self", dest="self_file", help="human-written self/personality file")
     step_parser.add_argument("--desires", help="human-written desires file")
