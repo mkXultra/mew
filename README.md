@@ -20,6 +20,7 @@ In another shell:
 ```sh
 uv run mew chat
 uv run mew attach -m "今日のタスクは何？"
+uv run mew -m "今日のタスクは何？" --wait
 uv run mew message "今日のタスクは何？" --wait
 uv run mew event github_webhook --source local --payload '{"ref":"main"}' --wait
 printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
@@ -113,6 +114,7 @@ uv run mew effects
 uv run mew effects --json
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
+uv run mew -m "今日のタスクは何？" --wait
 uv run mew message "今日のタスクは何？" --wait
 uv run mew chat
 uv run mew session
@@ -169,7 +171,8 @@ including model phase counts, cycle summaries, active dropped-thread warnings,
 and the final project snapshot.
 Every state save is validated, reconciles `next_ids`, and appends a compact
 checkpoint to `.mew/effects.jsonl`; `mew doctor` reports validation issues and
-the latest checkpoint hash.
+the latest checkpoint hash. `mew archive --apply` also compacts old effect log
+entries into `.mew/archive/`.
 Runtime cycles select and persist the next event under `.mew/state.lock`, then
 release the lock while the resident model runs THINK/ACT. The runtime reacquires
 the lock only to commit the resulting action plan, so `mew chat`, `mew message`,
@@ -384,8 +387,8 @@ uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 - `.mew/state.json`: durable state.
 - `.mew/runtime.md`: runtime log.
 - `.mew/runtime.out`: background runtime output when started with `mew start`.
-- `.mew/archive/`: archived processed inbox, read outbox, completed agent runs, and old verification/write records.
-- `mew run --auto-archive` writes old inactive records to `.mew/archive/`.
+- `.mew/archive/`: archived processed inbox, read outbox, completed agent runs, old verification/write records, and old effect log entries.
+- `mew run --auto-archive` writes old inactive records and effect log entries to `.mew/archive/`.
 - `.mew/guidance.md`: human-written think-phase priority.
 - `.mew/policy.md`: local safety policy.
 - `.mew/self.md`: mew identity and behavior.
