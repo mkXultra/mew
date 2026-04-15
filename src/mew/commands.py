@@ -4,11 +4,14 @@ import select
 import shlex
 import signal
 import shutil
+import socket
 import subprocess
 import sys
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .agent_runs import (
     build_ai_cli_run_command,
@@ -434,6 +437,107 @@ def cmd_event(args):
         mark_read=getattr(args, "mark_read", False),
         event_label=f"{event['type']} event",
     )
+
+def webhook_authorized(headers, token):
+    if not token:
+        return True
+    bearer = headers.get("Authorization", "")
+    if bearer == f"Bearer {token}":
+        return True
+    return headers.get("X-Mew-Token", "") == token
+
+def make_webhook_handler(token="", max_body_bytes=1024 * 1024, read_timeout=5.0):
+    class MewWebhookHandler(BaseHTTPRequestHandler):
+        server_version = "mew-webhook"
+        timeout = read_timeout
+
+        def log_message(self, format, *args):
+            return
+
+        def send_json(self, status, payload):
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if urlparse(self.path).path == "/health":
+                self.send_json(200, {"ok": True})
+                return
+            self.send_json(404, {"ok": False, "error": "not found"})
+
+        def do_POST(self):
+            self.connection.settimeout(read_timeout)
+            if not webhook_authorized(self.headers, token):
+                self.send_json(401, {"ok": False, "error": "unauthorized"})
+                return
+
+            parsed = urlparse(self.path)
+            prefix = "/event/"
+            if not parsed.path.startswith(prefix):
+                self.send_json(404, {"ok": False, "error": "not found"})
+                return
+            event_type = unquote(parsed.path[len(prefix) :]).strip()
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                self.send_json(400, {"ok": False, "error": "invalid content length"})
+                return
+            if length < 0:
+                self.send_json(400, {"ok": False, "error": "invalid content length"})
+                return
+            if length > max_body_bytes:
+                self.send_json(413, {"ok": False, "error": "payload too large"})
+                return
+            try:
+                raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            except (UnicodeDecodeError, socket.timeout):
+                self.send_json(400, {"ok": False, "error": "invalid request body"})
+                return
+            try:
+                payload = parse_event_payload(raw)
+                query = parse_qs(parsed.query)
+                source = query.get("source", [self.headers.get("X-Mew-Source", "webhook")])[0]
+                event = queue_external_event(event_type, source=source, payload=payload)
+            except MewError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+                return
+            self.send_json(202, {"ok": True, "event_id": event["id"], "event_type": event["type"]})
+
+    return MewWebhookHandler
+
+def webhook_host_is_loopback(host):
+    return host in ("127.0.0.1", "localhost", "::1")
+
+def cmd_webhook(args):
+    if not args.token and not args.allow_unauthenticated and not webhook_host_is_loopback(args.host):
+        print(
+            "mew: webhook token is required for non-loopback hosts; "
+            "pass --token or --allow-unauthenticated",
+            file=sys.stderr,
+        )
+        return 1
+    handler = make_webhook_handler(
+        token=args.token or "",
+        max_body_bytes=args.max_body_bytes,
+        read_timeout=args.read_timeout,
+    )
+    server = ThreadingHTTPServer((args.host, args.port), handler)
+    server.daemon_threads = True
+    host, port = server.server_address
+    print(f"mew webhook listening on http://{host}:{port}")
+    try:
+        if args.once:
+            server.handle_request()
+        else:
+            server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 def cmd_message(args):
     event = queue_user_message(args.message)

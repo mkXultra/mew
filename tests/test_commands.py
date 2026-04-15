@@ -8,9 +8,12 @@ import time
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from http.server import ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from mew.cli import main
 from mew.errors import MewError
@@ -1638,6 +1641,100 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(waiter.call_args.kwargs["poll_interval"], 0.1)
         self.assertTrue(waiter.call_args.kwargs["mark_read"])
         self.assertEqual(waiter.call_args.kwargs["event_label"], "file_change event")
+
+    def test_webhook_queues_external_event(self):
+        from mew.commands import make_webhook_handler
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                server = ThreadingHTTPServer(("127.0.0.1", 0), make_webhook_handler())
+                server.timeout = 1
+                thread = threading.Thread(target=server.handle_request)
+                thread.daemon = True
+                thread.start()
+                try:
+                    body = b'{"ref":"main"}'
+                    request = Request(
+                        f"http://127.0.0.1:{server.server_port}/event/github_webhook?source=test",
+                        data=body,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=5) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
+                finally:
+                    server.server_close()
+                    thread.join(timeout=5)
+
+                from mew.state import load_state
+
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(payload["event_type"], "github_webhook")
+        self.assertEqual(state["inbox"][0]["source"], "test")
+        self.assertEqual(state["inbox"][0]["payload"], {"ref": "main"})
+
+    def test_webhook_rejects_bad_token(self):
+        from mew.commands import make_webhook_handler
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_webhook_handler(token="secret"))
+        server.timeout = 1
+        thread = threading.Thread(target=server.handle_request)
+        thread.daemon = True
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/event/github_webhook",
+                data=b"{}",
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(request, timeout=5)
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(raised.exception.code, 401)
+
+    def test_webhook_rejects_invalid_utf8_body(self):
+        from mew.commands import make_webhook_handler
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_webhook_handler())
+        server.timeout = 1
+        thread = threading.Thread(target=server.handle_request)
+        thread.daemon = True
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/event/github_webhook",
+                data=b"\xff",
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(request, timeout=5)
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(raised.exception.code, 400)
+
+    def test_webhook_requires_token_for_non_loopback_hosts(self):
+        with redirect_stderr(StringIO()) as stderr:
+            code = main(["webhook", "--host", "0.0.0.0", "--port", "0", "--once"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("webhook token is required", stderr.getvalue())
+
+    def test_webhook_handler_sets_socket_timeout_before_headers(self):
+        from mew.commands import make_webhook_handler
+
+        handler = make_webhook_handler(read_timeout=3.5)
+
+        self.assertEqual(handler.timeout, 3.5)
 
     def test_perceive_command_supports_json(self):
         old_cwd = os.getcwd()

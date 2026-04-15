@@ -69,6 +69,7 @@ from .commands import (
     cmd_tool_test,
     cmd_tool_write,
     cmd_verification,
+    cmd_webhook,
     cmd_writes,
 )
 from .config import (
@@ -355,6 +356,20 @@ def build_parser():
     )
     event_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     event_parser.set_defaults(func=cmd_event)
+
+    webhook_parser = subparsers.add_parser("webhook", help="serve HTTP external event ingress")
+    webhook_parser.add_argument("--host", default="127.0.0.1", help="bind host")
+    webhook_parser.add_argument("--port", type=int, default=8765, help="bind port")
+    webhook_parser.add_argument("--token", default=os.environ.get("MEW_WEBHOOK_TOKEN", ""), help="optional bearer/X-Mew-Token secret")
+    webhook_parser.add_argument(
+        "--allow-unauthenticated",
+        action="store_true",
+        help="allow tokenless webhook ingress on non-loopback hosts",
+    )
+    webhook_parser.add_argument("--max-body-bytes", type=int, default=1024 * 1024, help="maximum JSON payload size")
+    webhook_parser.add_argument("--read-timeout", type=float, default=5.0, help="request body read timeout in seconds")
+    webhook_parser.add_argument("--once", action="store_true", help="serve a single request and exit")
+    webhook_parser.set_defaults(func=cmd_webhook)
 
     session_parser = subparsers.add_parser("session", help="JSONL control session for automation")
     session_parser.set_defaults(func=cmd_session)
