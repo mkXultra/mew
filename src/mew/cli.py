@@ -986,6 +986,16 @@ def build_parser():
     agent_sweep_parser.add_argument("--no-followup", action="store_true", help="do not create follow-up tasks from completed reviews")
     agent_sweep_parser.add_argument("--agent-model", help="review model when starting reviews")
     agent_sweep_parser.add_argument("--stale-minutes", type=float, default=60.0, help="age before running runs are considered stale")
+    agent_sweep_parser.add_argument(
+        "--agent-result-timeout",
+        type=float,
+        help="seconds to wait when polling running agent results",
+    )
+    agent_sweep_parser.add_argument(
+        "--agent-start-timeout",
+        type=float,
+        help="seconds to wait when starting review runs",
+    )
     agent_sweep_parser.set_defaults(func=cmd_agent_sweep)
 
     return parser

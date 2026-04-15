@@ -1538,6 +1538,31 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--allow-verify requires --verify-command", stderr.getvalue())
 
+    def test_agent_sweep_passes_timeout_flags(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.commands.sweep_agent_runs", return_value={}) as sweep:
+                    with redirect_stdout(StringIO()):
+                        code = main(
+                            [
+                                "agent",
+                                "sweep",
+                                "--agent-result-timeout",
+                                "4",
+                                "--agent-start-timeout",
+                                "6",
+                            ]
+                        )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        _, kwargs = sweep.call_args
+        self.assertEqual(kwargs["result_timeout"], 4.0)
+        self.assertEqual(kwargs["start_timeout"], 6.0)
+
     def test_perceive_command_supports_json(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

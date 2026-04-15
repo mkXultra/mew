@@ -2447,6 +2447,8 @@ def cmd_agent_sweep(args):
             stale_minutes=args.stale_minutes,
             dry_run=args.dry_run,
             review_model=args.agent_model,
+            result_timeout=args.agent_result_timeout,
+            start_timeout=args.agent_start_timeout,
         )
         if not args.dry_run:
             save_state(state)

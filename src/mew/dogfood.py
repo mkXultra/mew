@@ -318,6 +318,57 @@ def wait_for_active_agent_runs(workspace, timeout_seconds, env=None):
     return results
 
 
+def agent_reflex_sweep_timeout(args):
+    configured = []
+    for name in ("agent_result_timeout", "agent_start_timeout"):
+        value = getattr(args, name, None)
+        if value is None:
+            continue
+        configured.append(max(0.0, float(value)))
+    if not configured:
+        return 60.0
+    return max(60.0, sum(configured) + 30.0)
+
+
+def run_agent_reflex_sweep(workspace, args, env=None, phase="sweep"):
+    command = [
+        sys.executable,
+        "-m",
+        "mew",
+        "agent",
+        "sweep",
+        "--start-reviews",
+    ]
+    if getattr(args, "review_model", None):
+        command.extend(["--agent-model", args.review_model])
+    if getattr(args, "agent_stale_minutes", None) is not None:
+        command.extend(["--stale-minutes", str(args.agent_stale_minutes)])
+    if getattr(args, "agent_result_timeout", None) is not None:
+        command.extend(["--agent-result-timeout", str(args.agent_result_timeout)])
+    if getattr(args, "agent_start_timeout", None) is not None:
+        command.extend(["--agent-start-timeout", str(args.agent_start_timeout)])
+    result = run_command(command, workspace, timeout=agent_reflex_sweep_timeout(args), env=env)
+    return {
+        "phase": phase,
+        "sweep": command_result_tail(result),
+    }
+
+
+def run_post_wait_agent_reflex(workspace, args, env=None):
+    if not getattr(args, "allow_agent_run", False):
+        return []
+    wait_timeout = float(getattr(args, "wait_agent_runs", 0.0) or 0.0)
+    if wait_timeout <= 0:
+        return []
+
+    results = [run_agent_reflex_sweep(workspace, args, env=env, phase="post_wait_sweep")]
+    review_wait_results = wait_for_active_agent_runs(workspace, wait_timeout, env=env)
+    if review_wait_results:
+        results.append({"phase": "review_wait", "agent_wait_results": review_wait_results})
+        results.append(run_agent_reflex_sweep(workspace, args, env=env, phase="post_review_sweep"))
+    return results
+
+
 def wait_for_runtime_state(workspace, timeout=15.0, poll_interval=0.1):
     deadline = time.monotonic() + max(0.0, timeout)
     state_path = workspace / STATE_FILE
@@ -623,6 +674,28 @@ def format_dogfood_report(report):
                 f"timed_out={bool(result.get('timed_out'))} "
                 f"stdout_tail={result.get('stdout_tail')} stderr_tail={result.get('stderr_tail')}"
             )
+    reflex_results = report.get("agent_reflex_results") or []
+    if reflex_results:
+        lines.append(f"agent_reflex_results: {len(reflex_results)}")
+        for result in reflex_results:
+            if result.get("sweep"):
+                sweep = result.get("sweep") or {}
+                lines.append(
+                    f"- {result.get('phase')} exit={sweep.get('exit_code')} "
+                    f"stdout_tail={sweep.get('stdout_tail')} stderr_tail={sweep.get('stderr_tail')}"
+                )
+            else:
+                lines.append(
+                    f"- {result.get('phase')} "
+                    f"agent_wait_results={len(result.get('agent_wait_results') or [])}"
+                )
+                for wait_result in result.get("agent_wait_results") or []:
+                    lines.append(
+                        f"  - run #{wait_result.get('run_id')} exit={wait_result.get('exit_code')} "
+                        f"timed_out={bool(wait_result.get('timed_out'))} "
+                        f"stdout_tail={wait_result.get('stdout_tail')} "
+                        f"stderr_tail={wait_result.get('stderr_tail')}"
+                    )
     source_copy = report.get("source_copy")
     if source_copy:
         lines.append(
@@ -829,6 +902,7 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         getattr(args, "wait_agent_runs", 0.0),
         env=env,
     )
+    agent_reflex_results = run_post_wait_agent_reflex(workspace, args, env=env)
     report = build_dogfood_report(
         workspace,
         command,
@@ -845,6 +919,8 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         report["seed_task"] = seed_task
     if agent_wait_results:
         report["agent_wait_results"] = agent_wait_results
+    if agent_reflex_results:
+        report["agent_reflex_results"] = agent_reflex_results
     return report
 
 

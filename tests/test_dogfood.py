@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     active_agent_run_ids,
+    agent_reflex_sweep_timeout,
     build_dogfood_report,
     build_runtime_command,
     copy_source_workspace,
@@ -19,6 +21,7 @@ from mew.dogfood import (
     prepare_dogfood_workspace,
     run_dogfood,
     run_dogfood_loop,
+    run_post_wait_agent_reflex,
     seed_ready_coding_task,
     tail_lines,
     wait_for_active_agent_runs,
@@ -230,6 +233,20 @@ class DogfoodTests(unittest.TestCase):
             )
 
             report = build_dogfood_report(workspace, ["mew", "run"], 0, 1.5)
+            report["agent_reflex_results"] = [
+                {
+                    "phase": "review_wait",
+                    "agent_wait_results": [
+                        {
+                            "run_id": 9,
+                            "exit_code": 1,
+                            "timed_out": True,
+                            "stdout_tail": [],
+                            "stderr_tail": ["wait timed out"],
+                        }
+                    ],
+                }
+            ]
             text = format_dogfood_report(report)
 
             self.assertEqual(report["events"]["processed"], 1)
@@ -255,6 +272,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("read_inspection:", text)
             self.assertIn("agent_runs:", text)
             self.assertIn("programmer_loop:", text)
+            self.assertIn("agent_reflex_results: 1", text)
+            self.assertIn("run #9 exit=1 timed_out=True", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
@@ -417,6 +436,42 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertTrue(results[0]["timed_out"])
             collector.assert_not_called()
+
+    def test_post_wait_agent_reflex_runs_sweeps_around_review_wait(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            args = SimpleNamespace(
+                allow_agent_run=True,
+                wait_agent_runs=5.0,
+                review_model="codex-ultra",
+                agent_stale_minutes=3.0,
+                agent_result_timeout=4.0,
+                agent_start_timeout=6.0,
+            )
+            command_result = {"command": ["mew"], "exit_code": 0, "stdout": "swept\n", "stderr": ""}
+            with patch("mew.dogfood.run_command", return_value=command_result) as runner:
+                with patch(
+                    "mew.dogfood.wait_for_active_agent_runs",
+                    return_value=[{"run_id": 9, "exit_code": 0}],
+                ) as waiter:
+                    results = run_post_wait_agent_reflex(workspace, args, env={"PYTHONPATH": "src"})
+
+            self.assertEqual([result["phase"] for result in results], ["post_wait_sweep", "review_wait", "post_review_sweep"])
+            self.assertEqual(waiter.call_count, 1)
+            self.assertEqual(runner.call_count, 2)
+            first_command = runner.call_args_list[0].args[0]
+            self.assertEqual(first_command[:5], [sys.executable, "-m", "mew", "agent", "sweep"])
+            self.assertIn("--start-reviews", first_command)
+            self.assertEqual(first_command[first_command.index("--agent-model") + 1], "codex-ultra")
+            self.assertEqual(first_command[first_command.index("--stale-minutes") + 1], "3.0")
+            self.assertEqual(first_command[first_command.index("--agent-result-timeout") + 1], "4.0")
+            self.assertEqual(first_command[first_command.index("--agent-start-timeout") + 1], "6.0")
+            self.assertEqual(runner.call_args_list[0].kwargs["timeout"], 60.0)
+
+    def test_agent_reflex_sweep_timeout_honors_large_agent_timeouts(self):
+        args = SimpleNamespace(agent_result_timeout=90.0, agent_start_timeout=45.0)
+
+        self.assertEqual(agent_reflex_sweep_timeout(args), 165.0)
 
     def test_run_dogfood_skips_cleanup_when_agent_run_is_active(self):
         with tempfile.TemporaryDirectory() as tmp:
