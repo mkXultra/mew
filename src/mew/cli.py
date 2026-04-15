@@ -420,6 +420,12 @@ def build_parser():
     dogfood_parser.add_argument("--cycle-gap", type=float, default=0.0, help="seconds to wait between cycles")
     dogfood_parser.add_argument("--startup-timeout", type=float, default=15.0, help="seconds to wait for startup")
     dogfood_parser.add_argument("--stop-timeout", type=float, default=10.0, help="seconds to wait for shutdown")
+    dogfood_parser.add_argument(
+        "--wait-agent-runs",
+        type=float,
+        default=0.0,
+        help="seconds to wait for active programmer agent runs after stopping the dogfood runtime",
+    )
     dogfood_parser.add_argument("--message-timeout", type=float, default=30.0, help="seconds to wait while queueing messages")
     dogfood_parser.add_argument(
         "--send-message",

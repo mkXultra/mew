@@ -209,6 +209,94 @@ def run_command(command, workspace, timeout=30, env=None):
     }
 
 
+def command_result_tail(result, limit=20):
+    return {
+        "command": result.get("command", []),
+        "exit_code": result.get("exit_code"),
+        "stdout_tail": (result.get("stdout") or "").splitlines()[-limit:],
+        "stderr_tail": (result.get("stderr") or "").splitlines()[-limit:],
+    }
+
+
+def active_agent_run_ids(workspace):
+    return [run["id"] for run in active_agent_runs_for_wait(workspace)]
+
+
+def active_agent_runs_for_wait(workspace):
+    state = read_json_file(Path(workspace) / STATE_FILE, {})
+    runs = []
+    for run in state.get("agent_runs", []):
+        if run.get("id") is None or run.get("status") not in ("created", "running"):
+            continue
+        runs.append({"id": run.get("id"), "external_pid": run.get("external_pid")})
+    return runs
+
+
+def wait_for_active_agent_runs(workspace, timeout_seconds, env=None):
+    timeout_seconds = max(0.0, float(timeout_seconds or 0.0))
+    if timeout_seconds <= 0.0:
+        return []
+    deadline = time.monotonic() + timeout_seconds
+    results = []
+    for run in active_agent_runs_for_wait(workspace):
+        run_id = run["id"]
+        external_pid = run.get("external_pid")
+        if not external_pid:
+            results.append({"run_id": run_id, "skipped": "missing_external_pid"})
+            continue
+        remaining = max(0.0, deadline - time.monotonic())
+        if remaining <= 0.0:
+            results.append({"run_id": run_id, "skipped": "timeout_exhausted"})
+            continue
+        wait_command = ["ai-cli", "wait", str(external_pid)]
+        try:
+            wait_result = subprocess.run(
+                wait_command,
+                cwd=str(workspace),
+                text=True,
+                capture_output=True,
+                timeout=remaining,
+                shell=False,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            results.append(
+                {
+                    "run_id": run_id,
+                    "external_pid": external_pid,
+                    "command": wait_command,
+                    "exit_code": None,
+                    "timed_out": True,
+                    "stdout_tail": stdout.splitlines()[-20:],
+                    "stderr_tail": (stderr or f"wait timed out after {remaining:.1f} second(s)").splitlines()[-20:],
+                }
+            )
+            continue
+
+        wait_summary = command_result_tail(
+            {
+                "command": wait_command,
+                "exit_code": wait_result.returncode,
+                "stdout": wait_result.stdout,
+                "stderr": wait_result.stderr,
+            }
+        )
+        wait_summary["run_id"] = run_id
+        wait_summary["external_pid"] = external_pid
+        if wait_result.returncode == 0:
+            collect_result = run_command(
+                [sys.executable, "-m", "mew", "agent", "result", str(run_id)],
+                workspace,
+                timeout=30.0,
+                env=env,
+            )
+            wait_summary["collect_result"] = command_result_tail(collect_result)
+        results.append(wait_summary)
+    return results
+
+
 def wait_for_runtime_state(workspace, timeout=15.0, poll_interval=0.1):
     deadline = time.monotonic() + max(0.0, timeout)
     state_path = workspace / STATE_FILE
@@ -481,6 +569,14 @@ def format_dogfood_report(report):
         )
     if report.get("cleanup_skipped_reason"):
         lines.append(f"cleanup_skipped: {report.get('cleanup_skipped_reason')}")
+    wait_results = report.get("agent_wait_results") or []
+    if wait_results:
+        lines.append(f"agent_wait_results: {len(wait_results)}")
+        for result in wait_results:
+            lines.append(
+                f"- run #{result.get('run_id')} exit={result.get('exit_code')} "
+                f"stdout_tail={result.get('stdout_tail')}"
+            )
     source_copy = report.get("source_copy")
     if source_copy:
         lines.append(
@@ -682,6 +778,11 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
         exit_code = stop_process(process, timeout=args.stop_timeout)
 
     duration = time.monotonic() - started_at
+    agent_wait_results = wait_for_active_agent_runs(
+        workspace,
+        getattr(args, "wait_agent_runs", 0.0),
+        env=env,
+    )
     report = build_dogfood_report(
         workspace,
         command,
@@ -696,6 +797,8 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
     seed_task = getattr(args, "_seed_task", None)
     if seed_task is not None:
         report["seed_task"] = seed_task
+    if agent_wait_results:
+        report["agent_wait_results"] = agent_wait_results
     return report
 
 
@@ -830,17 +933,24 @@ def format_dogfood_loop_report(report):
         dropped = cycle.get("dropped_threads") or {}
         active_dropped = cycle.get("active_dropped_threads") or {}
         schema_issues = cycle.get("plan_schema_issues") or {}
+        wait_results = cycle.get("agent_wait_results") or []
         lines.append(
             f"- #{cycle.get('cycle')} exit={cycle.get('exit_code')} "
             f"duration={cycle.get('duration_seconds'):.1f}s "
             f"processed={events.get('processed')}/{events.get('total')} "
             f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
             f"agent_runs={(cycle.get('agent_runs') or {}).get('total', 0)} "
+            f"agent_waits={len(wait_results)} "
             f"dropped_threads={dropped.get('thought_count', 0)} "
             f"active_dropped_threads={active_dropped.get('thought_count', 0)} "
             f"schema_issues={schema_issues.get('count', 0)} "
             f"next={cycle.get('next_move')}"
         )
+        for result in wait_results:
+            lines.append(
+                f"  wait run #{result.get('run_id')}: exit={result.get('exit_code')} "
+                f"timed_out={bool(result.get('timed_out'))}"
+            )
     lines.append("")
     lines.append(f"Final next useful move: {report.get('final_next_move')}")
     return "\n".join(lines)

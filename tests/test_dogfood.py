@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
+    active_agent_run_ids,
     build_dogfood_report,
     build_runtime_command,
     copy_source_workspace,
@@ -18,6 +20,7 @@ from mew.dogfood import (
     run_dogfood,
     run_dogfood_loop,
     seed_ready_coding_task,
+    wait_for_active_agent_runs,
 )
 from mew.state import add_event, add_outbox_message, default_state
 
@@ -304,6 +307,56 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(task["agent_run_id"], 7)
             self.assertEqual(len(task["plans"]), initial_plan_count)
 
+    def test_wait_for_active_agent_runs_invokes_agent_wait(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / STATE_DIR).mkdir()
+            state = default_state()
+            state["agent_runs"].append({"id": 7, "status": "running", "external_pid": 123})
+            state["agent_runs"].append({"id": 8, "status": "completed"})
+            (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+
+            class Result:
+                returncode = 0
+                stdout = "waited\n"
+                stderr = ""
+
+            collect = {"command": ["mew"], "exit_code": 0, "stdout": "line1\nline2\n", "stderr": ""}
+            with patch(
+                "mew.dogfood.run_command",
+                return_value=collect,
+            ) as collector:
+                with patch("mew.dogfood.subprocess.run", return_value=Result()) as waiter:
+                    results = wait_for_active_agent_runs(workspace, 5.0, env={"PYTHONPATH": "src"})
+
+            self.assertEqual(active_agent_run_ids(workspace), [7])
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["run_id"], 7)
+            wait_command = waiter.call_args.args[0]
+            self.assertEqual(wait_command, ["ai-cli", "wait", "123"])
+            collect_command = collector.call_args.args[0]
+            self.assertEqual(collect_command[2:5], ["mew", "agent", "result"])
+            self.assertIn("7", collect_command)
+            self.assertEqual(results[0]["stdout_tail"], ["waited"])
+            self.assertEqual(results[0]["collect_result"]["stdout_tail"], ["line1", "line2"])
+
+    def test_wait_for_active_agent_runs_timeout_leaves_state_uncollected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / STATE_DIR).mkdir()
+            state = default_state()
+            state["agent_runs"].append({"id": 7, "status": "running", "external_pid": 123})
+            (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+
+            with patch("mew.dogfood.subprocess.run", side_effect=subprocess.TimeoutExpired(["ai-cli"], 1)):
+                with patch("mew.dogfood.run_command") as collector:
+                    results = wait_for_active_agent_runs(workspace, 0.01)
+
+            self.assertTrue(results[0]["timed_out"])
+            collector.assert_not_called()
+            state = json.loads((workspace / STATE_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(state["agent_runs"][0]["status"], "running")
+
     def test_run_dogfood_skips_cleanup_when_agent_run_is_active(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "dog"
@@ -390,6 +443,7 @@ class DogfoodTests(unittest.TestCase):
                         "active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                         "plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
                         "agent_runs": {"total": 1},
+                        "agent_wait_results": [{"run_id": 1, "exit_code": 0, "stdout_tail": ["done"]}],
                         "next_move": "keep going",
                     },
                 ],
@@ -406,6 +460,8 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("final_plan_schema_issues", text)
         self.assertIn("final_agent_runs", text)
         self.assertIn("agent_runs=1", text)
+        self.assertIn("agent_waits=1", text)
+        self.assertIn("wait run #1", text)
         self.assertIn("final_runtime_cycle", text)
         self.assertIn("Final project snapshot", text)
         self.assertIn("Final next useful move: keep going", text)
