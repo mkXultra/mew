@@ -7,6 +7,7 @@ from mew.tasks import (
     task_kind_report,
     task_needs_programmer_plan,
     task_question,
+    task_sort_key,
 )
 
 
@@ -60,6 +61,14 @@ class TaskKindTests(unittest.TestCase):
 
         self.assertEqual(report["inferred_kind"], "unknown")
         self.assertFalse(report["mismatch"])
+
+    def test_running_tasks_sort_before_ready_tasks(self):
+        tasks = [
+            {"id": 1, "status": "ready", "priority": "high", "created_at": "1"},
+            {"id": 2, "status": "running", "priority": "normal", "created_at": "2"},
+        ]
+
+        self.assertEqual([task["id"] for task in sorted(tasks, key=task_sort_key)], [2, 1])
 
     def test_task_needs_programmer_plan_uses_resolvable_latest_plan(self):
         task = {

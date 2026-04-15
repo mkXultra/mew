@@ -484,7 +484,12 @@ def append_passive_decisions(
             continue
 
         question = task_question(task)
-        if question and not question_added and not has_unread_outbox_message(state, "question", question):
+        if (
+            question
+            and not question_added
+            and not has_unread_outbox_message(state, "question", question)
+            and not has_resolved_task_question(state, task_id, question)
+        ):
             decisions.append(
                 {
                     "type": "ask_user",
@@ -493,6 +498,14 @@ def append_passive_decisions(
                 }
             )
             question_added = True
+
+def has_resolved_task_question(state, task_id, question_text):
+    return any(
+        question.get("related_task_id") == task_id
+        and question.get("text") == question_text
+        and question.get("status") in ("answered", "deferred")
+        for question in state.get("questions", [])
+    )
 
 def has_decision_type(decisions, decision_type):
     return any(decision.get("type") == decision_type for decision in decisions)

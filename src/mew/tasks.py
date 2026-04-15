@@ -247,7 +247,7 @@ def task_needs_programmer_plan(task):
     )
 
 def task_sort_key(task):
-    status_order = {"ready": 0, "todo": 1, "blocked": 2, "done": 3}
+    status_order = {"running": 0, "ready": 1, "todo": 2, "blocked": 3, "done": 4}
     priority_order = {"high": 0, "normal": 1, "low": 2}
     return (
         status_order.get(task.get("status"), 9),

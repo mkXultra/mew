@@ -299,7 +299,7 @@ def build_workbench_data(state, task):
 
     next_action = "mew task show {task_id}".format(task_id=task_id)
     if task.get("status") == "done":
-        next_action = next_move(state)
+        next_action = "wait for the next user request"
     elif questions:
         next_action = f"mew reply {questions[0]['id']} \"...\""
     elif not is_programmer_task(task):

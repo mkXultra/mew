@@ -896,6 +896,7 @@ class CommandTests(unittest.TestCase):
                     )
                     self.assertEqual(main(["buddy", "--task", "1"]), 0)
                     self.assertEqual(main(["task", "done", "1"]), 0)
+                    self.assertEqual(main(["task", "add", "Other task", "--kind", "coding", "--ready"]), 0)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1"]), 0)

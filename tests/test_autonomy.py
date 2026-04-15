@@ -1765,6 +1765,30 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(state["attention"]["items"], [])
         self.assertNotEqual(state["agent_status"]["mode"], "waiting_for_user")
 
+    def test_passive_tick_does_not_repeat_answered_task_question(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["status"] = "ready"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        question, _ = add_question(
+            state,
+            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            related_task_id=task["id"],
+        )
+        question["status"] = "answered"
+        state["outbox"][0]["read_at"] = "now"
+        state["outbox"][0]["answered_at"] = "now"
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+
     def test_complete_task_records_user_reported_passing_verification(self):
         state = default_state()
         event = add_event(state, "user_message", "test")
