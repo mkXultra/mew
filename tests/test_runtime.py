@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from contextlib import redirect_stderr, redirect_stdout
 
+from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
 from mew.runtime import run_runtime_post_run_pipeline
-from mew.state import add_outbox_message, default_state
+from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
 
 
 class RuntimeTests(unittest.TestCase):
@@ -140,6 +141,61 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(kwargs["extra_env"]["MEW_OUTBOX_REQUIRES_REPLY"], "1")
             finally:
                 os.chdir(old_cwd)
+
+    def test_runtime_processes_pending_external_event_without_waiting_for_passive_tick(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_event(state, "file_change", "watch", {"path": "src/mew/runtime.py"})
+                    save_state(state)
+
+                def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
+                    self.assertEqual(event_snapshot["type"], "file_change")
+                    return (
+                        {"summary": "external event", "decisions": []},
+                        {"summary": "external event", "actions": []},
+                    )
+
+                with patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--interval", "999", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("reason=external_event", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                self.assertIsNotNone(state["inbox"][0]["processed_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_external_events_use_resident_ai_when_available(self):
+        state = default_state()
+        event = add_event(state, "github_webhook", "test", {"ref": "main"})
+
+        with patch(
+            "mew.agent.call_model_json",
+            return_value={"summary": "handled webhook", "decisions": []},
+        ) as call_model:
+            plan = think_phase(
+                state,
+                event,
+                "now",
+                model_auth={"path": "auth.json"},
+                model="model",
+                base_url="base",
+                timeout=1,
+                ai_ticks=False,
+                allow_task_execution=False,
+                guidance="",
+                policy="",
+            )
+
+        self.assertTrue(should_use_ai_for_event(event, "external_event", ai_ticks=False))
+        call_model.assert_called_once()
+        self.assertEqual(plan["summary"], "handled webhook")
 
 
 if __name__ == "__main__":

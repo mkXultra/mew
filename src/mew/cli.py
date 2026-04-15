@@ -25,6 +25,7 @@ from .commands import (
     cmd_dogfood,
     cmd_doctor,
     cmd_effects,
+    cmd_event,
     cmd_focus,
     cmd_guidance_init,
     cmd_guidance_show,
@@ -338,6 +339,13 @@ def build_parser():
     )
     message_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     message_parser.set_defaults(func=cmd_message)
+
+    event_parser = subparsers.add_parser("event", help="queue an external event")
+    event_parser.add_argument("event_type", help="event type, for example github_webhook or file_change")
+    event_parser.add_argument("--source", default="cli", help="event source label")
+    event_parser.add_argument("--payload", default="", help="JSON object payload")
+    event_parser.add_argument("--text", help="convenience payload text field")
+    event_parser.set_defaults(func=cmd_event)
 
     session_parser = subparsers.add_parser("session", help="JSONL control session for automation")
     session_parser.set_defaults(func=cmd_session)

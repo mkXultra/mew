@@ -301,15 +301,9 @@ def build_act_prompt(
     )
 
 def should_use_ai_for_event(event, reason, ai_ticks):
-    if event["type"] == "user_message":
-        return True
-    if event["type"] == "startup":
-        return True
-    if event["type"] == "passive_tick":
-        return True
-    if ai_ticks and event["type"] == "tick":
-        return True
-    return False
+    if event["type"] == "tick":
+        return bool(ai_ticks)
+    return True
 
 def update_shallow_knowledge(state, event, summary, current_time):
     memory = state.setdefault("memory", {})

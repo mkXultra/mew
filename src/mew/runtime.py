@@ -261,6 +261,22 @@ def run_runtime_post_run_pipeline(state, args, autonomy_controls):
         start_timeout=getattr(args, "agent_start_timeout", 30.0),
     )
 
+def pending_external_event(state):
+    return any(
+        not event.get("processed_at")
+        and event.get("type") not in ("startup", "passive_tick", "user_message")
+        for event in state.get("inbox", [])
+    )
+
+def next_external_event(state):
+    for event in state.get("inbox", []):
+        if event.get("processed_at"):
+            continue
+        if event.get("type") in ("startup", "passive_tick", "user_message"):
+            continue
+        return event
+    return None
+
 def outbox_notification_env(message):
     return {
         "MEW_OUTBOX_ID": str(message.get("id") or ""),
@@ -405,9 +421,13 @@ def run_runtime(args):
                 if state["runtime_status"].get("state") != "running":
                     set_runtime_running(state, lock["started_at"])
                 pending_user = has_pending_user_message(state)
+                pending_external = pending_external_event(state)
                 current_monotonic = time.time()
                 if pending_user:
                     reason = "user_input"
+                    create_internal_event = False
+                elif pending_external:
+                    reason = "external_event"
                     create_internal_event = False
                 elif first:
                     reason = "startup"
@@ -436,10 +456,12 @@ def run_runtime(args):
                     run_runtime_post_run_pipeline(state, args, autonomy_controls)
                     if create_internal_event:
                         add_event(state, reason, "runtime", {"pid": os.getpid()})
-                    event = next_unprocessed_event(
-                        state,
-                        "user_message" if reason == "user_input" else None,
-                    )
+                    if reason == "user_input":
+                        event = next_unprocessed_event(state, "user_message")
+                    elif reason == "external_event":
+                        event = next_external_event(state)
+                    else:
+                        event = next_unprocessed_event(state)
                     if event:
                         event_id = event["id"]
                         event_snapshot = deepcopy(event)

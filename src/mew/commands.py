@@ -108,6 +108,9 @@ from .validation import format_validation_issues, validate_state, validation_err
 from .write_tools import edit_file, summarize_write_result, write_file
 
 
+RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
+
+
 def cmd_task_add(args):
     with state_lock():
         state = load_state()
@@ -383,6 +386,45 @@ def queue_user_message(text, reply_to_question_id=None, require_open_question=Fa
         user["updated_at"] = current_time
         save_state(state)
     return event
+
+def queue_external_event(event_type, source="cli", payload=None):
+    event_type = (event_type or "").strip()
+    if not event_type:
+        raise MewError("event type is required")
+    if event_type in RESERVED_EVENT_TYPES:
+        raise MewError(f"event type is reserved: {event_type}")
+    with state_lock():
+        state = load_state()
+        event = add_event(state, event_type, source or "cli", payload or {})
+        save_state(state)
+    return event
+
+def parse_event_payload(raw):
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise MewError(f"invalid JSON payload: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise MewError("event payload must be a JSON object")
+    return payload
+
+def cmd_event(args):
+    try:
+        payload = parse_event_payload(args.payload)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if args.text:
+        payload["text"] = args.text
+    try:
+        event = queue_external_event(args.event_type, source=args.source, payload=payload)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    print(f"queued {event['type']} event #{event['id']} source={event['source']}")
+    return 0
 
 def cmd_message(args):
     event = queue_user_message(args.message)

@@ -730,6 +730,9 @@ def build_recall_summary(state, event, current_time):
     if event["type"] == "user_message":
         text = event.get("payload", {}).get("text", "")
         parts.append(f"User asked: {text}")
+    elif event["type"] not in ("startup", "passive_tick", "tick"):
+        payload = json.dumps(event.get("payload") or {}, ensure_ascii=False, sort_keys=True)
+        parts.append(f"External event {event['type']} from {event.get('source')}: {payload}")
 
     return " ".join(parts)
 

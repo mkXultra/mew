@@ -1563,6 +1563,52 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(kwargs["result_timeout"], 4.0)
         self.assertEqual(kwargs["start_timeout"], 6.0)
 
+    def test_event_command_queues_external_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "event",
+                            "github_webhook",
+                            "--source",
+                            "test",
+                            "--payload",
+                            '{"ref":"main"}',
+                            "--text",
+                            "push received",
+                        ]
+                    )
+                from mew.state import load_state
+
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        self.assertIn("queued github_webhook event #1", stdout.getvalue())
+        self.assertEqual(state["inbox"][0]["type"], "github_webhook")
+        self.assertEqual(state["inbox"][0]["source"], "test")
+        self.assertEqual(state["inbox"][0]["payload"]["ref"], "main")
+        self.assertEqual(state["inbox"][0]["payload"]["text"], "push received")
+
+    def test_event_command_rejects_invalid_payload_without_traceback(self):
+        with redirect_stderr(StringIO()) as stderr:
+            code = main(["event", "github_webhook", "--payload", "["])
+
+        self.assertEqual(code, 1)
+        self.assertIn("invalid JSON payload", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_event_command_rejects_reserved_event_type(self):
+        with redirect_stderr(StringIO()) as stderr:
+            code = main(["event", "user_message", "--payload", '{"text":"hi"}'])
+
+        self.assertEqual(code, 1)
+        self.assertIn("event type is reserved: user_message", stderr.getvalue())
+
     def test_perceive_command_supports_json(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
