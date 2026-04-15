@@ -2001,6 +2001,20 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--allow-verify requires --verify-command", stderr.getvalue())
 
+    def test_dogfood_rejects_sensitive_workspace_without_traceback(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["dogfood", "--workspace", ".mew/acm-use-test/dog"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        self.assertIn("dogfood workspace is inside a sensitive path", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_agent_without_subcommand_lists_runs(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

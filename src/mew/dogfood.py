@@ -51,6 +51,10 @@ Expected behavior:
 def prepare_dogfood_workspace(path=None):
     if path:
         workspace = Path(path).expanduser()
+        if is_sensitive_path(workspace):
+            raise ValueError(
+                "dogfood workspace is inside a sensitive path; use a temporary directory outside .mew"
+            )
         workspace.mkdir(parents=True, exist_ok=True)
         created_temp = False
     else:

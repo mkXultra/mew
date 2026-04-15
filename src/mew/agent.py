@@ -2,6 +2,7 @@ import json
 import os
 import time
 
+from .brief import next_move
 from .config import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_CODEX_WEB_BASE_URL,
@@ -721,11 +722,12 @@ def deterministic_decision_plan(
     decisions = [{"type": "remember", "summary": summary}]
 
     if event["type"] == "user_message":
+        reply = f"Next: {next_move(state)}"
         decisions.append(
             {
                 "type": "send_message",
                 "message_type": "info",
-                "text": summary,
+                "text": reply,
             }
         )
     elif event["type"] == "startup":

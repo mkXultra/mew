@@ -1662,8 +1662,16 @@ def cmd_dogfood(args):
     if args.allow_verify and not args.verify_command:
         print("mew: --allow-verify requires --verify-command", file=sys.stderr)
         return 1
+    try:
+        if getattr(args, "cycles", 1) and args.cycles > 1:
+            report = run_dogfood_loop(args)
+        else:
+            report = run_dogfood(args)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
     if getattr(args, "cycles", 1) and args.cycles > 1:
-        report = run_dogfood_loop(args)
         report_path = write_report_if_requested(args, report)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -1672,7 +1680,6 @@ def cmd_dogfood(args):
         if report_path:
             print(f"report_path: {report_path}")
         return 0
-    report = run_dogfood(args)
     report_path = write_report_if_requested(args, report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

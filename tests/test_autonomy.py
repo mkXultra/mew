@@ -1868,6 +1868,43 @@ class AutonomyTests(unittest.TestCase):
             [decision.get("title") for decision in plan["decisions"] if decision.get("type") == "propose_task"],
         )
 
+    def test_non_ai_user_message_reply_uses_next_move(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Implement CLI polish",
+                "kind": "coding",
+                "description": "",
+                "status": "ready",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "user_message", "payload": {"text": "What should I do next?"}},
+            current_time,
+            allow_task_execution=False,
+        )
+
+        messages = [decision for decision in plan["decisions"] if decision.get("type") == "send_message"]
+        self.assertEqual(messages[0]["text"], 'Next: plan task #1 with `mew task plan 1`')
+
     def test_autonomous_high_priority_propose_task_can_interrupt_open_tasks(self):
         state = default_state()
         current_time = now_iso()
