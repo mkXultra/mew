@@ -258,6 +258,7 @@ state without leaving the session:
 /questions
 /add "調査する" | "対象を小さく確認する"
 /show 4
+/work 4
 /note 4 次はここを見る
 /kind 4 research
 /classify 4 apply

@@ -741,6 +741,12 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [passed] uv run pytest", output)
                 self.assertIn("#1 [edit_file] src/mew/commands.py changed=True", output)
                 self.assertIn("mew reply 1", output)
+
+                from mew.commands import run_chat_slash_command
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work 1", {}), "continue")
+                self.assertIn("Work task #1: Implement workbench", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

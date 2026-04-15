@@ -3127,6 +3127,7 @@ CHAT_HELP = """Commands:
 /add <title> [| desc] create a task from chat
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
+/work <task-id>       show task plan/runs/checks and next action
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -3224,6 +3225,15 @@ def print_chat_task(task_id):
     print(f"agent_model: {task.get('agent_model') or ''}")
     print(f"agent_run_id: {task.get('agent_run_id') or ''}")
     print(f"latest_plan_id: {task.get('latest_plan_id') or ''}")
+
+
+def print_chat_workbench(task_id):
+    state = load_state()
+    task = find_task(state, task_id)
+    if not task:
+        print(f"mew: task not found: {task_id}")
+        return
+    print(format_workbench(build_workbench_data(state, task)))
 
 
 def chat_add_task(rest):
@@ -4134,6 +4144,12 @@ def run_chat_slash_command(line, chat_state):
             print("usage: /show <task-id>")
         else:
             print_chat_task(rest)
+        return "continue"
+    if command == "work":
+        if not rest:
+            print("usage: /work <task-id>")
+        else:
+            print_chat_workbench(rest)
         return "continue"
     if command == "note":
         chat_append_task_note(rest)
