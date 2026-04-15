@@ -55,6 +55,16 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Manual step read permission:", guidance)
         self.assertIn("prefer one small targeted inspect_dir, read_file, or search_text", guidance)
 
+    def test_step_help_describes_model_flags(self):
+        with redirect_stdout(StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as raised:
+                main(["step", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        output = stdout.getvalue()
+        self.assertIn("resident model override", output)
+        self.assertIn("resident model API base URL override", output)
+
     def test_doctor_missing_optional_auth_still_succeeds(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,6 +92,18 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("codex_auth: error", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
+
+    def test_task_without_subcommand_lists_tasks(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task"]), 0)
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertIn("No tasks.", stdout.getvalue())
 
     def test_task_add_ready_shortcut(self):
         old_cwd = os.getcwd()

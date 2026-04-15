@@ -463,10 +463,15 @@ def build_parser():
         default=os.environ.get("MEW_MODEL_BACKEND", DEFAULT_MODEL_BACKEND),
         help=f"resident model backend ({', '.join(SUPPORTED_MODEL_BACKENDS)})",
     )
-    step_parser.add_argument("--model", default=os.environ.get("MEW_MODEL", os.environ.get("MEW_CODEX_MODEL", "")))
+    step_parser.add_argument(
+        "--model",
+        default=os.environ.get("MEW_MODEL", os.environ.get("MEW_CODEX_MODEL", "")),
+        help="resident model override; defaults to the backend default model",
+    )
     step_parser.add_argument(
         "--base-url",
         default=os.environ.get("MEW_MODEL_BASE_URL", os.environ.get("MEW_CODEX_BASE_URL", "")),
+        help="resident model API base URL override",
     )
     step_parser.add_argument("--timeout", type=float, default=60.0, help="resident model request timeout")
     step_parser.add_argument("--json", action="store_true", help="print structured JSON")
@@ -883,6 +888,7 @@ def build_parser():
     desires_show_parser.set_defaults(func=cmd_desires_show)
 
     task_parser = subparsers.add_parser("task", help="manage tasks")
+    task_parser.set_defaults(func=cmd_task_list)
     task_subparsers = task_parser.add_subparsers(dest="task_command")
 
     add_parser = task_subparsers.add_parser("add", help="add a task")

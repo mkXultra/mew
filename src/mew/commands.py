@@ -148,8 +148,8 @@ def cmd_task_add(args):
 
 def cmd_task_list(args):
     state = load_state()
-    tasks = state["tasks"] if args.all else open_tasks(state)
-    if args.kind:
+    tasks = state["tasks"] if getattr(args, "all", False) else open_tasks(state)
+    if getattr(args, "kind", None):
         tasks = [task for task in tasks if task_kind(task) == args.kind]
     tasks = sorted(tasks, key=task_sort_key)
     if not tasks:
