@@ -10,6 +10,7 @@ from mew.dogfood import (
     build_dogfood_report,
     build_runtime_command,
     copy_source_workspace,
+    format_dogfood_loop_report,
     format_dogfood_report,
     prepare_dogfood_workspace,
 )
@@ -145,6 +146,43 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
+
+    def test_format_dogfood_loop_report_summarizes_cycles(self):
+        text = format_dogfood_loop_report(
+            {
+                "generated_at": "now",
+                "workspace": "/tmp/dog",
+                "cycle_count": 2,
+                "exit_codes": [0, 0],
+                "final_events": {"processed": 3, "total": 3},
+                "final_model_phases": {"think_ok": 2, "act_ok": 2},
+                "final_next_move": "keep going",
+                "final_project_snapshot": {"updated_at": "now", "project_types": ["python"]},
+                "cycles": [
+                    {
+                        "cycle": 1,
+                        "exit_code": 0,
+                        "duration_seconds": 1.2,
+                        "events": {"processed": 1, "total": 1},
+                        "model_phases": {"think_ok": 1, "act_ok": 1},
+                        "next_move": "cycle one",
+                    },
+                    {
+                        "cycle": 2,
+                        "exit_code": 0,
+                        "duration_seconds": 1.4,
+                        "events": {"processed": 3, "total": 3},
+                        "model_phases": {"think_ok": 2, "act_ok": 2},
+                        "next_move": "keep going",
+                    },
+                ],
+            }
+        )
+
+        self.assertIn("cycles: 2", text)
+        self.assertIn("Cycle summaries", text)
+        self.assertIn("Final project snapshot", text)
+        self.assertIn("Final next useful move: keep going", text)
 
 
 if __name__ == "__main__":

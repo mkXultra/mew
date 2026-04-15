@@ -149,6 +149,40 @@ def _parse_pyproject(text):
     return package
 
 
+def _python_file_summary(text):
+    imports = []
+    functions = []
+    classes = []
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or line[:1].isspace():
+            continue
+        if stripped.startswith("import "):
+            name = stripped[len("import ") :].split(",", 1)[0].strip().split(" ", 1)[0]
+            if name and name not in imports:
+                imports.append(name)
+        elif stripped.startswith("from "):
+            name = stripped[len("from ") :].split(" import ", 1)[0].strip()
+            if name and name not in imports:
+                imports.append(name)
+        elif stripped.startswith("def "):
+            name = stripped[len("def ") :].split("(", 1)[0].strip()
+            if name and name not in functions:
+                functions.append(name)
+        elif stripped.startswith("class "):
+            name = stripped[len("class ") :].split("(", 1)[0].split(":", 1)[0].strip()
+            if name and name not in classes:
+                classes.append(name)
+    parts = []
+    if imports:
+        parts.append("imports=" + ", ".join(imports[:8]))
+    if classes:
+        parts.append("classes=" + ", ".join(classes[:8]))
+    if functions:
+        parts.append("functions=" + ", ".join(functions[:12]))
+    return "; ".join(parts) or "python module"
+
+
 def _file_summary(path, text):
     name = Path(path).name
     if name.lower().startswith("readme") or name == "prd.md":
@@ -157,6 +191,8 @@ def _file_summary(path, text):
     if name == "pyproject.toml":
         package = _parse_pyproject(text)
         return {"kind": "pyproject", "package": package}
+    if name.endswith(".py"):
+        return {"kind": "python", "summary": _python_file_summary(text)}
     return {"kind": "file", "summary": _clip(text, 200)}
 
 

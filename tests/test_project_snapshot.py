@@ -84,6 +84,34 @@ class ProjectSnapshotTests(unittest.TestCase):
         self.assertEqual(len(context["files"]), 10)
         self.assertLessEqual(len(context["files"][0]["summary"]), 320)
 
+    def test_python_file_summary_uses_structure_not_raw_prefix(self):
+        state = default_state()
+        update_project_snapshot_from_read_result(
+            state,
+            "read_file",
+            {
+                "path": "/repo/src/mew/example.py",
+                "size": 200,
+                "truncated": False,
+                "text": (
+                    "import json\n"
+                    "from pathlib import Path\n\n"
+                    "class Runner:\n"
+                    "    pass\n\n"
+                    "def main():\n"
+                    "    return Path('.')\n"
+                ),
+            },
+            "now",
+        )
+
+        file_item = state["memory"]["deep"]["project_snapshot"]["files"][0]
+
+        self.assertEqual(file_item["kind"], "python")
+        self.assertIn("imports=json, pathlib", file_item["summary"])
+        self.assertIn("classes=Runner", file_item["summary"])
+        self.assertIn("functions=main", file_item["summary"])
+
     def test_format_project_snapshot_prints_compact_summary(self):
         state = default_state()
         update_project_snapshot_from_read_result(

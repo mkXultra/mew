@@ -388,11 +388,7 @@ def format_dogfood_report(report):
     return "\n".join(lines)
 
 
-def run_dogfood(args):
-    workspace, created_temp = prepare_dogfood_workspace(args.workspace)
-    source_copy = None
-    if getattr(args, "source_workspace", None):
-        source_copy = copy_source_workspace(args.source_workspace, workspace)
+def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None):
     command = build_runtime_command(args, workspace)
     state_dir = workspace / STATE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -436,6 +432,84 @@ def run_dogfood(args):
     )
     report["runtime_output_path"] = str(output_path)
     report["source_copy"] = source_copy
+    return report
+
+
+def run_dogfood(args):
+    workspace, created_temp = prepare_dogfood_workspace(args.workspace)
+    source_copy = None
+    if getattr(args, "source_workspace", None):
+        source_copy = copy_source_workspace(args.source_workspace, workspace)
+    report = _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=source_copy)
     if args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
     return report
+
+
+def run_dogfood_loop(args):
+    workspace, created_temp = prepare_dogfood_workspace(args.workspace)
+    source_copy = None
+    if getattr(args, "source_workspace", None):
+        source_copy = copy_source_workspace(args.source_workspace, workspace)
+
+    cycles = max(1, int(getattr(args, "cycles", 1) or 1))
+    reports = []
+    try:
+        for index in range(cycles):
+            report = _run_dogfood_in_workspace(
+                args,
+                workspace,
+                created_temp,
+                source_copy=source_copy if index == 0 else None,
+            )
+            report["cycle"] = index + 1
+            reports.append(report)
+            if index < cycles - 1:
+                time.sleep(max(0.0, float(getattr(args, "cycle_gap", 0.0) or 0.0)))
+    finally:
+        if args.cleanup and created_temp:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+    final_report = reports[-1] if reports else {}
+    return {
+        "generated_at": now_iso(),
+        "workspace": str(workspace),
+        "kept": not (args.cleanup and created_temp),
+        "cycles": reports,
+        "cycle_count": cycles,
+        "exit_codes": [report.get("exit_code") for report in reports],
+        "final_next_move": final_report.get("next_move"),
+        "final_events": final_report.get("events", {}),
+        "final_model_phases": final_report.get("model_phases", {}),
+        "final_project_snapshot": final_report.get("project_snapshot", {}),
+    }
+
+
+def format_dogfood_loop_report(report):
+    lines = [
+        f"Mew dogfood loop report at {report.get('generated_at')}",
+        f"workspace: {report.get('workspace')}",
+        f"cycles: {report.get('cycle_count')} exit_codes={report.get('exit_codes')}",
+        f"final_events: {report.get('final_events')}",
+        f"final_model_phases: {report.get('final_model_phases')}",
+    ]
+    final_snapshot = report.get("final_project_snapshot") or {}
+    if final_snapshot:
+        lines.append("")
+        lines.append("Final project snapshot")
+        lines.append(format_project_snapshot(final_snapshot))
+    lines.append("")
+    lines.append("Cycle summaries")
+    for cycle in report.get("cycles") or []:
+        events = cycle.get("events") or {}
+        phases = cycle.get("model_phases") or {}
+        lines.append(
+            f"- #{cycle.get('cycle')} exit={cycle.get('exit_code')} "
+            f"duration={cycle.get('duration_seconds'):.1f}s "
+            f"processed={events.get('processed')}/{events.get('total')} "
+            f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
+            f"next={cycle.get('next_move')}"
+        )
+    lines.append("")
+    lines.append(f"Final next useful move: {report.get('final_next_move')}")
+    return "\n".join(lines)

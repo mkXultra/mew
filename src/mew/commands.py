@@ -29,7 +29,7 @@ from .brief import (
 from .codex_api import load_codex_oauth
 from .config import LOG_FILE, STATE_DIR
 from .context import build_context
-from .dogfood import format_dogfood_report, run_dogfood
+from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogfood, run_dogfood_loop
 from .errors import MewError
 from .memory import compact_memory
 from .perception import format_perception, perceive_workspace
@@ -634,6 +634,13 @@ def cmd_dogfood(args):
     if args.allow_verify and not args.verify_command:
         print("mew: --allow-verify requires --verify-command", file=sys.stderr)
         return 1
+    if getattr(args, "cycles", 1) and args.cycles > 1:
+        report = run_dogfood_loop(args)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        print(format_dogfood_loop_report(report))
+        return 0
     report = run_dogfood(args)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
