@@ -70,6 +70,7 @@ from .state import (
     read_lock,
     read_last_state_effect,
     save_state,
+    state_digest,
     state_lock,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
@@ -492,13 +493,19 @@ def build_doctor_data(args):
     try:
         state = load_state()
         validation_issues = validate_state(state)
+        current_sha256 = state_digest(state)
+        last_effect = read_last_state_effect()
         data["state"] = {
             "ok": not validation_errors(validation_issues),
             "version": state.get("version"),
             "tasks": len(state.get("tasks", [])),
             "agent_runs": len(state.get("agent_runs", [])),
             "validation_issues": validation_issues,
-            "last_effect": read_last_state_effect(),
+            "current_sha256": current_sha256,
+            "last_effect": last_effect,
+            "last_effect_matches_current": bool(
+                last_effect and last_effect.get("state_sha256") == current_sha256
+            ),
         }
         if validation_errors(validation_issues):
             data["ok"] = False
@@ -554,6 +561,7 @@ def format_doctor_data(data):
             lines.append(
                 "last_state_effect: "
                 f"{last_effect.get('saved_at')} sha256={str(last_effect.get('state_sha256') or '')[:12]} "
+                f"matches_current={state.get('last_effect_matches_current')} "
                 f"counts={last_effect.get('counts')}"
             )
         else:

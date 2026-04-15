@@ -293,6 +293,30 @@ def action_counts(thoughts):
             counts[action_type] = counts.get(action_type, 0) + 1
     return dict(sorted(counts.items()))
 
+def plan_schema_issues(events, limit=5):
+    issues = []
+    for event in events:
+        for phase, plan_key in (("think", "decision_plan"), ("act", "action_plan")):
+            plan = event.get(plan_key) or {}
+            for item in plan.get("schema_issues") or []:
+                if not isinstance(item, dict):
+                    continue
+                issues.append(
+                    {
+                        "event_id": event.get("id"),
+                        "event_type": event.get("type"),
+                        "phase": phase,
+                        "level": item.get("level") or "unknown",
+                        "path": item.get("path") or "",
+                        "message": item.get("message") or "",
+                    }
+                )
+    return {
+        "count": len(issues),
+        "by_level": count_by(issues, "level"),
+        "latest": issues[-limit:],
+    }
+
 
 def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=True):
     workspace = Path(workspace)
@@ -319,6 +343,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
             "by_type": count_by(inbox, "type"),
         },
         "model_phases": parse_phase_counts(log_text),
+        "plan_schema_issues": plan_schema_issues(inbox),
         "outbox": {
             "total": len(outbox),
             "unread": len([message for message in outbox if not message.get("read_at")]),
@@ -389,6 +414,13 @@ def format_dogfood_report(report):
         lines.append(
             "active_dropped_threads: "
             f"thought_id={active_dropped.get('thought_id')} latest={active_dropped.get('latest')}"
+        )
+    schema_issues = report.get("plan_schema_issues") or {}
+    if schema_issues.get("count"):
+        lines.append(
+            "plan_schema_issues: "
+            f"count={schema_issues.get('count')} by_level={schema_issues.get('by_level')} "
+            f"latest={schema_issues.get('latest')}"
         )
     project_snapshot = report.get("project_snapshot") or {}
     if project_snapshot:
@@ -541,6 +573,7 @@ def run_dogfood_loop(args):
         "final_next_move": final_report.get("next_move"),
         "final_events": final_report.get("events", {}),
         "final_model_phases": final_report.get("model_phases", {}),
+        "final_plan_schema_issues": final_report.get("plan_schema_issues", {}),
         "final_dropped_threads": final_report.get("dropped_threads", {}),
         "final_active_dropped_threads": final_report.get("active_dropped_threads", {}),
         "final_project_snapshot": final_report.get("project_snapshot", {}),
@@ -568,6 +601,12 @@ def format_dogfood_loop_report(report):
             f"thought_id={final_active_dropped.get('thought_id')} "
             f"latest={final_active_dropped.get('latest')}"
         )
+    final_schema_issues = report.get("final_plan_schema_issues") or {}
+    if final_schema_issues.get("count"):
+        lines.append(
+            "final_plan_schema_issues: "
+            f"count={final_schema_issues.get('count')} by_level={final_schema_issues.get('by_level')}"
+        )
     final_snapshot = report.get("final_project_snapshot") or {}
     if final_snapshot:
         lines.append("")
@@ -580,6 +619,7 @@ def format_dogfood_loop_report(report):
         phases = cycle.get("model_phases") or {}
         dropped = cycle.get("dropped_threads") or {}
         active_dropped = cycle.get("active_dropped_threads") or {}
+        schema_issues = cycle.get("plan_schema_issues") or {}
         lines.append(
             f"- #{cycle.get('cycle')} exit={cycle.get('exit_code')} "
             f"duration={cycle.get('duration_seconds'):.1f}s "
@@ -587,6 +627,7 @@ def format_dogfood_loop_report(report):
             f"think_ok={phases.get('think_ok')} act_ok={phases.get('act_ok')} "
             f"dropped_threads={dropped.get('thought_count', 0)} "
             f"active_dropped_threads={active_dropped.get('thought_count', 0)} "
+            f"schema_issues={schema_issues.get('count', 0)} "
             f"next={cycle.get('next_move')}"
         )
     lines.append("")

@@ -101,6 +101,10 @@ class DogfoodTests(unittest.TestCase):
             state = default_state()
             event = add_event(state, "passive_tick", "runtime")
             event["processed_at"] = "done"
+            event["decision_plan"] = {
+                "summary": "x",
+                "schema_issues": [{"level": "warning", "path": "decisions[0].type", "message": "unsupported"}],
+            }
             add_outbox_message(state, "info", "hello", event_id=event["id"])
             state["thought_journal"].append(
                 {
@@ -141,6 +145,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["events"]["processed"], 1)
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertEqual(report["actions"], {"inspect_dir": 1})
+            self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
@@ -148,6 +153,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(len(report["runtime_output_tail"]), 3)
             self.assertIn("Runtime output (last lines)", text)
             self.assertIn("mew runtime stopped", text)
+            self.assertIn("plan_schema_issues", text)
 
     def test_prepopulate_project_snapshot_writes_dogfood_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,6 +179,7 @@ class DogfoodTests(unittest.TestCase):
                 "exit_codes": [0, 0],
                 "final_events": {"processed": 3, "total": 3},
                 "final_model_phases": {"think_ok": 2, "act_ok": 2},
+                "final_plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
                 "final_dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
                 "final_active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
                 "final_next_move": "keep going",
@@ -186,6 +193,7 @@ class DogfoodTests(unittest.TestCase):
                         "model_phases": {"think_ok": 1, "act_ok": 1},
                         "dropped_threads": {"thought_count": 0, "latest": []},
                         "active_dropped_threads": {"thought_count": 0, "latest": []},
+                        "plan_schema_issues": {"count": 0, "by_level": {}, "latest": []},
                         "next_move": "cycle one",
                     },
                     {
@@ -196,6 +204,7 @@ class DogfoodTests(unittest.TestCase):
                         "model_phases": {"think_ok": 2, "act_ok": 2},
                         "dropped_threads": {"thought_count": 1, "latest": ["carry this"]},
                         "active_dropped_threads": {"thought_count": 1, "thought_id": 2, "latest": ["carry this"]},
+                        "plan_schema_issues": {"count": 1, "by_level": {"warning": 1}, "latest": []},
                         "next_move": "keep going",
                     },
                 ],
@@ -208,6 +217,8 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("final_active_dropped_threads", text)
         self.assertIn("dropped_threads=1", text)
         self.assertIn("active_dropped_threads=1", text)
+        self.assertIn("schema_issues=1", text)
+        self.assertIn("final_plan_schema_issues", text)
         self.assertIn("Final project snapshot", text)
         self.assertIn("Final next useful move: keep going", text)
 

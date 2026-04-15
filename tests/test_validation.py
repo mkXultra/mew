@@ -88,6 +88,8 @@ class ValidationTests(unittest.TestCase):
                 self.assertTrue(data["ok"])
                 self.assertTrue(data["state"]["ok"])
                 self.assertEqual(data["state"]["validation_issues"], [])
+                self.assertIn("current_sha256", data["state"])
+                self.assertTrue(data["state"]["last_effect_matches_current"])
                 self.assertIn("ai-cli", data["tools"])
             finally:
                 os.chdir(old_cwd)
