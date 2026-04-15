@@ -1287,13 +1287,15 @@ def apply_read_action(state, event, action, current_time, allowed_read_roots):
             f"Inspected directory {result.get('path')}; "
             f"{entry_count} {'entry' if entry_count == 1 else 'entries'} saved to memory."
         )
-    add_outbox_message(
+    message = add_outbox_message(
         state,
         "info",
         text,
         event_id=event["id"],
         related_task_id=action.get("task_id"),
     )
+    if event.get("type") != "user_message":
+        message["read_at"] = current_time
     return 1
 
 def add_proposed_task(state, title, description, priority, notes, current_time):
@@ -2011,7 +2013,7 @@ def apply_action_plan(
                 counts["messages"] += 1
                 continue
             if event["type"] != "user_message" and recently_repeated_read_action(state, action):
-                add_outbox_message(
+                message = add_outbox_message(
                     state,
                     "info",
                     (
@@ -2021,6 +2023,7 @@ def apply_action_plan(
                     event_id=event["id"],
                     related_task_id=action.get("task_id"),
                 )
+                message["read_at"] = current_time
                 counts["messages"] += 1
                 continue
             counts["messages"] += apply_read_action(

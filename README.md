@@ -185,7 +185,9 @@ read/memory/question/task-proposal actions, then records the actions, skipped
 actions, and visible effects so the next step can see the feedback. Autonomous
 read-only actions are also guarded against short-term repeats, so mew should
 synthesize or choose a different inspection target instead of reading the same
-file over and over.
+file over and over. Routine autonomous read progress is kept in outbox for
+history and live attach streams, but marked read so the user's unread queue
+stays focused on actual replies, questions, and warnings.
 
 ## Resident Model
 

@@ -724,6 +724,9 @@ The first user-facing version should likely include:
 - Autonomous read-only actions should use recent memory, thoughts, and step
   results before inspecting again; short-term duplicate inspections should be
   skipped unless the user explicitly requested them.
+- Routine autonomous read progress should remain available in history/live
+  streams while being marked read by default, so unread outbox focuses on
+  user-facing replies, questions, and warnings.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.

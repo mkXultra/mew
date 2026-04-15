@@ -1551,6 +1551,32 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(snapshot["project_types"], ["python"])
         self.assertEqual(snapshot["roots"][0]["key_dirs"], ["src", "tests"])
 
+    def test_autonomous_read_action_marks_progress_message_read(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "README.md"
+            target.write_text("hello", encoding="utf-8")
+
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "read"},
+                {
+                    "summary": "read",
+                    "actions": [{"type": "read_file", "path": str(target)}],
+                },
+                "read-time",
+                allow_task_execution=False,
+                task_timeout=1,
+                allowed_read_roots=[tmp],
+                autonomous=True,
+                autonomy_level="act",
+            )
+
+        self.assertIn("Read file", state["outbox"][0]["text"])
+        self.assertEqual(state["outbox"][0]["read_at"], "read-time")
+
     def test_autonomous_read_action_skips_recent_duplicate(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
@@ -1579,6 +1605,7 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(counts["messages"], 1)
         self.assertIn("Skipped repeated read_file", state["outbox"][0]["text"])
+        self.assertIsNotNone(state["outbox"][0]["read_at"])
         self.assertEqual(state["memory"]["deep"]["project"], [])
 
     def test_user_requested_read_action_can_repeat_recent_read(self):
@@ -1608,6 +1635,7 @@ class AutonomyTests(unittest.TestCase):
             )
 
         self.assertIn("Read file", state["outbox"][0]["text"])
+        self.assertIsNone(state["outbox"][0]["read_at"])
         self.assertTrue(state["memory"]["deep"]["project"])
 
     def test_autonomous_self_review_has_cooldown(self):
