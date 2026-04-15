@@ -1257,6 +1257,19 @@ def add_proposed_task(state, title, description, priority, notes, current_time):
 def apply_propose_task_action(state, event, action, current_time, autonomous, autonomy_level):
     allowed = event["type"] == "user_message" or (autonomous and autonomy_level in ("propose", "act"))
     title = action.get("title") or action.get("proposed_task_title") or ""
+    if (
+        event["type"] != "user_message"
+        and autonomous
+        and open_tasks(state)
+        and action.get("priority") != "high"
+    ):
+        record_deep_memory(
+            state,
+            "decisions",
+            f"Deferred propose_task because open tasks already exist: {title}",
+            current_time,
+        )
+        return 0
     if not allowed:
         add_outbox_message(
             state,

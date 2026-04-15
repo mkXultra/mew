@@ -1012,6 +1012,108 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(state["tasks"], [])
         self.assertIn("Refused propose_task", state["outbox"][0]["text"])
 
+    def test_autonomous_propose_task_defers_when_open_tasks_exist(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Existing task",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "propose"},
+            {
+                "summary": "propose",
+                "actions": [
+                    {
+                        "type": "propose_task",
+                        "title": "Another normal task",
+                        "priority": "normal",
+                    }
+                ],
+            },
+            current_time,
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertIn("Deferred propose_task", state["memory"]["deep"]["decisions"][-1])
+
+    def test_autonomous_high_priority_propose_task_can_interrupt_open_tasks(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Existing task",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "repair"},
+            {
+                "summary": "repair",
+                "actions": [
+                    {
+                        "type": "propose_task",
+                        "title": "Fix verification failure",
+                        "priority": "high",
+                    }
+                ],
+            },
+            current_time,
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(len(state["tasks"]), 2)
+        self.assertEqual(state["tasks"][-1]["title"], "Fix verification failure")
+
     def test_observe_level_defers_self_review_task_proposal_quietly(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
