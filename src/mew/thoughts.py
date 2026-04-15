@@ -1,8 +1,15 @@
+import re
+
+
 MAX_THOUGHT_JOURNAL_ENTRIES = 100
 MAX_THOUGHT_TEXT_CHARS = 700
 MAX_THOUGHT_THREADS = 8
 MAX_THOUGHT_ITEMS = 12
 DROPPED_THREAD_WARNING_THRESHOLD = 0.5
+
+QUESTION_REF_RE = re.compile(r"\bQuestion #(\d+)\b", re.IGNORECASE)
+TASK_REF_RE = re.compile(r"\bTask #(\d+)\b", re.IGNORECASE)
+AGENT_RUN_REF_RE = re.compile(r"\bAgent run #(\d+)\b", re.IGNORECASE)
 
 
 def clip_thought_text(value, limit=MAX_THOUGHT_TEXT_CHARS):
@@ -30,6 +37,41 @@ def normalize_thread_list(value, limit=MAX_THOUGHT_THREADS):
     return result
 
 
+def compact_thread_key(state, thread):
+    text = str(thread or "").strip()
+    lowered = text.casefold()
+    if not text:
+        return ""
+
+    question_match = QUESTION_REF_RE.search(text)
+    task_match = TASK_REF_RE.search(text)
+    if "waiting for user" in lowered or "pending question" in lowered:
+        if question_match:
+            task_id = task_id_for_question(state, question_match.group(1))
+            if task_id is not None:
+                return f"waiting:task:{task_id}"
+            return f"waiting:question:{question_match.group(1)}"
+        if task_match:
+            return f"waiting:task:{task_match.group(1)}"
+
+    run_match = AGENT_RUN_REF_RE.search(text)
+    if run_match:
+        return f"agent_run:{run_match.group(1)}"
+    if "programmer-loop" in lowered and task_match:
+        return f"programmer_task:{task_match.group(1)}"
+
+    return "text:" + " ".join(text.split()).casefold()
+
+
+def task_id_for_question(state, question_id):
+    for question in state.get("questions", []):
+        if str(question.get("id")) != str(question_id):
+            continue
+        task_id = question.get("related_task_id")
+        return str(task_id) if task_id is not None else None
+    return None
+
+
 def _compact_plan_item(item):
     compact = {"type": item.get("type") or "unknown"}
     for key in ("task_id", "run_id", "plan_id"):
@@ -55,7 +97,11 @@ def infer_open_threads(state, event, decision_plan, action_plan):
         if action_type in ("ask_user", "wait_for_user"):
             text = action.get("question") or action.get("text") or action.get("reason")
             if text:
-                threads.append(f"Waiting for user input: {text}")
+                task_id = action.get("task_id")
+                if task_id is not None:
+                    threads.append(f"Waiting for user input on task #{task_id}: {text}")
+                else:
+                    threads.append(f"Waiting for user input: {text}")
         elif action_type in ("dispatch_task", "collect_agent_result", "review_agent_run"):
             run_id = action.get("run_id")
             task_id = action.get("task_id")
@@ -66,7 +112,11 @@ def infer_open_threads(state, event, decision_plan, action_plan):
 
     pending = state.get("agent_status", {}).get("pending_question")
     if pending:
-        threads.append(f"Pending question: {pending}")
+        active_task_id = state.get("agent_status", {}).get("active_task_id")
+        if active_task_id is not None:
+            threads.append(f"Pending question for task #{active_task_id}: {pending}")
+        else:
+            threads.append(f"Pending question: {pending}")
 
     if event.get("type") == "user_message":
         text = event.get("payload", {}).get("text")
@@ -76,14 +126,15 @@ def infer_open_threads(state, event, decision_plan, action_plan):
     return normalize_thread_list(threads)
 
 
-def merge_thread_lists(*lists):
+def merge_thread_lists(*lists, state=None):
     merged = []
     seen = set()
     for values in lists:
         for value in normalize_thread_list(values):
-            if value in seen:
+            key = compact_thread_key(state or {}, value)
+            if key in seen:
                 continue
-            seen.add(value)
+            seen.add(key)
             merged.append(value)
             if len(merged) >= MAX_THOUGHT_THREADS:
                 return merged
@@ -97,11 +148,19 @@ def dropped_threads_from_previous(state, open_threads, resolved_threads):
     previous_open = merge_thread_lists(
         thoughts[-1].get("open_threads"),
         thoughts[-1].get("dropped_threads"),
+        state=state,
     )
     if not previous_open:
         return [], 0.0
-    handled = set(merge_thread_lists(open_threads, resolved_threads))
-    dropped = [thread for thread in previous_open if thread not in handled]
+    handled = {
+        compact_thread_key(state, thread)
+        for thread in merge_thread_lists(open_threads, resolved_threads, state=state)
+    }
+    dropped = [
+        thread
+        for thread in previous_open
+        if compact_thread_key(state, thread) not in handled
+    ]
     ratio = len(dropped) / len(previous_open)
     return dropped, ratio
 
@@ -144,14 +203,16 @@ def record_thought_journal_entry(
     explicit_open_threads = merge_thread_lists(
         decision_plan.get("open_threads"),
         action_plan.get("open_threads"),
+        state=state,
     )
     inferred_open_threads = (
         [] if explicit_open_threads else infer_open_threads(state, event, decision_plan, action_plan)
     )
-    open_threads = merge_thread_lists(explicit_open_threads, inferred_open_threads)
+    open_threads = merge_thread_lists(explicit_open_threads, inferred_open_threads, state=state)
     resolved_threads = merge_thread_lists(
         decision_plan.get("resolved_threads"),
         action_plan.get("resolved_threads"),
+        state=state,
     )
     dropped_threads, dropped_thread_ratio = dropped_threads_from_previous(
         state,

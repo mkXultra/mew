@@ -159,6 +159,53 @@ class AutonomyTests(unittest.TestCase):
         context = build_context(state, second, "later")
         self.assertIsNone(context["thought_thread_warning"])
 
+    def test_thought_journal_keeps_equivalent_waiting_question_thread(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "ask", "decisions": [{"type": "ask_user", "task_id": 1}]},
+            {
+                "summary": "ask",
+                "actions": [
+                    {
+                        "type": "ask_user",
+                        "task_id": 1,
+                        "question": "Task #1 is todo. Should I make it ready?",
+                    }
+                ],
+            },
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        second = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "wait", "decisions": [{"type": "wait_for_user", "task_id": 1}]},
+            {
+                "summary": "wait",
+                "actions": [
+                    {
+                        "type": "wait_for_user",
+                        "task_id": 1,
+                        "reason": "Question #1 is still unanswered.",
+                    }
+                ],
+            },
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(state["thought_journal"][-1]["dropped_threads"], [])
+        self.assertIsNone(build_context(state, second, "later")["thought_thread_warning"])
+
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -292,6 +339,38 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(state["tasks"], [])
         self.assertIn("Refused propose_task", state["outbox"][0]["text"])
+
+    def test_observe_level_defers_self_review_task_proposal_quietly(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "review"},
+            {
+                "summary": "review",
+                "actions": [
+                    {
+                        "type": "self_review",
+                        "summary": "No user work yet.",
+                        "proposed_task_title": "Monitor for first actionable input",
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="observe",
+        )
+
+        self.assertEqual(state["tasks"], [])
+        self.assertEqual(state["outbox"], [])
+        self.assertIn(
+            "Deferred self-review task proposal",
+            state["memory"]["deep"]["decisions"][-1],
+        )
 
     def test_read_actions_require_act_level_unless_user_requested(self):
         state = default_state()

@@ -1366,6 +1366,20 @@ def apply_self_review_action(state, event, action, current_time, autonomous, aut
 
     title = action.get("proposed_task_title")
     if title:
+        can_propose = event["type"] == "user_message" or (
+            autonomous and autonomy_level in ("propose", "act")
+        )
+        if not can_propose:
+            record_deep_memory(
+                state,
+                "decisions",
+                (
+                    "Deferred self-review task proposal because the current autonomy "
+                    f"level does not allow task creation: {title}"
+                ),
+                current_time,
+            )
+            return message_count
         message_count += apply_propose_task_action(
             state,
             event,
