@@ -15,6 +15,7 @@ MAX_CONTEXT_QUESTIONS = 20
 MAX_CONTEXT_QUESTION_BLOCKS = 5
 MAX_CONTEXT_ATTENTION_ITEMS = 25
 MAX_CONTEXT_AGENT_RUNS = 8
+MAX_CONTEXT_STEP_RUNS = 5
 MAX_CONTEXT_RUN_OUTPUT_CHARS = 600
 MAX_CONTEXT_MEMORY_CHARS = 800
 MAX_CONTEXT_QUESTION_BLOCK_CHARS = 200
@@ -528,6 +529,37 @@ def write_run_for_context(run):
     }
 
 
+def _step_action_for_context(action):
+    return {
+        "type": action.get("type") or "unknown",
+        "task_id": action.get("task_id"),
+        "path": clip_context_text(action.get("path"), 500),
+        "query": clip_context_text(action.get("query"), 500),
+        "title": clip_context_text(action.get("title"), 500),
+        "reason": clip_context_text(action.get("reason"), MAX_CONTEXT_TEXT_CHARS),
+        "summary": clip_context_text(action.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+    }
+
+
+def step_run_for_context(run):
+    return {
+        "id": run.get("id"),
+        "at": run.get("at"),
+        "event_id": run.get("event_id"),
+        "summary": clip_context_text(run.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+        "stop_reason": run.get("stop_reason") or "",
+        "actions": [
+            _step_action_for_context(action)
+            for action in list(run.get("actions") or [])[:8]
+        ],
+        "skipped_actions": [
+            _step_action_for_context(action)
+            for action in list(run.get("skipped_actions") or [])[:8]
+        ],
+        "counts": dict(run.get("counts") or {}),
+    }
+
+
 def event_for_context(event):
     payload = event.get("payload") or {}
     return {
@@ -566,6 +598,7 @@ def build_context_stats(state, context):
             "tasks": MAX_CONTEXT_TASKS,
             "attention": MAX_CONTEXT_ATTENTION_ITEMS,
             "agent_runs": MAX_CONTEXT_AGENT_RUNS,
+            "step_runs": MAX_CONTEXT_STEP_RUNS,
             "questions": MAX_CONTEXT_QUESTIONS,
             "question_blocks": MAX_CONTEXT_QUESTION_BLOCKS,
             "question_block_chars": MAX_CONTEXT_QUESTION_BLOCK_CHARS,
@@ -584,6 +617,7 @@ def build_context_stats(state, context):
             "active_agent_runs": active_agent_run_count(state),
             "verification_runs": len(state.get("verification_runs", [])),
             "write_runs": len(state.get("write_runs", [])),
+            "step_runs": len(state.get("step_runs", [])),
             "conversation_items": conversation_item_count(state),
         },
         "included_counts": {
@@ -600,6 +634,7 @@ def build_context_stats(state, context):
             ),
             "verification_runs": len(context.get("verification_runs", [])),
             "write_runs": len(context.get("write_runs", [])),
+            "step_runs": len(context.get("step_runs", [])),
             "conversation_items": len(context.get("conversation", [])),
         },
         "omitted_counts": {
@@ -610,6 +645,10 @@ def build_context_stats(state, context):
                 len(open_questions(state)) - len(context.get("unanswered_questions", [])),
             ),
             "agent_runs": max(0, agent_run_count - len(context.get("agent_runs", []))),
+            "step_runs": max(
+                0,
+                len(state.get("step_runs", [])) - len(context.get("step_runs", [])),
+            ),
             "active_agent_runs": context.get("agent_runs_active_omitted_count", 0),
             "conversation_items": max(
                 0,
@@ -726,6 +765,10 @@ def build_context(
         "write_runs": [
             write_run_for_context(run)
             for run in compact_recent_items(state.get("write_runs", []), 10)
+        ],
+        "step_runs": [
+            step_run_for_context(run)
+            for run in compact_recent_items(state.get("step_runs", []), MAX_CONTEXT_STEP_RUNS)
         ],
         "event": event_for_context(event),
     }

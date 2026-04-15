@@ -553,6 +553,33 @@ class AutonomyTests(unittest.TestCase):
         self.assertIn("rollback detail", write_run["rollback_error"])
         self.assertLessEqual(len(write_run["diff_tail"]), 620)
 
+    def test_build_context_includes_recent_step_runs(self):
+        state = default_state()
+        for index in range(7):
+            state["step_runs"].append(
+                {
+                    "id": index + 1,
+                    "at": f"t{index}",
+                    "event_id": index + 10,
+                    "summary": "step summary " + ("detail " * 300),
+                    "stop_reason": "max_steps",
+                    "actions": [{"type": "read_file", "path": f"file-{index}.md"}],
+                    "skipped_actions": [{"type": "write_file", "path": f"file-{index}.md"}],
+                    "counts": {"actions": 1},
+                }
+            )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        self.assertEqual(len(context["step_runs"]), 5)
+        self.assertEqual(context["step_runs"][-1]["id"], 7)
+        self.assertEqual(context["step_runs"][-1]["stop_reason"], "max_steps")
+        self.assertEqual(context["step_runs"][-1]["actions"][0]["type"], "read_file")
+        self.assertEqual(context["context_stats"]["source_counts"]["step_runs"], 7)
+        self.assertEqual(context["context_stats"]["included_counts"]["step_runs"], 5)
+        self.assertEqual(context["context_stats"]["omitted_counts"]["step_runs"], 2)
+
     def test_build_context_preserves_attention_reason(self):
         state = default_state()
         long_reason = "verification failed because " + ("stderr detail " * 500)
