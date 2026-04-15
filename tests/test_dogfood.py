@@ -20,6 +20,7 @@ from mew.dogfood import (
     run_dogfood,
     run_dogfood_loop,
     seed_ready_coding_task,
+    tail_lines,
     wait_for_active_agent_runs,
 )
 from mew.state import add_event, add_outbox_message, default_state
@@ -333,12 +334,20 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["run_id"], 7)
             wait_command = waiter.call_args.args[0]
-            self.assertEqual(wait_command, ["ai-cli", "wait", "123"])
+            self.assertEqual(wait_command[:3], ["ai-cli", "wait", "123"])
+            self.assertIn("--timeout", wait_command)
             collect_command = collector.call_args.args[0]
             self.assertEqual(collect_command[2:5], ["mew", "agent", "result"])
             self.assertIn("7", collect_command)
             self.assertEqual(results[0]["stdout_tail"], ["waited"])
             self.assertEqual(results[0]["collect_result"]["stdout_tail"], ["line1", "line2"])
+
+    def test_tail_lines_clips_long_report_lines(self):
+        text = "short\n" + ("x" * 1200)
+
+        self.assertEqual(tail_lines(text, limit=2)[0], "short")
+        self.assertTrue(tail_lines(text, limit=2)[1].endswith("...<truncated>"))
+        self.assertLessEqual(len(tail_lines(text, limit=2)[1]), 1014)
 
     def test_wait_for_active_agent_runs_timeout_leaves_state_uncollected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,6 +365,26 @@ class DogfoodTests(unittest.TestCase):
             collector.assert_not_called()
             state = json.loads((workspace / STATE_FILE).read_text(encoding="utf-8"))
             self.assertEqual(state["agent_runs"][0]["status"], "running")
+
+    def test_wait_for_active_agent_runs_marks_ai_cli_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / STATE_DIR).mkdir()
+            state = default_state()
+            state["agent_runs"].append({"id": 7, "status": "running", "external_pid": 123})
+            (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+
+            class Result:
+                returncode = 1
+                stdout = ""
+                stderr = "Timed out after 180 seconds waiting for processes"
+
+            with patch("mew.dogfood.subprocess.run", return_value=Result()):
+                with patch("mew.dogfood.run_command") as collector:
+                    results = wait_for_active_agent_runs(workspace, 5.0)
+
+            self.assertTrue(results[0]["timed_out"])
+            collector.assert_not_called()
 
     def test_run_dogfood_skips_cleanup_when_agent_run_is_active(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -209,12 +209,23 @@ def run_command(command, workspace, timeout=30, env=None):
     }
 
 
+def tail_lines(text, limit=20, max_line_chars=1000):
+    lines = (text or "").splitlines()[-limit:]
+    clipped = []
+    for line in lines:
+        if len(line) > max_line_chars:
+            clipped.append(line[:max_line_chars] + "...<truncated>")
+        else:
+            clipped.append(line)
+    return clipped
+
+
 def command_result_tail(result, limit=20):
     return {
         "command": result.get("command", []),
         "exit_code": result.get("exit_code"),
-        "stdout_tail": (result.get("stdout") or "").splitlines()[-limit:],
-        "stderr_tail": (result.get("stderr") or "").splitlines()[-limit:],
+        "stdout_tail": tail_lines(result.get("stdout"), limit=limit),
+        "stderr_tail": tail_lines(result.get("stderr"), limit=limit),
     }
 
 
@@ -248,14 +259,14 @@ def wait_for_active_agent_runs(workspace, timeout_seconds, env=None):
         if remaining <= 0.0:
             results.append({"run_id": run_id, "skipped": "timeout_exhausted"})
             continue
-        wait_command = ["ai-cli", "wait", str(external_pid)]
+        wait_command = ["ai-cli", "wait", str(external_pid), "--timeout", str(remaining)]
         try:
             wait_result = subprocess.run(
                 wait_command,
                 cwd=str(workspace),
                 text=True,
                 capture_output=True,
-                timeout=remaining,
+                timeout=remaining + 30.0,
                 shell=False,
                 env=env,
             )
@@ -269,8 +280,8 @@ def wait_for_active_agent_runs(workspace, timeout_seconds, env=None):
                     "command": wait_command,
                     "exit_code": None,
                     "timed_out": True,
-                    "stdout_tail": stdout.splitlines()[-20:],
-                    "stderr_tail": (stderr or f"wait timed out after {remaining:.1f} second(s)").splitlines()[-20:],
+                    "stdout_tail": tail_lines(stdout),
+                    "stderr_tail": tail_lines(stderr or f"wait timed out after {remaining:.1f} second(s)"),
                 }
             )
             continue
@@ -285,6 +296,8 @@ def wait_for_active_agent_runs(workspace, timeout_seconds, env=None):
         )
         wait_summary["run_id"] = run_id
         wait_summary["external_pid"] = external_pid
+        if wait_result.returncode != 0 and "timed out" in (wait_result.stderr or "").casefold():
+            wait_summary["timed_out"] = True
         if wait_result.returncode == 0:
             collect_result = run_command(
                 [sys.executable, "-m", "mew", "agent", "result", str(run_id)],
@@ -575,7 +588,8 @@ def format_dogfood_report(report):
         for result in wait_results:
             lines.append(
                 f"- run #{result.get('run_id')} exit={result.get('exit_code')} "
-                f"stdout_tail={result.get('stdout_tail')}"
+                f"timed_out={bool(result.get('timed_out'))} "
+                f"stdout_tail={result.get('stdout_tail')} stderr_tail={result.get('stderr_tail')}"
             )
     source_copy = report.get("source_copy")
     if source_copy:
