@@ -30,6 +30,11 @@ def open_unread_messages(state):
     return [message for message in state.get("outbox", []) if not message.get("read_at")]
 
 
+def recent_unread_messages(state, limit=5):
+    unread = open_unread_messages(state)
+    return list(reversed(unread[-limit:]))
+
+
 def running_agent_runs(state):
     return [
         run for run in state.get("agent_runs", []) if run.get("status") in ("created", "running")
@@ -314,7 +319,7 @@ def build_brief_data(state, limit=5):
         "agent": state.get("agent_status", {}),
         "autonomy": state.get("autonomy", {}),
         "user": state.get("user_status", {}),
-        "unread_outbox": [_message_item(message) for message in unread[:limit]],
+        "unread_outbox": [_message_item(message) for message in recent_unread_messages(state, limit=limit)],
         "unread_outbox_count": len(unread),
         "memory": {
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
@@ -401,6 +406,7 @@ def build_brief(state, limit=5):
     verifications = recent_verification_runs(state, limit=limit)
     thoughts = recent_thoughts_for_context(state, limit=limit)
     activity = recent_activity(state, limit=limit)
+    recent_unread = recent_unread_messages(state, limit=limit)
 
     lines = [
         f"Mew brief at {now_iso()}",
@@ -426,7 +432,11 @@ def build_brief(state, limit=5):
 
     if unread:
         lines.append("Unread messages")
-        for message in unread[:limit]:
+        if len(unread) > len(recent_unread):
+            lines.append(
+                f"- showing latest {len(recent_unread)}; {len(unread) - len(recent_unread)} older unread omitted"
+            )
+        for message in recent_unread:
             lines.append(
                 f"- #{message.get('id')} [{message.get('type')}] {str(message.get('text') or '').splitlines()[0]}"
             )

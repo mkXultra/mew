@@ -2,7 +2,7 @@ import unittest
 
 from mew.brief import build_brief, build_brief_data, next_move, review_runs_needing_followup
 from mew.programmer import create_follow_up_task_from_review, create_implementation_run_from_plan, create_task_plan
-from mew.state import add_question, default_state
+from mew.state import add_outbox_message, add_question, default_state
 
 
 def add_task(state, status="todo", auto_execute=False):
@@ -158,6 +158,20 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("project_snapshot: types=python package=mew roots=1 files=1", brief)
         self.assertEqual(data["memory"]["project_snapshot"]["package_name"], "mew")
+
+    def test_brief_shows_latest_unread_messages_first(self):
+        state = default_state()
+        for index in range(7):
+            add_outbox_message(state, "info", f"message {index + 1}")
+
+        brief = build_brief(state, limit=3)
+        data = build_brief_data(state, limit=3)
+
+        self.assertIn("showing latest 3; 4 older unread omitted", brief)
+        self.assertIn("#7 [info] message 7", brief)
+        self.assertNotIn("#1 [info] message 1", brief)
+        self.assertEqual([message["id"] for message in data["unread_outbox"]], [7, 6, 5])
+        self.assertEqual(data["unread_outbox_count"], 7)
 
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()
