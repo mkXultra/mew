@@ -861,6 +861,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(think_prompt.count("GUIDANCE_START"), 1)
         self.assertNotIn("GUIDANCE_END", think_prompt)
         self.assertIn("record_memory, update_memory, self_review, or propose_task", act_prompt)
+        self.assertIn('"type": "refine_task"', think_prompt)
+        self.assertIn('"type": "refine_task"', act_prompt)
         self.assertNotIn("memory/self_review", act_prompt)
         self.assertNotIn("record/self_review", act_prompt)
 
@@ -1353,6 +1355,77 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(task["status"], "todo")
         self.assertIn("Refused complete_task", state["outbox"][0]["text"])
+
+    def test_autonomous_refine_task_updates_self_proposed_task_and_resets_plan(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        task = add_planned_ready_task(state)
+        task["title"] = "Define the next useful mew task"
+        task["description"] = "Generic next step."
+        task["notes"] = "Proposed by mew from event #1."
+        state["next_ids"]["plan"] = 2
+        old_plan = task["plans"][0]
+
+        counts = apply_action_plan(
+            state,
+            event,
+            {"summary": "refine"},
+            {
+                "summary": "refine",
+                "actions": [
+                    {
+                        "type": "refine_task",
+                        "task_id": task["id"],
+                        "title": "Persist concrete next-step hints",
+                        "description": "Let mew turn synthesis into task motion.",
+                        "kind": "coding",
+                        "priority": "high",
+                        "notes": "Refined from dogfood synthesis.",
+                        "reset_plan": True,
+                        "objective": "Implement concrete next-step persistence.",
+                    }
+                ],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(counts["messages"], 1)
+        self.assertEqual(task["title"], "Persist concrete next-step hints")
+        self.assertEqual(task["description"], "Let mew turn synthesis into task motion.")
+        self.assertEqual(task["priority"], "high")
+        self.assertIn("refine_task", task["notes"])
+        self.assertEqual(old_plan["status"], "superseded")
+        self.assertEqual(task["latest_plan_id"], 2)
+        self.assertEqual(task["plans"][-1]["objective"], "Implement concrete next-step persistence.")
+        self.assertIn("Refined task", state["outbox"][0]["text"])
+
+    def test_autonomous_refine_task_refuses_user_task(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        task = add_planned_ready_task(state)
+        task["notes"] = "Created by user."
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "refine"},
+            {
+                "summary": "refine",
+                "actions": [{"type": "refine_task", "task_id": task["id"], "title": "New title"}],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertNotEqual(task["title"], "New title")
+        self.assertIn("Refused refine_task", state["outbox"][0]["text"])
 
     def test_observe_level_refuses_task_proposal(self):
         state = default_state()

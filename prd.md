@@ -727,6 +727,8 @@ The first user-facing version should likely include:
 - Routine autonomous read progress should remain available in history/live
   streams while being marked read by default, so unread outbox focuses on
   user-facing replies, questions, and warnings.
+- `refine_task` should let autonomous synthesis refine a self-proposed internal
+  task into a concrete coding task and refresh stale programmer plans.
 - `mew step --focus <text>` should inject a short immediate focus for that
   manual loop without changing persistent guidance.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.

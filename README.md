@@ -189,6 +189,9 @@ synthesize or choose a different inspection target instead of reading the same
 file over and over. Routine autonomous read progress is kept in outbox for
 history and live attach streams, but marked read so the user's unread queue
 stays focused on actual replies, questions, and warnings.
+After repeated inspection produces a concrete direction, the resident model can
+use `refine_task` to turn a self-proposed generic task into a specific coding
+task and refresh its programmer plan.
 Use `--focus` to steer a short step loop toward the current development session
 without rewriting persistent guidance.
 

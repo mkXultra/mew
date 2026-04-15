@@ -24,6 +24,7 @@ STEP_ACTION_TYPES = {
     "wait_for_user",
     "self_review",
     "propose_task",
+    "refine_task",
     "inspect_dir",
     "read_file",
     "search_text",
@@ -171,11 +172,13 @@ def clip_step_text(value, limit=MAX_STEP_TEXT_CHARS):
 
 def compact_step_action(action):
     compact = {"type": action.get("type") or "unknown"}
-    for key in ("task_id", "path", "query", "title", "question", "reason", "summary", "text"):
+    for key in ("task_id", "path", "query", "title", "kind", "question", "reason", "summary", "text"):
         value = action.get(key)
         if value is None:
             continue
         compact[key] = clip_step_text(value)
+    if action.get("reset_plan") is not None:
+        compact["reset_plan"] = bool(action.get("reset_plan"))
     return compact
 
 

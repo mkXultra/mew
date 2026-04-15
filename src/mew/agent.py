@@ -50,6 +50,7 @@ from .tasks import (
     clip_output,
     execute_task_action,
     is_programmer_task,
+    normalize_task_kind,
     normalize_task_id,
     open_tasks,
     task_by_id,
@@ -124,7 +125,7 @@ def build_think_prompt(
         "Use open_threads for unfinished reasoning that should survive the next wake, and resolved_threads for threads closed now.\n"
         "If thought_thread_warning is present, explicitly carry those dropped threads forward or mark them resolved.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
-        "execute_task, complete_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
+        "execute_task, complete_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, refine_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
@@ -146,6 +147,7 @@ def build_think_prompt(
         "Use execute_task only when a task is ready, has command, has auto_execute=true, "
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
         "Use complete_task only for a task whose objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
+        "Use refine_task when autonomous synthesis has made a self-proposed internal task more concrete than its current title or plan.\n"
         "Use read-only inspection only when it directly helps the current task or memory, and only under allowed_read_roots.\n"
         "Use recent step_runs, thought_journal, and memory before inspecting; autonomous cycles should not repeat the same read-only action.\n"
         "If memory says a read was skipped as repeated, choose a different target or synthesize the next step instead of retrying it.\n"
@@ -179,6 +181,7 @@ def build_think_prompt(
         '    {"type": "edit_file", "path": "...", "old": "...", "new": "...", "replace_all": false, "dry_run": true},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
         '    {"type": "propose_task", "title": "...", "description": "...", "priority": "low|normal|high"},\n'
+        '    {"type": "refine_task", "task_id": 1, "title": "...", "description": "...", "kind": "coding", "notes": "...", "reset_plan": true},\n'
         '    {"type": "plan_task", "task_id": 1, "objective": "...", "approach": "..."},\n'
         '    {"type": "dispatch_task", "task_id": 1, "plan_id": 1, "reason": "..."},\n'
         '    {"type": "collect_agent_result", "run_id": 1},\n'
@@ -236,7 +239,7 @@ def build_act_prompt(
         "Preserve or refine open_threads when follow-up is needed, and mark resolved_threads when actions close a thread.\n"
         "If thought_thread_warning is present, do not silently drop those threads again.\n"
         "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, complete_task, run_verification, "
-        "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
+        "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, refine_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
@@ -254,6 +257,7 @@ def build_act_prompt(
         "Use execute_task only when the task is ready, has command, has auto_execute=true, "
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
         "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
+        "Use refine_task to update a self-proposed internal task after synthesis, instead of proposing a duplicate task.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
         "Do not repeat the same read-only action shown in recent step_runs or thought_journal during autonomous cycles.\n"
         "If the DecisionPlan repeats a read that memory says was skipped, convert it to record_memory, update_memory, self_review, or propose_task instead.\n"
@@ -280,6 +284,7 @@ def build_act_prompt(
         '    {"type": "edit_file", "path": "...", "old": "...", "new": "...", "replace_all": false, "dry_run": true},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
         '    {"type": "propose_task", "title": "...", "description": "...", "priority": "low|normal|high"},\n'
+        '    {"type": "refine_task", "task_id": 1, "title": "...", "description": "...", "kind": "coding", "notes": "...", "reset_plan": true},\n'
         '    {"type": "plan_task", "task_id": 1, "objective": "...", "approach": "..."},\n'
         '    {"type": "dispatch_task", "task_id": 1, "plan_id": 1, "reason": "..."},\n'
         '    {"type": "collect_agent_result", "run_id": 1},\n'
@@ -787,6 +792,7 @@ def normalize_decision_plan(plan, fallback_summary):
             "category",
             "title",
             "description",
+            "kind",
             "priority",
             "status",
             "notes",
@@ -803,7 +809,7 @@ def normalize_decision_plan(plan, fallback_summary):
         ):
             if isinstance(decision.get(key), str):
                 clean[key] = decision[key]
-        for key in ("create", "dry_run", "replace_all"):
+        for key in ("create", "dry_run", "replace_all", "reset_plan"):
             if isinstance(decision.get(key), bool):
                 clean[key] = decision[key]
         for key in ("run_id", "plan_id"):
@@ -838,6 +844,7 @@ REQUIRED_MODEL_GUARDRAIL_DECISIONS = {
     "followup_review",
     "run_verification",
     "propose_task",
+    "refine_task",
     "plan_task",
     "dispatch_task",
 }
@@ -984,6 +991,7 @@ def deterministic_action_plan(decision_plan):
             "edit_file",
             "self_review",
             "propose_task",
+            "refine_task",
             "plan_task",
             "dispatch_task",
             "collect_agent_result",
@@ -1036,6 +1044,7 @@ def normalize_action_plan(plan, fallback_plan):
             "category",
             "title",
             "description",
+            "kind",
             "priority",
             "status",
             "notes",
@@ -1052,7 +1061,7 @@ def normalize_action_plan(plan, fallback_plan):
         ):
             if isinstance(action.get(key), str):
                 clean[key] = action[key]
-        for key in ("create", "dry_run", "replace_all"):
+        for key in ("create", "dry_run", "replace_all", "reset_plan"):
             if isinstance(action.get(key), bool):
                 clean[key] = action[key]
         for key in ("run_id", "plan_id"):
@@ -1675,9 +1684,97 @@ def is_self_proposed_task(task):
     return "Proposed by mew" in notes or "Proposed by self_review" in notes
 
 
+def is_mew_internal_task(task):
+    notes = str(task.get("notes") or "")
+    return (
+        "Proposed by mew" in notes
+        or "Proposed by self_review" in notes
+        or "Created by mew" in notes
+    )
+
+
 def append_agent_task_note(task, note):
     existing = task.get("notes") or ""
     task["notes"] = f"{existing.rstrip()}\n{note}".strip()
+
+
+def _refine_text(value):
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def apply_refine_task_action(state, event, action, current_time, autonomous, autonomy_level):
+    task = task_by_id(state, action.get("task_id"))
+    if not task:
+        add_outbox_message(state, "warning", f"Cannot refine missing task #{action.get('task_id')}", event_id=event["id"])
+        return 1
+    allowed = event["type"] == "user_message"
+    if autonomous:
+        allowed = allowed or (autonomy_level == "act" and is_mew_internal_task(task))
+    if not allowed:
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused refine_task for task #{task['id']}: only user-requested or mew-internal tasks can be refined this way.",
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+
+    changed = []
+    title = _refine_text(action.get("title"))
+    if title and title != task.get("title"):
+        task["title"] = title
+        changed.append("title")
+    description = _refine_text(action.get("description"))
+    if description and description != task.get("description"):
+        task["description"] = description
+        changed.append("description")
+    kind = normalize_task_kind(action.get("kind"))
+    if kind and kind != task.get("kind"):
+        task["kind"] = kind
+        changed.append("kind")
+    priority = action.get("priority")
+    if priority in ("low", "normal", "high") and priority != task.get("priority"):
+        task["priority"] = priority
+        changed.append("priority")
+    notes = _refine_text(action.get("notes") or action.get("summary") or action.get("reason"))
+    if notes:
+        append_agent_task_note(task, f"{current_time} refine_task: {notes}")
+        changed.append("notes")
+
+    if not changed and not action.get("reset_plan"):
+        return 0
+
+    task["updated_at"] = current_time
+    reset_plan = bool(action.get("reset_plan"))
+    if reset_plan:
+        for plan in task.get("plans") or []:
+            if plan.get("status") in ("planned", "dry_run"):
+                plan["status"] = "superseded"
+                plan["updated_at"] = current_time
+        task["latest_plan_id"] = None
+        changed.append("plan")
+        if task_kind(task) == "coding":
+            create_task_plan(
+                state,
+                task,
+                cwd=action.get("cwd"),
+                model=action.get("agent_model"),
+                review_model=action.get("review_model"),
+                objective=action.get("objective") or task.get("description") or task.get("title"),
+                approach=action.get("approach"),
+            )
+
+    add_outbox_message(
+        state,
+        "info",
+        f"Refined task #{task['id']}: {', '.join(dict.fromkeys(changed))}",
+        event_id=event["id"],
+        related_task_id=task["id"],
+    )
+    return 1
 
 
 def apply_complete_task_action(state, event, action, current_time, autonomous, autonomy_level):
@@ -2050,6 +2147,15 @@ def apply_action_plan(
             )
         elif action_type == "propose_task":
             counts["messages"] += apply_propose_task_action(
+                state,
+                event,
+                action,
+                current_time,
+                autonomous,
+                autonomy_level,
+            )
+        elif action_type == "refine_task":
+            counts["messages"] += apply_refine_task_action(
                 state,
                 event,
                 action,
