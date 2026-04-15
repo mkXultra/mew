@@ -1,11 +1,13 @@
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 
 from .config import (
     DESIRES_FILE,
+    EFFECT_LOG_FILE,
     GUIDANCE_FILE,
     LOCK_FILE,
     LOG_FILE,
@@ -17,6 +19,7 @@ from .config import (
     STATE_VERSION,
 )
 from .timeutil import now_iso
+from .validation import validation_errors, validate_state
 
 
 _runtime_lock_handle = None
@@ -378,11 +381,66 @@ def load_state():
 
 def save_state(state):
     ensure_state_dir()
+    reconcile_next_ids(state)
+    issues = validation_errors(validate_state(state))
+    if issues:
+        first = issues[0]
+        raise ValueError(f"invalid state at {first['path']}: {first['message']}")
     tmp_file = STATE_FILE.with_name(f"{STATE_FILE.name}.{os.getpid()}.tmp")
     with tmp_file.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     os.replace(tmp_file, STATE_FILE)
+    append_state_effect(state)
+
+def state_digest(state):
+    encoded = json.dumps(state, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+def state_counts(state):
+    return {
+        "tasks": len(state.get("tasks", [])),
+        "inbox": len(state.get("inbox", [])),
+        "outbox": len(state.get("outbox", [])),
+        "questions": len(state.get("questions", [])),
+        "agent_runs": len(state.get("agent_runs", [])),
+        "verification_runs": len(state.get("verification_runs", [])),
+        "write_runs": len(state.get("write_runs", [])),
+        "thoughts": len(state.get("thought_journal", [])),
+    }
+
+def state_effect_record(state):
+    return {
+        "type": "state_saved",
+        "saved_at": now_iso(),
+        "pid": os.getpid(),
+        "state_version": state.get("version"),
+        "state_sha256": state_digest(state),
+        "counts": state_counts(state),
+    }
+
+def append_state_effect(state):
+    record = state_effect_record(state)
+    with EFFECT_LOG_FILE.open("a", encoding="utf-8") as handle:
+        json.dump(record, handle, ensure_ascii=False, sort_keys=True)
+        handle.write("\n")
+    return record
+
+def read_last_state_effect():
+    if not EFFECT_LOG_FILE.exists():
+        return None
+    try:
+        lines = EFFECT_LOG_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return {"type": "corrupt_effect_record", "raw": line}
+    return None
 
 def append_log(line):
     ensure_state_dir()

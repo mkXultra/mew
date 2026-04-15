@@ -379,6 +379,7 @@ The first core validation should avoid a database.
 Use simple local files:
 
 - `.mew/state.json`: durable structured state for tasks, inbox, outbox, runtime status, agent status, user status, and shallow knowledge.
+- `.mew/effects.jsonl`: append-only state checkpoint records with save time, process id, state hash, and record counts.
 - `.mew/runtime.md`: human-readable runtime log.
 - `.mew/runtime.lock`: single-runtime lock.
 - `.mew/state.lock`: state mutation lock for runtime/client coordination.
@@ -670,7 +671,8 @@ The first user-facing version should likely include:
 - `mew status`: show whether the background AI is running and what it last did.
 - `mew status --json`: show runtime status and counters as structured JSON.
 - `mew stop`: stop the active background runtime and wait for shutdown.
-- `mew doctor`: check local state, runtime lock, and required local tools.
+- `mew doctor`: check local state, state validation, latest state checkpoint, runtime lock, and required local tools.
+- `mew doctor --json`: expose the same health check as structured JSON for agents and automation.
 - `mew brief`: show the current operational summary and next useful move.
 - `mew brief --json`: expose the operational summary as structured JSON for other agents.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.

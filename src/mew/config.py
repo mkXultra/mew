@@ -6,6 +6,7 @@ STATE_DIR = Path(".mew")
 STATE_FILE = STATE_DIR / "state.json"
 ARCHIVE_DIR = STATE_DIR / "archive"
 LOG_FILE = STATE_DIR / "runtime.md"
+EFFECT_LOG_FILE = STATE_DIR / "effects.jsonl"
 LOCK_FILE = STATE_DIR / "runtime.lock"
 STATE_LOCK_FILE = STATE_DIR / "state.lock"
 AGENT_RUN_DIR = STATE_DIR / "agent-runs"

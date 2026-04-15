@@ -74,6 +74,8 @@ passive alert.
 ```sh
 uv run mew status
 uv run mew status --json
+uv run mew doctor
+uv run mew doctor --json
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew stop
 uv run mew message "今日のタスクは何？" --wait
@@ -115,6 +117,9 @@ Run `mew snapshot --allow-read .` to refresh that map deterministically.
 `mew dogfood --report <path>` stores the structured report for later inspection,
 including model phase counts, cycle summaries, active dropped-thread warnings,
 and the final project snapshot.
+Every state save is validated, reconciles `next_ids`, and appends a compact
+checkpoint to `.mew/effects.jsonl`; `mew doctor` reports validation issues and
+the latest checkpoint hash.
 
 ## Resident Model
 

@@ -268,6 +268,7 @@ def build_parser():
     doctor_parser = subparsers.add_parser("doctor", help="check local mew dependencies and state")
     doctor_parser.add_argument("--auth", help="path to Codex OAuth auth.json")
     doctor_parser.add_argument("--require-auth", action="store_true", help="fail if Codex OAuth auth is missing")
+    doctor_parser.add_argument("--json", action="store_true", help="print structured JSON")
     doctor_parser.set_defaults(func=cmd_doctor)
 
     message_parser = subparsers.add_parser("message", help="queue a user message")

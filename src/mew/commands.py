@@ -68,6 +68,7 @@ from .state import (
     read_policy,
     read_self,
     read_lock,
+    read_last_state_effect,
     save_state,
     state_lock,
 )
@@ -77,6 +78,7 @@ from .tasks import clip_output, find_task, format_task, open_tasks, task_sort_ke
 from .thoughts import format_thought_entry
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
+from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, summarize_write_result, write_file
 
 
@@ -485,46 +487,113 @@ def cmd_stop(args):
     print(f"mew: timed out waiting for runtime pid={pid} to stop", file=sys.stderr)
     return 1
 
-def cmd_doctor(args):
-    failed = False
-
+def build_doctor_data(args):
+    data = {"ok": True}
     try:
         state = load_state()
-        print("state: ok")
-        print(f"state_version: {state.get('version')}")
-        print(f"tasks: {len(state.get('tasks', []))}")
-        print(f"agent_runs: {len(state.get('agent_runs', []))}")
+        validation_issues = validate_state(state)
+        data["state"] = {
+            "ok": not validation_errors(validation_issues),
+            "version": state.get("version"),
+            "tasks": len(state.get("tasks", [])),
+            "agent_runs": len(state.get("agent_runs", [])),
+            "validation_issues": validation_issues,
+            "last_effect": read_last_state_effect(),
+        }
+        if validation_errors(validation_issues):
+            data["ok"] = False
     except Exception as exc:
-        print(f"state: error {exc}")
-        failed = True
+        data["state"] = {"ok": False, "error": str(exc)}
+        data["ok"] = False
 
     lock = read_lock()
     if lock:
         lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
-        print(f"runtime_lock: {lock_state} pid={lock.get('pid')}")
+        data["runtime_lock"] = {"state": lock_state, "pid": lock.get("pid")}
     else:
-        print("runtime_lock: none")
+        data["runtime_lock"] = {"state": "none", "pid": None}
 
+    data["tools"] = {}
     for executable in ("ai-cli", "rg"):
         path = shutil.which(executable)
         if path:
-            print(f"{executable}: ok {path}")
+            data["tools"][executable] = {"ok": True, "path": path}
         else:
-            print(f"{executable}: missing")
-            failed = True
+            data["tools"][executable] = {"ok": False, "path": None}
+            data["ok"] = False
 
     try:
         auth = load_codex_oauth(args.auth)
         account = "present" if auth.get("account_id") else "none"
         expires = auth.get("expires") or "(unknown)"
-        print(f"codex_auth: ok path={auth.get('path')} account_id={account} expires={expires}")
+        data["codex_auth"] = {
+            "ok": True,
+            "level": "ok",
+            "path": auth.get("path"),
+            "account_id": account,
+            "expires": expires,
+        }
     except MewError as exc:
         level = "error" if args.require_auth else "missing"
-        print(f"codex_auth: {level} {exc}")
+        data["codex_auth"] = {"ok": not args.require_auth, "level": level, "error": str(exc)}
         if args.require_auth:
-            failed = True
+            data["ok"] = False
+    return data
 
-    return 1 if failed else 0
+def format_doctor_data(data):
+    lines = []
+    state = data.get("state") or {}
+    if state.get("ok"):
+        lines.append("state: ok")
+        lines.append(f"state_version: {state.get('version')}")
+        lines.append(f"tasks: {state.get('tasks')}")
+        lines.append(f"agent_runs: {state.get('agent_runs')}")
+        lines.append(format_validation_issues(state.get("validation_issues") or []))
+        last_effect = state.get("last_effect")
+        if last_effect:
+            lines.append(
+                "last_state_effect: "
+                f"{last_effect.get('saved_at')} sha256={str(last_effect.get('state_sha256') or '')[:12]} "
+                f"counts={last_effect.get('counts')}"
+            )
+        else:
+            lines.append("last_state_effect: none")
+    else:
+        lines.append(f"state: error {state.get('error') or 'validation failed'}")
+        if state.get("validation_issues"):
+            lines.append(format_validation_issues(state.get("validation_issues") or []))
+
+    runtime_lock = data.get("runtime_lock") or {}
+    if runtime_lock.get("state") == "none":
+        lines.append("runtime_lock: none")
+    else:
+        lines.append(f"runtime_lock: {runtime_lock.get('state')} pid={runtime_lock.get('pid')}")
+
+    for executable in ("ai-cli", "rg"):
+        tool = (data.get("tools") or {}).get(executable) or {}
+        if tool.get("ok"):
+            lines.append(f"{executable}: ok {tool.get('path')}")
+        else:
+            lines.append(f"{executable}: missing")
+
+    auth = data.get("codex_auth") or {}
+    if auth.get("level") == "ok":
+        lines.append(
+            "codex_auth: ok "
+            f"path={auth.get('path')} account_id={auth.get('account_id')} expires={auth.get('expires')}"
+        )
+    else:
+        lines.append(f"codex_auth: {auth.get('level')} {auth.get('error')}")
+    return "\n".join(lines)
+
+def cmd_doctor(args):
+    data = build_doctor_data(args)
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_doctor_data(data))
+
+    return 0 if data.get("ok") else 1
 
 def cmd_brief(args):
     state = load_state()
