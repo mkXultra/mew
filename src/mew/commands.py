@@ -297,7 +297,9 @@ def build_workbench_data(state, task):
     )
 
     next_action = "mew task show {task_id}".format(task_id=task_id)
-    if questions:
+    if task.get("status") == "done":
+        next_action = next_move(state)
+    elif questions:
         next_action = f"mew reply {questions[0]['id']} \"...\""
     elif not is_programmer_task(task):
         next_action = f"mew task update {task_id} --kind coding"

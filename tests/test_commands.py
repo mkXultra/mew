@@ -831,6 +831,38 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_done_task_does_not_recommend_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "add",
+                                "Implement dispatch prompt",
+                                "--kind",
+                                "coding",
+                                "--ready",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(main(["buddy", "--task", "1"]), 0)
+                    self.assertEqual(main(["task", "done", "1"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("#1 [done/normal/coding]", output)
+                self.assertIn("Next action\nwait for the next user request", output)
+                self.assertNotIn("mew buddy --task 1 --dispatch", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_plan_refuses_non_coding_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
