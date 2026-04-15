@@ -475,6 +475,24 @@ def build_parser():
     dogfood_parser.add_argument("--execute-tasks", action="store_true", help="allow runtime task execution gates during dogfood")
     dogfood_parser.add_argument("--allow-agent-run", action="store_true", help="allow runtime programmer agent dispatch during dogfood")
     dogfood_parser.add_argument(
+        "--agent-stale-minutes",
+        type=float,
+        default=None,
+        help="pass --agent-stale-minutes through to the dogfood runtime",
+    )
+    dogfood_parser.add_argument(
+        "--agent-result-timeout",
+        type=float,
+        default=None,
+        help="pass --agent-result-timeout through to the dogfood runtime",
+    )
+    dogfood_parser.add_argument(
+        "--agent-start-timeout",
+        type=float,
+        default=None,
+        help="pass --agent-start-timeout through to the dogfood runtime",
+    )
+    dogfood_parser.add_argument(
         "--seed-ready-coding-task",
         action="store_true",
         help="seed a ready auto-executable coding task before starting the dogfood runtime",

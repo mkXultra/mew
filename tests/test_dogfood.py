@@ -49,6 +49,9 @@ class DogfoodTests(unittest.TestCase):
             allow_verify=False,
             execute_tasks=False,
             allow_agent_run=False,
+            agent_stale_minutes=None,
+            agent_result_timeout=None,
+            agent_start_timeout=None,
             verify_command="",
             verify_interval_minutes=0.05,
         )
@@ -77,6 +80,9 @@ class DogfoodTests(unittest.TestCase):
                     allow_verify=False,
                     execute_tasks=False,
                     allow_agent_run=False,
+                    agent_stale_minutes=None,
+                    agent_result_timeout=None,
+                    agent_start_timeout=None,
                     verify_command="",
                     verify_interval_minutes=0.05,
                 )
@@ -102,6 +108,9 @@ class DogfoodTests(unittest.TestCase):
             allow_verify=False,
             execute_tasks=True,
             allow_agent_run=True,
+            agent_stale_minutes=3.0,
+            agent_result_timeout=4.0,
+            agent_start_timeout=5.0,
             verify_command="",
             verify_interval_minutes=0.05,
         )
@@ -110,6 +119,9 @@ class DogfoodTests(unittest.TestCase):
 
         self.assertIn("--execute-tasks", command)
         self.assertIn("--allow-agent-run", command)
+        self.assertEqual(command[command.index("--agent-stale-minutes") + 1], "3.0")
+        self.assertEqual(command[command.index("--agent-result-timeout") + 1], "4.0")
+        self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:

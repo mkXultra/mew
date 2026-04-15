@@ -170,6 +170,12 @@ def build_runtime_command(args, workspace):
         command.append("--execute-tasks")
     if getattr(args, "allow_agent_run", False):
         command.append("--allow-agent-run")
+    if getattr(args, "agent_stale_minutes", None) is not None:
+        command.extend(["--agent-stale-minutes", str(args.agent_stale_minutes)])
+    if getattr(args, "agent_result_timeout", None) is not None:
+        command.extend(["--agent-result-timeout", str(args.agent_result_timeout)])
+    if getattr(args, "agent_start_timeout", None) is not None:
+        command.extend(["--agent-start-timeout", str(args.agent_start_timeout)])
     return command
 
 
