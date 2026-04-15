@@ -1633,6 +1633,7 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(task["status"], "done")
         self.assertIn("complete_task", task["notes"])
         self.assertEqual(state["questions"][0]["status"], "answered")
+        self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
         self.assertEqual(counts["messages"], 1)
 
     def test_send_message_skips_same_event_duplicate_outbox_text(self):

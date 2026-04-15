@@ -973,12 +973,35 @@ def resolve_open_questions_for_task(state, task_id, reason="", event_id=None):
     for item in state.get("attention", {}).get("items", []):
         if (
             item.get("status") == "open"
-            and item.get("kind") == "waiting"
-            and str(item.get("related_task_id")) == str(task_id)
+            and (
+                item.get("question_id") in resolved_ids
+                or (
+                    item.get("kind") in ("question", "waiting")
+                    and str(item.get("related_task_id")) == str(task_id)
+                )
+            )
         ):
             item["status"] = "resolved"
             item["resolved_at"] = current_time
             item["updated_at"] = current_time
+
+    agent = state.get("agent_status", {})
+    if (
+        agent.get("mode") == "waiting_for_user"
+        and str(agent.get("active_task_id")) == str(task_id)
+        and not pending_question_for_task(state, task_id)
+    ):
+        agent["mode"] = "idle"
+        agent["current_focus"] = ""
+        agent["active_task_id"] = None
+        agent["pending_question"] = None
+        agent["updated_at"] = current_time
+
+    user = state.get("user_status", {})
+    if user.get("mode") == "needs_user" and not open_questions(state):
+        user["mode"] = "idle"
+        user["current_focus"] = ""
+        user["updated_at"] = current_time
     return len(resolved_ids)
 
 def mark_question_deferred(state, question, reason=""):

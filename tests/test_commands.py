@@ -148,6 +148,11 @@ class CommandTests(unittest.TestCase):
                 with state_lock():
                     state = load_state()
                     add_question(state, "Should I mark task #1 done?", related_task_id=1)
+                    state["agent_status"]["mode"] = "waiting_for_user"
+                    state["agent_status"]["current_focus"] = "task #1 completion confirmation"
+                    state["agent_status"]["active_task_id"] = 1
+                    state["agent_status"]["pending_question"] = "Should I mark task #1 done?"
+                    state["user_status"]["mode"] = "needs_user"
                     save_state(state)
 
                 with redirect_stdout(StringIO()):
@@ -157,6 +162,11 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(state["tasks"][0]["status"], "done")
                 self.assertEqual(state["questions"][0]["status"], "answered")
                 self.assertIsNotNone(state["outbox"][0]["answered_at"])
+                self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+                self.assertEqual(state["agent_status"]["mode"], "idle")
+                self.assertIsNone(state["agent_status"]["active_task_id"])
+                self.assertIsNone(state["agent_status"]["pending_question"])
+                self.assertEqual(state["user_status"]["mode"], "idle")
             finally:
                 os.chdir(old_cwd)
 
