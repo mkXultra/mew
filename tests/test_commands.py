@@ -136,6 +136,30 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_done_resolves_related_open_questions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Finish docs"]), 0)
+                with state_lock():
+                    state = load_state()
+                    add_question(state, "Should I mark task #1 done?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "done", "1"]), 0)
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "done")
+                self.assertEqual(state["questions"][0]["status"], "answered")
+                self.assertIsNotNone(state["outbox"][0]["answered_at"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_ack_can_mark_multiple_and_all(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

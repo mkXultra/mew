@@ -946,6 +946,41 @@ def mark_question_answered(state, question, answer_text, event_id=None):
             item["updated_at"] = current_time
     return reply
 
+def resolve_open_questions_for_task(state, task_id, reason="", event_id=None):
+    current_time = now_iso()
+    resolved_ids = []
+    for question in state.get("questions", []):
+        if question.get("status") != "open":
+            continue
+        if str(question.get("related_task_id")) != str(task_id):
+            continue
+        question["status"] = "answered"
+        question["answered_at"] = current_time
+        question["resolution_reason"] = reason
+        question["resolution_event_id"] = event_id
+        resolved_ids.append(question["id"])
+
+    if not resolved_ids:
+        return 0
+
+    for message in state.get("outbox", []):
+        related = str(message.get("related_task_id")) == str(task_id)
+        linked = message.get("question_id") in resolved_ids
+        if linked or (related and message.get("type") == "question"):
+            message["answered_at"] = message.get("answered_at") or current_time
+            message["read_at"] = message.get("read_at") or current_time
+
+    for item in state.get("attention", {}).get("items", []):
+        if (
+            item.get("status") == "open"
+            and item.get("kind") == "waiting"
+            and str(item.get("related_task_id")) == str(task_id)
+        ):
+            item["status"] = "resolved"
+            item["resolved_at"] = current_time
+            item["updated_at"] = current_time
+    return len(resolved_ids)
+
 def mark_question_deferred(state, question, reason=""):
     current_time = now_iso()
     question["status"] = "deferred"

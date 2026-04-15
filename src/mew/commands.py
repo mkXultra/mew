@@ -87,6 +87,7 @@ from .state import (
     read_lock,
     read_last_state_effect,
     reconcile_next_ids,
+    resolve_open_questions_for_task,
     save_state,
     state_digest,
     state_lock,
@@ -434,6 +435,11 @@ def cmd_task_done(args):
             return 1
         task["status"] = "done"
         task["updated_at"] = now_iso()
+        resolve_open_questions_for_task(
+            state,
+            task["id"],
+            reason="task marked done",
+        )
         save_state(state)
     print(format_task(task))
     return 0

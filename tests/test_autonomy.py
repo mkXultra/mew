@@ -1607,6 +1607,7 @@ class AutonomyTests(unittest.TestCase):
         task = add_planned_ready_task(state)
         task["status"] = "todo"
         task["notes"] = "Proposed by mew from event #1."
+        add_question(state, "Should I mark task #1 done?", related_task_id=task["id"])
 
         counts = apply_action_plan(
             state,
@@ -1631,6 +1632,7 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(task["status"], "done")
         self.assertIn("complete_task", task["notes"])
+        self.assertEqual(state["questions"][0]["status"], "answered")
         self.assertEqual(counts["messages"], 1)
 
     def test_send_message_skips_same_event_duplicate_outbox_text(self):

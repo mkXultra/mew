@@ -47,6 +47,7 @@ from .state import (
     next_id,
     open_attention_items,
     pending_question_for_task,
+    resolve_open_questions_for_task,
 )
 from .tasks import (
     clip_output,
@@ -1892,6 +1893,12 @@ def apply_complete_task_action(state, event, action, current_time, autonomous, a
     append_agent_task_note(task, f"{current_time} complete_task: {summary}")
     task["status"] = "done"
     task["updated_at"] = current_time
+    resolve_open_questions_for_task(
+        state,
+        task["id"],
+        reason="task completed",
+        event_id=event["id"],
+    )
     add_outbox_message(
         state,
         "info",
