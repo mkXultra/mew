@@ -59,6 +59,17 @@ def compact_thread_key(state, thread):
         return f"agent_run:{run_match.group(1)}"
     if "programmer-loop" in lowered and task_match:
         return f"programmer_task:{task_match.group(1)}"
+    if task_match:
+        return f"task:{task_match.group(1)}"
+
+    for task in state.get("tasks", []):
+        title = str(task.get("title") or "").strip()
+        if len(title) < 5:
+            continue
+        if title.casefold() in lowered:
+            task_id = task.get("id")
+            if task_id is not None:
+                return f"task:{task_id}"
 
     return "text:" + " ".join(text.split()).casefold()
 

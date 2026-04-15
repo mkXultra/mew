@@ -163,6 +163,67 @@ class AutonomyTests(unittest.TestCase):
         context = build_context(state, second, "later")
         self.assertIsNone(context["thought_thread_warning"])
 
+    def test_thought_journal_keeps_task_threads_when_wording_changes(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Review recent workspace changes",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+        first = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            first,
+            {
+                "summary": "start",
+                "open_threads": [
+                    "Review recent workspace changes by reading a small amount of one recently changed file."
+                ],
+            },
+            {"summary": "start", "actions": [{"type": "record_memory", "summary": "start"}]},
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        second = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            second,
+            {
+                "summary": "continue",
+                "open_threads": [
+                    "Review recent workspace changes for task #1 by reading one more recent allowed file."
+                ],
+            },
+            {"summary": "continue", "actions": [{"type": "record_memory", "summary": "continue"}]},
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(state["thought_journal"][-1]["dropped_threads"], [])
+
     def test_thought_journal_removes_threads_resolved_in_same_cycle(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
