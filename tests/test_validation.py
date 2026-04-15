@@ -2,10 +2,12 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from unittest.mock import patch
 
 from mew.cli import main
+from mew.config import EFFECT_LOG_FILE, STATE_FILE
 from mew.state import default_state, read_last_state_effect, save_state, state_digest
 from mew.validation import format_validation_issues, validate_state, validation_errors
 
@@ -126,6 +128,73 @@ class ValidationTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["effects"]), 0)
                 self.assertIn("state_saved", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["effects", "--limit", "0", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["effects"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_refuses_active_runtime_without_force(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.commands.runtime_is_active", return_value=True):
+                    with redirect_stderr(StringIO()) as stderr:
+                        code = main(["repair"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("runtime is active", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_active_runtime_json_stays_structured(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.commands.runtime_is_active", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["repair", "--json"])
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(code, 1)
+                self.assertFalse(data["ok"])
+                self.assertEqual(data["validation_issues"][0]["path"], "runtime_lock")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_malformed_state_returns_validation_data(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                STATE_FILE.write_text('{"next_ids": "bad"}\n', encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair", "--json"])
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(code, 1)
+                self.assertFalse(data["ok"])
+                self.assertIn("unable to load or repair state", data["validation_issues"][0]["message"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_effects_treats_non_object_json_as_corrupt(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                EFFECT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                EFFECT_LOG_FILE.write_text("[]\n", encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["effects"]), 0)
+
+                self.assertIn("corrupt_effect_record", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

@@ -274,6 +274,7 @@ def build_parser():
     doctor_parser.set_defaults(func=cmd_doctor)
 
     repair_parser = subparsers.add_parser("repair", help="reconcile and validate local mew state")
+    repair_parser.add_argument("--force", action="store_true", help="repair even when a runtime lock is active")
     repair_parser.add_argument("--json", action="store_true", help="print structured JSON")
     repair_parser.set_defaults(func=cmd_repair)
 

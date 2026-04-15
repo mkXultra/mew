@@ -610,32 +610,63 @@ def cmd_doctor(args):
     return 0 if data.get("ok") else 1
 
 def build_repair_data():
-    with state_lock():
-        state = load_state()
-        before_sha = state_digest(state)
-        reconcile_next_ids(state)
-        issues = validate_state(state)
-        errors = validation_errors(issues)
-        if errors:
+    try:
+        with state_lock():
+            state = load_state()
+            before_sha = state_digest(state)
+            reconcile_next_ids(state)
+            issues = validate_state(state)
+            errors = validation_errors(issues)
+            if errors:
+                return {
+                    "ok": False,
+                    "repaired": False,
+                    "before_sha256": before_sha,
+                    "after_sha256": before_sha,
+                    "validation_issues": issues,
+                }
+            save_state(state)
+            after_sha = state_digest(state)
+            last_effect = read_last_state_effect()
+            if last_effect and last_effect.get("state_sha256"):
+                after_sha = last_effect["state_sha256"]
             return {
-                "ok": False,
-                "repaired": False,
+                "ok": True,
+                "repaired": before_sha != after_sha,
                 "before_sha256": before_sha,
-                "after_sha256": before_sha,
-                "validation_issues": issues,
+                "after_sha256": after_sha,
+                "validation_issues": validate_state(state),
+                "last_effect": last_effect,
             }
-        save_state(state)
-        after_sha = state_digest(state)
+    except Exception as exc:
         return {
-            "ok": True,
-            "repaired": before_sha != after_sha,
-            "before_sha256": before_sha,
-            "after_sha256": after_sha,
-            "validation_issues": validate_state(state),
-            "last_effect": read_last_state_effect(),
+            "ok": False,
+            "repaired": False,
+            "before_sha256": "",
+            "after_sha256": "",
+            "validation_issues": [
+                {"level": "error", "path": "$", "message": f"unable to load or repair state: {exc}"}
+            ],
         }
 
 def cmd_repair(args):
+    if runtime_is_active() and not args.force:
+        data = {
+            "ok": False,
+            "repaired": False,
+            "validation_issues": [
+                {
+                    "level": "error",
+                    "path": "runtime_lock",
+                    "message": "runtime is active; stop it before repair or pass --force",
+                }
+            ],
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print("mew: runtime is active; stop it before repair or pass --force", file=sys.stderr)
+        return 1
     data = build_repair_data()
     if getattr(args, "json", False):
         print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -3010,6 +3041,8 @@ def cmd_log(args):
 
 def read_effect_records(limit=20):
     ensure_state_dir()
+    if limit <= 0:
+        return []
     if not EFFECT_LOG_FILE.exists():
         return []
     try:
@@ -3021,10 +3054,13 @@ def read_effect_records(limit=20):
         if not line.strip():
             continue
         try:
-            records.append(json.loads(line))
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                record = {"type": "corrupt_effect_record", "raw": line}
+            records.append(record)
         except json.JSONDecodeError:
             records.append({"type": "corrupt_effect_record", "raw": line})
-    return records[-max(1, limit):]
+    return records[-limit:]
 
 def cmd_effects(args):
     records = read_effect_records(limit=args.limit)

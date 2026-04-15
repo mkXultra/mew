@@ -674,6 +674,7 @@ The first user-facing version should likely include:
 - `mew doctor`: check local state, state validation, latest state checkpoint, runtime lock, and required local tools.
 - `mew doctor --json`: expose the same health check as structured JSON for agents and automation.
 - `mew repair`: reconcile and validate local state, then write a fresh checkpoint when validation passes.
+- `mew repair --force`: allow repair while a runtime lock is active; default repair should refuse active runtimes.
 - `mew repair --json`: expose the repair pass as structured JSON.
 - `mew effects`: show recent append-only state checkpoint records.
 - `mew effects --json`: expose state checkpoint records as structured JSON.
