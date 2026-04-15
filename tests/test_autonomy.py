@@ -1170,6 +1170,40 @@ class AutonomyTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_act_phase_skips_model_when_think_phase_failed(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "hello"})
+        decision_plan = {
+            "summary": "fallback",
+            "model_error": True,
+            "decisions": [
+                {
+                    "type": "send_message",
+                    "message_type": "warning",
+                    "text": "Codex Web API THINK error: DNS failed",
+                }
+            ],
+        }
+
+        with patch("mew.agent.call_model_json") as call:
+            plan = act_phase(
+                state,
+                event,
+                decision_plan,
+                now_iso(),
+                {"access_token": "token"},
+                "test-model",
+                "https://example.invalid",
+                5,
+                False,
+                False,
+                "",
+                model_backend="codex",
+            )
+
+        call.assert_not_called()
+        self.assertEqual(plan["actions"], decision_plan["decisions"])
+
     def test_think_phase_preserves_required_guardrail_decisions(self):
         state = default_state()
         current_time = now_iso()
@@ -1598,6 +1632,79 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(task["status"], "done")
         self.assertIn("complete_task", task["notes"])
         self.assertEqual(counts["messages"], 1)
+
+    def test_send_message_skips_same_event_duplicate_outbox_text(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "todo"
+
+        counts = apply_action_plan(
+            state,
+            event,
+            {"summary": "complete"},
+            {
+                "summary": "complete",
+                "actions": [
+                    {
+                        "type": "complete_task",
+                        "task_id": task["id"],
+                        "summary": "User confirmed done.",
+                    },
+                    {
+                        "type": "send_message",
+                        "text": "Completed task #1: Verify mew",
+                    },
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(counts["messages"], 1)
+        self.assertEqual(
+            [message["text"] for message in state["outbox"]],
+            ["Completed task #1: Verify mew"],
+        )
+
+    def test_send_message_skips_repeated_unread_warning(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "first")
+        second = add_event(state, "passive_tick", "second")
+        warning_action = {
+            "summary": "warn",
+            "actions": [
+                {
+                    "type": "send_message",
+                    "message_type": "warning",
+                    "text": "Codex Web API THINK error: DNS failed",
+                }
+            ],
+        }
+
+        first_counts = apply_action_plan(
+            state,
+            first,
+            {"summary": "warn"},
+            warning_action,
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+        second_counts = apply_action_plan(
+            state,
+            second,
+            {"summary": "warn"},
+            warning_action,
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+        )
+
+        self.assertEqual(first_counts["messages"], 1)
+        self.assertEqual(second_counts["messages"], 0)
+        self.assertEqual(len(state["outbox"]), 1)
 
     def test_complete_task_refuses_user_task_during_autonomous_cycle(self):
         state = default_state()

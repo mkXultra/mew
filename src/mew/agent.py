@@ -808,6 +808,16 @@ def passive_wait_reason(state):
         return f"Next: {move}"
     return "No actionable task."
 
+def should_skip_outbox_send(state, message_type, text, event_id):
+    for message in state.get("outbox", []):
+        if message.get("type") != message_type or message.get("text") != text:
+            continue
+        if event_id is not None and message.get("event_id") == event_id:
+            return True
+        if message_type == "warning" and not message.get("read_at"):
+            return True
+    return False
+
 def normalize_decision_plan(plan, fallback_summary):
     schema_issues = []
     if not isinstance(plan, dict):
@@ -1020,6 +1030,7 @@ def think_phase(
                 "text": f"{model_backend_label(model_backend)} THINK error: {exc}",
             }
         )
+        fallback["model_error"] = True
         return fallback
     normalized = append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
     if log_phases and normalized.get("schema_issues"):
@@ -1177,6 +1188,8 @@ def act_phase(
     log_phases=True,
 ):
     fallback = deterministic_action_plan(decision_plan)
+    if decision_plan.get("model_error"):
+        return fallback
     if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
         return fallback
 
@@ -2323,8 +2336,15 @@ def apply_action_plan(
             message_type = action.get("message_type") or "info"
             if message_type not in ("assistant", "info", "warning"):
                 message_type = "info"
-            add_outbox_message(state, message_type, text, event_id=event["id"], related_task_id=action.get("task_id"))
-            counts["messages"] += 1
+            if not should_skip_outbox_send(state, message_type, text, event["id"]):
+                add_outbox_message(
+                    state,
+                    message_type,
+                    text,
+                    event_id=event["id"],
+                    related_task_id=action.get("task_id"),
+                )
+                counts["messages"] += 1
         elif action_type == "ask_user":
             text = action.get("question") or action.get("text") or ""
             task_id = action.get("task_id")
