@@ -124,6 +124,11 @@ def recent_verification_runs(state, limit=5):
     return list(reversed(runs[-limit:]))
 
 
+def recent_step_runs(state, limit=3):
+    runs = list(state.get("step_runs", []))
+    return list(reversed(runs[-limit:]))
+
+
 def _message_item(message):
     return {
         "id": message.get("id"),
@@ -372,6 +377,7 @@ def build_brief_data(state, limit=5):
         "recent_verification": [
             _verification_item(run) for run in recent_verification_runs(state, limit=limit)
         ],
+        "recent_steps": recent_step_runs(state, limit=limit),
         "programmer_queue": {
             "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
             "followup_needed": [_agent_run_item(run) for run in followup_waiting[:limit]],
@@ -506,6 +512,7 @@ def build_brief(state, limit=5):
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
+    step_runs = recent_step_runs(state, limit=limit)
     thoughts = recent_thoughts_for_context(state, limit=limit)
     activity = recent_activity(state, limit=limit)
     recent_unread = recent_unread_messages(state, limit=limit)
@@ -596,6 +603,22 @@ def build_brief(state, limit=5):
             lines.append(
                 f"- #{item.get('id')} {activity_label(item)}: "
                 f"{item.get('summary')}{suffix}"
+            )
+        lines.append("")
+
+    if step_runs:
+        lines.append("Recent steps")
+        for run in step_runs[:limit]:
+            action_types = ", ".join(
+                action.get("type") or "unknown" for action in run.get("actions", [])[:3]
+            )
+            skipped = run.get("skipped_actions") or []
+            skipped_text = f" skipped={len(skipped)}" if skipped else ""
+            suffix = f" actions={action_types}" if action_types else ""
+            lines.append(
+                f"- #{run.get('id')} event=#{run.get('event_id')} "
+                f"stop={run.get('stop_reason')}{suffix}{skipped_text}: "
+                f"{run.get('summary') or ''}"
             )
         lines.append("")
 

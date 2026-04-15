@@ -7,6 +7,7 @@ REQUIRED_LISTS = (
     "agent_runs",
     "verification_runs",
     "write_runs",
+    "step_runs",
     "thought_journal",
 )
 
@@ -138,6 +139,7 @@ def validate_state(state):
         "agent_runs": "agent_run",
         "verification_runs": "verification_run",
         "write_runs": "write_run",
+        "step_runs": "step_run",
         "thought_journal": "thought",
         "attention": "attention",
     }

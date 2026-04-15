@@ -224,6 +224,30 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("passive_tick/manual_step", brief)
 
+    def test_brief_surfaces_recent_step_runs(self):
+        state = default_state()
+        state["step_runs"].append(
+            {
+                "id": 1,
+                "at": "now",
+                "event_id": 2,
+                "index": 1,
+                "summary": "Read and remembered one thing.",
+                "stop_reason": "max_steps",
+                "actions": [{"type": "read_file", "path": "README.md"}],
+                "skipped_actions": [{"type": "write_file", "path": "README.md"}],
+                "counts": {"actions": 1, "messages": 1},
+            }
+        )
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("Recent steps", brief)
+        self.assertIn("stop=max_steps", brief)
+        self.assertIn("skipped=1", brief)
+        self.assertEqual(data["recent_steps"][0]["summary"], "Read and remembered one thing.")
+
     def test_brief_surfaces_project_snapshot(self):
         state = default_state()
         state["memory"]["deep"]["project_snapshot"] = {

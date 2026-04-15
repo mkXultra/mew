@@ -83,6 +83,7 @@ def default_state():
         "agent_runs": [],
         "verification_runs": [],
         "write_runs": [],
+        "step_runs": [],
         "thought_journal": [],
         "autonomy": {
             "enabled": False,
@@ -135,6 +136,7 @@ def default_state():
             "plan": 1,
             "verification_run": 1,
             "write_run": 1,
+            "step_run": 1,
             "thought": 1,
         },
     }
@@ -178,6 +180,7 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "agent_run", state.get("agent_runs", []))
     _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
     _ensure_next_id_after_existing(next_ids, "write_run", state.get("write_runs", []))
+    _ensure_next_id_after_existing(next_ids, "step_run", state.get("step_runs", []))
     _ensure_next_id_after_existing(next_ids, "thought", state.get("thought_journal", []))
 
     plans = []
@@ -313,6 +316,7 @@ def migrate_state(state):
 
     next_ids = state.setdefault("next_ids", {})
     state.setdefault("write_runs", [])
+    state.setdefault("step_runs", [])
     state.setdefault("thought_journal", [])
 
     for name in (
@@ -323,6 +327,7 @@ def migrate_state(state):
         "plan",
         "verification_run",
         "write_run",
+        "step_run",
         "thought",
     ):
         next_ids.setdefault(name, 1)
@@ -414,6 +419,7 @@ def state_counts(state):
         "agent_runs": len(state.get("agent_runs", [])),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
+        "step_runs": len(state.get("step_runs", [])),
         "thoughts": len(state.get("thought_journal", [])),
     }
 

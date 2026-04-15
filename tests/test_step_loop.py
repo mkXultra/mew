@@ -137,6 +137,8 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(len(state["inbox"]), 1)
         self.assertEqual(state["inbox"][0]["processed_at"], state["thought_journal"][0]["at"])
         self.assertEqual(state["thought_journal"][0]["actions"][0]["type"], "record_memory")
+        self.assertEqual(state["step_runs"][0]["event_id"], state["inbox"][0]["id"])
+        self.assertEqual(state["step_runs"][0]["skipped_actions"][0]["type"], "write_file")
 
     def test_step_does_not_expose_unprocessed_manual_event_while_planning(self):
         old_cwd = os.getcwd()

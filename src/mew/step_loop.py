@@ -3,7 +3,16 @@ import json
 
 from .agent import apply_event_plans, plan_event, update_runtime_processing_summary
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, STATE_FILE
-from .state import add_event, default_state, load_state, merge_defaults, migrate_state, save_state, state_lock
+from .state import (
+    add_event,
+    default_state,
+    load_state,
+    merge_defaults,
+    migrate_state,
+    next_id,
+    save_state,
+    state_lock,
+)
 from .timeutil import now_iso
 
 
@@ -19,6 +28,8 @@ STEP_ACTION_TYPES = {
     "read_file",
     "search_text",
 }
+
+MAX_STEP_RUNS = 100
 
 
 def _synthetic_step_event(state, step_index):
@@ -92,6 +103,38 @@ def step_stop_reason(action_plan, dry_run=False):
     return ""
 
 
+def compact_step_action(action):
+    compact = {"type": action.get("type") or "unknown"}
+    for key in ("task_id", "path", "query", "title", "question", "reason", "summary", "text"):
+        value = action.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        if len(text) > 240:
+            text = text[:237] + "..."
+        compact[key] = text
+    return compact
+
+
+def record_step_run(state, step, stop_reason, at):
+    run = {
+        "id": next_id(state, "step_run"),
+        "at": at,
+        "event_id": step.get("event_id"),
+        "index": step.get("index"),
+        "summary": step.get("summary") or "",
+        "stop_reason": stop_reason or "continue",
+        "actions": [compact_step_action(action) for action in step.get("actions") or []],
+        "skipped_actions": [
+            compact_step_action(action) for action in step.get("skipped_actions") or []
+        ],
+        "counts": dict(step.get("counts") or {}),
+    }
+    state.setdefault("step_runs", []).append(run)
+    del state["step_runs"][:-MAX_STEP_RUNS]
+    return run
+
+
 def run_step_loop(
     max_steps=1,
     dry_run=False,
@@ -160,9 +203,13 @@ def run_step_loop(
             log_phases=not dry_run,
         )
         filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
+        reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
+        step_stop = reason or ("max_steps" if index == max_steps - 1 else "")
 
         counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
         event_id = event.get("id")
+        apply_time = current_time
+        step = None
         if not dry_run:
             with state_lock():
                 state = load_state()
@@ -202,19 +249,28 @@ def run_step_loop(
                     counts.get("executed", 0),
                     autonomous=True,
                 )
+                step = {
+                    "index": index + 1,
+                    "event_id": event_id,
+                    "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
+                    "actions": filtered_action_plan.get("actions", []),
+                    "skipped_actions": filtered_action_plan.get("skipped_actions", []),
+                    "counts": counts,
+                }
+                record_step_run(state, step, step_stop, apply_time)
                 save_state(state)
 
-        step = {
-            "index": index + 1,
-            "event_id": event_id,
-            "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
-            "actions": filtered_action_plan.get("actions", []),
-            "skipped_actions": filtered_action_plan.get("skipped_actions", []),
-            "counts": counts,
-        }
+        if step is None:
+            step = {
+                "index": index + 1,
+                "event_id": event_id,
+                "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
+                "actions": filtered_action_plan.get("actions", []),
+                "skipped_actions": filtered_action_plan.get("skipped_actions", []),
+                "counts": counts,
+            }
         steps.append(step)
 
-        reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
         if reason:
             stop_reason = reason
             break
