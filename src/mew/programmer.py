@@ -414,10 +414,15 @@ def create_follow_up_task_from_review(state, task, review_run):
     follow_up = "\n".join(report["follow_up"]).strip()
     if status == "needs_fix" and not follow_up:
         follow_up = result or f"Review run #{review_run['id']} reported needs_fix without follow-up details."
+    elif status == "unknown" and not follow_up:
+        follow_up = (
+            f"Review run #{review_run['id']} did not return a parseable pass/needs_fix report. "
+            "Inspect the review result, rerun review if needed, or acknowledge it explicitly."
+        )
     if not follow_up or status == "pass":
         return None, status
 
-    if status == "needs_fix" and task.get("status") == "done":
+    if status in ("needs_fix", "unknown") and task.get("status") == "done":
         task["status"] = "blocked"
 
     reconcile_next_ids(state)

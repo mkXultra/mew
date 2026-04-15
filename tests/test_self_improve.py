@@ -299,7 +299,9 @@ class SelfImproveTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(state["agent_runs"][1]["review_status"], "unknown")
                 self.assertTrue(state["agent_runs"][1]["followup_processed_at"])
-                self.assertEqual(len(state["tasks"]), 1)
+                self.assertEqual(len(state["tasks"]), 2)
+                self.assertEqual(state["tasks"][0]["status"], "blocked")
+                self.assertIn("did not return a parseable", state["tasks"][1]["description"])
             finally:
                 os.chdir(old_cwd)
 

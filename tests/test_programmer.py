@@ -257,10 +257,29 @@ class ProgrammerTests(unittest.TestCase):
 
         followup, status = create_follow_up_task_from_review(state, task, review)
 
-        self.assertIsNone(followup)
+        self.assertIsNotNone(followup)
         self.assertEqual(status, "unknown")
         self.assertEqual(review["review_status"], "unknown")
+        self.assertIn("did not return a parseable", followup["description"])
         self.assertTrue(review["followup_processed_at"])
+
+    def test_unknown_review_without_followup_blocks_completed_task(self):
+        state = default_state()
+        task = add_task(state)
+        task["status"] = "done"
+        review = {
+            "id": 8,
+            "task_id": task["id"],
+            "purpose": "review",
+            "result": "STATUS: unknown\nSUMMARY: Could not tell.\nFOLLOW_UP:\n- none",
+            "stdout": "",
+        }
+
+        followup, status = create_follow_up_task_from_review(state, task, review)
+
+        self.assertEqual(status, "unknown")
+        self.assertIsNotNone(followup)
+        self.assertEqual(task["status"], "blocked")
 
     def test_review_status_reads_nested_agent_message(self):
         review = {
