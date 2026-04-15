@@ -389,6 +389,15 @@ def record_deep_memory(state, category, text, current_time):
     items.append(f"{current_time}: {clipped}")
     del items[:-100]
 
+def has_recent_deep_memory(state, category, text, limit=20):
+    if category not in ("preferences", "project", "decisions"):
+        category = "project"
+    if not isinstance(text, str) or not text.strip():
+        return False
+    items = state.get("memory", {}).get("deep", {}).get(category, [])
+    wanted = text.strip()
+    return any(str(item).endswith(wanted) for item in items[-limit:])
+
 def update_agent_work_context(state, event, summary, current_time):
     agent = state["agent_status"]
     tasks = sorted(open_tasks(state), key=task_sort_key)
@@ -641,6 +650,7 @@ def append_autonomous_decisions(
     if (
         autonomy_level in ("propose", "act")
         and not decisions_create_task(decisions)
+        and not open_tasks(state)
         and not open_task_with_title(state, "Review mew self direction")
     ):
         decisions.append(
@@ -1401,12 +1411,9 @@ def apply_propose_task_action(state, event, action, current_time, autonomous, au
         and open_tasks(state)
         and action.get("priority") != "high"
     ):
-        record_deep_memory(
-            state,
-            "decisions",
-            f"Deferred propose_task because open tasks already exist: {title}",
-            current_time,
-        )
+        decision = f"Deferred propose_task because open tasks already exist: {title}"
+        if not has_recent_deep_memory(state, "decisions", decision):
+            record_deep_memory(state, "decisions", decision, current_time)
         return 0
     if not allowed:
         add_outbox_message(

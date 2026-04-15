@@ -1773,6 +1773,101 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(state["tasks"]), 1)
         self.assertIn("Deferred propose_task", state["memory"]["deep"]["decisions"][-1])
 
+    def test_repeated_autonomous_propose_task_defer_is_not_recorded_twice(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Existing task",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        for index in range(2):
+            event = add_event(state, "passive_tick", f"test-{index}")
+            apply_action_plan(
+                state,
+                event,
+                {"summary": "propose"},
+                {
+                    "summary": "propose",
+                    "actions": [
+                        {
+                            "type": "propose_task",
+                            "title": "Another normal task",
+                            "priority": "normal",
+                        }
+                    ],
+                },
+                current_time,
+                allow_task_execution=False,
+                task_timeout=1,
+                autonomous=True,
+                autonomy_level="act",
+            )
+
+        decisions = state["memory"]["deep"]["decisions"]
+        self.assertEqual(
+            len([item for item in decisions if "Deferred propose_task because open tasks already exist" in item]),
+            1,
+        )
+
+    def test_self_direction_proposal_waits_until_no_open_tasks(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Existing task",
+                "description": "",
+                "status": "todo",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        self.assertNotIn(
+            "Review mew self direction",
+            [decision.get("title") for decision in plan["decisions"] if decision.get("type") == "propose_task"],
+        )
+
     def test_autonomous_high_priority_propose_task_can_interrupt_open_tasks(self):
         state = default_state()
         current_time = now_iso()
