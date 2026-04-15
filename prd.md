@@ -717,6 +717,10 @@ The first user-facing version should likely include:
 - `mew daily`: alias for the quiet focus view.
 - `mew activity`: show only recent runtime activity, action counts, and dropped-thread warnings.
 - `mew context`: show resident prompt context diagnostics and approximate section sizes.
+- `mew step`: run a bounded manual feedback loop. It plans a passive step,
+  filters out writes, task execution, and agent dispatch, applies safe
+  read/memory/question/task-proposal actions, and records the result for the
+  next step.
 - `mew snapshot --allow-read <path>`: refresh structured project snapshot memory from bounded local reads.
 - `mew dogfood`: run an isolated short passive-runtime check and print a structured dogfood report.
 - `mew dogfood --source-workspace <path>`: copy a non-sensitive repository snapshot into the dogfood workspace before running.
@@ -775,6 +779,9 @@ The first user-facing version should likely include:
 - `mew task update <task-id>`: update task fields.
 - `mew task done <task-id>`: mark a task complete.
 - `mew buddy [--task <task-id>]`: advance one coding task through the programmer loop. The default creates or reuses a plan; `--dispatch --dry-run` previews the implementation run, and explicit `--dispatch` or `--review` moves further. Long waits remain under `mew agent wait <run-id>`.
+- `.codex/skills/mew-product-evaluator/SKILL.md`: project skill for evaluating
+  mew by asking whether a resident AI would want to be inside it, not only
+  whether the code works.
 
 Exact command names can change during implementation.
 

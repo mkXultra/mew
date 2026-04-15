@@ -47,6 +47,7 @@ from .commands import (
     cmd_snapshot,
     cmd_start,
     cmd_status,
+    cmd_step,
     cmd_stop,
     cmd_task_add,
     cmd_task_classify,
@@ -355,6 +356,50 @@ def build_parser():
     )
     context_parser.add_argument("--json", action="store_true", help="print structured JSON")
     context_parser.set_defaults(func=cmd_context)
+
+    step_parser = subparsers.add_parser("step", help="run a bounded manual feedback step loop")
+    step_parser.add_argument("--max-steps", type=int, default=1, help="maximum feedback steps to run")
+    step_parser.add_argument("--dry-run", action="store_true", help="plan one step without changing state")
+    step_parser.add_argument("--ai", action="store_true", help="use the resident model backend for each step")
+    step_parser.add_argument(
+        "--auth",
+        help=(
+            "path to model auth file; codex defaults to ./auth.json then ~/.codex/auth.json; "
+            "claude can use ANTHROPIC_API_KEY"
+        ),
+    )
+    step_parser.add_argument("--guidance", help="human-written think-phase guidance file")
+    step_parser.add_argument("--policy", help="human-written safety/boundary policy file")
+    step_parser.add_argument("--self", dest="self_file", help="human-written self/personality file")
+    step_parser.add_argument("--desires", help="human-written desires file")
+    step_parser.add_argument(
+        "--autonomy-level",
+        choices=("observe", "propose", "act"),
+        default="act",
+        help="freedom level for the step loop; writes and agent runs remain disabled",
+    )
+    step_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="allow read-only inspection under this path; can be passed more than once",
+    )
+    step_parser.add_argument("--allow-verify", action="store_true", help="allow run_verification actions")
+    step_parser.add_argument("--verify-command", help="verification command available to run_verification")
+    step_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout in seconds")
+    step_parser.add_argument(
+        "--model-backend",
+        default=os.environ.get("MEW_MODEL_BACKEND", DEFAULT_MODEL_BACKEND),
+        help=f"resident model backend ({', '.join(SUPPORTED_MODEL_BACKENDS)})",
+    )
+    step_parser.add_argument("--model", default=os.environ.get("MEW_MODEL", os.environ.get("MEW_CODEX_MODEL", "")))
+    step_parser.add_argument(
+        "--base-url",
+        default=os.environ.get("MEW_MODEL_BASE_URL", os.environ.get("MEW_CODEX_BASE_URL", "")),
+    )
+    step_parser.add_argument("--timeout", type=float, default=60.0, help="resident model request timeout")
+    step_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    step_parser.set_defaults(func=cmd_step)
 
     dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")

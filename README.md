@@ -122,6 +122,8 @@ uv run mew brief
 uv run mew brief --json
 uv run mew activity
 uv run mew context
+uv run mew step --dry-run
+uv run mew step --ai --auth auth.json --allow-read . --max-steps 3
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
 uv run mew dogfood --source-workspace . --ai --duration 60
@@ -176,6 +178,11 @@ Resident prompts include a bounded raw conversation history from recent
 `user_message` events and human-facing outbox replies/questions, so follow-up
 turns can see the human's wording and mew's last replies instead of relying
 only on summaries.
+
+`mew step` is a bounded manual feedback loop. It plans one small passive step,
+filters out writes, task execution, and agent dispatch, applies only safe
+read/memory/question/task-proposal actions, then records the result so the next
+step can see the feedback.
 
 ## Resident Model
 
@@ -354,5 +361,7 @@ uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 - `.mew/policy.md`: local safety policy.
 - `.mew/self.md`: mew identity and behavior.
 - `.mew/desires.md`: autonomous work preferences.
+- `.codex/skills/mew-product-evaluator/SKILL.md`: project skill for evaluating
+  whether mew is becoming a shell an AI would want to inhabit.
 
 `auth.json` and `.mew/` are ignored by git.

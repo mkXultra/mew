@@ -36,6 +36,12 @@ from .context import build_context
 from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogfood, run_dogfood_loop
 from .errors import MewError
 from .memory import compact_memory
+from .model_backends import (
+    load_model_auth,
+    model_backend_default_base_url,
+    model_backend_default_model,
+    normalize_model_backend,
+)
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
 from .programmer import (
@@ -82,6 +88,7 @@ from .state import (
     state_lock,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
+from .step_loop import format_step_loop_report, run_step_loop
 from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
 from .tasks import (
     clip_output,
@@ -1094,6 +1101,53 @@ def cmd_context(args):
         print(json.dumps(context, ensure_ascii=False, indent=2))
         return 0
     print(format_context_report(context, current_time))
+    return 0
+
+
+def cmd_step(args):
+    try:
+        model_backend = normalize_model_backend(args.model_backend)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
+    model = args.model or model_backend_default_model(model_backend)
+    base_url = args.base_url or model_backend_default_base_url(model_backend)
+    model_auth = None
+    if args.ai:
+        try:
+            model_auth = load_model_auth(model_backend, args.auth)
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+
+    if not args.dry_run:
+        ensure_guidance(args.guidance)
+        ensure_policy(args.policy)
+        ensure_self(args.self_file)
+        ensure_desires(args.desires)
+    report = run_step_loop(
+        max_steps=args.max_steps,
+        dry_run=args.dry_run,
+        model_auth=model_auth,
+        model=model,
+        base_url=base_url,
+        model_backend=model_backend,
+        timeout=args.timeout,
+        guidance=read_guidance(args.guidance),
+        policy=read_policy(args.policy),
+        self_text=read_self(args.self_file),
+        desires=read_desires(args.desires),
+        autonomy_level=args.autonomy_level,
+        allowed_read_roots=args.allow_read or [],
+        allow_verify=args.allow_verify,
+        verify_command=args.verify_command or "",
+        verify_timeout=args.verify_timeout,
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_step_loop_report(report))
     return 0
 
 

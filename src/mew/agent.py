@@ -896,6 +896,7 @@ def think_phase(
     allowed_write_roots=None,
     model_backend=DEFAULT_MODEL_BACKEND,
     prompt_context=None,
+    log_phases=True,
 ):
     fallback = deterministic_decision_plan(
         state,
@@ -933,11 +934,14 @@ def think_phase(
         prompt_context=prompt_context,
     )
     try:
-        append_log(f"- {current_time}: think_phase {model_backend} start event={event['id']}")
+        if log_phases:
+            append_log(f"- {current_time}: think_phase {model_backend} start event={event['id']}")
         plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
-        append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
+        if log_phases:
+            append_log(f"- {current_time}: think_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:
-        append_log(f"- {current_time}: think_phase {model_backend} error event={event['id']} error={exc}")
+        if log_phases:
+            append_log(f"- {current_time}: think_phase {model_backend} error event={event['id']} error={exc}")
         fallback["decisions"].append(
             {
                 "type": "send_message",
@@ -947,7 +951,7 @@ def think_phase(
         )
         return fallback
     normalized = append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
-    if normalized.get("schema_issues"):
+    if log_phases and normalized.get("schema_issues"):
         append_log(
             "- "
             f"{current_time}: think_phase schema_issues event={event['id']} "
@@ -1097,6 +1101,7 @@ def act_phase(
     allowed_write_roots=None,
     model_backend=DEFAULT_MODEL_BACKEND,
     prompt_context=None,
+    log_phases=True,
 ):
     fallback = deterministic_action_plan(decision_plan)
     if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
@@ -1122,11 +1127,14 @@ def act_phase(
         prompt_context=prompt_context,
     )
     try:
-        append_log(f"- {current_time}: act_phase {model_backend} start event={event['id']}")
+        if log_phases:
+            append_log(f"- {current_time}: act_phase {model_backend} start event={event['id']}")
         action_plan = call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
-        append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
+        if log_phases:
+            append_log(f"- {current_time}: act_phase {model_backend} ok event={event['id']}")
     except ModelBackendError as exc:
-        append_log(f"- {current_time}: act_phase {model_backend} error event={event['id']} error={exc}")
+        if log_phases:
+            append_log(f"- {current_time}: act_phase {model_backend} error event={event['id']} error={exc}")
         fallback["actions"].append(
             {
                 "type": "send_message",
@@ -1136,7 +1144,7 @@ def act_phase(
         )
         return fallback
     normalized = normalize_action_plan(action_plan, fallback)
-    if normalized.get("schema_issues"):
+    if log_phases and normalized.get("schema_issues"):
         append_log(
             "- "
             f"{current_time}: act_phase schema_issues event={event['id']} "
@@ -2171,6 +2179,7 @@ def plan_event(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    log_phases=True,
 ):
     prompt_context = build_context(
         state,
@@ -2212,6 +2221,7 @@ def plan_event(
         allowed_write_roots=allowed_write_roots,
         model_backend=model_backend,
         prompt_context=prompt_context,
+        log_phases=log_phases,
     )
     action_plan = act_phase(
         state,
@@ -2237,6 +2247,7 @@ def plan_event(
         allowed_write_roots=allowed_write_roots,
         model_backend=model_backend,
         prompt_context=prompt_context,
+        log_phases=log_phases,
     )
     return decision_plan, action_plan
 
