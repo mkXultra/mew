@@ -171,6 +171,55 @@ def _thought_item(thought):
     }
 
 
+def describe_action(action):
+    action_type = action.get("type") or "unknown"
+    if action.get("task_id") is not None:
+        return f"{action_type} task=#{action.get('task_id')}"
+    if action.get("run_id") is not None:
+        return f"{action_type} run=#{action.get('run_id')}"
+    if action.get("path"):
+        return f"{action_type} {action.get('path')}"
+    title = action.get("title")
+    if title:
+        return f"{action_type} {title}"
+    text = action.get("summary") or action.get("reason") or action.get("text") or ""
+    if text:
+        first_line = str(text).strip().splitlines()[0]
+        if len(first_line) > 80:
+            first_line = first_line[:77] + "..."
+        return f"{action_type} {first_line}"
+    return action_type
+
+
+def _activity_item(thought):
+    actions = thought.get("actions") or []
+    return {
+        "id": thought.get("id"),
+        "at": thought.get("at"),
+        "event_type": thought.get("event_type"),
+        "cycle_reason": thought.get("cycle_reason"),
+        "summary": thought.get("summary") or "",
+        "actions": [describe_action(action) for action in actions[:3]],
+        "message_count": (thought.get("counts") or {}).get("messages", 0),
+    }
+
+
+def recent_activity(state, limit=5):
+    thoughts = list(state.get("thought_journal", []))
+    items = []
+    for thought in reversed(thoughts):
+        if thought.get("event_type") not in ("startup", "passive_tick", "user_message"):
+            continue
+        summary = thought.get("summary") or ""
+        actions = thought.get("actions") or []
+        if not summary and not actions:
+            continue
+        items.append(_activity_item(thought))
+        if len(items) >= limit:
+            break
+    return items
+
+
 def build_brief_data(state, limit=5):
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
@@ -198,6 +247,7 @@ def build_brief_data(state, limit=5):
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
         },
+        "recent_activity": recent_activity(state, limit=limit),
         "thought_journal": [_thought_item(thought) for thought in recent_thoughts_for_context(state, limit=limit)],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "open_questions": [_question_item(question) for question in questions[:limit]],
@@ -275,6 +325,7 @@ def build_brief(state, limit=5):
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
     thoughts = recent_thoughts_for_context(state, limit=limit)
+    activity = recent_activity(state, limit=limit)
 
     lines = [
         f"Mew brief at {now_iso()}",
@@ -336,6 +387,17 @@ def build_brief(state, limit=5):
             lines.append(
                 f"- #{run.get('id')} [{verification_outcome(run)}] "
                 f"exit_code={run.get('exit_code')} command={run.get('command')}"
+            )
+        lines.append("")
+
+    if activity:
+        lines.append("Recent activity")
+        for item in activity[:limit]:
+            actions = item.get("actions") or []
+            suffix = f" actions={', '.join(actions)}" if actions else ""
+            lines.append(
+                f"- #{item.get('id')} {item.get('event_type')}: "
+                f"{item.get('summary')}{suffix}"
             )
         lines.append("")
 

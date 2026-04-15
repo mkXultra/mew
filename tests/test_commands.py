@@ -814,6 +814,42 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tool_read_refuses_mew_internal_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path(".mew").mkdir()
+                Path(".mew/state.json").write_text("{}", encoding="utf-8")
+
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["tool", "read", ".mew/state.json"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("sensitive path", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_list_hides_sensitive_entries(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path(".mew").mkdir()
+                Path("auth.json").write_text("secret", encoding="utf-8")
+                Path("notes.md").write_text("hello", encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["tool", "list", "."])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("notes.md", output)
+                self.assertNotIn(".mew", output)
+                self.assertNotIn("auth.json", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_tool_write_create_and_dry_run(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

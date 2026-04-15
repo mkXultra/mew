@@ -159,6 +159,26 @@ class AutonomyTests(unittest.TestCase):
         context = build_context(state, second, "later")
         self.assertIsNone(context["thought_thread_warning"])
 
+    def test_thought_journal_removes_threads_resolved_in_same_cycle(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            event,
+            {
+                "summary": "done",
+                "open_threads": ["Read README next.", "Keep monitoring."],
+                "resolved_threads": ["Read README next."],
+            },
+            {"summary": "done", "actions": [{"type": "record_memory", "summary": "done"}]},
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(state["thought_journal"][-1]["open_threads"], ["Keep monitoring."])
+
     def test_thought_journal_keeps_equivalent_waiting_question_thread(self):
         state = default_state()
         first = add_event(state, "passive_tick", "test")
@@ -205,6 +225,39 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(state["thought_journal"][-1]["dropped_threads"], [])
         self.assertIsNone(build_context(state, second, "later")["thought_thread_warning"])
+
+    def test_user_message_preserves_previous_autonomous_thread(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "start", "open_threads": ["Continue workspace inspection."]},
+            {"summary": "start", "actions": [{"type": "record_memory", "summary": "start"}]},
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        second = add_event(state, "user_message", "user", {"text": "status?"})
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "answer"},
+            {
+                "summary": "answer",
+                "actions": [{"type": "send_message", "text": "ok"}],
+            },
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+
+        thought = state["thought_journal"][-1]
+        self.assertIn("Continue workspace inspection.", thought["open_threads"])
+        self.assertEqual(thought["dropped_threads"], [])
 
     def test_think_phase_uses_model_backend_adapter(self):
         old_cwd = os.getcwd()
@@ -313,6 +366,63 @@ class AutonomyTests(unittest.TestCase):
         self.assertGreaterEqual(counts["messages"], 1)
         self.assertIn("Self review:", state["memory"]["deep"]["decisions"][0])
 
+    def test_complete_task_can_finish_self_proposed_task_at_act_level(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "todo"
+        task["notes"] = "Proposed by mew from event #1."
+
+        counts = apply_action_plan(
+            state,
+            event,
+            {"summary": "complete"},
+            {
+                "summary": "complete",
+                "actions": [
+                    {
+                        "type": "complete_task",
+                        "task_id": task["id"],
+                        "summary": "Inspection objective is satisfied.",
+                    }
+                ],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(task["status"], "done")
+        self.assertIn("complete_task", task["notes"])
+        self.assertEqual(counts["messages"], 1)
+
+    def test_complete_task_refuses_user_task_during_autonomous_cycle(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+        task = add_planned_ready_task(state)
+        task["status"] = "todo"
+        task["notes"] = "Created by user."
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "complete"},
+            {
+                "summary": "complete",
+                "actions": [{"type": "complete_task", "task_id": task["id"]}],
+            },
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+        )
+
+        self.assertEqual(task["status"], "todo")
+        self.assertIn("Refused complete_task", state["outbox"][0]["text"])
+
     def test_observe_level_refuses_task_proposal(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
@@ -407,6 +517,16 @@ class AutonomyTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 read_file(str(auth_file), [tmp])
+
+    def test_mew_internal_file_read_is_refused_inside_allowed_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            internal = Path(tmp) / ".mew"
+            internal.mkdir()
+            state_file = internal / "state.json"
+            state_file.write_text("{}", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                read_file(str(state_file), [tmp])
 
     def test_autonomous_self_review_has_cooldown(self):
         state = default_state()

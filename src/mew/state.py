@@ -429,7 +429,7 @@ Default policy:
 - Read-only local inspection is allowed only inside paths explicitly passed with --allow-read.
 - Runtime file writes are allowed only inside paths explicitly passed with --allow-write.
 - Non-dry-run runtime writes require --allow-verify and a configured --verify-command.
-- Never read or search sensitive files such as auth.json, .env, private keys, or token files.
+- Never read or search sensitive files such as auth.json, .env, private keys, token files, or mew internal state/log files under .mew.
 - Keep user-facing messages short and actionable.
 - Preserve state and memory; do not erase history unless the user explicitly asks.
 """

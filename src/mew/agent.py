@@ -227,7 +227,7 @@ def build_think_prompt(
         "Use open_threads for unfinished reasoning that should survive the next wake, and resolved_threads for threads closed now.\n"
         "If thought_thread_warning is present, explicitly carry those dropped threads forward or mark them resolved.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
-        "execute_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
+        "execute_task, complete_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
@@ -248,6 +248,7 @@ def build_think_prompt(
         "If you emit wait_for_user, include a question when the missing input should be visible to the user.\n"
         "Use execute_task only when a task is ready, has command, has auto_execute=true, "
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
+        "Use complete_task only for a task whose objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only when it directly helps the current task or memory, and only under allowed_read_roots.\n"
         "Use write actions only for small targeted changes under allowed_write_roots; prefer dry_run before writing.\n"
         "Do not ask the same question if it already appears in unanswered_questions.\n"
@@ -273,6 +274,7 @@ def build_think_prompt(
         '    {"type": "read_file", "path": "...", "max_chars": 4000},\n'
         '    {"type": "search_text", "path": "...", "query": "...", "max_matches": 20},\n'
         '    {"type": "run_verification", "reason": "..."},\n'
+        '    {"type": "complete_task", "task_id": 1, "summary": "..."},\n'
         '    {"type": "write_file", "path": "...", "content": "...", "create": false, "dry_run": true},\n'
         '    {"type": "edit_file", "path": "...", "old": "...", "new": "...", "replace_all": false, "dry_run": true},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
@@ -332,7 +334,7 @@ def build_act_prompt(
         "You still do not execute shell commands yourself. Local code will execute only validated actions.\n"
         "Preserve or refine open_threads when follow-up is needed, and mark resolved_threads when actions close a thread.\n"
         "If thought_thread_warning is present, do not silently drop those threads again.\n"
-        "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, run_verification, "
+        "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, complete_task, run_verification, "
         "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, "
         "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
@@ -350,6 +352,7 @@ def build_act_prompt(
         "If the DecisionPlan is waiting on concrete user input, turn it into ask_user or include question on wait_for_user.\n"
         "Use execute_task only when the task is ready, has command, has auto_execute=true, "
         f"and allow_task_execution is {str(bool(allow_task_execution)).lower()}.\n"
+        "Use complete_task only when the task objective is satisfied; autonomous completion is limited to self-proposed internal tasks.\n"
         "Use read-only inspection only under allowed_read_roots. If no read root is allowed, do not emit read actions.\n"
         "Use write actions only under allowed_write_roots. If no write root is allowed, do not emit write actions.\n"
         "Do not invent shell commands. Reference tasks by task_id only.\n"
@@ -369,6 +372,7 @@ def build_act_prompt(
         '    {"type": "read_file", "path": "...", "max_chars": 4000},\n'
         '    {"type": "search_text", "path": "...", "query": "...", "max_matches": 20},\n'
         '    {"type": "run_verification", "reason": "..."},\n'
+        '    {"type": "complete_task", "task_id": 1, "summary": "..."},\n'
         '    {"type": "write_file", "path": "...", "content": "...", "create": false, "dry_run": true},\n'
         '    {"type": "edit_file", "path": "...", "old": "...", "new": "...", "replace_all": false, "dry_run": true},\n'
         '    {"type": "self_review", "summary": "...", "proposed_task_title": "...", "proposed_task_description": "..."},\n'
@@ -1001,6 +1005,7 @@ def deterministic_action_plan(decision_plan):
             "ask_user",
             "wait_for_user",
             "execute_task",
+            "complete_task",
             "run_verification",
             "update_memory",
             "inspect_dir",
@@ -1048,6 +1053,7 @@ def normalize_action_plan(plan, fallback_plan):
             "ask_user",
             "wait_for_user",
             "execute_task",
+            "complete_task",
             "run_verification",
             "update_memory",
             "inspect_dir",
@@ -1202,6 +1208,7 @@ def update_agent_work_context_from_plan(state, event, decision_plan, action_plan
             action["type"]
             in (
                 "execute_task",
+                "complete_task",
                 "run_verification",
                 "write_file",
                 "edit_file",
@@ -1587,6 +1594,53 @@ def apply_followup_review_action(state, event, action, autonomous, autonomy_leve
     )
     return 1
 
+
+def is_self_proposed_task(task):
+    notes = str(task.get("notes") or "")
+    return "Proposed by mew" in notes or "Proposed by self_review" in notes
+
+
+def append_agent_task_note(task, note):
+    existing = task.get("notes") or ""
+    task["notes"] = f"{existing.rstrip()}\n{note}".strip()
+
+
+def apply_complete_task_action(state, event, action, current_time, autonomous, autonomy_level):
+    task_id = action.get("task_id")
+    task = task_by_id(state, task_id)
+    if not task:
+        add_outbox_message(state, "warning", f"Cannot complete missing task #{task_id}", event_id=event["id"])
+        return 1
+    if task.get("status") == "done":
+        return 0
+
+    allowed = event["type"] == "user_message"
+    if autonomous:
+        allowed = allowed or (autonomy_level == "act" and is_self_proposed_task(task))
+    if not allowed:
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused complete_task for task #{task['id']}: only user-requested or self-proposed autonomous tasks can be completed this way.",
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+
+    summary = action.get("summary") or action.get("reason") or "Completed by mew."
+    append_agent_task_note(task, f"{current_time} complete_task: {summary}")
+    task["status"] = "done"
+    task["updated_at"] = current_time
+    add_outbox_message(
+        state,
+        "info",
+        f"Completed task #{task['id']}: {task['title']}",
+        event_id=event["id"],
+        related_task_id=task["id"],
+    )
+    return 1
+
+
 def record_verification_result(state, event, action, current_time, verify_command, result):
     run = {
         "id": next_id(state, "verification_run"),
@@ -1948,6 +2002,15 @@ def apply_action_plan(
                 allow_verify,
                 verify_command,
                 verify_timeout,
+            )
+        elif action_type == "complete_task":
+            counts["messages"] += apply_complete_task_action(
+                state,
+                event,
+                action,
+                current_time,
+                autonomous,
+                autonomy_level,
             )
         elif action_type in ("write_file", "edit_file"):
             counts["messages"] += apply_write_action(

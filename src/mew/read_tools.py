@@ -7,6 +7,7 @@ import fnmatch
 DEFAULT_READ_MAX_CHARS = 6000
 DEFAULT_SEARCH_MAX_MATCHES = 50
 SENSITIVE_GLOBS = (
+    ".mew",
     "auth.json",
     ".env",
     ".env.*",
@@ -74,6 +75,7 @@ def resolve_allowed_path(path, allowed_roots):
 def inspect_dir(path, allowed_roots, limit=50):
     limit = max(1, min(int(limit), 200))
     resolved = resolve_allowed_path(path, allowed_roots)
+    ensure_not_sensitive(resolved)
     if not resolved.is_dir():
         raise ValueError(f"path is not a directory: {resolved}")
 
@@ -81,6 +83,8 @@ def inspect_dir(path, allowed_roots, limit=50):
     for entry in sorted(resolved.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
         if len(entries) >= limit:
             break
+        if is_sensitive_path(entry):
+            continue
         try:
             stat = entry.stat()
             size = stat.st_size
@@ -131,8 +135,7 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
         raise ValueError("search query is empty")
 
     resolved = resolve_allowed_path(path or ".", allowed_roots)
-    if resolved.is_file():
-        ensure_not_sensitive(resolved)
+    ensure_not_sensitive(resolved, verb="search")
     command = [
         "rg",
         "--line-number",
@@ -140,6 +143,10 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
         "--no-heading",
         "--color",
         "never",
+        "--glob",
+        "!.mew",
+        "--glob",
+        "!.mew/**",
         "--glob",
         "!auth.json",
         "--glob",

@@ -1,6 +1,6 @@
 import unittest
 
-from mew.brief import build_brief, next_move, review_runs_needing_followup
+from mew.brief import build_brief, build_brief_data, next_move, review_runs_needing_followup
 from mew.programmer import create_follow_up_task_from_review, create_implementation_run_from_plan, create_task_plan
 from mew.state import add_question, default_state
 
@@ -116,6 +116,32 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Thought journal", brief)
         self.assertIn("#1 passive_tick#2", brief)
         self.assertIn("open_threads=1", brief)
+
+    def test_brief_surfaces_recent_activity(self):
+        state = default_state()
+        state["thought_journal"].append(
+            {
+                "id": 1,
+                "event_id": 2,
+                "event_type": "passive_tick",
+                "at": "now",
+                "summary": "Inspected the workspace.",
+                "open_threads": [],
+                "resolved_threads": [],
+                "actions": [
+                    {"type": "inspect_dir", "path": "/tmp/project"},
+                    {"type": "read_file", "path": "/tmp/project/README.md"},
+                ],
+                "counts": {"actions": 2, "messages": 2},
+            }
+        )
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("Recent activity", brief)
+        self.assertIn("inspect_dir /tmp/project", brief)
+        self.assertEqual(data["recent_activity"][0]["summary"], "Inspected the workspace.")
 
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()

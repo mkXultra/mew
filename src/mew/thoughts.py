@@ -141,6 +141,42 @@ def merge_thread_lists(*lists, state=None):
     return merged
 
 
+def previous_unresolved_threads(state, resolved_threads):
+    thoughts = state.get("thought_journal", [])
+    if not thoughts:
+        return []
+    previous_open = merge_thread_lists(
+        thoughts[-1].get("open_threads"),
+        thoughts[-1].get("dropped_threads"),
+        state=state,
+    )
+    if not previous_open:
+        return []
+    resolved_keys = {
+        compact_thread_key(state, thread)
+        for thread in normalize_thread_list(resolved_threads)
+    }
+    return [
+        thread
+        for thread in previous_open
+        if compact_thread_key(state, thread) not in resolved_keys
+    ]
+
+
+def remove_resolved_threads(state, open_threads, resolved_threads):
+    resolved_keys = {
+        compact_thread_key(state, thread)
+        for thread in normalize_thread_list(resolved_threads)
+    }
+    if not resolved_keys:
+        return open_threads
+    return [
+        thread
+        for thread in normalize_thread_list(open_threads)
+        if compact_thread_key(state, thread) not in resolved_keys
+    ]
+
+
 def dropped_threads_from_previous(state, open_threads, resolved_threads):
     thoughts = state.get("thought_journal", [])
     if not thoughts:
@@ -214,6 +250,13 @@ def record_thought_journal_entry(
         action_plan.get("resolved_threads"),
         state=state,
     )
+    open_threads = remove_resolved_threads(state, open_threads, resolved_threads)
+    if event.get("type") == "user_message":
+        open_threads = merge_thread_lists(
+            open_threads,
+            previous_unresolved_threads(state, resolved_threads),
+            state=state,
+        )
     dropped_threads, dropped_thread_ratio = dropped_threads_from_previous(
         state,
         open_threads,
