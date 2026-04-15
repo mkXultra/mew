@@ -162,6 +162,10 @@ def build_parser():
         help="seconds to wait when starting review runs in the runtime reflex sweep",
     )
     run_parser.add_argument(
+        "--review-model",
+        help="ai-cli model used for autonomous programmer review runs",
+    )
+    run_parser.add_argument(
         "--allow-verify",
         action="store_true",
         help="allow runtime actions to run the configured verification command",
@@ -491,6 +495,10 @@ def build_parser():
         type=float,
         default=None,
         help="pass --agent-start-timeout through to the dogfood runtime",
+    )
+    dogfood_parser.add_argument(
+        "--review-model",
+        help="pass --review-model through to the dogfood runtime",
     )
     dogfood_parser.add_argument(
         "--seed-ready-coding-task",

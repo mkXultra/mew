@@ -52,6 +52,7 @@ class DogfoodTests(unittest.TestCase):
             agent_stale_minutes=None,
             agent_result_timeout=None,
             agent_start_timeout=None,
+            review_model=None,
             verify_command="",
             verify_interval_minutes=0.05,
         )
@@ -83,6 +84,7 @@ class DogfoodTests(unittest.TestCase):
                     agent_stale_minutes=None,
                     agent_result_timeout=None,
                     agent_start_timeout=None,
+                    review_model=None,
                     verify_command="",
                     verify_interval_minutes=0.05,
                 )
@@ -111,6 +113,7 @@ class DogfoodTests(unittest.TestCase):
             agent_stale_minutes=3.0,
             agent_result_timeout=4.0,
             agent_start_timeout=5.0,
+            review_model="codex-ultra",
             verify_command="",
             verify_interval_minutes=0.05,
         )
@@ -122,6 +125,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(command[command.index("--agent-stale-minutes") + 1], "3.0")
         self.assertEqual(command[command.index("--agent-result-timeout") + 1], "4.0")
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
+        self.assertEqual(command[command.index("--review-model") + 1], "codex-ultra")
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:

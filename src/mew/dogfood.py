@@ -176,6 +176,8 @@ def build_runtime_command(args, workspace):
         command.extend(["--agent-result-timeout", str(args.agent_result_timeout)])
     if getattr(args, "agent_start_timeout", None) is not None:
         command.extend(["--agent-start-timeout", str(args.agent_start_timeout)])
+    if getattr(args, "review_model", None):
+        command.extend(["--review-model", args.review_model])
     return command
 
 
