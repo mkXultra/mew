@@ -1,6 +1,6 @@
 import unittest
 
-from mew.brief import build_brief, build_brief_data, next_move, review_runs_needing_followup
+from mew.brief import build_brief, build_brief_data, build_focus_data, format_focus, next_move, review_runs_needing_followup
 from mew.programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -279,6 +279,19 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("#1 [info] message 1", brief)
         self.assertEqual([message["id"] for message in data["unread_outbox"]], [7, 6, 5])
         self.assertEqual(data["unread_outbox_count"], 7)
+
+    def test_brief_and_focus_show_routine_unread_cleanup_hint(self):
+        state = default_state()
+        add_outbox_message(state, "info", "Agent run #1 completed.", agent_run_id=1)
+        add_outbox_message(state, "warning", "Needs attention.")
+
+        brief = build_brief(state, limit=3)
+        data = build_brief_data(state, limit=3)
+        focus = format_focus(build_focus_data(state, limit=3))
+
+        self.assertIn("routine info: 1; clear with `mew ack --routine`", brief)
+        self.assertEqual(data["routine_unread_info_count"], 1)
+        self.assertIn("Routine info: 1 clear with `mew ack --routine`", focus)
 
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()

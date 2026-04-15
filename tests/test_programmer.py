@@ -463,6 +463,24 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(task["status"], "blocked")
         self.assertIn("failed to start", state["outbox"][-1]["text"])
 
+    def test_successful_agent_start_message_is_quiet(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task))
+
+        class Result:
+            returncode = 0
+            stdout = '{"pid": 12345, "session_id": "s"}'
+            stderr = ""
+
+        with patch("mew.agent_runs.subprocess.run", return_value=Result()):
+            start_agent_run(state, run)
+
+        self.assertEqual(run["status"], "running")
+        self.assertEqual(run["external_pid"], 12345)
+        self.assertEqual(state["outbox"][-1]["type"], "info")
+        self.assertIsNotNone(state["outbox"][-1]["read_at"])
+
     def test_agent_wait_os_error_finalizes_linked_task_and_attention(self):
         state = default_state()
         task = add_task(state)
@@ -478,6 +496,28 @@ class ProgrammerTests(unittest.TestCase):
         self.assertEqual(run["result"], "ai-cli missing")
         self.assertEqual(task["status"], "blocked")
         self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+
+    def test_successful_agent_wait_message_is_quiet(self):
+        state = default_state()
+        task = add_task(state)
+        run = create_implementation_run_from_plan(state, task, create_task_plan(state, task), dry_run=True)
+        run["status"] = "running"
+        run["external_pid"] = 12345
+        add_attention_item(state, "agent_run", "Agent run #1 is running", "still running", agent_run_id=run["id"])
+
+        class Result:
+            returncode = 0
+            stdout = '{"status": "completed", "session_id": "s"}'
+            stderr = ""
+
+        with patch("mew.agent_runs.subprocess.run", return_value=Result()):
+            wait_agent_run(state, run)
+
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+        self.assertEqual(state["outbox"][-1]["type"], "info")
+        self.assertIsNotNone(state["outbox"][-1]["read_at"])
 
     def test_autonomous_plan_task_action_creates_plan(self):
         state = default_state()

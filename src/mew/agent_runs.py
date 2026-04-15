@@ -287,6 +287,7 @@ def start_agent_run(state, run, timeout=None):
         f"Started agent run #{run['id']} for task #{run['task_id']} with {run['model']}.",
         related_task_id=run["task_id"],
         agent_run_id=run["id"],
+        quiet=True,
     )
     return run
 
@@ -473,6 +474,7 @@ def wait_agent_run(state, run, timeout=None):
         text,
         related_task_id=run["task_id"],
         agent_run_id=run["id"],
+        quiet=message_type == "info",
     )
     sync_task_with_agent_run(state, run, current_time)
     resolve_agent_run_attention(state, run, current_time)

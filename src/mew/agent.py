@@ -2338,15 +2338,6 @@ def apply_action_plan(
                     blocks=[f"task:{task_id}"] if task_id else [],
                 )
                 counts["messages"] += 1
-            elif text:
-                add_attention_item(
-                    state,
-                    "waiting",
-                    "Waiting for user",
-                    text,
-                    related_task_id=task_id,
-                    priority="normal",
-                )
         elif action_type == "execute_task":
             if allow_task_execution:
                 counts["executed"] += execute_task_action(state, action, task_timeout)

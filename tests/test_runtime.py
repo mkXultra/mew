@@ -168,6 +168,54 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_does_not_echo_or_notify_quiet_passive_info(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "routine", "decisions": []},
+                            {
+                                "summary": "routine",
+                                "actions": [
+                                    {
+                                        "type": "send_message",
+                                        "message_type": "info",
+                                        "text": "Routine passive progress.",
+                                    }
+                                ],
+                            },
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as notify,
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--echo-outbox",
+                                "--notify-command",
+                                "notify-tool",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertNotIn("Routine passive progress.", stdout.getvalue())
+                notify.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(state["outbox"][0]["type"], "info")
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_processes_pending_external_event_without_waiting_for_passive_tick(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

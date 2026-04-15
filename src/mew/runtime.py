@@ -603,6 +603,7 @@ def run_runtime(args):
                         message
                         for message in state.get("outbox", [])
                         if str(message.get("id")) not in outbox_ids_before
+                        and not message.get("read_at")
                     ]
                 save_state(state)
                 first = False

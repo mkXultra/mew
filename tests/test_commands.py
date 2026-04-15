@@ -108,6 +108,114 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_ack_routine_marks_only_info_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    user_event = add_event(state, "user_message", "test", {"text": "status?"})
+                    external_event = add_event(state, "file_change", "watch", {"path": "README.md"})
+                    add_outbox_message(state, "info", "Agent run #1 completed.", agent_run_id=1)
+                    add_outbox_message(state, "info", "User-visible status.", event_id=user_event["id"])
+                    add_outbox_message(state, "info", "External event handled.", event_id=external_event["id"])
+                    add_outbox_message(state, "warning", "check this")
+                    add_outbox_message(state, "assistant", "visible reply")
+                    add_outbox_message(state, "question", "answer this", requires_reply=True)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["ack", "--routine"]), 0)
+
+                self.assertIn("acknowledged 1 routine message(s)", stdout.getvalue())
+                state = load_state()
+                by_text = {message["text"]: message for message in state["outbox"]}
+                self.assertIsNotNone(by_text["Agent run #1 completed."]["read_at"])
+                self.assertIsNone(by_text["User-visible status."]["read_at"])
+                self.assertIsNone(by_text["External event handled."]["read_at"])
+                self.assertIsNone(by_text["check this"]["read_at"])
+                self.assertIsNone(by_text["visible reply"]["read_at"])
+                self.assertIsNone(by_text["answer this"]["read_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_status_reports_routine_unread_cleanup_hint(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_outbox_message(state, "info", "Agent run #1 completed.", agent_run_id=1)
+                    add_outbox_message(state, "warning", "Needs attention.")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["status"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("routine_unread_info: 1", output)
+                self.assertIn("routine_cleanup: mew ack --routine", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["counts"]["routine_unread_info"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_wait_outbox_skips_quiet_read_event_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import wait_for_event_messages
+                from mew.state import add_event, add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    event = add_event(state, "startup", "runtime")
+                    add_outbox_message(state, "info", "Routine startup progress.", event_id=event["id"])
+                    event["processed_at"] = "done"
+                    save_state(state)
+
+                result = wait_for_event_messages(event["id"], timeout=0)
+
+                self.assertEqual(result["status"], "processed_without_response")
+                self.assertEqual(result["messages"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_live_outbox_stream_skips_quiet_read_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import emit_new_outbox
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    quiet = add_outbox_message(state, "info", "routine", quiet=True)
+                    warning = add_outbox_message(state, "warning", "check this")
+                    save_state(state)
+
+                seen = set()
+                with redirect_stdout(StringIO()) as stdout:
+                    count = emit_new_outbox(seen, mark_read=False)
+
+                self.assertEqual(count, 1)
+                self.assertNotIn("routine", stdout.getvalue())
+                self.assertIn("check this", stdout.getvalue())
+                self.assertIn(str(quiet["id"]), seen)
+                self.assertIn(str(warning["id"]), seen)
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_handles_status_outbox_ack_and_message(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

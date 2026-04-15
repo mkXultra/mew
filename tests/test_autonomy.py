@@ -19,7 +19,7 @@ from mew.agent import (
     think_phase,
 )
 from mew.read_tools import read_file
-from mew.state import add_attention_item, add_event, add_outbox_message, default_state, migrate_state
+from mew.state import add_attention_item, add_event, add_outbox_message, add_question, default_state, migrate_state
 from mew.thoughts import format_thought_entry
 from mew.timeutil import now_iso
 
@@ -65,6 +65,74 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(migrated["autonomy"]["cycles"], 0)
         self.assertEqual(migrated["thought_journal"], [])
         self.assertEqual(migrated["next_ids"]["thought"], 1)
+
+    def test_migration_resolves_waiting_attention_covered_by_open_question(self):
+        state = default_state()
+        add_question(state, "Which option should I use?", related_task_id=1)
+        waiting = add_attention_item(
+            state,
+            "waiting",
+            "Waiting for user",
+            "Which option should I use?",
+            related_task_id=1,
+        )
+
+        migrated = migrate_state(state)
+        open_attention = [
+            item for item in migrated["attention"]["items"] if item.get("status") == "open"
+        ]
+
+        self.assertEqual(waiting["status"], "resolved")
+        self.assertEqual(len(open_attention), 1)
+        self.assertEqual(open_attention[0]["kind"], "question")
+
+    def test_migration_keeps_distinct_waiting_attention_for_same_task(self):
+        state = default_state()
+        add_question(state, "Which option should I use?", related_task_id=1)
+        waiting = add_attention_item(
+            state,
+            "waiting",
+            "Waiting for user",
+            "Need a separate deployment window.",
+            related_task_id=1,
+        )
+
+        migrated = migrate_state(state)
+
+        self.assertEqual(waiting["status"], "open")
+        self.assertIn(waiting["id"], [item["id"] for item in migrated["attention"]["items"]])
+
+    def test_migration_keeps_same_text_waiting_attention_for_different_task(self):
+        state = default_state()
+        add_question(state, "Which option should I use?", related_task_id=1)
+        waiting = add_attention_item(
+            state,
+            "waiting",
+            "Waiting for user",
+            "Which option should I use?",
+            related_task_id=2,
+        )
+
+        migrated = migrate_state(state)
+
+        self.assertEqual(waiting["status"], "open")
+        self.assertIn(waiting["id"], [item["id"] for item in migrated["attention"]["items"]])
+
+    def test_migration_keeps_task_waiting_attention_when_question_is_taskless(self):
+        state = default_state()
+        add_question(state, "Need approval?")
+        waiting = add_attention_item(
+            state,
+            "waiting",
+            "Waiting for user",
+            "Need approval?",
+            related_task_id=2,
+        )
+
+        migrated = migrate_state(state)
+
+        self.assertEqual(waiting["status"], "open")
+        self.assertIn(waiting["id"], [item["id"] for item in migrated["attention"]["items"]])
 
     def test_action_plan_records_thought_journal_threads(self):
         state = default_state()
@@ -246,6 +314,206 @@ class AutonomyTests(unittest.TestCase):
         )
 
         self.assertEqual(state["thought_journal"][-1]["open_threads"], ["Keep monitoring."])
+
+    def test_passive_info_messages_are_created_read(self):
+        state = default_state()
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "routine", "decisions": []},
+            {
+                "summary": "routine",
+                "actions": [
+                    {
+                        "type": "send_message",
+                        "message_type": "info",
+                        "text": "Routine passive progress.",
+                    }
+                ],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(len(state["outbox"]), 1)
+        self.assertIsNotNone(state["outbox"][0]["read_at"])
+
+    def test_user_info_and_passive_warnings_stay_unread(self):
+        state = default_state()
+        user_event = add_event(state, "user_message", "test", {"text": "status?"})
+        passive_event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            user_event,
+            {"summary": "reply", "decisions": []},
+            {
+                "summary": "reply",
+                "actions": [
+                    {
+                        "type": "send_message",
+                        "message_type": "info",
+                        "text": "User-visible status.",
+                    }
+                ],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+        apply_action_plan(
+            state,
+            passive_event,
+            {"summary": "warn", "decisions": []},
+            {
+                "summary": "warn",
+                "actions": [
+                    {
+                        "type": "send_message",
+                        "message_type": "warning",
+                        "text": "Action required.",
+                    }
+                ],
+            },
+            "later",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertIsNone(state["outbox"][0]["read_at"])
+        self.assertIsNone(state["outbox"][1]["read_at"])
+
+    def test_external_event_info_stays_unread(self):
+        state = default_state()
+        event = add_event(state, "file_change", "watch", {"path": "README.md"})
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "external", "decisions": []},
+            {
+                "summary": "external",
+                "actions": [
+                    {
+                        "type": "send_message",
+                        "message_type": "info",
+                        "text": "External event handled.",
+                    }
+                ],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="external_event",
+        )
+
+        self.assertEqual(len(state["outbox"]), 1)
+        self.assertIsNone(state["outbox"][0]["read_at"])
+
+    def test_wait_for_user_does_not_duplicate_question_attention(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        second = add_event(state, "passive_tick", "test")
+        question = "Which option should I use?"
+
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "ask", "decisions": [{"type": "ask_user", "task_id": 1}]},
+            {
+                "summary": "ask",
+                "actions": [
+                    {
+                        "type": "ask_user",
+                        "task_id": 1,
+                        "question": question,
+                    }
+                ],
+            },
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "wait", "decisions": [{"type": "wait_for_user", "task_id": 1}]},
+            {
+                "summary": "wait",
+                "actions": [
+                    {
+                        "type": "wait_for_user",
+                        "task_id": 1,
+                        "question": question,
+                    }
+                ],
+            },
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        open_attention = [item for item in state["attention"]["items"] if item["status"] == "open"]
+        self.assertEqual(len(open_attention), 1)
+        self.assertEqual(open_attention[0]["kind"], "question")
+
+    def test_same_text_wait_for_user_on_different_task_creates_question(self):
+        state = default_state()
+        first = add_event(state, "passive_tick", "test")
+        second = add_event(state, "passive_tick", "test")
+        question = "Need approval?"
+
+        apply_action_plan(
+            state,
+            first,
+            {"summary": "ask", "decisions": [{"type": "ask_user", "task_id": 1}]},
+            {
+                "summary": "ask",
+                "actions": [
+                    {
+                        "type": "ask_user",
+                        "task_id": 1,
+                        "question": question,
+                    }
+                ],
+            },
+            "first",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+        apply_action_plan(
+            state,
+            second,
+            {"summary": "wait", "decisions": [{"type": "wait_for_user", "task_id": 2}]},
+            {
+                "summary": "wait",
+                "actions": [
+                    {
+                        "type": "wait_for_user",
+                        "task_id": 2,
+                        "question": question,
+                    }
+                ],
+            },
+            "second",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(
+            [(item["text"], item["related_task_id"]) for item in state["questions"]],
+            [(question, 1), (question, 2)],
+        )
 
     def test_thought_journal_keeps_equivalent_waiting_question_thread(self):
         state = default_state()

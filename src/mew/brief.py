@@ -1,4 +1,5 @@
 from .programmer import find_review_run_for_implementation, latest_task_plan
+from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import now_iso
@@ -347,6 +348,7 @@ def build_brief_data(state, limit=5):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
     tasks = sorted(open_tasks(state), key=task_sort_key)
     unread = open_unread_messages(state)
+    routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
@@ -362,6 +364,7 @@ def build_brief_data(state, limit=5):
         "user": state.get("user_status", {}),
         "unread_outbox": [_message_item(message) for message in recent_unread_messages(state, limit=limit)],
         "unread_outbox_count": len(unread),
+        "routine_unread_info_count": len(routine_unread),
         "memory": {
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
@@ -398,9 +401,11 @@ def build_focus_data(state, limit=3):
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     unread = open_unread_messages(state)
+    routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     return {
         "next_move": next_move(state),
         "unread_outbox_count": len(unread),
+        "routine_unread_info_count": len(routine_unread),
         "open_questions": [_question_item(question) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "tasks": [
@@ -419,6 +424,9 @@ def format_focus(data):
     unread = data.get("unread_outbox_count") or 0
     if unread:
         lines.append(f"Unread: {unread}")
+    routine_unread = data.get("routine_unread_info_count") or 0
+    if routine_unread:
+        lines.append(f"Routine info: {routine_unread} clear with `mew ack --routine`")
 
     questions = data.get("open_questions") or []
     if questions:
@@ -505,6 +513,7 @@ def build_brief(state, limit=5):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
     tasks = sorted(open_tasks(state), key=task_sort_key)
     unread = open_unread_messages(state)
+    routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
@@ -541,6 +550,8 @@ def build_brief(state, limit=5):
 
     if unread:
         lines.append("Unread messages")
+        if routine_unread:
+            lines.append(f"- routine info: {len(routine_unread)}; clear with `mew ack --routine`")
         if len(unread) > len(recent_unread):
             lines.append(
                 f"- showing latest {len(recent_unread)}; {len(unread) - len(recent_unread)} older unread omitted"

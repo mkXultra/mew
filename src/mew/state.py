@@ -374,6 +374,7 @@ def migrate_state(state):
             priority="high",
         )
 
+    resolve_redundant_waiting_attention(state)
     return reconcile_next_ids(state)
 
 def load_state():
@@ -682,6 +683,52 @@ def add_event(state, event_type, source, payload=None):
     state["inbox"].append(event)
     return event
 
+def _event_type_for_id(state, event_id):
+    if event_id is None:
+        return None
+    for event in state.get("inbox", []):
+        if str(event.get("id")) == str(event_id):
+            return event.get("type")
+    return None
+
+QUIET_INFO_EVENT_TYPES = {"startup", "passive_tick", "tick"}
+ROUTINE_INFO_PREFIXES = (
+    "Agent run #",
+    "Started agent run #",
+    "Read file ",
+    "Searched ",
+    "Inspected directory ",
+    "Skipped repeated ",
+)
+
+def event_type_for_outbox_message(state, message):
+    return _event_type_for_id(state, message.get("event_id"))
+
+def is_routine_outbox_message(state, message):
+    if (
+        message.get("type") != "info"
+        or message.get("requires_reply")
+        or message.get("read_at")
+    ):
+        return False
+    if message.get("quiet"):
+        return True
+    event_type = event_type_for_outbox_message(state, message)
+    if event_type in QUIET_INFO_EVENT_TYPES:
+        return True
+    if event_type:
+        return False
+    text = message.get("text") or ""
+    return bool(message.get("agent_run_id")) or text.startswith(ROUTINE_INFO_PREFIXES)
+
+def _outbox_quiet_on_create(state, message_type, event_id, requires_reply, quiet):
+    if requires_reply or message_type in ("question", "warning", "assistant"):
+        return False
+    if message_type != "info":
+        return False
+    event_type = _event_type_for_id(state, event_id)
+    return bool(quiet or event_type in QUIET_INFO_EVENT_TYPES)
+
 def add_outbox_message(
     state,
     message_type,
@@ -693,7 +740,16 @@ def add_outbox_message(
     attention_id=None,
     requires_reply=False,
     blocks=None,
+    quiet=False,
 ):
+    current_time = now_iso()
+    quiet_on_create = _outbox_quiet_on_create(
+        state,
+        message_type,
+        event_id,
+        requires_reply,
+        quiet,
+    )
     message = {
         "id": next_id(state, "message"),
         "type": message_type,
@@ -706,8 +762,9 @@ def add_outbox_message(
         "requires_reply": requires_reply,
         "answered_at": None,
         "blocks": blocks or [],
-        "created_at": now_iso(),
-        "read_at": None,
+        "created_at": current_time,
+        "read_at": current_time if quiet_on_create else None,
+        "quiet": quiet_on_create,
     }
     state["outbox"].append(message)
     return message
@@ -811,6 +868,32 @@ def add_question(state, text, event_id=None, related_task_id=None, blocks=None, 
 
 def open_questions(state):
     return [question for question in state["questions"] if question.get("status") == "open"]
+
+def resolve_redundant_waiting_attention(state):
+    current_time = None
+    questions = open_questions(state)
+    for item in state.get("attention", {}).get("items", []):
+        if item.get("status") != "open" or item.get("kind") != "waiting":
+            continue
+        item_task = item.get("related_task_id")
+        item_reason = (item.get("reason") or "").strip()
+        redundant = False
+        for question in questions:
+            question_task = question.get("related_task_id")
+            question_text = (question.get("text") or "").strip()
+            if not item_reason or not question_text or item_reason != question_text:
+                continue
+            if str(item_task or "") != str(question_task or ""):
+                continue
+            redundant = True
+            break
+        if not redundant:
+            continue
+        current_time = current_time or now_iso()
+        item["status"] = "resolved"
+        item["resolved_at"] = current_time
+        item["updated_at"] = current_time
+    return state
 
 def find_question(state, question_id):
     wanted = str(question_id).strip().lstrip("#")
@@ -935,8 +1018,8 @@ def pending_question_for_task(state, task_id):
     return None
 
 def has_open_question(state, text, task_id=None):
-    if text and has_unread_outbox_message(state, "question", text):
-        return True
     if task_id is not None and pending_question_for_task(state, task_id):
+        return True
+    if task_id is None and text and has_unread_outbox_message(state, "question", text):
         return True
     return False

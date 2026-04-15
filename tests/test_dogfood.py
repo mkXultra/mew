@@ -256,7 +256,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["read_inspection"]["read_progress_messages"], 1)
             self.assertEqual(report["read_inspection"]["read_progress_unread"], 0)
             self.assertEqual(report["read_inspection"]["repeated_read_skips"], 1)
-            self.assertEqual(report["read_inspection"]["repeated_read_skips_unread"], 1)
+            self.assertEqual(report["read_inspection"]["repeated_read_skips_unread"], 0)
             self.assertEqual(report["agent_runs"]["total"], 2)
             self.assertEqual(report["agent_runs"]["by_status"], {"completed": 1, "running": 1})
             self.assertEqual(report["programmer_loop"]["implementation_runs"], 1)

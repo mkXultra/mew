@@ -145,6 +145,7 @@ uv run mew run --notify-command "scripts/notify-mew" --notify-bell
 uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
+uv run mew ack --routine
 uv run mew ack --all
 uv run mew questions
 uv run mew questions --defer <question-id> --reason "not now"
@@ -201,9 +202,11 @@ read/memory/question/task-proposal actions, then records the actions, skipped
 actions, and visible effects so the next step can see the feedback. Autonomous
 read-only actions are also guarded against short-term repeats, so mew should
 synthesize or choose a different inspection target instead of reading the same
-file over and over. Routine autonomous read progress is kept in outbox for
-history and live attach streams, but marked read so the user's unread queue
-stays focused on actual replies, questions, and warnings.
+file over and over. Routine startup/passive `info` messages are kept in outbox
+history, but they start as read and are skipped by live echo, notification,
+listen, attach, and chat streams so the user's unread queue stays focused on
+actual replies, questions, and warnings. Use `mew ack --routine` to clear older
+routine unread `info` messages without acknowledging questions or warnings.
 After repeated inspection produces a concrete direction, the resident model can
 use `refine_task` to turn a self-proposed generic task into a specific coding
 task and refresh its programmer plan.

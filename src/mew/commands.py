@@ -70,6 +70,7 @@ from .state import (
     ensure_self,
     ensure_state_dir,
     find_question,
+    is_routine_outbox_message,
     load_state,
     mark_message_read,
     mark_question_deferred,
@@ -568,7 +569,11 @@ def wait_for_event_messages(event_id, timeout=60.0, poll_interval=1.0, mark_read
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         state = load_state()
-        messages = outbox_for_event(state, event_id)
+        messages = [
+            message
+            for message in outbox_for_event(state, event_id)
+            if not message.get("read_at")
+        ]
         if messages:
             if mark_read:
                 mark_outbox_read(message.get("id") for message in messages)
@@ -790,6 +795,20 @@ def cmd_reply(args):
 def cmd_ack(args):
     with state_lock():
         state = load_state()
+        if args.all and getattr(args, "routine", False):
+            print("mew: choose either --all or --routine", file=sys.stderr)
+            return 1
+        if getattr(args, "routine", False):
+            messages = [
+                message
+                for message in state["outbox"]
+                if is_routine_outbox_message(state, message)
+            ]
+            for message in messages:
+                mark_message_read(state, message["id"])
+            save_state(state)
+            print(f"acknowledged {len(messages)} routine message(s)")
+            return 0
         if args.all:
             messages = [message for message in state["outbox"] if not message.get("read_at")]
             for message in messages:
@@ -829,6 +848,7 @@ def cmd_status(args):
     user = state["user_status"]
     autonomy = state.get("autonomy", {})
     unread = [message for message in state["outbox"] if not message.get("read_at")]
+    routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     questions = open_questions(state)
     attention = open_attention_items(state)
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
@@ -851,6 +871,7 @@ def cmd_status(args):
                         "open_attention": len(attention),
                         "running_agent_runs": len(running_agents),
                         "unread_outbox": len(unread),
+                        "routine_unread_info": len(routine_unread),
                     },
                     "top_attention": attention[0] if attention else None,
                     "latest_summary": (
@@ -902,6 +923,9 @@ def cmd_status(args):
         top = attention[0]
         print(f"top_attention: #{top['id']} {top.get('title')}: {top.get('reason')}")
     print(f"unread_outbox: {len(unread)}")
+    print(f"routine_unread_info: {len(routine_unread)}")
+    if routine_unread:
+        print("routine_cleanup: mew ack --routine")
     memory = state.get("memory", {}).get("shallow", {})
     latest_summary = memory.get("current_context") or state["knowledge"]["shallow"].get("latest_task_summary")
     print(f"latest_summary: {latest_summary}")
@@ -2695,10 +2719,11 @@ def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read
             message
             for message in messages
             if str(message.get("id")) not in seen_ids
+            and not message.get("read_at")
         ]
+        seen_ids.update(str(message.get("id")) for message in messages)
         if new_messages:
             print_outbox_messages(new_messages)
-            seen_ids.update(str(message.get("id")) for message in new_messages)
             if mark_read:
                 mark_outbox_read(message.get("id") for message in new_messages)
             return 0
@@ -2736,6 +2761,8 @@ def emit_new_outbox(seen_ids, mark_read):
         if message_id in seen_ids:
             continue
         seen_ids.add(message_id)
+        if message.get("read_at"):
+            continue
         messages.append(message)
     print_outbox_messages(messages)
     if mark_read:
@@ -2854,7 +2881,7 @@ CHAT_HELP = """Commands:
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
 /mode <level>         override autonomy level: observe|propose|act|default
-/ack all|<ids...>     mark outbox messages as read
+/ack all|routine|<ids...> mark outbox messages as read
 /reply <id> <text>    answer an open question
 /activity on|off      toggle runtime activity lines
 /history              print all outbox messages
@@ -3962,7 +3989,7 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "ack":
         if not rest:
-            print("usage: /ack all|<ids...>")
+            print("usage: /ack all|routine|<ids...>")
             return "continue"
         if rest.casefold() == "all":
             with state_lock():
@@ -3970,6 +3997,17 @@ def run_chat_slash_command(line, chat_state):
                 ids = [message.get("id") for message in state["outbox"] if not message.get("read_at")]
             mark_outbox_read(ids)
             print(f"acknowledged {len(ids)} message(s)")
+            return "continue"
+        if rest.casefold() == "routine":
+            with state_lock():
+                state = load_state()
+                ids = [
+                    message.get("id")
+                    for message in state["outbox"]
+                    if is_routine_outbox_message(state, message)
+                ]
+            mark_outbox_read(ids)
+            print(f"acknowledged {len(ids)} routine message(s)")
             return "continue"
         try:
             ids = shlex.split(rest)
