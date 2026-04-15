@@ -137,6 +137,7 @@ uv run mew dogfood --source-workspace . --cycles 3 --report .mew/dogfood-latest.
 uv run mew perceive --allow-read .
 uv run mew next
 uv run mew next --json
+uv run mew work <task-id>
 uv run mew task list --kind coding
 uv run mew verification
 uv run mew writes
@@ -215,6 +216,9 @@ use `refine_task` to turn a self-proposed generic task into a specific coding
 task and refresh its programmer plan.
 Use `--focus` to steer a short step loop toward the current development session
 without rewriting persistent guidance.
+Use `mew work <task-id>` as a read-only resume surface for one coding task: it
+shows the current plan, recent agent runs, verification, writes, open questions,
+and exactly one recommended next action.
 
 ## Resident Model
 
