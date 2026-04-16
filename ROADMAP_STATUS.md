@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, context pressure diagnostics, work-session/global ledgers, and scoped status/brief cockpit views; the remaining gap is a polished REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has quieter deterministic live steps, command streaming, action/resume output, chat/listen kind scopes, approval/live controls, line-targeted reads, large-file small edits, context pressure diagnostics, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -139,11 +139,17 @@ Evidence:
 - `mew verification` and `mew writes` now include work-session tool calls with stable `source`, `id`, `ledger_id`, and session-qualified labels such as `work25#113.verify`, making native work audit trails visible outside the full session view.
 - `mew status --kind ...` and `mew brief --kind ...` now scope counts, unread task-linked messages, questions, attention, task queues, next moves, and brief ledgers by task kind; kind-scoped briefs suppress unrelated global activity/thought/step history.
 - Human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers all behave as intended without tracked file edits.
+- `mew chat --kind ...` now scopes the startup brief, unread outbox, and slash-command views; `/scope` can switch or clear the active chat kind, and `mew listen --kind ...` scopes passive outbox observation.
+- `mew work --live` now defaults to deterministic ACT, so the common live path uses one model call per step; model JSON/text deltas are quiet by default and remain available with explicit `--stream-model`.
+- `read_file` now supports `line_start` / `line_count` through both CLI tools and resident model actions, letting the model jump from `search_text` line numbers to the relevant source region instead of rereading file offset 0.
+- `edit_file` now permits small exact replacements in large files by limiting replacement/delta size instead of rejecting based on total edited file size.
+- `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
+- `dogfood --scenario work-session` now covers line-based `read_file` and large-file dry-run `edit_file`, bringing the recurring scenario to 27 commands.
 
 Missing proof:
 
-- Model delta streaming is wired for Codex SSE, but live UX still prints raw JSON deltas rather than a polished reasoning view.
-- Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
+- Model delta streaming is opt-in and no longer pollutes `--live` by default, but there is still no polished reasoning pane or diff/test-output cockpit comparable to Claude Code / Codex CLI.
+- `mew work --live` now defaults to one model call per step, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, next controls, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
@@ -228,6 +234,7 @@ Evidence:
 - External model review through ACM has been used for roadmap and extraction decisions.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
+- Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
 
 Missing proof:
 
@@ -242,14 +249,14 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `567 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `209 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_brief.py` current: `33 passed`.
-- `uv run pytest -q tests/test_self_improve.py` current: `16 passed`.
+- `uv run pytest -q` current: `572 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed`.
+- `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `156 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `./mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 25 commands.
-- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 25 commands.
+- `./mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 27 commands.
+- `./mew dogfood --scenario all --cleanup` last observed: pass, including `work-session` with 25 commands before the line-read/large-edit scenario expansion.
 - `./mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
 - `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
@@ -258,6 +265,9 @@ Next action:
 - `codex-ultra` reentry retest after cockpit changes: strict chat resume order and missing chat resume hints are mostly fixed; remaining UX gaps are broader cockpit polish and quiet-chat affordances.
 - `codex-ultra` human-role E2E round 2 verified exact `/tmp` new-file approval, sibling write rejection, work-session/global ledgers, and `uv run pytest tests/test_work_session.py -q` with `88 passed`.
 - `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
+- `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
+- `mew chat --kind coding`, `mew next --kind coding`, and `mew status --kind coding` were dogfooded locally after the scoped-chat changes; startup and slash-view scoping stayed quiet and task/coding-focused.
+- `mew work --live` task #44 dogfood verified the quieter deterministic live path, then used line-based reads and large-file edit support to reach and approve a real cockpit improvement.
 - `claude-ultra` reviews found no ship-blockers after fixes for work-session global ledgers and status/brief kind scoping.
 - Mew dogfood task #27 used `mew work --live` with Codex Web API in this repository; it found high context pressure from broad batch reads, which led to smaller model read defaults and diffstat-first model `git_diff`.
 - Mew dogfood task #28 used `mew work --live` with Codex Web API as a read-only self-improvement buddy; it reentered docs, chose `finish`, and exposed the need to distinguish session finish from task completion.
@@ -269,4 +279,4 @@ Next action:
 
 Milestone 2: Interactive Parity.
 
-The next implementation should turn `mew work --live` and `/work-session live` into a real resident coding cockpit: a continuous loop with visible action selection, controlled continuation, approval handling, and a durable final note that explains what changed or what should happen next.
+The next implementation should turn `mew work --live` and `/work-session live` into a real resident coding cockpit: a continuous loop with readable reasoning/diff/test panes, controlled continuation, approval handling, and a durable final note that explains what changed or what should happen next.
