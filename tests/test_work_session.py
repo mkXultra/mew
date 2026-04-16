@@ -807,6 +807,17 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(load_state()["work_sessions"][0]["tool_calls"][0]["status"], "interrupted")
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                interrupted_resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(interrupted_resume["phase"], "interrupted")
+                self.assertEqual(interrupted_resume["recovery_plan"]["items"][0]["action"], "retry_tool")
+                self.assertIn("recover-session", interrupted_resume["recovery_plan"]["items"][0]["hint"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                self.assertIn("Recovery plan", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)
                 report = json.loads(stdout.getvalue())
 

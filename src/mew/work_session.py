@@ -597,6 +597,67 @@ def work_session_phase(session, calls, turns, pending_approvals):
     return "idle"
 
 
+def build_work_recovery_plan(session, calls, turns, limit=8):
+    items = []
+    task_id = (session or {}).get("task_id")
+    for call in calls:
+        if call.get("status") != "interrupted" or call.get("recovery_status"):
+            continue
+        tool = call.get("tool") or "unknown"
+        if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
+            action = "retry_tool"
+            safety = "read_only"
+            reason = "interrupted read/git inspection can be retried after verifying read roots"
+        elif tool in WRITE_WORK_TOOLS:
+            action = "needs_user_review"
+            safety = "write"
+            reason = "interrupted write must be reviewed before retry or rollback"
+        elif tool in COMMAND_WORK_TOOLS:
+            action = "needs_user_review"
+            safety = "command"
+            reason = "interrupted command or verification may have side effects"
+        else:
+            action = "needs_user_review"
+            safety = "unknown"
+            reason = "interrupted tool type is not automatically recoverable"
+        item = {
+            "kind": "tool_call",
+            "tool_call_id": call.get("id"),
+            "tool": tool,
+            "action": action,
+            "safety": safety,
+            "reason": reason,
+        }
+        if action == "retry_tool":
+            item["hint"] = f"mew work {task_id} --recover-session --allow-read <path>"
+        items.append(item)
+
+    for turn in turns:
+        if turn.get("status") != "interrupted" or turn.get("recovery_status"):
+            continue
+        items.append(
+            {
+                "kind": "model_turn",
+                "model_turn_id": turn.get("id"),
+                "action": "replan",
+                "safety": "no_tool_started",
+                "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
+                "hint": f"mew work {task_id} --live --allow-read <path>",
+            }
+        )
+
+    items = items[-limit:]
+    if not items:
+        return {}
+    if any(item.get("action") == "needs_user_review" for item in items):
+        next_action = "verify the world and review interrupted side-effecting work before retry"
+    elif any(item.get("action") == "retry_tool" for item in items):
+        next_action = "verify the world, then retry recoverable interrupted read/git tool after checking read roots"
+    else:
+        next_action = "verify world state and replan the interrupted model step"
+    return {"next_action": next_action, "items": items}
+
+
 def build_work_session_resume(session, task=None, limit=8):
     if not session:
         return None
@@ -711,6 +772,10 @@ def build_work_session_resume(session, task=None, limit=8):
     else:
         next_action = "continue the work session with /continue in chat or mew work --live"
 
+    recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
+    if recovery_plan.get("next_action"):
+        next_action = recovery_plan["next_action"]
+
     return {
         "session_id": session.get("id"),
         "task_id": session.get("task_id"),
@@ -727,6 +792,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "recent_decisions": recent_decisions,
         "context": build_work_context_metrics(calls, turns),
         "last_stop_request": session.get("last_stop_request") or {},
+        "recovery_plan": recovery_plan,
         "next_action": next_action,
     }
 
@@ -807,6 +873,18 @@ def format_work_session_resume(resume):
     if last_stop:
         lines.extend(["", "Last stop request"])
         lines.append(f"{last_stop.get('requested_at') or ''} {last_stop.get('reason') or ''}".strip())
+
+    recovery = resume.get("recovery_plan") or {}
+    if recovery:
+        lines.extend(["", "Recovery plan"])
+        for item in recovery.get("items") or []:
+            target = f"tool_call=#{item.get('tool_call_id')}" if item.get("kind") == "tool_call" else f"model_turn=#{item.get('model_turn_id')}"
+            lines.append(
+                f"- {target} action={item.get('action')} safety={item.get('safety')} "
+                f"{item.get('reason') or ''}"
+            )
+            if item.get("hint"):
+                lines.append(f"  hint: {item.get('hint')}")
 
     world = resume.get("world_state") or {}
     if world:

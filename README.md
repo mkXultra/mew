@@ -265,7 +265,9 @@ verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it.
 Interrupted read-only tools can be retried with `mew work --recover-session
 --allow-read .`; write, shell, and verification interruptions still require
-human review. Older tool calls that fall out of the full recent context window
+human review, and interrupted resumes include a `Recovery plan` that classifies
+retryable reads, replannable model turns, and side-effecting work that needs
+review. Older tool calls that fall out of the full recent context window
 are carried forward as compact `session_knowledge` digests instead of raw file
 contents, and recent `read_file` results are clipped in model context with a
 resume offset so the model can request the next page when needed. If the
