@@ -657,6 +657,18 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_format_outbox_line_clips_large_text(self):
+        from mew.commands import format_outbox_line
+
+        line = format_outbox_line(
+            {"id": 1, "type": "info", "created_at": "now", "text": "x" * 40},
+            max_text_chars=12,
+        )
+
+        self.assertIn("xxxxxxxxxxxx", line)
+        self.assertIn("truncated 28 char(s)", line)
+        self.assertIn("outbox --json", line)
+
     def test_chat_kind_filter_scopes_startup_brief_and_unread(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

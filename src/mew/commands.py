@@ -164,6 +164,7 @@ from .work_world import build_work_world_state
 
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
+MAX_OUTBOX_TEXT_CHARS = 2000
 
 
 def cmd_task_add(args):
@@ -5217,11 +5218,17 @@ def runtime_is_active():
     lock = read_lock()
     return bool(lock and pid_alive(lock.get("pid")))
 
-def format_outbox_line(message):
+def format_outbox_line(message, max_text_chars=MAX_OUTBOX_TEXT_CHARS):
     created_at = message.get("created_at") or "unknown-time"
     message_id = message.get("id")
     message_type = message.get("type") or "message"
     text = str(message.get("text") or "")
+    if max_text_chars and len(text) > max_text_chars:
+        omitted = len(text) - max_text_chars
+        text = (
+            text[:max_text_chars].rstrip()
+            + f"\n... truncated {omitted} char(s); use `{mew_command('outbox', '--json')}` for full text"
+        )
     prefix = f"[{created_at}] #{message_id} {message_type}: "
     return prefix + text.replace("\n", "\n" + " " * len(prefix))
 
