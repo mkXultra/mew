@@ -1069,6 +1069,18 @@ def suppress_processed_injected_dropped_threads(report):
     return report
 
 
+def format_model_trace_summary(summary, enabled=False):
+    summary = summary or {}
+    latest = summary.get("latest") or []
+    return (
+        f"enabled={bool(enabled)} "
+        f"total={summary.get('total', 0)} "
+        f"by_status={summary.get('by_status', {})} "
+        f"by_phase={summary.get('by_phase', {})} "
+        f"latest={len(latest)}"
+    )
+
+
 def format_dogfood_report(report):
     lines = [
         f"Mew dogfood report at {report.get('generated_at')}",
@@ -1080,7 +1092,11 @@ def format_dogfood_report(report):
         "model_phases: " + ", ".join(
             f"{key}={value}" for key, value in report.get("model_phases", {}).items()
         ),
-        f"model_traces: enabled={bool(report.get('trace_model_enabled'))} {report.get('model_traces')}",
+        "model_traces: "
+        + format_model_trace_summary(
+            report.get("model_traces"),
+            enabled=bool(report.get("trace_model_enabled")),
+        ),
         "runtime_cycle: "
         f"last_reason={report.get('runtime_status', {}).get('last_cycle_reason')} "
         f"duration={report.get('runtime_status', {}).get('last_cycle_duration_seconds')} "

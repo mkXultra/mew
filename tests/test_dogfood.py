@@ -351,7 +351,10 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
-            self.assertIn("model_traces: enabled=True", text)
+            self.assertIn(
+                "model_traces: enabled=True total=1 by_status={'ok': 1} by_phase={'think': 1} latest=1",
+                text,
+            )
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
             self.assertIn("read_inspection:", text)
