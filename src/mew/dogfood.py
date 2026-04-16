@@ -693,6 +693,8 @@ def run_work_session_scenario(workspace, env=None):
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
+    workbench_session_verifications = work_data.get("work_session_verifications") or []
+    workbench_session_writes = work_data.get("work_session_writes") or []
     timeline = timeline_data.get("timeline") or []
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
@@ -796,6 +798,18 @@ def run_work_session_scenario(workspace, env=None):
         == ["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
         expected=["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
+    )
+    _scenario_check(
+        checks,
+        "workbench_surfaces_work_session_ledgers",
+        any(item.get("exit_code") == 0 for item in workbench_session_verifications)
+        and any(str(item.get("path") or "").endswith("approved.md") for item in workbench_session_writes)
+        and any(str(item.get("path") or "").endswith("generated.md") for item in workbench_session_writes),
+        observed={
+            "verifications": workbench_session_verifications,
+            "writes": workbench_session_writes,
+        },
+        expected="workbench includes work-session verification and write summaries",
     )
     _scenario_check(
         checks,

@@ -343,10 +343,16 @@ def build_workbench_data(state, task):
         else None
     )
     work_session = None
+    active_task_work_session = None
     for session in reversed(state.get("work_sessions", [])):
-        if str(session.get("task_id")) == str(task_id) and session.get("status") == "active":
+        if str(session.get("task_id")) != str(task_id):
+            continue
+        if session.get("status") == "active":
+            active_task_work_session = session
             work_session = session
             break
+        if work_session is None:
+            work_session = session
 
     next_action = "mew task show {task_id}".format(task_id=task_id)
     if task.get("status") == "done":
@@ -355,7 +361,7 @@ def build_workbench_data(state, task):
         next_action = f"mew reply {questions[0]['id']} \"...\""
     elif not is_programmer_task(task):
         next_action = f"mew task update {task_id} --kind coding"
-    elif work_session:
+    elif active_task_work_session:
         next_action = f"mew work {task_id} --live --allow-read . --max-steps 1"
     elif not plan:
         next_action = f"mew work {task_id} --start-session"
@@ -381,10 +387,64 @@ def build_workbench_data(state, task):
         "agent_runs": agent_runs,
         "verification_runs": verification_runs,
         "write_runs": write_runs,
+        "work_session_verifications": work_session_verification_summaries(work_session),
+        "work_session_writes": work_session_write_summaries(work_session),
         "open_questions": questions,
         "work_session": work_session,
         "next_action": next_action,
     }
+
+
+def work_session_verification_summaries(session, limit=5):
+    items = []
+    for call in (session or {}).get("tool_calls") or []:
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        if call.get("tool") == "run_tests":
+            items.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "command": result.get("command") or parameters.get("command"),
+                    "exit_code": result.get("exit_code"),
+                }
+            )
+        verification = result.get("verification") or {}
+        if verification.get("command"):
+            items.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": f"{call.get('tool')}_verification",
+                    "command": verification.get("command"),
+                    "exit_code": verification.get("exit_code"),
+                }
+            )
+    return items[-limit:]
+
+
+def work_session_write_summaries(session, limit=5):
+    items = []
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        if not result.get("diff") and not result.get("path") and not parameters.get("path"):
+            continue
+        items.append(
+            {
+                "tool_call_id": call.get("id"),
+                "operation": call.get("tool"),
+                "path": result.get("path") or parameters.get("path"),
+                "changed": result.get("changed"),
+                "dry_run": result.get("dry_run"),
+                "written": result.get("written"),
+                "rolled_back": result.get("rolled_back"),
+                "verification_exit_code": result.get("verification_exit_code"),
+                "approval_status": call.get("approval_status") or "",
+            }
+        )
+    return items[-limit:]
 
 
 def format_workbench(data):
@@ -424,7 +484,19 @@ def format_workbench(data):
         for run in data["verification_runs"]:
             outcome = verification_outcome(run)
             lines.append(f"#{run.get('id')} [{outcome}] {run.get('command') or ''}")
-    else:
+    if data.get("work_session_verifications"):
+        for run in data["work_session_verifications"]:
+            outcome = "passed" if run.get("exit_code") == 0 else "failed"
+            if run.get("exit_code") is None:
+                outcome = "unknown"
+            label = f"work#{run.get('tool_call_id')}"
+            if str(run.get("tool") or "").endswith("_verification"):
+                label += ".verify"
+            lines.append(
+                f"{label} [{outcome}] "
+                f"{run.get('command') or ''}"
+            )
+    if not data.get("verification_runs") and not data.get("work_session_verifications"):
         lines.append("(none)")
 
     lines.append("")
@@ -436,7 +508,21 @@ def format_workbench(data):
                 f"{run.get('path') or ''} changed={bool(run.get('changed'))} "
                 f"rolled_back={bool(run.get('rolled_back'))}"
             )
-    else:
+    if data.get("work_session_writes"):
+        for run in data["work_session_writes"]:
+            verification = (
+                f" verification_exit={run.get('verification_exit_code')}"
+                if run.get("verification_exit_code") is not None
+                else ""
+            )
+            approval = f" approval={run.get('approval_status')}" if run.get("approval_status") else ""
+            lines.append(
+                f"work#{run.get('tool_call_id')} [{run.get('operation') or 'write'}] "
+                f"{run.get('path') or ''} changed={bool(run.get('changed'))} "
+                f"written={bool(run.get('written'))} dry_run={bool(run.get('dry_run'))} "
+                f"rolled_back={bool(run.get('rolled_back'))}{verification}{approval}"
+            )
+    if not data.get("write_runs") and not data.get("work_session_writes"):
         lines.append("(none)")
 
     lines.append("")

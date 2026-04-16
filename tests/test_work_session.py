@@ -1756,6 +1756,74 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_surfaces_closed_work_session_writes_and_verifications(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                test_command = f"{sys.executable} -c \"print('session verify ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", test_command, "--allow-verify"]),
+                        0,
+                    )
+                write_verify = (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; assert Path('generated.md').read_text() == 'generated\\n'\""
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "generated.md",
+                                "--content",
+                                "generated\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--allow-verify",
+                                "--verify-command",
+                                write_verify,
+                            ]
+                        ),
+                        0,
+                    )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("Verification", output)
+                self.assertIn("work#1 [passed]", output)
+                self.assertIn("session verify ok", output)
+                self.assertIn("work#2.verify [passed]", output)
+                self.assertIn("generated.md", output)
+                self.assertIn("Writes", output)
+                self.assertIn("work#2 [write_file]", output)
+                self.assertIn("written=True", output)
+                self.assertIn("verification_exit=0", output)
+                self.assertIn("Work session", output)
+                self.assertIn("#1 [closed]", output)
+                self.assertNotIn("mew work 1 --live", output)
+                self.assertIn("mew work 1 --start-session", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_rolls_back_failed_applied_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
