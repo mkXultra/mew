@@ -5022,6 +5022,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session <task-id> resume        same as resume; task-first order is accepted
 /work-session resume --allow-read .   add live git/file world state to the reentry bundle
 /work-session start <task-id>         start or reuse a native work session
+/outside chat: mew do <task-id>       run the common supervised coding loop
 /continue --allow-read .              run one live resident-model step
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop

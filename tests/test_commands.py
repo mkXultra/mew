@@ -2936,6 +2936,7 @@ class CommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Work session quick help", output)
         self.assertIn("/work-session <task-id> resume", output)
+        self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
         self.assertNotIn("/agents [all]", output)
