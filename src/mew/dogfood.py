@@ -828,6 +828,10 @@ def run_work_session_scenario(workspace, env=None):
     interrupted_review = interrupted_recovery.get("review_item") or {}
     auto_recovery = auto_recover_data.get("auto_recovery") or {}
     auto_tool_call = auto_recovery.get("tool_call") or {}
+    pending_diff_previews = [
+        approval.get("diff_preview") or ""
+        for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
+    ]
 
     _scenario_check(
         checks,
@@ -925,6 +929,14 @@ def run_work_session_scenario(workspace, env=None):
         and (resume_data.get("resume") or {}).get("phase") == "stop_requested",
         observed=resume_data.get("resume"),
         expected="resume reports phase=stop_requested",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_pending_diff_preview",
+        resume_result.get("exit_code") == 0
+        and any("Diff preview" in preview and "native work sessions" in preview for preview in pending_diff_previews),
+        observed=pending_diff_previews,
+        expected="resume pending approvals include readable diff previews",
     )
     _scenario_check(
         checks,

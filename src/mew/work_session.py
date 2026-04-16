@@ -44,6 +44,7 @@ READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
     "query",
@@ -61,6 +62,29 @@ WORK_ACTION_DISPLAY_FIELDS = (
     "staged",
     "stat",
 )
+
+
+def diff_line_counts(diff):
+    added = 0
+    removed = 0
+    for line in (diff or "").splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return {"added": added, "removed": removed}
+
+
+def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS):
+    if not diff:
+        return ""
+    counts = diff_line_counts(diff)
+    return (
+        f"Diff preview (+{counts['added']} -{counts['removed']})\n"
+        f"{clip_output(diff, max_chars)}"
+    )
 
 
 def active_work_session(state):
@@ -823,12 +847,15 @@ def build_work_session_resume(session, task=None, limit=8):
         ):
             tool_call_id = call.get("id")
             write_path = path or "."
+            diff = result.get("diff") or ""
             pending_approvals.append(
                 {
                     "tool_call_id": tool_call_id,
                     "tool": call.get("tool"),
                     "path": path,
                     "summary": call.get("summary") or "",
+                    "diff_stats": diff_line_counts(diff),
+                    "diff_preview": format_diff_preview(diff, max_chars=1200),
                     "approve_hint": (
                         f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
                         f"--allow-verify --verify-command {verify_command_hint}"
@@ -944,6 +971,10 @@ def format_work_session_resume(resume):
     if approvals:
         for approval in approvals:
             lines.append(f"#{approval.get('tool_call_id')} {approval.get('tool')} {approval.get('path') or ''}")
+            if approval.get("diff_preview"):
+                lines.append("  diff:")
+                for preview_line in approval.get("diff_preview", "").splitlines():
+                    lines.append(f"    {preview_line}")
             if approval.get("approve_hint"):
                 lines.append(f"  approve: {approval.get('approve_hint')}")
             if approval.get("reject_hint"):

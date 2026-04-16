@@ -141,6 +141,7 @@ from .work_session import (
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
+    format_diff_preview,
     format_work_action,
     format_work_session_resume,
     format_work_session,
@@ -882,6 +883,8 @@ def prompt_live_write_approval(tool_call):
     result = (tool_call or {}).get("result") or {}
     parameters = (tool_call or {}).get("parameters") or {}
     path = result.get("path") or parameters.get("path") or ""
+    if result.get("diff"):
+        print(format_diff_preview(result.get("diff") or "", max_chars=2000))
     prompt = f"Apply dry-run work tool #{(tool_call or {}).get('id')} {(tool_call or {}).get('tool')} {path}? [y/N/q]: "
     print(prompt, end="", flush=True)
     answer = sys.stdin.readline()
