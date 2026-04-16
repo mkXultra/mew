@@ -1152,7 +1152,13 @@ class WorkSessionTests(unittest.TestCase):
                                 0,
                             )
                 output = stdout.getvalue()
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("action: read_file", output)
+                self.assertIn("tool_call: #1", output)
+                self.assertIn("reason: read README", output)
+                self.assertIn("path: README.md", output)
                 self.assertIn("Work live step #1 resume", output)
+                self.assertLess(output.index("Work live step #1 action"), output.index("Work live step #1 resume"))
                 self.assertIn("Work resume #1 [active] task=#1", output)
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
                 self.assertIn("ACT deterministic action=read_file", stderr.getvalue())

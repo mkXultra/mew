@@ -245,6 +245,8 @@ def normalize_work_model_action(action_plan, verify_command=""):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
 
+    if not normalized.get("summary") and action_plan.get("summary"):
+        normalized["summary"] = action_plan.get("summary")
     if action_type in WRITE_WORK_TOOLS:
         dry_run = action.get("dry_run")
         normalized["apply"] = bool(action.get("apply")) or dry_run is False

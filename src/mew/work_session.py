@@ -40,6 +40,21 @@ READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+WORK_ACTION_DISPLAY_FIELDS = (
+    "path",
+    "query",
+    "pattern",
+    "command",
+    "cwd",
+    "base",
+    "limit",
+    "offset",
+    "apply",
+    "create",
+    "replace_all",
+    "staged",
+    "stat",
+)
 
 
 def active_work_session(state):
@@ -564,6 +579,36 @@ def format_work_session_resume(resume):
         lines.append("(none)")
 
     lines.extend(["", "Next action", resume.get("next_action") or ""])
+    return "\n".join(lines)
+
+
+def _display_value(action, parameters, key):
+    if action.get(key) is not None:
+        return action.get(key)
+    return parameters.get(key)
+
+
+def format_work_action(action, parameters=None, tool_call_id=None):
+    action = dict(action or {})
+    parameters = dict(parameters or {})
+    action_type = action.get("type") or action.get("tool") or "unknown"
+    lines = [f"action: {action_type}"]
+    if tool_call_id:
+        lines.append(f"tool_call: #{tool_call_id}")
+    reason = action.get("reason") or action.get("summary") or action.get("text") or action.get("question") or ""
+    if reason:
+        lines.append(f"reason: {clip_output(str(reason), 500)}")
+    for key in WORK_ACTION_DISPLAY_FIELDS:
+        value = _display_value(action, parameters, key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, bool) and not value and key != "apply":
+            continue
+        lines.append(f"{key}: {clip_output(str(value), 500)}")
+    for key in ("content", "old", "new"):
+        value = _display_value(action, parameters, key)
+        if value is not None:
+            lines.append(f"{key}: {len(str(value))} chars")
     return "\n".join(lines)
 
 

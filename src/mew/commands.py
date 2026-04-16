@@ -133,6 +133,7 @@ from .work_session import (
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
+    format_work_action,
     format_work_session_resume,
     format_work_session,
     start_work_model_turn,
@@ -672,6 +673,10 @@ def cmd_work_ai(args):
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
         action_type = action.get("type")
         if action_type not in WORK_TOOLS:
+            if getattr(args, "live", False):
+                print("")
+                print(f"Work live step #{index} action")
+                print(format_work_action(action))
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
@@ -721,6 +726,10 @@ def cmd_work_ai(args):
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id")
             save_state(state)
+        if getattr(args, "live", False):
+            print("")
+            print(f"Work live step #{index} action")
+            print(format_work_action(action, parameters=parameters, tool_call_id=tool_call_id))
         if progress:
             progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
