@@ -869,6 +869,38 @@ class AutonomyTests(unittest.TestCase):
         self.assertIn("rollback detail", write_run["rollback_error"])
         self.assertLessEqual(len(write_run["diff_tail"]), 620)
 
+    def test_build_context_includes_recent_runtime_effects(self):
+        state = default_state()
+        for index in range(12):
+            state["runtime_effects"].append(
+                {
+                    "id": index + 1,
+                    "event_id": index + 10,
+                    "event_type": "passive_tick",
+                    "reason": "passive_tick",
+                    "status": "verified",
+                    "summary": "runtime effect " + ("detail " * 200),
+                    "action_types": ["run_verification"],
+                    "processed_count": 1,
+                    "counts": {"actions": 1},
+                    "verification_run_ids": [index + 100],
+                    "write_run_ids": [],
+                    "deferred": False,
+                    "error": "",
+                }
+            )
+        event = add_event(state, "passive_tick", "test")
+
+        context = build_context(state, event, "later")
+
+        self.assertEqual(len(context["runtime_effects"]), 10)
+        self.assertEqual(context["runtime_effects"][0]["id"], 3)
+        self.assertEqual(context["runtime_effects"][-1]["verification_run_ids"], [111])
+        self.assertLessEqual(len(context["runtime_effects"][0]["summary"]), 1220)
+        self.assertEqual(context["context_stats"]["source_counts"]["runtime_effects"], 12)
+        self.assertEqual(context["context_stats"]["included_counts"]["runtime_effects"], 10)
+        self.assertEqual(context["context_stats"]["omitted_counts"]["runtime_effects"], 2)
+
     def test_build_context_includes_recent_step_runs(self):
         state = default_state()
         for index in range(7):
