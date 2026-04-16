@@ -227,6 +227,7 @@ class RuntimeTests(unittest.TestCase):
                 effect = state["runtime_effects"][0]
                 self.assertEqual(effect["status"], "applied")
                 self.assertEqual(effect["summary"], "journaled")
+                self.assertEqual(effect["outcome"], "journaled runtime effect")
                 self.assertEqual(effect["action_types"], ["send_message"])
                 self.assertEqual(effect["counts"]["messages"], 1)
                 self.assertIsNotNone(effect["finished_at"])

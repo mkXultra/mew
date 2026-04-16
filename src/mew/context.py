@@ -544,6 +544,7 @@ def runtime_effect_for_context(effect):
         "status": effect.get("status"),
         "phase": effect.get("phase"),
         "summary": clip_context_text(effect.get("summary"), MAX_CONTEXT_TEXT_CHARS),
+        "outcome": clip_context_text(effect.get("outcome"), MAX_CONTEXT_TEXT_CHARS),
         "action_types": list(effect.get("action_types") or []),
         "processed_count": effect.get("processed_count"),
         "counts": effect.get("counts") or {},

@@ -880,6 +880,7 @@ class AutonomyTests(unittest.TestCase):
                     "reason": "passive_tick",
                     "status": "verified",
                     "summary": "runtime effect " + ("detail " * 200),
+                    "outcome": "outcome " + str(index),
                     "action_types": ["run_verification"],
                     "processed_count": 1,
                     "counts": {"actions": 1},
@@ -897,6 +898,7 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(context["runtime_effects"]), 10)
         self.assertEqual(context["runtime_effects"][0]["id"], 3)
         self.assertEqual(context["runtime_effects"][-1]["verification_run_ids"], [111])
+        self.assertEqual(context["runtime_effects"][-1]["outcome"], "outcome 11")
         self.assertEqual(context["runtime_effects"][-1]["recovery_hint"], "Retry this effect")
         self.assertLessEqual(len(context["runtime_effects"][0]["summary"]), 1220)
         self.assertEqual(context["context_stats"]["source_counts"]["runtime_effects"], 12)

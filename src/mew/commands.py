@@ -4863,6 +4863,9 @@ def format_runtime_effect(effect):
         f"actions={actions} verification={verification} writes={writes} "
         f"finished={finished}"
     )
+    outcome = effect.get("outcome")
+    if outcome:
+        text += f" outcome={clip_output(outcome, 160)}"
     recovery_hint = effect.get("recovery_hint")
     if recovery_hint:
         text += f" next={recovery_hint}"

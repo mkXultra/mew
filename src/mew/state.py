@@ -700,6 +700,7 @@ def add_runtime_effect(state, event, reason, status, current_time):
         "status": status,
         "phase": status,
         "summary": "",
+        "outcome": "",
         "action_types": [],
         "processed_count": None,
         "counts": {},

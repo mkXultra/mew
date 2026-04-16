@@ -345,6 +345,7 @@ class ValidationTests(unittest.TestCase):
                 event = add_event(state, "startup", "runtime", {})
                 effect = add_runtime_effect(state, event, "startup", "planning", "then")
                 effect["action_types"] = ["send_message"]
+                effect["outcome"] = "hello from mew"
                 complete_runtime_effect(
                     state,
                     effect["id"],
@@ -360,6 +361,7 @@ class ValidationTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("#1 [applied] event=#1 reason=startup", output)
                 self.assertIn("actions=send_message", output)
+                self.assertIn("outcome=hello from mew", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["runtime-effects", "--json"]), 0)

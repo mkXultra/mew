@@ -215,6 +215,25 @@ def action_types_for_plan(action_plan):
         if isinstance(action, dict)
     ]
 
+def runtime_effect_outcome_for_plan(action_plan):
+    if not isinstance(action_plan, dict):
+        return ""
+    for action in action_plan.get("actions", []):
+        if not isinstance(action, dict):
+            continue
+        action_type = action.get("type")
+        if action_type == "send_message":
+            return action.get("text") or action.get("summary") or action_plan.get("summary") or ""
+        if action_type in ("ask_user", "wait_for_user"):
+            return action.get("question") or action.get("text") or action.get("reason") or ""
+        if action_type == "run_verification":
+            return f"verify: {action.get('command') or 'configured command'}"
+        if action_type in ("write_file", "edit_file"):
+            return f"{action_type}: {action.get('path') or '(unknown path)'}"
+        if action_type in ("dispatch_task", "plan_task", "complete_task"):
+            return f"{action_type}: task #{action.get('task_id')}"
+    return action_plan.get("summary") or ""
+
 def runtime_effect_final_status(state, verification_run_ids, write_run_ids, processed_count):
     if processed_count == 0:
         return "skipped"
@@ -608,6 +627,7 @@ def run_runtime(args):
                             summary=(decision_plan or {}).get("summary")
                             or (action_plan or {}).get("summary")
                             or "",
+                            outcome=runtime_effect_outcome_for_plan(action_plan),
                             action_types=action_types_for_plan(action_plan),
                         )
                         save_state(state)
