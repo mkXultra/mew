@@ -1,6 +1,6 @@
 from subprocess import SubprocessError, run as run_subprocess
 
-from .brief import build_brief, next_move
+from .brief import build_focus_data, format_focus, next_move
 from .programmer import create_task_plan, latest_task_plan
 from .state import next_id
 from .tasks import open_tasks
@@ -43,12 +43,13 @@ def build_self_improve_description(state, focus=""):
         if commits
         else ""
     )
+    coding_focus = format_focus(build_focus_data(state, limit=5, kind="coding"))
     return (
         "Improve mew through one small, reviewable code or documentation change.\n\n"
-        f"Focus:\n{focus_text or next_move(state)}\n\n"
+        f"Focus:\n{focus_text or next_move(state, kind='coding')}\n\n"
         f"{commit_text}"
-        "Current brief:\n"
-        f"{build_brief(state, limit=5)}\n\n"
+        "Current coding focus:\n"
+        f"{coding_focus}\n\n"
         "Constraints:\n"
         "- Keep the change small.\n"
         "- Preserve unrelated user changes.\n"

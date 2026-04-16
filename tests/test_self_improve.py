@@ -39,10 +39,73 @@ class SelfImproveTests(unittest.TestCase):
 
         self.assertLess(
             description.index("Recently completed git commits"),
-            description.index("Current brief:"),
+            description.index("Current coding focus:"),
         )
         self.assertIn("Do not repeat these topics", description)
         self.assertIn("abc123 Fix latest thing", description)
+
+    def test_self_improve_description_uses_coding_focus(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 20,
+                "title": "Research grants",
+                "kind": "research",
+                "status": "ready",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": "t",
+                "updated_at": "t",
+            }
+        )
+
+        with patch("mew.self_improve.recent_git_commits", return_value=""):
+            description = build_self_improve_description(state, focus="Pick next")
+
+        self.assertIn("Current coding focus:", description)
+        self.assertIn("Mew focus (coding)", description)
+        self.assertNotIn("Research grants", description)
+
+    def test_self_improve_description_default_focus_uses_coding_next_move(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 20,
+                "title": "Research grants",
+                "kind": "research",
+                "status": "ready",
+                "priority": "normal",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": "t",
+                "updated_at": "t",
+            }
+        )
+
+        with patch("mew.self_improve.recent_git_commits", return_value=""):
+            description = build_self_improve_description(state)
+
+        self.assertIn("Focus:\nstart a native self-improvement session", description)
+        self.assertNotIn("spend 10 minutes researching", description)
 
     def test_self_improve_reuses_open_task(self):
         state = default_state()
