@@ -12,7 +12,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, context pressure diagnostics, and live world-state resume; the remaining gap is a polished REPL-style cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, and live world-state context now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
-| 5. Self-Improving Mew | `foundation` | Self-improvement and dogfood entry points exist; closed-loop self-improvement is not yet reliable. |
+| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Milestone 1: Native Hands
 
@@ -219,6 +219,7 @@ Evidence:
 - Self-improvement task creation/planning paths exist.
 - External model review through ACM has been used for roadmap and extraction decisions.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
+- Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 
 Missing proof:
 
@@ -233,15 +234,17 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `546 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `555 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `205 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_brief.py` current: `31 passed`.
-- `uv run pytest -q tests/test_self_improve.py` current: `13 passed`.
+- `uv run pytest -q tests/test_brief.py` current: `32 passed`.
+- `uv run pytest -q tests/test_self_improve.py` current: `16 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 21 commands.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 21 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
+- `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
+- `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 - `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.
 - `codex-ultra` reentry retest after cockpit changes: strict chat resume order and missing chat resume hints are mostly fixed; remaining UX gaps are broader cockpit polish and quiet-chat affordances.
