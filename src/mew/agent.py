@@ -1023,6 +1023,7 @@ def think_phase(
     prompt_context=None,
     log_phases=True,
     trace_model=False,
+    trace_phase="think",
 ):
     fallback = deterministic_decision_plan(
         state,
@@ -1041,7 +1042,7 @@ def think_phase(
         if trace_model:
             append_model_trace(
                 at=current_time,
-                phase="think",
+                phase=trace_phase,
                 event=event,
                 backend=model_backend,
                 model=model,
@@ -1099,7 +1100,7 @@ def think_phase(
         if trace_model:
             append_model_trace(
                 at=current_time,
-                phase="think",
+                phase=trace_phase,
                 event=event,
                 backend=model_backend,
                 model=model,
@@ -1113,7 +1114,7 @@ def think_phase(
     if trace_model:
         append_model_trace(
             at=current_time,
-            phase="think",
+            phase=trace_phase,
             event=event,
             backend=model_backend,
             model=model,
@@ -2776,6 +2777,7 @@ def plan_event(
                 prompt_context=prompt_context,
                 log_phases=log_phases,
                 trace_model=trace_model,
+                trace_phase="think_reflex",
             )
         if reflex_observations:
             decision_plan = dict(decision_plan)

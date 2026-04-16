@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from mew.agent import plan_event
@@ -76,6 +77,50 @@ class ModelTraceTests(unittest.TestCase):
                 self.assertTrue(records[1]["prompt"].startswith("You are the ACT phase"))
                 self.assertEqual(records[0]["plan"]["summary"], "think")
                 self.assertEqual(records[1]["plan"]["summary"], "act")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_reflex_think_trace_is_labeled(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("reflex trace marker\n", encoding="utf-8")
+                state = default_state()
+                event = add_event(state, "user_message", "test", {"text": "inspect"})
+                responses = [
+                    {
+                        "summary": "read",
+                        "decisions": [{"type": "read_file", "path": "README.md"}],
+                    },
+                    {
+                        "summary": "observed",
+                        "decisions": [{"type": "remember", "summary": "observed"}],
+                    },
+                    {
+                        "summary": "act",
+                        "actions": [{"type": "record_memory", "summary": "act"}],
+                    },
+                ]
+
+                with patch("mew.agent.call_model_json", side_effect=responses):
+                    plan_event(
+                        state,
+                        event,
+                        now_iso(),
+                        model_auth={"access_token": "token"},
+                        model="test-model",
+                        base_url="https://example.invalid",
+                        model_backend="codex",
+                        trace_model=True,
+                        log_phases=False,
+                        allowed_read_roots=[tmp],
+                        max_reflex_rounds=1,
+                    )
+
+                records = read_model_traces(limit=5)
+                self.assertEqual([record["phase"] for record in records], ["think", "think_reflex", "act"])
+                self.assertEqual(records[1]["plan"]["summary"], "observed")
             finally:
                 os.chdir(old_cwd)
 
