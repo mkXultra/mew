@@ -655,6 +655,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertIn("/work-session approve 3", resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn("/work-session reject 3", resume["pending_approvals"][0]["reject_hint"])
+                self.assertEqual(resume["context"]["tool_calls"], 3)
+                self.assertEqual(resume["context"]["pressure"], "low")
+                self.assertGreater(resume["context"]["total_session_chars"], 0)
                 self.assertEqual(resume["next_action"], "approve or reject pending write tool calls")
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -665,6 +668,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("#3 edit_file", text)
                 self.assertIn("approve: /work-session approve 3", text)
                 self.assertIn("reject: /work-session reject 3", text)
+                self.assertIn("Context pressure", text)
+                self.assertIn("pressure=low tool_calls=3", text)
             finally:
                 os.chdir(old_cwd)
 

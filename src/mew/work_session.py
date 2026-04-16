@@ -1,3 +1,4 @@
+import json
 import shlex
 
 from .read_tools import (
@@ -421,6 +422,37 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def _json_size(value):
+    try:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    except (TypeError, ValueError):
+        return len(str(value))
+
+
+def _context_pressure(chars):
+    if chars >= 200000:
+        return "high"
+    if chars >= 80000:
+        return "medium"
+    return "low"
+
+
+def build_work_context_metrics(calls, turns):
+    calls = list(calls or [])
+    turns = list(turns or [])
+    recent_calls = calls[-12:]
+    recent_turns = turns[-8:]
+    recent_chars = _json_size({"tool_calls": recent_calls, "model_turns": recent_turns})
+    total_chars = _json_size({"tool_calls": calls, "model_turns": turns})
+    return {
+        "tool_calls": len(calls),
+        "model_turns": len(turns),
+        "recent_context_chars": recent_chars,
+        "total_session_chars": total_chars,
+        "pressure": _context_pressure(total_chars),
+    }
+
+
 def build_work_session_resume(session, task=None, limit=8):
     if not session:
         return None
@@ -525,6 +557,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "failures": failures[-limit:],
         "pending_approvals": pending_approvals[-limit:],
         "recent_decisions": recent_decisions,
+        "context": build_work_context_metrics(calls, turns),
         "next_action": next_action,
     }
 
@@ -590,6 +623,17 @@ def format_work_session_resume(resume):
             )
     else:
         lines.append("(none)")
+
+    context = resume.get("context") or {}
+    lines.extend(["", "Context pressure"])
+    if context:
+        lines.append(
+            f"pressure={context.get('pressure')} "
+            f"tool_calls={context.get('tool_calls')} model_turns={context.get('model_turns')} "
+            f"recent_chars={context.get('recent_context_chars')} total_chars={context.get('total_session_chars')}"
+        )
+    else:
+        lines.append("(unknown)")
 
     lines.extend(["", "Next action", resume.get("next_action") or ""])
     return "\n".join(lines)
