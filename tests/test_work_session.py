@@ -1735,6 +1735,29 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stop=stop_requested", text)
         self.assertIn("stop_request: pause here", text)
 
+    def test_work_ai_report_includes_inline_approval_status(self):
+        from mew.commands import format_work_ai_report
+
+        text = format_work_ai_report(
+            {
+                "steps": [
+                    {
+                        "index": 1,
+                        "status": "completed",
+                        "action": {"type": "edit_file"},
+                        "tool_call": {"id": 7, "summary": "previewed edit"},
+                        "inline_approval": "rejected",
+                    }
+                ],
+                "max_steps": 1,
+                "stop_reason": "max_steps",
+                "session_id": 1,
+                "task_id": 1,
+            }
+        )
+
+        self.assertIn("#1 [completed] edit_file tool_call=#7 inline_approval=rejected", text)
+
     def test_work_session_resume_next_action_uses_latest_tool_status(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2998,6 +3021,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Apply dry-run work tool #1 edit_file", output)
                 self.assertIn("README.md? [y/N/q]:", output)
                 self.assertIn("rejected work tool #1", output)
+                self.assertIn("inline_approval=rejected", output)
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
                 rejected = load_state()["work_sessions"][0]["tool_calls"][0]
                 self.assertEqual(rejected["approval_status"], "rejected")

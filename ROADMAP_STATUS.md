@@ -264,8 +264,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `584 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `95 passed`.
+- `uv run pytest -q` current: `585 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `96 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.

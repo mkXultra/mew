@@ -657,6 +657,8 @@ def format_work_ai_report(report):
             line += f" question=#{step['question'].get('id')}"
         if step.get("error"):
             line += f" error={step.get('error')}"
+        if step.get("inline_approval"):
+            line += f" inline_approval={step.get('inline_approval')}"
         lines.append(line)
         summary = step.get("summary") or tool_call.get("summary") or ""
         if summary:
