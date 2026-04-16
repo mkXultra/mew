@@ -1901,6 +1901,64 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_stops_multi_step_loop_for_pending_write_approval(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview edit",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "README.md",
+                            "old": "old text",
+                            "new": "new text",
+                        },
+                    },
+                    {"summary": "should not run", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "pending_approval")
+                self.assertEqual(call_model.call_count, 1)
+                self.assertEqual(len(report["steps"]), 1)
+                state = load_state()
+                self.assertEqual(len(state["work_sessions"][0]["tool_calls"]), 1)
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_think_prompt_guides_independent_reads_to_batch(self):
         from mew.work_loop import build_work_think_prompt
 

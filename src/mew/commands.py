@@ -149,6 +149,7 @@ from .work_session import (
     GIT_WORK_TOOLS,
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
+    WRITE_WORK_TOOLS,
     work_session_task,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
@@ -1301,6 +1302,14 @@ def cmd_work_ai(args):
                 "summary": tool_call.get("summary") or "",
             }
         )
+        result = tool_call.get("result") or {}
+        pending_approval = (
+            action_type in WRITE_WORK_TOOLS
+            and tool_call.get("status") == "completed"
+            and result.get("dry_run")
+            and result.get("changed")
+            and not tool_call.get("approval_status")
+        )
         if getattr(args, "live", False):
             with state_lock():
                 state = load_state()
@@ -1309,6 +1318,11 @@ def cmd_work_ai(args):
             print("")
             print(f"Work live step #{index} resume")
             print(format_work_session_resume(build_work_session_resume(session, task=task)))
+        if pending_approval:
+            report["stop_reason"] = "pending_approval"
+            if progress:
+                progress(f"step #{index}: pending write approval")
+            break
         if error:
             report["stop_reason"] = "tool_failed"
             break

@@ -269,7 +269,8 @@ Starting a session with those options also seeds the same defaults before the
 first live step.
 Controls include both a one-step continue and a bounded `--max-steps 3`
 continue, so short autonomous runs are discoverable without hiding the safer
-single-step path.
+single-step path. Multi-step work stops at pending dry-run write approvals
+instead of continuing past a human review boundary.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
