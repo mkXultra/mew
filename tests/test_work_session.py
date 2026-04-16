@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -364,6 +364,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(applied["tool_call"]["result"]["written"])
                 self.assertEqual(applied["tool_call"]["result"]["verification_exit_code"], 0)
                 self.assertEqual(target.read_text(encoding="utf-8"), "new text\n")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
+                details = stdout.getvalue()
+                self.assertIn("Recent diffs", details)
+                self.assertIn("-old text", details)
+                self.assertIn("+new text", details)
+                self.assertIn("verification_exit_code=0", details)
             finally:
                 os.chdir(old_cwd)
 
@@ -560,6 +568,48 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Model turns", text)
                 self.assertIn("README.md", text)
                 self.assertIn("read_file tool_call=#1", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_progress_streams_model_and_tool_events(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("progress content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--progress",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                progress = stderr.getvalue()
+                self.assertIn("THINK start", progress)
+                self.assertIn("ACT ok action=read_file", progress)
+                self.assertIn("tool #1 read_file start", progress)
+                self.assertIn("tool #1 completed", progress)
             finally:
                 os.chdir(old_cwd)
 

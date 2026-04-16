@@ -387,6 +387,24 @@ def format_work_session(session, task=None, limit=8, details=False):
         else:
             lines.append("(none)")
 
+        write_calls = [
+            call
+            for call in calls
+            if call.get("tool") in WRITE_WORK_TOOLS and (call.get("result") or {}).get("diff")
+        ]
+        lines.extend(["", "Recent diffs"])
+        if write_calls:
+            for call in write_calls[-limit:]:
+                result = call.get("result") or {}
+                lines.append(
+                    f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
+                    f"written={result.get('written')} rolled_back={result.get('rolled_back')} "
+                    f"verification_exit_code={result.get('verification_exit_code')}"
+                )
+                lines.append(result.get("diff") or "")
+        else:
+            lines.append("(none)")
+
     lines.extend(
         [
             "",

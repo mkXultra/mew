@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `foundation` | `mew chat` exists and gained cockpit commands, but it is not yet a Claude Code-quality live coding UI. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has progress events and detailed cockpit output, but still lacks true model/command streaming and approval UX. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Self-improvement and dogfood entry points exist; closed-loop self-improvement is not yet reliable. |
@@ -48,24 +48,26 @@ Next action:
 
 ## Milestone 2: Interactive Parity
 
-Status: `foundation`
+Status: `in_progress`
 
 Evidence:
 
 - `mew chat` exists.
 - Chat can inspect focus, status, workbench, agents, verification, writes, thoughts, runtime effects, doctor, and repair.
 - `mew work --session --details` and `/work-session details` expose touched files, model turns, and tool-call summaries for the active work session.
+- `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
+- Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
 
 Missing proof:
 
-- No streaming model output.
+- No streaming model token output.
 - No streaming command output.
 - No integrated diff approval flow.
 - Live coding work session UX is improving, but it is still report-style rather than an interactive cockpit.
 
 Next action:
 
-- After Milestone 1's first native work loop exists, add chat commands that expose current work session state and tool results.
+- Add an integrated diff approval flow and a compact verification failure summary for active work sessions.
 
 ## Milestone 3: Persistent Advantage
 
@@ -134,9 +136,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `451 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `13 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `11 passed`.
+- `uv run pytest -q` current: `452 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `14 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `15 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

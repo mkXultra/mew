@@ -281,6 +281,7 @@ def plan_work_model_turn(
     allow_verify=False,
     verify_command="",
     guidance="",
+    progress=None,
 ):
     current_time = now_iso()
     context = build_work_model_context(
@@ -295,6 +296,8 @@ def plan_work_model_turn(
         verify_command=verify_command,
         guidance=guidance,
     )
+    if progress:
+        progress(f"session #{session.get('id')}: THINK start")
     decision_plan = call_model_json_with_retries(
         model_backend,
         model_auth,
@@ -304,6 +307,9 @@ def plan_work_model_turn(
         timeout,
         log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
     )
+    if progress:
+        progress(f"session #{session.get('id')}: THINK ok")
+        progress(f"session #{session.get('id')}: ACT start")
     action_plan = call_model_json_with_retries(
         model_backend,
         model_auth,
@@ -314,6 +320,8 @@ def plan_work_model_turn(
         log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
     )
     action = normalize_work_model_action(action_plan, verify_command=verify_command)
+    if progress:
+        progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
     return {
         "decision_plan": decision_plan,
         "action_plan": action_plan,

@@ -486,6 +486,16 @@ def format_work_ai_report(report):
     return "\n".join(lines)
 
 
+def work_ai_progress(args):
+    if not (getattr(args, "progress", False) or not getattr(args, "json", False)):
+        return None
+
+    def emit(line):
+        print(f"mew work ai: {line}", file=sys.stderr, flush=True)
+
+    return emit
+
+
 def cmd_work(args):
     if getattr(args, "ai", False):
         if getattr(args, "tool", None):
@@ -535,6 +545,7 @@ def cmd_work_ai(args):
         return 1
 
     max_steps = max(1, int(getattr(args, "max_steps", 1) or 1))
+    progress = work_ai_progress(args)
     with state_lock():
         state = load_state()
         task = select_workbench_task(state, getattr(args, "task_id", None))
@@ -548,6 +559,8 @@ def cmd_work_ai(args):
         session_id = session.get("id")
         task_id = task.get("id")
         save_state(state)
+    if progress:
+        progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
 
     report = {
         "session_id": session_id,
@@ -559,6 +572,8 @@ def cmd_work_ai(args):
     }
 
     for index in range(1, max_steps + 1):
+        if progress:
+            progress(f"step #{index}: planning")
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -583,6 +598,7 @@ def cmd_work_ai(args):
                 allow_verify=args.allow_verify,
                 verify_command=args.verify_command or "",
                 guidance=args.work_guidance or "",
+                progress=progress,
             )
         except MewError as exc:
             error = str(exc)
@@ -608,6 +624,8 @@ def cmd_work_ai(args):
                 }
             )
             report["stop_reason"] = "model_error"
+            if progress:
+                progress(f"step #{index}: model failed")
             break
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
@@ -635,6 +653,8 @@ def cmd_work_ai(args):
                 }
             )
             report["stop_reason"] = action_type or "control"
+            if progress:
+                progress(f"step #{index}: stop={report['stop_reason']}")
             break
 
         parameters = work_tool_parameters_from_action(
@@ -660,6 +680,8 @@ def cmd_work_ai(args):
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id")
             save_state(state)
+        if progress:
+            progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
         try:
             result = execute_work_tool(action_type, parameters, args.allow_read or [])
@@ -673,6 +695,8 @@ def cmd_work_ai(args):
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
             turn = finish_work_model_turn(state, session_id, turn_id, tool_call_id=tool_call_id, error=error)
             save_state(state)
+        if progress:
+            progress(f"step #{index}: tool #{tool_call_id} {tool_call.get('status')}")
 
         report["steps"].append(
             {
