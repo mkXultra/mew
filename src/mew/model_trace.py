@@ -60,7 +60,7 @@ def append_model_trace(
     return record
 
 
-def read_model_traces(limit=20, include_prompt=False):
+def read_model_traces(limit=20, include_prompt=False, phase=""):
     if limit <= 0 or not MODEL_TRACE_FILE.exists():
         return []
     try:
@@ -80,5 +80,7 @@ def read_model_traces(limit=20, include_prompt=False):
             record = {"status": "corrupt", "raw": line}
         if not include_prompt:
             record.pop("prompt", None)
+        if phase and record.get("phase") != phase:
+            continue
         records.append(record)
     return records[-limit:]

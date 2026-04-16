@@ -1,10 +1,14 @@
+import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from mew.agent import plan_event
+from mew.cli import main
 from mew.model_trace import append_model_trace, read_model_traces
 from mew.state import add_event, default_state
 from mew.timeutil import now_iso
@@ -26,15 +30,32 @@ class ModelTraceTests(unittest.TestCase):
                     prompt="secret prompt",
                     plan={"summary": "ok", "decisions": []},
                 )
+                append_model_trace(
+                    at="later",
+                    phase="think_reflex",
+                    event={"id": 1, "type": "user_message"},
+                    backend="codex",
+                    model="test-model",
+                    status="ok",
+                    prompt="reflex prompt",
+                    plan={"summary": "reflex", "decisions": []},
+                )
 
                 records = read_model_traces(limit=1)
                 self.assertEqual(len(records), 1)
                 self.assertNotIn("prompt", records[0])
-                self.assertEqual(records[0]["prompt_chars"], len("secret prompt"))
+                self.assertEqual(records[0]["prompt_chars"], len("reflex prompt"))
                 self.assertEqual(len(records[0]["prompt_sha256"]), 64)
 
-                records = read_model_traces(limit=1, include_prompt=True)
+                records = read_model_traces(limit=1, include_prompt=True, phase="think")
                 self.assertEqual(records[0]["prompt"], "secret prompt")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["trace", "--phase", "think_reflex", "--json"]), 0)
+                trace_data = json.loads(stdout.getvalue())
+                self.assertEqual(trace_data["phase"], "think_reflex")
+                self.assertEqual(len(trace_data["traces"]), 1)
+                self.assertEqual(trace_data["traces"][0]["phase"], "think_reflex")
             finally:
                 os.chdir(old_cwd)
 

@@ -4607,9 +4607,9 @@ def cmd_log(args):
     return 0
 
 def cmd_trace(args):
-    records = read_model_traces(limit=args.limit, include_prompt=args.prompt)
+    records = read_model_traces(limit=args.limit, include_prompt=args.prompt, phase=args.phase or "")
     if args.json:
-        print(json.dumps({"traces": records}, ensure_ascii=False, indent=2))
+        print(json.dumps({"traces": records, "phase": args.phase or ""}, ensure_ascii=False, indent=2))
         return 0
     if not records:
         print("No model traces.")

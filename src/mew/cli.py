@@ -908,6 +908,7 @@ def build_parser():
 
     trace_parser = subparsers.add_parser("trace", help="show opt-in model THINK/ACT traces")
     trace_parser.add_argument("--limit", type=int, default=20, help="maximum trace records")
+    trace_parser.add_argument("--phase", help="show only records for this phase, for example think_reflex")
     trace_parser.add_argument("--prompt", action="store_true", help="include full stored prompts")
     trace_parser.add_argument("--json", action="store_true", help="print structured JSON")
     trace_parser.set_defaults(func=cmd_trace)
