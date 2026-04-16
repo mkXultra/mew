@@ -283,6 +283,17 @@ class DogfoodTests(unittest.TestCase):
                 "searches": [],
                 "package": {"name": "mew"},
             }
+            state["runtime_effects"].append(
+                {
+                    "id": 1,
+                    "event_id": event["id"],
+                    "reason": "passive_tick",
+                    "status": "verified",
+                    "action_types": ["run_verification"],
+                    "verification_run_ids": [1],
+                    "write_run_ids": [],
+                }
+            )
             (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             (workspace / LOG_FILE).write_text(
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
@@ -334,6 +345,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["model_phases"]["think_ok"], 1)
             self.assertTrue(report["trace_model_enabled"])
             self.assertEqual(report["model_traces"]["total"], 1)
+            self.assertEqual(report["runtime_effects"]["total"], 1)
+            self.assertEqual(report["runtime_effects"]["by_status"], {"verified": 1})
             self.assertNotIn("prompt", report["model_traces"]["latest"][0])
             self.assertEqual(report["runtime_status"]["last_cycle_reason"], "passive_tick")
             self.assertEqual(report["actions"], {"inspect_dir": 1})
@@ -357,6 +370,7 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
+            self.assertIn("runtime_effects: total=1 by_status={'verified': 1} latest=1", text)
             self.assertIn("read_inspection:", text)
             self.assertIn("agent_runs:", text)
             self.assertIn("programmer_loop:", text)

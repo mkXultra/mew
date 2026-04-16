@@ -921,6 +921,28 @@ def model_trace_summary(workspace, limit=5):
     }
 
 
+def runtime_effect_summary(state, limit=5):
+    effects = list(state.get("runtime_effects", []))
+    latest = []
+    for effect in effects[-limit:]:
+        latest.append(
+            {
+                "id": effect.get("id"),
+                "event_id": effect.get("event_id"),
+                "reason": effect.get("reason"),
+                "status": effect.get("status"),
+                "action_types": effect.get("action_types") or [],
+                "verification_run_ids": effect.get("verification_run_ids") or [],
+                "write_run_ids": effect.get("write_run_ids") or [],
+            }
+        )
+    return {
+        "total": len(effects),
+        "by_status": count_by(effects, "status"),
+        "latest": latest,
+    }
+
+
 def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=True):
     workspace = Path(workspace)
     state = read_json_file(workspace / STATE_FILE, {})
@@ -963,7 +985,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "programmer_loop": programmer_loop_metrics(state),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
-        "runtime_effects": len(state.get("runtime_effects", [])),
+        "runtime_effects": runtime_effect_summary(state),
         "dropped_threads": {
             "thought_count": len(dropped),
             "latest": dropped[-1].get("dropped_threads", []) if dropped else [],
@@ -1082,6 +1104,18 @@ def format_model_trace_summary(summary, enabled=False):
     )
 
 
+def format_runtime_effect_summary(summary):
+    if isinstance(summary, int):
+        return f"total={summary}"
+    summary = summary or {}
+    latest = summary.get("latest") or []
+    return (
+        f"total={summary.get('total', 0)} "
+        f"by_status={summary.get('by_status', {})} "
+        f"latest={len(latest)}"
+    )
+
+
 def format_dogfood_report(report):
     lines = [
         f"Mew dogfood report at {report.get('generated_at')}",
@@ -1111,7 +1145,7 @@ def format_dogfood_report(report):
         f"agent_runs: {report.get('agent_runs')}",
         f"programmer_loop: {report.get('programmer_loop')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
-        f"runtime_effects: {report.get('runtime_effects')}",
+        "runtime_effects: " + format_runtime_effect_summary(report.get("runtime_effects")),
         f"model_enabled: {bool(report.get('model_enabled'))}",
     ]
     injected = report.get("injected_messages") or {}
