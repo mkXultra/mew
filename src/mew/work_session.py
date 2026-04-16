@@ -422,6 +422,18 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def latest_work_verify_command(calls, task=None):
+    command = (task or {}).get("command") or ""
+    for call in calls:
+        result = call.get("result") or {}
+        if call.get("tool") == "run_tests" and result.get("command"):
+            command = result.get("command")
+        verification = result.get("verification") or {}
+        if verification.get("command"):
+            command = verification.get("command")
+    return command
+
+
 def _json_size(value):
     try:
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -458,6 +470,8 @@ def build_work_session_resume(session, task=None, limit=8):
         return None
     calls = list(session.get("tool_calls") or [])
     turns = list(session.get("model_turns") or [])
+    verify_command = latest_work_verify_command(calls, task=task)
+    verify_command_hint = shlex.quote(verify_command) if verify_command else '"<command>"'
     paths = []
     commands = []
     failures = []
@@ -519,7 +533,7 @@ def build_work_session_resume(session, task=None, limit=8):
                     "summary": call.get("summary") or "",
                     "approve_hint": (
                         f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
-                        '--allow-verify --verify-command "<command>"'
+                        f"--allow-verify --verify-command {verify_command_hint}"
                     ),
                     "reject_hint": f"/work-session reject {tool_call_id} <reason>",
                 }

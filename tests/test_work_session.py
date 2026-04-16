@@ -654,6 +654,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["commands"][0]["exit_code"], 0)
                 self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertIn("/work-session approve 3", resume["pending_approvals"][0]["approve_hint"])
+                self.assertIn(shlex.quote(command), resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn("/work-session reject 3", resume["pending_approvals"][0]["reject_hint"])
                 self.assertEqual(resume["context"]["tool_calls"], 3)
                 self.assertEqual(resume["context"]["pressure"], "low")
