@@ -113,6 +113,7 @@ uv run mew repair --force
 uv run mew effects
 uv run mew effects --json
 uv run mew start -- --autonomous --autonomy-level propose
+uv run mew run --once --autonomous --autonomy-level act --focus "Take one small verified step"
 uv run mew stop
 uv run mew -m "今日のタスクは何？" --wait
 uv run mew message "今日のタスクは何？" --wait

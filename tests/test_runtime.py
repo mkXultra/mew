@@ -9,11 +9,19 @@ from contextlib import redirect_stderr, redirect_stdout
 from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
 from mew.errors import ModelBackendError
-from mew.runtime import compact_agent_reflex_report, run_runtime_post_run_pipeline
+from mew.runtime import compact_agent_reflex_report, guidance_with_runtime_focus, run_runtime_post_run_pipeline
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_guidance_with_runtime_focus_appends_transient_focus(self):
+        guidance = guidance_with_runtime_focus("Base guidance.", "Review current changes")
+
+        self.assertIn("Base guidance.", guidance)
+        self.assertIn("Immediate runtime focus:", guidance)
+        self.assertIn("Review current changes", guidance)
+        self.assertIn("Do not stop solely because an unrelated older question is waiting.", guidance)
+
     def test_compact_agent_reflex_report_drops_nested_previous_report(self):
         report = {
             "collected": [f"run #{index}" for index in range(7)],
@@ -125,6 +133,41 @@ class RuntimeTests(unittest.TestCase):
                     },
                 )
                 self.assertTrue(state["runtime_status"]["last_agent_reflex_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_runtime_focus_is_passed_to_planner_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_plan_runtime_event(_state_snapshot, _event_snapshot, *args, **_kwargs):
+                    guidance = args[7]
+                    self.assertIn("Immediate runtime focus:", guidance)
+                    self.assertIn("Make one tiny verified change", guidance)
+                    return (
+                        {"summary": "focused", "decisions": []},
+                        {"summary": "focused", "actions": []},
+                    )
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--focus",
+                                "Make one tiny verified change",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertIn("runtime focus: Make one tiny verified change", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

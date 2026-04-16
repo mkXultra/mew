@@ -263,6 +263,24 @@ def run_runtime_post_run_pipeline(state, args, autonomy_controls):
         start_timeout=getattr(args, "agent_start_timeout", 30.0),
     )
 
+def guidance_with_runtime_focus(guidance, focus):
+    focus_text = str(focus or "").strip()
+    if not focus_text:
+        return guidance
+    return "\n\n".join(
+        part
+        for part in (
+            str(guidance or "").strip(),
+            (
+                "Immediate runtime focus:\n"
+                f"{focus_text}\n"
+                "Prefer this focus over unrelated existing tasks or questions during this runtime. "
+                "Do not stop solely because an unrelated older question is waiting."
+            ),
+        )
+        if part
+    )
+
 def compact_agent_reflex_value(value, limit=5, depth=0):
     if isinstance(value, list):
         items = value[-limit:]
@@ -351,7 +369,7 @@ def run_runtime(args):
     if args.autonomous:
         ensure_self(args.self_file)
         ensure_desires(args.desires)
-    initial_guidance = read_guidance(args.guidance)
+    initial_guidance = guidance_with_runtime_focus(read_guidance(args.guidance), args.focus)
     initial_policy = read_policy(args.policy)
     initial_self = read_self(args.self_file)
     initial_desires = read_desires(args.desires)
@@ -391,6 +409,8 @@ def run_runtime(args):
         if initial_guidance:
             guidance_path = args.guidance or str(GUIDANCE_FILE)
             print(f"guidance loaded path={guidance_path}")
+        if args.focus:
+            print(f"runtime focus: {args.focus}")
         if initial_policy:
             policy_path = args.policy or str(POLICY_FILE)
             print(f"policy loaded path={policy_path}")
@@ -504,7 +524,7 @@ def run_runtime(args):
                 time.sleep(sleep_for)
                 continue
 
-            guidance = read_guidance(args.guidance)
+            guidance = guidance_with_runtime_focus(read_guidance(args.guidance), args.focus)
             policy = read_policy(args.policy)
             self_text = read_self(args.self_file)
             desires = read_desires(args.desires)

@@ -244,6 +244,7 @@ def build_parser():
         "--guidance",
         help="human-written think-phase guidance file; default .mew/guidance.md",
     )
+    run_parser.add_argument("--focus", default="", help="immediate focus to inject into runtime guidance")
     run_parser.add_argument(
         "--policy",
         help="human-written safety/boundary policy file; default .mew/policy.md",
