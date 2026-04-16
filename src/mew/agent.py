@@ -2430,6 +2430,7 @@ def apply_action_plan(
     counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
     action_plan = suppress_done_task_wait_actions(state, action_plan)
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
+    auto_verified_write = False
 
     for action in action_plan.get("actions", []):
         action_type = action.get("type")
@@ -2548,6 +2549,19 @@ def apply_action_plan(
                 autonomy_level,
             )
         elif action_type == "run_verification":
+            if auto_verified_write:
+                add_outbox_message(
+                    state,
+                    "info",
+                    (
+                        "Skipped run_verification: a non-dry-run write already ran "
+                        "the configured verification command in this action plan."
+                    ),
+                    event_id=event["id"],
+                    related_task_id=action.get("task_id"),
+                )
+                counts["messages"] += 1
+                continue
             counts["messages"] += apply_run_verification_action(
                 state,
                 event,
@@ -2569,6 +2583,7 @@ def apply_action_plan(
                 autonomy_level,
             )
         elif action_type in ("write_file", "edit_file"):
+            verification_count = len(state.get("verification_runs", []))
             counts["messages"] += apply_write_action(
                 state,
                 event,
@@ -2582,6 +2597,8 @@ def apply_action_plan(
                 verify_command,
                 verify_timeout,
             )
+            if len(state.get("verification_runs", [])) > verification_count:
+                auto_verified_write = True
         elif action_type == "send_message":
             text = action.get("text") or memory_summary
             message_type = action.get("message_type") or "info"

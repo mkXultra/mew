@@ -319,6 +319,60 @@ class StepLoopTests(unittest.TestCase):
         self.assertIn("write_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
         self.assertIn("verification_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
 
+    def test_step_loop_skips_duplicate_verification_after_written_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Write and do not verify twice.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        },
+                        {"type": "run_verification", "reason": "check after write"},
+                    ],
+                }
+                fake_actions = {
+                    "summary": "Write and do not verify twice.",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        },
+                        {"type": "run_verification", "reason": "check after write"},
+                    ],
+                }
+                verify_command = (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; assert Path('note.md').read_text() == 'hello'\""
+                )
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(
+                        max_steps=1,
+                        allow_write=True,
+                        allowed_write_roots=[tmp],
+                        allow_verify=True,
+                        verify_command=verify_command,
+                    )
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(report["steps"][0]["counts"]["messages"], 3)
+        self.assertEqual(len(state["verification_runs"]), 1)
+        self.assertIn("already ran", state["outbox"][-1]["text"])
+
     def test_step_loop_rolls_back_failed_gated_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
