@@ -684,6 +684,7 @@ def _work_control_options(args, session=None):
         "verify_command": option("verify_command", ""),
         "act_mode": option("act_mode"),
         "prompt_approval": bool(option("prompt_approval", False)),
+        "no_prompt_approval": bool(option("no_prompt_approval", False)),
     }
 
 
@@ -702,6 +703,7 @@ def remember_work_session_default_options(session, args):
             options.get("base_url"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("prompt_approval"),
+            options.get("no_prompt_approval"),
         )
     )
     if not has_meaningful_defaults:
@@ -724,6 +726,11 @@ def remember_work_session_default_options(session, args):
             return value
         return current.get(name) or ""
 
+    no_prompt_approval = bool(current.get("no_prompt_approval") or options.get("no_prompt_approval"))
+    prompt_approval = bool(current.get("prompt_approval") or options.get("prompt_approval"))
+    if no_prompt_approval:
+        prompt_approval = False
+
     session["default_options"] = {
         "auth": merged_scalar("auth"),
         "model_backend": merged_scalar("model_backend"),
@@ -735,7 +742,8 @@ def remember_work_session_default_options(session, args):
         "allow_verify": bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": merged_scalar("verify_command"),
         "act_mode": merged_scalar("act_mode"),
-        "prompt_approval": bool(current.get("prompt_approval") or options.get("prompt_approval")),
+        "prompt_approval": prompt_approval,
+        "no_prompt_approval": no_prompt_approval,
     }
 
 
@@ -753,6 +761,14 @@ def remember_successful_work_verification(session, tool, result):
     defaults = session.setdefault("default_options", {})
     defaults["allow_verify"] = True
     defaults["verify_command"] = command
+
+
+def work_session_default_verify_command(session, task=None):
+    defaults = (session or {}).get("default_options") or {}
+    return defaults.get("verify_command") or latest_work_verify_command(
+        (session or {}).get("tool_calls") or [],
+        task=task,
+    )
 
 
 def work_chat_continue_options(session):
@@ -778,7 +794,9 @@ def work_chat_continue_options(session):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
-    if options.get("prompt_approval"):
+    if options.get("no_prompt_approval"):
+        parts.append("--no-prompt-approval")
+    elif options.get("prompt_approval"):
         parts.append("--prompt-approval")
     return shlex.join(parts)
 
@@ -809,7 +827,9 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
-    if options.get("prompt_approval"):
+    if options.get("no_prompt_approval"):
+        parts.append("--no-prompt-approval")
+    elif options.get("prompt_approval"):
         parts.append("--prompt-approval")
     parts.extend(["--max-steps", str(max_steps)])
     return shlex.join(parts)
@@ -1642,10 +1662,7 @@ def cmd_work_ai(args):
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
-                approval_verify_command = args.verify_command or latest_work_verify_command(
-                    (session or {}).get("tool_calls") or [],
-                    task=task,
-                )
+                approval_verify_command = args.verify_command or work_session_default_verify_command(session, task=task)
                 approval = prompt_live_write_approval(tool_call, verify_command=approval_verify_command)
                 report["steps"][-1]["inline_approval"] = approval
                 if approval == "approve":
@@ -1763,7 +1780,7 @@ def cmd_work_approve_tool(args):
             return 1
         task = work_session_task(state, session)
         if not getattr(args, "verify_command", None):
-            inferred_verify_command = latest_work_verify_command(session.get("tool_calls") or [], task=task)
+            inferred_verify_command = work_session_default_verify_command(session, task=task)
             if inferred_verify_command:
                 args.verify_command = inferred_verify_command
                 args.allow_verify = True

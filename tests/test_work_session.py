@@ -1874,6 +1874,69 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_reuses_default_verification_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; assert Path('notes.md').read_text() == 'after\\n'\""
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--approve-tool", "1", "--allow-write", ".", "--json"]), 0)
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                self.assertEqual(approved["tool_call"]["parameters"]["verify_command"], command)
+                self.assertTrue(approved["tool_call"]["parameters"]["allow_verify"])
+                self.assertEqual(approved["tool_call"]["result"]["verification_exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_allows_exact_new_file_write_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -3953,6 +4016,35 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("--verify-command 'uv run pytest -q'", output)
                 self.assertIn("--act-mode deterministic", output)
                 self.assertIn("--prompt-approval", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_reentry_options_preserve_no_prompt_approval(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--start-session", "--allow-read", ".", "--prompt-approval"]),
+                        0,
+                    )
+                    self.assertEqual(main(["work", "1", "--start-session", "--no-prompt-approval"]), 0)
+
+                defaults = load_state()["work_sessions"][0]["default_options"]
+                self.assertTrue(defaults["no_prompt_approval"])
+                self.assertFalse(defaults["prompt_approval"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--no-prompt-approval", output)
+                self.assertNotIn("--prompt-approval", output)
             finally:
                 os.chdir(old_cwd)
 
