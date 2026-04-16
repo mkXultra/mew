@@ -1525,6 +1525,45 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer one batch action", prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
 
+    def test_work_model_context_digests_older_tool_calls(self):
+        from mew.work_loop import build_work_model_context
+
+        tool_calls = []
+        for index in range(1, 19):
+            tool_calls.append(
+                {
+                    "id": index,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": f"file{index}.py"},
+                    "result": {"path": f"file{index}.py", "text": f"secret content {index}\n", "offset": 0},
+                    "summary": f"read file{index}",
+                }
+            )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Digest older context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Digest", "description": "Digest older context.", "status": "todo", "kind": "coding"}
+
+        context = build_work_model_context({}, session, task, "now")
+        work_context = context["work_session"]
+        knowledge_text = json.dumps(work_context["session_knowledge"], ensure_ascii=False)
+
+        self.assertEqual(len(work_context["tool_calls"]), 12)
+        self.assertEqual(work_context["tool_calls"][0]["id"], 7)
+        self.assertEqual(len(work_context["session_knowledge"]), 6)
+        self.assertIn("read_file file6.py", work_context["session_knowledge"][0]["summary"])
+        self.assertIn("read_file file1.py", knowledge_text)
+        self.assertNotIn("secret content 1", knowledge_text)
+        self.assertLess(len(knowledge_text), 3000)
+
     def test_work_ai_batch_skips_read_tools_without_required_parameters(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

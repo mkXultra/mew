@@ -263,7 +263,9 @@ verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it.
 Interrupted read-only tools can be retried with `mew work --recover-session
 --allow-read .`; write, shell, and verification interruptions still require
-human review.
+human review. Older tool calls that fall out of the full recent context window
+are carried forward as compact `session_knowledge` digests instead of raw file
+contents.
 
 ```sh
 uv run mew work 1 --start-session

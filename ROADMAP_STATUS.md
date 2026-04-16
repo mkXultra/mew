@@ -122,11 +122,12 @@ Evidence:
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - Work mode now has a `remember` control action that records durable session notes surfaced in resume bundles and future model context.
 - Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, making persistent guidance distinct from one-shot `/continue` guidance.
+- Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
 
 Missing proof:
 
 - Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
-- There is no automatic compaction or pruning strategy for noisy long-running work-session history beyond archive retention and explicit `remember` notes.
+- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, and automatic older-tool digests.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
@@ -184,9 +185,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `485 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `44 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `59 passed`.
+- `uv run pytest -q` current: `486 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `45 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `60 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

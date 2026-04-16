@@ -18,6 +18,9 @@ WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "remember", "wait"
 WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
 WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
+WORK_CONTEXT_RECENT_TOOL_CALLS = 12
+WORK_SESSION_KNOWLEDGE_LIMIT = 30
+WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 
 
 def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):
@@ -130,6 +133,69 @@ def work_model_turn_for_model(turn):
     }
 
 
+def _count_items(value, key):
+    items = (value or {}).get(key) or []
+    return len(items) if isinstance(items, list) else 0
+
+
+def digest_tool_call(call):
+    tool = call.get("tool") or "unknown"
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    path = result.get("path") or parameters.get("path") or parameters.get("cwd") or ""
+    if tool == "read_file":
+        text = result.get("text") or ""
+        line_count = len(text.splitlines())
+        summary = (
+            f"read_file {path or '(unknown)'} "
+            f"lines={line_count} offset={result.get('offset', parameters.get('offset', 0))} "
+            f"truncated={bool(result.get('truncated'))}"
+        )
+    elif tool == "inspect_dir":
+        summary = f"inspect_dir {path or '.'} entries={_count_items(result, 'entries')}"
+    elif tool == "search_text":
+        query = parameters.get("query") or result.get("query") or ""
+        summary = (
+            f"search_text {query!r} "
+            f"in {path or '.'} matches={_count_items(result, 'matches')}"
+        )
+    elif tool == "glob":
+        pattern = parameters.get("pattern") or result.get("pattern") or ""
+        summary = (
+            f"glob {pattern!r} "
+            f"in {path or '.'} matches={_count_items(result, 'matches')}"
+        )
+    elif tool in ("run_command", "run_tests", "git_status", "git_diff", "git_log"):
+        summary = f"{tool} exit={result.get('exit_code')} command={result.get('command') or parameters.get('command') or ''}"
+    elif tool in WRITE_WORK_TOOLS:
+        verification = result.get("verification") or {}
+        summary = (
+            f"{tool} {path or '(unknown)'} changed={bool(result.get('changed'))} "
+            f"dry_run={bool(result.get('dry_run'))} written={bool(result.get('written'))} "
+            f"verification_exit={verification.get('exit_code', result.get('verification_exit_code'))}"
+        )
+    else:
+        summary = call.get("summary") or call.get("error") or tool
+    return {
+        "tool_call_id": call.get("id"),
+        "tool": tool,
+        "status": call.get("status"),
+        "summary": clip_output(summary, 300),
+    }
+
+
+def build_session_knowledge(calls, recent_count=WORK_CONTEXT_RECENT_TOOL_CALLS):
+    older_calls = list(calls or [])[:-recent_count]
+    entries = []
+    for call in reversed(older_calls[-WORK_SESSION_KNOWLEDGE_LIMIT:]):
+        entry = digest_tool_call(call)
+        candidate = entries + [entry]
+        if len(json.dumps(candidate, ensure_ascii=False)) > WORK_SESSION_KNOWLEDGE_BUDGET:
+            break
+        entries = candidate
+    return entries
+
+
 def build_work_model_context(
     state,
     session,
@@ -142,6 +208,8 @@ def build_work_model_context(
     verify_command="",
     guidance="",
 ):
+    tool_calls = list(session.get("tool_calls") or [])
+    model_turns = list(session.get("model_turns") or [])
     return {
         "date": {"now": current_time},
         "task": {
@@ -160,13 +228,14 @@ def build_work_model_context(
             "created_at": session.get("created_at"),
             "updated_at": session.get("updated_at"),
             "resume": build_work_session_resume(session, task=task, limit=8),
+            "session_knowledge": build_session_knowledge(tool_calls),
             "tool_calls": [
                 work_tool_call_for_model(call)
-                for call in list(session.get("tool_calls") or [])[-12:]
+                for call in tool_calls[-WORK_CONTEXT_RECENT_TOOL_CALLS:]
             ],
             "model_turns": [
                 work_model_turn_for_model(turn)
-                for turn in list(session.get("model_turns") or [])[-8:]
+                for turn in model_turns[-8:]
             ],
         },
         "capabilities": {
