@@ -3709,6 +3709,7 @@ class WorkSessionTests(unittest.TestCase):
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
                 self.assertIn("summary: Read file", result_block)
                 self.assertNotIn("live content", result_block)
+                self.assertNotIn("live content", output)
                 self.assertIn("phase: idle", output)
                 self.assertIn("context: pressure=low", output)
                 self.assertIn("Work live step #1 resume", output)

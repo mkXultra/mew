@@ -86,6 +86,7 @@ Evidence:
 - `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
 - Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
 - Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
+- Final `mew work --ai` step reports now reuse compact tool summaries, so live runs do not reprint read-file bodies after the resume.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
 - Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with clipped diff preview, the approval verification command, `--prompt-approval` for non-TTY forcing, and `--no-prompt-approval` for explicit opt-out.

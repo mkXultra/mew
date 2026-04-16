@@ -661,7 +661,7 @@ def format_work_ai_report(report):
         if step.get("inline_approval"):
             line += f" inline_approval={step.get('inline_approval')}"
         lines.append(line)
-        summary = step.get("summary") or tool_call.get("summary") or ""
+        summary = compact_work_tool_summary(tool_call) if tool_call else step.get("summary") or ""
         if summary:
             lines.append(clip_output(summary, 1000))
     stop_request = report.get("stop_request") or {}

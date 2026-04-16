@@ -315,7 +315,8 @@ live run when you want mew to ask inline before applying or rejecting a dry-run
 write.
 `mew work --live` prints the selected action before execution, a compact result
 pane after each step, and a resume after each completed tool step. Read results
-stay summarized in the result pane so large files do not flood the cockpit.
+stay summarized in the result pane and final step report so large files do not
+flood the cockpit.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set
