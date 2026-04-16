@@ -2174,6 +2174,13 @@ def sync_task_done_state(state, task, summary, current_time):
         if any(marker in message_text for marker in task_markers):
             message["read_at"] = current_time
 
+    for session in state.get("work_sessions", []):
+        if session.get("status") != "active":
+            continue
+        if str(session.get("task_id")) != str(task_id):
+            continue
+        close_work_session(session, current_time=current_time)
+
 def cmd_task_update(args):
     with state_lock():
         state = load_state()

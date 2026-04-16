@@ -280,6 +280,17 @@ class CommandTests(unittest.TestCase):
                     state["agent_status"]["active_task_id"] = 1
                     state["agent_status"]["pending_question"] = "Should I mark task #1 done?"
                     state["user_status"]["mode"] = "needs_user"
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Finish docs",
+                            "goal": "Finish the task.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                        }
+                    )
                     save_state(state)
 
                 with redirect_stdout(StringIO()):
@@ -294,6 +305,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIsNone(state["agent_status"]["active_task_id"])
                 self.assertIsNone(state["agent_status"]["pending_question"])
                 self.assertEqual(state["user_status"]["mode"], "idle")
+                self.assertEqual(state["work_sessions"][0]["status"], "closed")
             finally:
                 os.chdir(old_cwd)
 
