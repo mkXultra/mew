@@ -243,6 +243,11 @@ explicit gates. Write tools default to dry-run. Applied writes require
 `--allow-verify` and `--verify-command`; failed verification rolls the change
 back and records the failed tool result. Nonzero `run_tests` exits are treated
 as failed tool calls and summarized in `mew work --session --details`.
+`mew work --live` prints the selected action before execution and a resume after
+each completed tool step. When the model finishes, the work session is closed
+and the final note is appended to the task so `mew work <task-id> --session --resume`
+can still show the closed session. Work-mode `send_message` writes to outbox;
+`ask_user` creates a normal question.
 
 ```sh
 uv run mew work 1 --start-session
@@ -268,7 +273,8 @@ uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-st
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
 
-Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session ai 1 --allow-read . --max-steps 1`,
+Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session live 1 --allow-read . --max-steps 1`,
+`/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
 `/work-session reject 7 not the right change`.
 
