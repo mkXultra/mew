@@ -20,6 +20,8 @@ WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
 WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
 WORK_READ_FILE_CONTEXT_TEXT_LIMIT = 12000
+WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT = 1000
+WORK_LIST_CONTEXT_ITEM_LIMIT = 100
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
 WORK_CONTEXT_BUDGET = 120000
 WORK_CONTEXT_WINDOW_CANDIDATES = ((12, 8), (8, 6), (6, 4), (4, 2), (2, 2))
@@ -33,6 +35,21 @@ def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):
     except (TypeError, ValueError):
         text = str(value)
     return clip_output(text, limit)
+
+
+def _compact_context_value(value, text_limit=WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT):
+    if isinstance(value, str):
+        return clip_output(value, text_limit)
+    if isinstance(value, list):
+        return [_compact_context_value(item, text_limit=text_limit) for item in value[:WORK_LIST_CONTEXT_ITEM_LIMIT]]
+    if isinstance(value, dict):
+        return {key: _compact_context_value(item, text_limit=text_limit) for key, item in value.items()}
+    return value
+
+
+def _compact_context_items(items):
+    items = items if isinstance(items, list) else []
+    return [_compact_context_value(item) for item in items[:WORK_LIST_CONTEXT_ITEM_LIMIT]]
 
 
 def _compact_tool_result(tool, result):
@@ -57,11 +74,20 @@ def _compact_tool_result(tool, result):
             "truncated": bool(result.get("truncated")) or context_truncated,
         }
     if tool in ("inspect_dir", "glob", "search_text"):
-        return {
+        compact = {
             key: result.get(key)
-            for key in ("path", "query", "pattern", "entries", "matches", "truncated")
+            for key in ("path", "query", "pattern", "truncated")
             if key in result
         }
+        if "entries" in result:
+            entries = result.get("entries") or []
+            compact["entries"] = _compact_context_items(entries)
+            compact["entries_context_truncated"] = len(entries) > len(compact["entries"])
+        if "matches" in result:
+            matches = result.get("matches") or []
+            compact["matches"] = _compact_context_items(matches)
+            compact["matches_context_truncated"] = len(matches) > len(compact["matches"])
+        return compact
     if tool in ("run_command", "run_tests", "git_status", "git_diff", "git_log"):
         return {
             "command": result.get("command"),

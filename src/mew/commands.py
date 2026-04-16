@@ -694,6 +694,38 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
     tool_calls = []
     error = ""
     for sub_action in sub_actions:
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            stop_request = consume_work_session_stop(session)
+            if stop_request:
+                tool_call_ids = [call.get("id") for call in tool_calls if call]
+                turn = finish_work_model_turn(
+                    state,
+                    session_id,
+                    turn_id,
+                    tool_call_id=tool_call_ids[0] if tool_call_ids else None,
+                )
+                if turn is not None:
+                    turn["tool_call_ids"] = tool_call_ids
+                    turn["stop_request"] = stop_request
+                    turn["summary"] = clip_output(
+                        f"stopped before next batch tool: {stop_request.get('reason') or ''}".strip(),
+                        4000,
+                    )
+                save_state(state)
+            else:
+                turn = None
+        if stop_request:
+            return {
+                "index": index,
+                "status": "stopped",
+                "action": action,
+                "model_turn": turn,
+                "tool_calls": tool_calls,
+                "stop_request": stop_request,
+                "summary": turn.get("summary") if turn else "stopped before next batch tool",
+            }
         action_type = sub_action.get("type") or sub_action.get("tool")
         if action_type not in BATCH_READ_WORK_TOOLS:
             error = f"batch tool is not read-only: {action_type or 'missing'}"
@@ -1004,6 +1036,10 @@ def cmd_work_ai(args):
             if batch_step.get("error"):
                 report["stop_reason"] = "tool_failed"
                 break
+            if batch_step.get("stop_request"):
+                report["stop_reason"] = "stop_requested"
+                report["stop_request"] = batch_step.get("stop_request")
+                break
             continue
         if action_type not in WORK_TOOLS:
             if getattr(args, "live", False):
@@ -1073,6 +1109,43 @@ def cmd_work_ai(args):
             verify_command=args.verify_command or "",
             verify_timeout=args.verify_timeout,
         )
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            stop_request = consume_work_session_stop(session)
+            if stop_request:
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    action,
+                )
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
+                if turn is not None:
+                    turn["stop_request"] = stop_request
+                    turn["summary"] = clip_output(
+                        f"stopped before tool execution: {stop_request.get('reason') or ''}".strip(),
+                        4000,
+                    )
+                save_state(state)
+        if stop_request:
+            report["steps"].append(
+                {
+                    "index": index,
+                    "status": "stopped",
+                    "action": action,
+                    "model_turn": turn,
+                    "stop_request": stop_request,
+                    "summary": turn.get("summary") if turn else "stopped before tool execution",
+                }
+            )
+            report["stop_reason"] = "stop_requested"
+            report["stop_request"] = stop_request
+            if progress:
+                progress(f"step #{index}: stop requested before tool start")
+            break
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)

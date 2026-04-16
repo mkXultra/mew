@@ -859,6 +859,57 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(items[0]["action"], "retry_tool")
         self.assertEqual(items[1]["action"], "replan")
 
+    def test_work_recovery_plan_does_not_override_pending_approval_next_action(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Prefer approval.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "interrupted", "parameters": {"path": "README.md"}},
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "README.md"},
+                    "result": {"dry_run": True, "changed": True, "path": "README.md"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["phase"], "awaiting_approval")
+        self.assertEqual(resume["next_action"], "approve or reject pending write tool calls")
+        self.assertEqual(resume["recovery_plan"]["items"][0]["action"], "retry_tool")
+
+    def test_work_recovery_plan_hints_only_latest_recoverable_tool(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover latest.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "interrupted", "parameters": {"path": "a.md"}},
+                {"id": 2, "tool": "glob", "status": "interrupted", "parameters": {"path": ".", "pattern": "*.py"}},
+            ],
+            "model_turns": [],
+        }
+
+        items = build_work_session_resume(session)["recovery_plan"]["items"]
+
+        self.assertNotIn("hint", items[0])
+        self.assertIn("recover-session", items[1]["hint"])
+
     def test_work_ai_report_includes_stop_request_reason(self):
         from mew.commands import format_work_ai_report
 
@@ -1430,6 +1481,74 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_stop_requested_between_batch_tools_prevents_next_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("one.md").write_text("one\n", encoding="utf-8")
+                Path("two.md").write_text("two\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "batch read",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "read_file", "path": "one.md"},
+                            {"type": "read_file", "path": "two.md"},
+                        ],
+                    },
+                }
+                calls = []
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None):
+                    from mew.work_session import request_work_session_stop
+
+                    calls.append(parameters.get("path"))
+                    if len(calls) == 1:
+                        with state_lock():
+                            state = load_state()
+                            request_work_session_stop(state["work_sessions"][0], "pause between batch tools")
+                            save_state(state)
+                    return {"path": parameters.get("path"), "text": "ok\n", "offset": 0, "truncated": False}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "stop_requested")
+                self.assertEqual(data["steps"][0]["status"], "stopped")
+                self.assertEqual(calls, ["one.md"])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["parameters"]["path"] for call in session["tool_calls"]], ["one.md"])
+                self.assertEqual(session["model_turns"][0]["tool_call_ids"], [1])
+                self.assertEqual(session["model_turns"][0]["stop_request"]["reason"], "pause between batch tools")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_can_stream_model_deltas_to_progress(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1822,6 +1941,37 @@ class WorkSessionTests(unittest.TestCase):
         self.assertLess(len(work_context["tool_calls"]), 12)
         self.assertEqual(work_context["tool_calls"][-1]["id"], 60)
         self.assertIn("read_file file51.py", json.dumps(work_context["session_knowledge"], ensure_ascii=False))
+        self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_CONTEXT_BUDGET)
+
+    def test_work_model_context_clips_large_search_matches(self):
+        from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Clip large search result.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": ".", "query": "needle"},
+                    "result": {"path": ".", "query": "needle", "matches": ["x" * 200000], "truncated": False},
+                    "summary": "large search",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Search", "description": "Clip large search result.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+        match = work_context["tool_calls"][0]["result"]["matches"][0]
+
+        self.assertLess(len(match), 200000)
+        self.assertIn("output truncated", match)
         self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_CONTEXT_BUDGET)
 
     def test_work_model_context_includes_bounded_world_state_when_read_allowed(self):

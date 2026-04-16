@@ -605,6 +605,12 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         for call in calls
         if call.get("status") == "interrupted" and not call.get("recovery_status")
     }
+    latest_retryable_tool_id = None
+    for call in calls:
+        if call.get("status") != "interrupted" or call.get("recovery_status"):
+            continue
+        if call.get("tool") in READ_ONLY_WORK_TOOLS or call.get("tool") in GIT_WORK_TOOLS:
+            latest_retryable_tool_id = call.get("id")
     for call in calls:
         if call.get("status") != "interrupted" or call.get("recovery_status"):
             continue
@@ -633,7 +639,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "safety": safety,
             "reason": reason,
         }
-        if action == "retry_tool":
+        if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
             item["hint"] = f"mew work {task_id} --recover-session --allow-read <path>"
         items.append(item)
 
@@ -780,7 +786,7 @@ def build_work_session_resume(session, task=None, limit=8):
         next_action = "continue the work session with /continue in chat or mew work --live"
 
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
-    if recovery_plan.get("next_action"):
+    if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
         next_action = recovery_plan["next_action"]
 
     return {
