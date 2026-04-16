@@ -82,6 +82,8 @@ Evidence:
 - Work mode now supports a read-only `batch` action with up to five inspection tools in one model turn, journaling each tool call separately while keeping writes and shell commands outside batch mode.
 - Codex Web API dogfood for batch exposed a missing `read_file.path` failure, after which batch normalization was hardened to skip invalid read subtools; retrying the same dogfood task completed `inspect_dir` and `read_file README.md` in one model turn without writes.
 - Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
+- Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
+- `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 
 Missing proof:
 
@@ -89,11 +91,11 @@ Missing proof:
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible, but there is no prompt budget enforcement or automatic compaction of noisy work-session history.
-- Live coding work session UX now has a one-step `/continue` command, but it is still not a full REPL-style coding cockpit with first-class pause/approve/reject prompts and inline guidance capture.
+- Live coding work session UX now has a one-step `/continue` command, reusable options, and inline guidance capture, but it is still not a full REPL-style coding cockpit with polished streaming, defaults for approval verification, and richer pause/stop state.
 
 Next action:
 
-- Build the next live cockpit slice: first-class chat prompts after each live action that offer continue/approve/reject/stop, capture inline guidance, and dogfood batch reads on real repository investigations.
+- Dogfood the live cockpit on real repository investigations, then add polished streaming and safer approval defaults so a long chat work session feels closer to Claude Code / Codex CLI.
 
 ## Milestone 3: Persistent Advantage
 
@@ -165,9 +167,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `474 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `32 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `47 passed`.
+- `uv run pytest -q` current: `475 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `35 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `50 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

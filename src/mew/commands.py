@@ -4270,7 +4270,7 @@ CHAT_HELP = """Commands:
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
 /work-session [cmd]   show/start/close/ai/live/resume/approve/reject native work session; add details
-/continue [opts]      run one live step for the active work session
+/continue [opts|text] run one live step; plain text becomes work guidance
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -4500,7 +4500,97 @@ def _parse_chat_work_ai_args(parts):
     return SimpleNamespace(**args), ""
 
 
-def chat_work_session(rest):
+def _strip_work_guidance_options(rest):
+    try:
+        parts = shlex.split(rest or "")
+    except ValueError:
+        return (rest or "").strip()
+    kept = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        if token == "--work-guidance":
+            index += 2
+            continue
+        if token.startswith("--work-guidance="):
+            index += 1
+            continue
+        kept.append(token)
+        index += 1
+    return shlex.join(kept)
+
+
+def _looks_like_work_continue_options(rest):
+    try:
+        parts = shlex.split(rest or "")
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    first = parts[0]
+    if first.startswith("-"):
+        return True
+    return first.lstrip("#").isdigit()
+
+
+def _chat_continue_rest(rest, chat_state):
+    rest = (rest or "").strip()
+    cached = (chat_state or {}).get("work_continue_options", "").strip()
+    if not rest:
+        return cached
+    if _looks_like_work_continue_options(rest):
+        if chat_state is not None:
+            chat_state["work_continue_options"] = _strip_work_guidance_options(rest)
+        return rest
+    guidance = "--work-guidance " + shlex.quote(rest)
+    return " ".join(part for part in (cached, guidance) if part)
+
+
+def _remember_work_continue_options(parts, chat_state):
+    if chat_state is None:
+        return
+    options = _strip_work_guidance_options(shlex.join(parts[1:]))
+    if options:
+        chat_state["work_continue_options"] = options
+
+
+def format_work_cockpit_controls(state=None, session=None, continue_options=""):
+    state = state or load_state()
+    if session is None:
+        session = active_work_session(state)
+    lines = ["", "Next controls"]
+    if not session:
+        lines.append("- /work-session start <task-id>")
+        return "\n".join(lines)
+    task_id = session.get("task_id")
+    task_suffix = f" {task_id}" if task_id else ""
+    if session.get("status") != "active":
+        lines.append(f"- /work-session resume{task_suffix}")
+        lines.append(f"- /work-session start{task_suffix or ' <task-id>'}")
+        return "\n".join(lines)
+
+    resume = build_work_session_resume(session, task=work_session_task(state, session))
+    for approval in (resume or {}).get("pending_approvals") or []:
+        if approval.get("approve_hint"):
+            lines.append(f"- {approval.get('approve_hint')}")
+        if approval.get("reject_hint"):
+            lines.append(f"- {approval.get('reject_hint')}")
+
+    cached = (continue_options or "").strip()
+    if cached:
+        lines.append("- /continue")
+        lines.append("- /continue <guidance>")
+        lines.append(f"- /work-session live {cached}")
+    else:
+        lines.append("- /continue --allow-read .")
+        lines.append('- /continue --allow-read . --work-guidance "focus ..."')
+    lines.append("- /work-session resume")
+    lines.append("- /work-session details")
+    lines.append("- /work-session close")
+    return "\n".join(lines)
+
+
+def chat_work_session(rest, chat_state=None):
     try:
         parts = shlex.split(rest)
     except ValueError as exc:
@@ -4550,9 +4640,26 @@ def chat_work_session(rest):
         if error:
             print(error)
             return
+        live_session_id = None
         if action == "live":
             args.live = True
+            _remember_work_continue_options(parts, chat_state)
+            state = load_state()
+            session = _select_active_work_session_for_args(state, args)
+            live_session_id = session.get("id") if session else None
         cmd_work_ai(args)
+        if action == "live":
+            state = load_state()
+            session = find_work_session(state, live_session_id) if live_session_id else None
+            if session is None and args.task_id:
+                session = _latest_work_session_for_task(state, args.task_id)
+            print(
+                format_work_cockpit_controls(
+                    state=state,
+                    session=session,
+                    continue_options=(chat_state or {}).get("work_continue_options", ""),
+                )
+            )
         return
 
     if action == "resume":
@@ -4648,6 +4755,7 @@ def chat_work_session(rest):
             json=False,
         )
         cmd_work_approve_tool(args)
+        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 
     if action == "reject":
@@ -4677,6 +4785,7 @@ def chat_work_session(rest):
             json=False,
         )
         cmd_work_reject_tool(args)
+        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 
     state = load_state()
@@ -5634,10 +5743,10 @@ def run_chat_slash_command(line, chat_state):
         print_chat_workbench(rest or None)
         return "continue"
     if command in ("work-session", "work_session"):
-        chat_work_session(rest)
+        chat_work_session(rest, chat_state)
         return "continue"
     if command in ("continue", "cont"):
-        chat_work_session(("live " + rest).strip())
+        chat_work_session(("live " + _chat_continue_rest(rest, chat_state)).strip(), chat_state)
         return "continue"
     if command == "note":
         chat_append_task_note(rest)

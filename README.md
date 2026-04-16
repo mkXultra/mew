@@ -249,7 +249,10 @@ and the final note is appended to the task so `mew work <task-id> --session --re
 can still show the closed session. Work-mode `send_message` writes to outbox;
 `ask_user` creates a normal question. The model can also choose a read-only
 `batch` action to run up to five inspection tools in one work turn; writes and
-shell commands remain outside batch mode.
+shell commands remain outside batch mode. In `mew chat`, live work steps print
+`Next controls` after execution. `/continue` remembers the previous live-step
+options for the chat session, so `/continue <guidance>` can steer the next step
+without retyping gates such as `--allow-read .`.
 
 ```sh
 uv run mew work 1 --start-session
@@ -277,6 +280,7 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic 
 
 Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session live 1 --allow-read . --max-steps 1`,
 `/continue --allow-read .` to advance the active work session by one live step,
+`/continue focus on README.md` to reuse the previous live options with new guidance,
 `/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
 `/work-session reject 7 not the right change`.
@@ -322,6 +326,10 @@ state without leaving the session:
 /add "調査する" | "対象を小さく確認する"
 /show 4
 /work
+/work-session details
+/work-session resume
+/continue --allow-read .
+/continue focus on the current failure
 /note 4 次はここを見る
 /kind 4 research
 /classify 4 apply

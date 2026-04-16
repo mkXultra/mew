@@ -1604,6 +1604,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 action", output)
                 self.assertIn("Work live step #1 resume", output)
                 self.assertIn("action: read_file", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/continue <guidance>", output)
                 self.assertIn("chat live content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
                 self.assertIn("THINK start", stderr.getvalue())
             finally:
@@ -1640,7 +1642,62 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Work live step #1 action", output)
                 self.assertIn("action: read_file", output)
+                self.assertIn("Next controls", output)
                 self.assertIn("continue content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_continue_reuses_options_and_treats_plain_text_as_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("guided continue content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    if len(prompts) == 1:
+                        return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+                    return {"summary": "done", "action": {"type": "finish", "reason": "guidance followed"}}
+
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/continue --auth auth.json --allow-read . --act-mode deterministic",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/continue focus on the README summary",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+                output = stdout.getvalue()
+                self.assertEqual(
+                    chat_state["work_continue_options"],
+                    "--auth auth.json --allow-read . --act-mode deterministic",
+                )
+                self.assertIn("focus on the README summary", prompts[-1])
+                self.assertIn("Next controls", output)
+                self.assertIn("/continue <guidance>", output)
+                self.assertIn("/work-session resume 1", output)
+                self.assertIn("Work session finished: guidance followed", load_state()["tasks"][0]["notes"])
             finally:
                 os.chdir(old_cwd)
 
