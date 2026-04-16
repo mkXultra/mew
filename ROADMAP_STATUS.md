@@ -156,20 +156,20 @@ Evidence:
 - Text outbox/listen/chat history views now clip very large message bodies and point to `outbox --json` for the full payload, reducing the chance that historical agent payloads swamp the cockpit.
 - `edit_file` now permits small exact replacements in large files by limiting replacement/delta size instead of rejecting based on total edited file size.
 - `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
-- `dogfood --scenario work-session` now covers line-based `read_file` and large-file dry-run `edit_file`, bringing the recurring scenario to 27 commands.
+- `dogfood --scenario work-session` now covers line-based `read_file`, large-file dry-run `edit_file`, focused diff previews, and focused test output, bringing the recurring scenario to 29 commands.
 - `dogfood --scenario chat-cockpit` now exercises a scripted `mew chat --kind coding` session with `/scope`, `/tasks`, `/work`, scoped startup controls, and scoped `/work-session`, making the scoped cockpit path part of deterministic recurring dogfood.
 
 Missing proof:
 
-- Model delta streaming is opt-in and no longer pollutes `--live` by default, but there is still no polished reasoning pane or diff/test-output cockpit comparable to Claude Code / Codex CLI.
+- Model delta streaming is opt-in and no longer pollutes `--live` by default, and focused diff/test panes now exist, but there is still no polished reasoning pane or unified streaming cockpit comparable to Claude Code / Codex CLI.
 - `mew work --live` now defaults to one model call per step, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, next controls, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
+- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, next controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/streaming.
 
 Next action:
 
-- Dogfood the live cockpit on real repository investigations, then add polished streaming and safer approval defaults so a long chat work session feels closer to Claude Code / Codex CLI.
+- Dogfood the live cockpit on real repository investigations, then add a polished reasoning/progress pane so a long chat work session feels closer to Claude Code / Codex CLI.
 
 ## Milestone 3: Persistent Advantage
 
@@ -283,6 +283,7 @@ Next action:
 - `codex-ultra` human-role E2E round 2 verified exact `/tmp` new-file approval, sibling write rejection, work-session/global ledgers, and `uv run pytest tests/test_work_session.py -q` with `88 passed`.
 - `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
 - `codex-ultra` approval-UX human-role E2E after inline defaults verified pending diff previews, explicit and TTY-default inline prompts, verifier display, opt-out behavior, verification/writes ledgers, and clean repo state. It found two continuity bugs: generated controls dropped `--no-prompt-approval`, and `approve-tool` ignored session default verification commands; both now have regression tests and fixes.
+- `codex-ultra` approval-UX retest after continuity fixes verified that `--no-prompt-approval` stays in next controls without reintroducing `--prompt-approval`, CLI and chat approvals reuse default verification commands, and focused `--diffs`/`--tests` plus `/work-session diffs`/`tests` show useful cockpit panes. No remaining bug was found in that scope.
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
 - `claude-ultra` Milestone 2 review after pending diff previews judged the cockpit direction coherent and recommended consolidating inline approval as the next small slice; interactive live/do approval prompts now have explicit default/force/opt-out semantics.
