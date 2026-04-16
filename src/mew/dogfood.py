@@ -731,6 +731,46 @@ def run_work_session_scenario(workspace, env=None):
     )
     stop_result = run(["work", "1", "--stop-session", "--stop-reason", "dogfood pause", "--json"])
     note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
+
+    state_path = workspace / STATE_FILE
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    memory_session = None
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("task_id")) == "1":
+            memory_session = candidate
+            break
+    if memory_session:
+        turn_id = next_id(state, "work_model_turn")
+        timestamp = now_iso()
+        memory_session.setdefault("model_turns", []).append(
+            {
+                "id": turn_id,
+                "session_id": memory_session.get("id"),
+                "task_id": 1,
+                "status": "completed",
+                "decision_plan": {
+                    "summary": "dogfood reentry contract",
+                    "working_memory": {
+                        "hypothesis": "Dogfood work session has readable reentry state.",
+                        "next_step": "Inspect resume before continuing.",
+                        "open_questions": ["Does resume show this compact memory?"],
+                        "last_verified_state": "dogfood verification passed",
+                    },
+                },
+                "action_plan": {"summary": "dogfood reentry contract"},
+                "action": {"type": "finish", "reason": "record memory for resume dogfood"},
+                "summary": "dogfood reentry contract",
+                "guidance": "",
+                "tool_call_id": None,
+                "tool_call_ids": [],
+                "started_at": timestamp,
+                "finished_at": timestamp,
+            }
+        )
+        memory_session["updated_at"] = timestamp
+        write_json_file(state_path, state)
+
     resume_result = run(["work", "1", "--session", "--resume", "--json"])
     work_result = run(["work", "1", "--json"])
     verification_ledger_result = run(["verification", "--json"])
@@ -764,7 +804,6 @@ def run_work_session_scenario(workspace, env=None):
     run(["task", "add", "Interrupted side-effect task", "--kind", "coding"])
     run(["work", "2", "--start-session", "--json"])
 
-    state_path = workspace / STATE_FILE
     state = migrate_state(read_json_file(state_path, default_state()))
     reconcile_next_ids(state)
     interrupted_session = None
@@ -860,6 +899,7 @@ def run_work_session_scenario(workspace, env=None):
         approval.get("diff_preview") or ""
         for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
     ]
+    working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
 
     _scenario_check(
         checks,
@@ -982,6 +1022,16 @@ def run_work_session_scenario(workspace, env=None):
         and any((note or {}).get("text") == "dogfood note" for note in (resume_data.get("resume") or {}).get("notes") or []),
         observed={"note": note_data.get("work_note"), "resume_notes": (resume_data.get("resume") or {}).get("notes")},
         expected="session note is recorded and surfaced in resume",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_working_memory",
+        resume_result.get("exit_code") == 0
+        and working_memory.get("hypothesis") == "Dogfood work session has readable reentry state."
+        and working_memory.get("next_step") == "Inspect resume before continuing."
+        and working_memory.get("open_questions") == ["Does resume show this compact memory?"],
+        observed=working_memory,
+        expected="resume includes compact working memory from resident THINK output",
     )
     _scenario_check(
         checks,

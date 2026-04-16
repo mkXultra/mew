@@ -392,6 +392,7 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
@@ -473,6 +474,7 @@ def build_work_think_prompt(context):
         "Use run_command only when shell is explicitly allowed. "
         "Use finish when the task is done or the next step is clear enough to stop. "
         "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
+        "Include a compact working_memory object that restates your current hypothesis, next intended step, open questions, and latest verified state for future reentry; keep it short and do not copy raw logs. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"

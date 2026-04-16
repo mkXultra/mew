@@ -629,6 +629,127 @@ def latest_work_verify_command(calls, task=None):
     return command
 
 
+def latest_work_verification_state(calls, task=None):
+    for call in reversed(list(calls or [])):
+        result = call.get("result") or {}
+        verification = result.get("verification") or {}
+        if "exit_code" in verification:
+            return {
+                "kind": f"{call.get('tool')}_verification",
+                "status": "passed" if verification.get("exit_code") == 0 else "failed",
+                "command": verification.get("command") or "",
+                "cwd": verification.get("cwd") or "",
+                "exit_code": verification.get("exit_code"),
+                "finished_at": verification.get("finished_at") or call.get("finished_at"),
+            }
+        if call.get("tool") == "run_tests" and "exit_code" in result:
+            return {
+                "kind": "run_tests",
+                "status": "passed" if result.get("exit_code") == 0 else "failed",
+                "command": result.get("command") or (call.get("parameters") or {}).get("command") or "",
+                "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
+                "exit_code": result.get("exit_code"),
+                "finished_at": result.get("finished_at") or call.get("finished_at"),
+            }
+    command = latest_work_verify_command(calls, task=task)
+    if command:
+        return {
+            "kind": "configured_verification",
+            "status": "not_run",
+            "command": command,
+            "cwd": ".",
+            "exit_code": None,
+            "finished_at": "",
+        }
+    return {}
+
+
+def format_work_verification_state(state):
+    if not state:
+        return ""
+    command = state.get("command") or ""
+    status = state.get("status") or "unknown"
+    if status == "not_run":
+        prefix = "verification configured but not run"
+    else:
+        prefix = f"last verification {status}"
+    exit_text = "" if state.get("exit_code") is None else f" exit={state.get('exit_code')}"
+    command_text = f": {command}" if command else ""
+    return f"{prefix}{exit_text}{command_text}"
+
+
+def _coerce_open_questions(value):
+    if isinstance(value, list):
+        return [clip_output(str(item), 300) for item in value if str(item).strip()][:5]
+    if isinstance(value, str) and value.strip():
+        return [clip_output(value, 300)]
+    return []
+
+
+def _normalize_working_memory(raw, turn=None, verification_state=None, source="model"):
+    if not isinstance(raw, dict):
+        return {}
+    observed_verified_state = ""
+    if (verification_state or {}).get("status") != "not_run":
+        observed_verified_state = format_work_verification_state(verification_state)
+    memory = {
+        "hypothesis": clip_output(str(raw.get("hypothesis") or raw.get("current_hypothesis") or "").strip(), 600),
+        "next_step": clip_output(str(raw.get("next_step") or raw.get("next_intended_step") or "").strip(), 600),
+        "open_questions": _coerce_open_questions(raw.get("open_questions") or raw.get("questions") or []),
+        "last_verified_state": clip_output(
+            observed_verified_state or str(raw.get("last_verified_state") or "").strip(),
+            600,
+        ),
+    }
+    if not memory["last_verified_state"]:
+        memory["last_verified_state"] = clip_output(format_work_verification_state(verification_state), 600)
+    if not any(memory.get(key) for key in ("hypothesis", "next_step", "open_questions", "last_verified_state")):
+        return {}
+    if turn:
+        memory["model_turn_id"] = turn.get("id")
+        memory["status"] = turn.get("status")
+        memory["updated_at"] = turn.get("finished_at") or turn.get("started_at") or ""
+    memory["source"] = source
+    return memory
+
+
+def build_working_memory(turns, calls, task=None):
+    turns = list(turns or [])
+    verification_state = latest_work_verification_state(calls, task=task)
+    for reversed_index, turn in enumerate(reversed(turns)):
+        decision_plan = turn.get("decision_plan") or {}
+        action_plan = turn.get("action_plan") or {}
+        for source, plan in (("think", decision_plan), ("act", action_plan)):
+            memory = _normalize_working_memory(
+                plan.get("working_memory") if isinstance(plan, dict) else {},
+                turn=turn,
+                verification_state=verification_state,
+                source=source,
+            )
+            if memory:
+                if reversed_index:
+                    memory["stale_after_model_turn_id"] = turn.get("id")
+                    memory["latest_model_turn_id"] = turns[-1].get("id")
+                    memory["stale_turns"] = reversed_index
+                return memory
+
+    latest_turn = turns[-1] if turns else {}
+    if not latest_turn and not verification_state:
+        return {}
+    if not latest_turn and verification_state.get("status") == "not_run":
+        return {}
+    action = latest_turn.get("action") or {}
+    raw = {
+        "hypothesis": latest_turn.get("finished_note")
+        or latest_turn.get("summary")
+        or latest_turn.get("error")
+        or "",
+        "next_step": action.get("reason") or action.get("summary") or "",
+        "open_questions": [action.get("question")] if action.get("type") == "ask_user" and action.get("question") else [],
+    }
+    return _normalize_working_memory(raw, turn=latest_turn or None, verification_state=verification_state, source="fallback")
+
+
 def _json_size(value):
     try:
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -923,6 +1044,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "pending_approvals": pending_approvals[-limit:],
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
+        "working_memory": build_working_memory(turns, calls, task=task),
         "context": build_work_context_metrics(calls, turns),
         "stop_request": (
             {
@@ -1001,6 +1123,33 @@ def format_work_session_resume(resume):
             lines.append(f"- {note.get('created_at') or ''} [{source}] {note.get('text') or ''}".strip())
     else:
         lines.append("(none)")
+
+    memory = resume.get("working_memory") or {}
+    if memory:
+        lines.extend(["", "Working memory"])
+        if memory.get("hypothesis"):
+            lines.append(f"hypothesis: {memory.get('hypothesis')}")
+        if memory.get("next_step"):
+            lines.append(f"next_step: {memory.get('next_step')}")
+        questions = memory.get("open_questions") or []
+        if questions:
+            lines.append("open_questions:")
+            lines.extend(f"- {question}" for question in questions)
+        if memory.get("last_verified_state"):
+            lines.append(f"last_verified_state: {memory.get('last_verified_state')}")
+        source = memory.get("source") or ""
+        turn_id = memory.get("model_turn_id")
+        if source or turn_id:
+            source_text = f"source: {source}" if source else "source:"
+            if turn_id:
+                source_text += f" model_turn=#{turn_id}"
+            lines.append(source_text)
+        if memory.get("stale_after_model_turn_id"):
+            lines.append(
+                f"stale_after_model_turn: #{memory.get('stale_after_model_turn_id')} "
+                f"({memory.get('stale_turns')} later turn(s) without working_memory; "
+                f"latest=#{memory.get('latest_model_turn_id')})"
+            )
 
     lines.extend(["", "Recent decisions"])
     decisions = resume.get("recent_decisions") or []

@@ -275,6 +275,13 @@ The default session view keeps read-tool entries compact, so a large
 controls after the compact resume bundle.
 Active `mew work --session --json` and `--resume --json` also include
 `next_cli_controls`, so machine readers get the same reentry commands.
+The resume bundle also carries a compact `working_memory` section when resident
+THINK output or recent session evidence can provide it: current hypothesis,
+next intended step, open questions, and latest verification state. That same
+digest is injected into future work-model context, so reentry starts from a
+short contract instead of reconstructing intent from raw logs. Observed
+verification results override model-written verification claims, and older
+working memory is marked stale when later model turns did not refresh it.
 World-state git summaries hide mew's own `.mew/` state noise, keeping the
 reentry signal focused on project files.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
@@ -340,7 +347,10 @@ do not immediately bloat a resident session. One-shot `--work-guidance` and
 `/continue <guidance>` text is treated as the current instruction for that turn
 and retained as a historical guidance snapshot on model turns so resume,
 timeline, and details views can show why the resident model chose the next
-action without making that old guidance current again.
+action without making that old guidance current again. THINK prompts ask the
+resident model to write a compact `working_memory` object for future reentry;
+older sessions fall back to the latest turn summary and verification state, and
+stale memory is marked when newer turns omit the digest.
 
 ```sh
 uv run mew work 1 --start-session

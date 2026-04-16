@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has quieter deterministic live steps, command streaming, action/resume output, chat/listen kind scopes, approval/live controls, line-targeted reads, large-file small edits, context pressure diagnostics, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -73,6 +73,7 @@ Evidence:
 - `mew work --ai --act-mode deterministic` can skip the second model ACT call and normalize THINK output locally; the default remains model ACT to preserve the original THINK/ACT architecture.
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
+- Work-session resume bundles now include compact `working_memory` when available, giving humans and future model turns a short hypothesis, next step, open questions, and latest verification state.
 - `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and the same bounded world-state summary is injected into future work-model context when read access is allowed.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
@@ -182,9 +183,11 @@ Evidence:
 - Durable state tracks tasks, questions, inbox/outbox, agent runs, step runs, thoughts, and runtime effects.
 - Context builder includes recent runtime effects and clipped summaries.
 - Project snapshot and memory systems exist.
-- Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, recent decisions, next action, and context pressure.
+- Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, working memory, recent decisions, next action, and context pressure.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
+- THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
+- Working memory treats observed verification results as authoritative over model-written verification claims and marks the digest stale when later model turns did not refresh it.
 - Work mode now has a `remember` control action that records durable session notes surfaced in resume bundles and future model context.
 - Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, making persistent guidance distinct from one-shot `/continue` guidance.
 - Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
@@ -197,7 +200,7 @@ Evidence:
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
-- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic older-tool digests, read-result clipping, and budgeted recent-window compaction.
+- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
@@ -264,8 +267,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `585 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `96 passed`.
+- `uv run pytest -q` current: `589 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `100 passed`.
+- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `131 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.
@@ -274,7 +278,7 @@ Next action:
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, and scoped `/work-session`.
-- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
+- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
 - `./mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
@@ -286,6 +290,7 @@ Next action:
 - `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
 - `codex-ultra` approval-UX human-role E2E after inline defaults verified pending diff previews, explicit and TTY-default inline prompts, verifier display, opt-out behavior, verification/writes ledgers, and clean repo state. It found two continuity bugs: generated controls dropped `--no-prompt-approval`, and `approve-tool` ignored session default verification commands; both now have regression tests and fixes.
 - `codex-ultra` approval-UX retest after continuity fixes verified that `--no-prompt-approval` stays in next controls without reintroducing `--prompt-approval`, CLI and chat approvals reuse default verification commands, and focused `--diffs`/`--tests` plus `/work-session diffs`/`tests` show useful cockpit panes. No remaining bug was found in that scope.
+- `claude-ultra` review of the working-memory reentry slice found two correctness concerns: model-written verification claims could outlive later failed tests, and old memory could shadow newer turns. Both are fixed with observed verification override, stale markers, and regression tests; Claude re-review reported no blockers.
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
 - `claude-ultra` Milestone 2 review after pending diff previews judged the cockpit direction coherent and recommended consolidating inline approval as the next small slice; interactive live/do approval prompts now have explicit default/force/opt-out semantics.

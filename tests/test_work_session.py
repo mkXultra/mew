@@ -1015,6 +1015,208 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertNotIn("guidance", context["work_session"]["model_turns"][0])
 
+    def test_work_session_resume_surfaces_working_memory(self):
+        from mew.work_loop import build_work_model_context
+        from mew.work_session import (
+            build_work_session_resume,
+            finish_work_model_turn,
+            format_work_session_resume,
+            start_work_model_turn,
+        )
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Memory",
+            "goal": "Reenter with a compact hypothesis.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+        decision_plan = {
+            "summary": "continue approval UX",
+            "working_memory": {
+                "hypothesis": "Approval UX still needs command output visibility.",
+                "next_step": "Add a focused command-output pane.",
+                "open_questions": ["Should chat expose the same pane?"],
+                "last_verified_state": "full suite passed before this slice",
+            },
+        }
+
+        turn = start_work_model_turn(
+            state,
+            session,
+            decision_plan,
+            {"summary": "continue approval UX"},
+            {"type": "finish", "reason": "next slice is clear"},
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        resume = build_work_session_resume(session)
+        memory = resume["working_memory"]
+        self.assertEqual(memory["hypothesis"], "Approval UX still needs command output visibility.")
+        self.assertEqual(memory["next_step"], "Add a focused command-output pane.")
+        self.assertEqual(memory["open_questions"], ["Should chat expose the same pane?"])
+        self.assertEqual(memory["last_verified_state"], "full suite passed before this slice")
+        self.assertEqual(memory["source"], "think")
+        self.assertEqual(memory["model_turn_id"], 1)
+
+        text = format_work_session_resume(resume)
+        self.assertIn("Working memory", text)
+        self.assertIn("hypothesis: Approval UX still needs command output visibility.", text)
+        self.assertIn("next_step: Add a focused command-output pane.", text)
+        self.assertIn("- Should chat expose the same pane?", text)
+
+        context = build_work_model_context(
+            state,
+            session,
+            {"id": 1, "title": "Memory", "description": "Reenter with a compact hypothesis.", "status": "todo"},
+            "now",
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["working_memory"]["next_step"],
+            "Add a focused command-output pane.",
+        )
+
+    def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
+        from mew.work_session import (
+            build_work_session_resume,
+            finish_work_model_turn,
+            format_work_session_resume,
+            start_work_model_turn,
+        )
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Observed memory",
+            "goal": "Do not trust stale model verification claims.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "uv run pytest -q"},
+                    "result": {"command": "uv run pytest -q", "exit_code": 1},
+                    "summary": "tests failed",
+                }
+            ],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+
+        first_turn = start_work_model_turn(
+            state,
+            session,
+            {
+                "summary": "old claim",
+                "working_memory": {
+                    "hypothesis": "Feature is ready.",
+                    "next_step": "Ship it.",
+                    "last_verified_state": "model claimed tests passed",
+                },
+            },
+            {"summary": "old claim"},
+            {"type": "finish", "reason": "old reason"},
+        )
+        finish_work_model_turn(state, 1, first_turn["id"])
+        second_turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "later turn without memory"},
+            {"summary": "later turn without memory"},
+            {"type": "finish", "reason": "later reason"},
+        )
+        finish_work_model_turn(state, 1, second_turn["id"])
+
+        resume = build_work_session_resume(session)
+        memory = resume["working_memory"]
+        self.assertEqual(memory["last_verified_state"], "last verification failed exit=1: uv run pytest -q")
+        self.assertEqual(memory["model_turn_id"], 1)
+        self.assertEqual(memory["stale_after_model_turn_id"], 1)
+        self.assertEqual(memory["latest_model_turn_id"], 2)
+        self.assertEqual(memory["stale_turns"], 1)
+        text = format_work_session_resume(resume)
+        self.assertIn("last_verified_state: last verification failed exit=1: uv run pytest -q", text)
+        self.assertIn("stale_after_model_turn: #1 (1 later turn(s) without working_memory; latest=#2)", text)
+
+    def test_work_session_resume_falls_back_to_latest_turn_and_verification_state(self):
+        from mew.work_session import (
+            build_work_session_resume,
+            finish_work_model_turn,
+            format_work_session_resume,
+            start_work_model_turn,
+        )
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Fallback memory",
+            "goal": "Infer reentry memory from old turns.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "parameters": {"command": "uv run pytest -q"},
+                    "result": {"command": "uv run pytest -q", "exit_code": 0},
+                    "summary": "tests passed",
+                }
+            ],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+
+        turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "Need a warm reentry contract."},
+            {"summary": "Need a warm reentry contract."},
+            {"type": "finish", "reason": "Next, persist a compact resume digest."},
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        resume = build_work_session_resume(session)
+        memory = resume["working_memory"]
+        self.assertEqual(memory["hypothesis"], "Need a warm reentry contract.")
+        self.assertEqual(memory["next_step"], "Next, persist a compact resume digest.")
+        self.assertEqual(memory["last_verified_state"], "last verification passed exit=0: uv run pytest -q")
+        self.assertEqual(memory["source"], "fallback")
+        self.assertIn("last_verified_state: last verification passed exit=0: uv run pytest -q", format_work_session_resume(resume))
+
+    def test_work_session_resume_does_not_create_memory_from_unrun_task_command(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "No memory yet",
+            "goal": "Avoid noisy resume memory.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "No memory yet", "description": "", "status": "todo", "command": "uv run pytest -q"}
+
+        resume = build_work_session_resume(session, task=task)
+
+        self.assertEqual(resume["working_memory"], {})
+        self.assertNotIn("Working memory", format_work_session_resume(resume))
+
     def test_work_session_stop_request_is_consumed_before_model_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -3041,6 +3243,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)
+        self.assertIn("Include a compact working_memory object", prompt)
+        self.assertIn('"working_memory": {"hypothesis"', prompt)
+        self.assertIn('"next_step": "what to do after reentry"', prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
         self.assertIn('"summary": "optional concrete result', prompt)
         self.assertIn('"max_chars": "optional read_file cap"', prompt)
