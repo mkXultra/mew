@@ -1092,6 +1092,27 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_recommends_native_work_session_for_coding_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Implement resident loop", "--kind", "coding", "--ready"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                self.assertIn("Next action\nmew work 1 --start-session", stdout.getvalue())
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                self.assertIn("Next action\nmew work 1 --live --allow-read . --max-steps 1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_workbench_recommends_real_dispatch_after_dry_run(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2859,6 +2880,30 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(state["inbox"][-1]["payload"]["text"], "hello mew")
             finally:
                 os.chdir(old_cwd)
+
+    def test_chat_help_prints_slash_command_reference(self):
+        with redirect_stdout(StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as caught:
+                main(["chat", "--help"])
+
+        self.assertEqual(caught.exception.code, 0)
+        output = stdout.getvalue()
+        self.assertIn("human-friendly chat REPL", output)
+        self.assertIn("Slash commands available inside chat", output)
+        self.assertIn("/work-session [cmd]", output)
+        self.assertIn("/continue [opts|text]", output)
+
+    def test_chat_help_work_prints_focused_reentry_commands(self):
+        from mew.commands import run_chat_slash_command
+
+        with redirect_stdout(StringIO()) as stdout:
+            self.assertEqual(run_chat_slash_command("/help work", {}), "continue")
+
+        output = stdout.getvalue()
+        self.assertIn("Work session quick help", output)
+        self.assertIn("/work-session <task-id> resume", output)
+        self.assertIn("/continue --allow-read .", output)
+        self.assertNotIn("/agents [all]", output)
 
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):
         from mew.commands import run_chat_slash_command

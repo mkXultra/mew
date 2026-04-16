@@ -784,6 +784,50 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Recent work sessions", output)
                 self.assertIn("resume: mew work 1 --session --resume", output)
                 self.assertIn("mew work <task-id> --start-session", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--session", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertIsNone(data["work_session"])
+                self.assertEqual(data["recent_work_sessions"][0]["task_id"], 1)
+                self.assertEqual(data["recent_work_sessions"][0]["resume_command"], "mew work 1 --session --resume")
+                self.assertEqual(data["recent_work_sessions"][0]["chat_resume_command"], "/work-session resume 1")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--session", "--resume"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("No active work session.", output)
+                self.assertIn("Recent work sessions", output)
+                self.assertIn("resume: mew work 1 --session --resume", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--session", "--resume", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertIsNone(data["resume"])
+                self.assertEqual(data["recent_work_sessions"][0]["chat_resume_command"], "/work-session resume 1")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_show_active_includes_next_cli_controls(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("Work session #1 [active] task=#1", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("mew work 1 --live --auth auth.json --model-backend codex --allow-read .", output)
+                self.assertIn("mew chat", output)
             finally:
                 os.chdir(old_cwd)
 
@@ -1830,6 +1874,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(len(session["model_turns"]), 1)
                 self.assertEqual(session["model_turns"][0]["tool_call_ids"], [1, 2])
                 self.assertEqual([call["tool"] for call in session["tool_calls"]], ["inspect_dir", "read_file"])
+                self.assertEqual(session["tool_calls"][1]["parameters"]["max_chars"], 12000)
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
                 self.assertIn("batch tool_calls=#1,#2", stdout.getvalue())
@@ -1842,6 +1887,25 @@ class WorkSessionTests(unittest.TestCase):
         prompt = build_work_think_prompt({"work_session": {"tool_calls": []}})
         self.assertIn("prefer one batch action", prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
+        self.assertIn('"max_chars": "optional read_file cap"', prompt)
+        self.assertIn('"stat": "optional git_diff diffstat', prompt)
+
+    def test_work_model_actions_default_to_small_reads_and_diffstat(self):
+        from mew.work_loop import work_tool_parameters_from_action
+
+        read_parameters = work_tool_parameters_from_action({"type": "read_file", "path": "README.md"})
+        self.assertEqual(read_parameters["max_chars"], 12000)
+
+        explicit_read_parameters = work_tool_parameters_from_action(
+            {"type": "read_file", "path": "README.md", "max_chars": 24000}
+        )
+        self.assertEqual(explicit_read_parameters["max_chars"], 24000)
+
+        diff_parameters = work_tool_parameters_from_action({"type": "git_diff"})
+        self.assertTrue(diff_parameters["stat"])
+
+        explicit_diff_parameters = work_tool_parameters_from_action({"type": "git_diff", "stat": False})
+        self.assertFalse(explicit_diff_parameters["stat"])
 
     def test_work_model_context_digests_older_tool_calls(self):
         from mew.work_loop import build_work_model_context
@@ -2370,6 +2434,97 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
                 self.assertIn("Work session #1 [active] task=#1", stdout.getvalue())
                 self.assertIn("phase: idle", stdout.getvalue())
+                self.assertIn("Next controls", stdout.getvalue())
+                self.assertIn("/continue --allow-read .", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_show_without_active_lists_recent_sessions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
+                output = stdout.getvalue()
+
+                self.assertIn("No active work session.", output)
+                self.assertIn("Recent work sessions", output)
+                self.assertIn("resume: mew work 1 --session --resume", output)
+                self.assertIn("chat: /work-session resume 1", output)
+                self.assertIn("mew work <task-id> --start-session", output)
+                self.assertIn("/work-session start <task-id>", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("No active work session.", output)
+                self.assertIn("Recent work sessions", output)
+                self.assertIn("chat: /work-session resume 1", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_accepts_task_first_resume_order(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("resume me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session 1 resume --allow-read .", {}), "continue")
+                output = stdout.getvalue()
+
+                self.assertIn("Work resume #1 [closed] task=#1", output)
+                self.assertIn("World state", output)
+                self.assertIn("README.md", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_startup_surfaces_active_work_session_controls(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                stdin = StringIO("/exit\n")
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["chat", "--no-unread", "--no-activity"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("mew chat. Type /help", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/continue --allow-read .", output)
+                self.assertIn("/work-session resume", output)
             finally:
                 os.chdir(old_cwd)
 

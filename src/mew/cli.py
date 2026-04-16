@@ -3,6 +3,7 @@ import argparse
 import os
 
 from .commands import (
+    CHAT_HELP,
     cmd_attach,
     cmd_ack,
     cmd_agent_list,
@@ -978,7 +979,13 @@ def build_parser():
     attach_parser.set_defaults(activity=True)
     attach_parser.set_defaults(func=cmd_attach)
 
-    chat_parser = subparsers.add_parser("chat", help="human-friendly chat REPL for mew")
+    chat_parser = subparsers.add_parser(
+        "chat",
+        help="human-friendly chat REPL for mew",
+        description="human-friendly chat REPL for mew.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Slash commands available inside chat:\n\n" + CHAT_HELP,
+    )
     chat_parser.add_argument(
         "--poll-interval",
         type=float,

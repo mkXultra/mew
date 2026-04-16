@@ -88,6 +88,11 @@ Evidence:
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
+- `mew chat --help` now includes the slash-command reference, and `/help work` prints focused work-session reentry/continue commands.
+- `mew work --session`, `mew work --session --resume`, and `/work-session` now fall back to recent work sessions when no session is active, including exact CLI and chat resume hints.
+- `mew work --session --json` and `mew work --session --resume --json` expose the same recent-session summaries for model-facing or scripted reentry.
+- Active `mew work --session`, active `/work-session`, and normal `mew chat` startup now surface next controls for continuing, stopping, resuming, or entering chat.
+- Chat work-session parsing accepts task-first resume order such as `/work-session 26 resume --allow-read .`, reducing command-order friction during reentry.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
@@ -98,6 +103,7 @@ Evidence:
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 - `dogfood --scenario work-session` now covers stop request recording and `phase=stop_requested` resume output.
 - `dogfood --scenario work-session` now also covers user session notes appearing in resume output.
+- Model-selected `read_file` now defaults to a smaller 12,000-character page, and model-selected `git_diff` defaults to diffstat unless full diff is explicitly requested, reducing the chance that a broad read-only batch bloats a resident session.
 
 Missing proof:
 
@@ -105,7 +111,7 @@ Missing proof:
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has a one-step `/continue` command, reusable options, inline guidance capture, and boundary stop requests, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
+- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, and next controls, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
 
 Next action:
 
@@ -194,8 +200,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `498 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `57 passed`.
+- `uv run pytest -q` current: `506 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `175 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
@@ -203,6 +209,8 @@ Next action:
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 - `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.
+- `codex-ultra` reentry retest after cockpit changes: strict chat resume order and missing chat resume hints are mostly fixed; remaining UX gaps are broader cockpit polish and quiet-chat affordances.
+- Mew dogfood task #27 used `mew work --live` with Codex Web API in this repository; it found high context pressure from broad batch reads, which led to smaller model read defaults and diffstat-first model `git_diff`.
 
 ## Current Roadmap Focus
 

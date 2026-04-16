@@ -20,6 +20,7 @@ WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
 WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
 WORK_READ_FILE_CONTEXT_TEXT_LIMIT = 12000
+WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS = WORK_READ_FILE_CONTEXT_TEXT_LIMIT
 WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT = 1000
 WORK_LIST_CONTEXT_ITEM_LIMIT = 100
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
@@ -367,10 +368,17 @@ def _work_action_schema_text():
         '  "summary": "short reason",\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
-        '    "tools": [{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", "path": "required for read_file/glob/search_text", "query": "required for search_text", "pattern": "required for glob"}],\n'
+        '    "tools": ['
+        '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", '
+        '"path": "required for read_file/glob/search_text", '
+        '"query": "required for search_text", '
+        '"pattern": "required for glob", '
+        '"max_chars": "optional read_file cap"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
         '    "pattern": "glob pattern",\n'
+        '    "max_chars": "optional read_file cap",\n'
+        '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
         '    "content": "write_file content",\n'
         '    "old": "edit_file old text",\n'
@@ -457,6 +465,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "path",
         "query",
         "pattern",
+        "max_chars",
         "command",
         "cwd",
         "base",
@@ -508,6 +517,7 @@ def work_tool_parameters_from_action(
     verify_timeout=300,
 ):
     parameters = dict(action or {})
+    action_type = action.get("type") or action.get("tool")
     parameters.pop("type", None)
     parameters["allowed_write_roots"] = allowed_write_roots or []
     parameters["allow_shell"] = bool(allow_shell)
@@ -516,6 +526,16 @@ def work_tool_parameters_from_action(
         parameters["verify_command"] = verify_command
     parameters.setdefault("verify_cwd", ".")
     parameters.setdefault("verify_timeout", verify_timeout)
+    if action_type == "read_file":
+        try:
+            parameters["max_chars"] = max(
+                1,
+                min(int(parameters.get("max_chars") or WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS), 50000),
+            )
+        except (TypeError, ValueError):
+            parameters["max_chars"] = WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS
+    if action_type == "git_diff" and "stat" not in parameters:
+        parameters["stat"] = True
     return parameters
 
 

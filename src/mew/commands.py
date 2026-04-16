@@ -352,10 +352,12 @@ def build_workbench_data(state, task):
         next_action = f"mew reply {questions[0]['id']} \"...\""
     elif not is_programmer_task(task):
         next_action = f"mew task update {task_id} --kind coding"
+    elif work_session:
+        next_action = f"mew work {task_id} --live --allow-read . --max-steps 1"
     elif not plan:
-        next_action = f"mew task plan {task_id}"
+        next_action = f"mew work {task_id} --start-session"
     elif not latest_implementation:
-        next_action = f"mew buddy --task {task_id} --dispatch --dry-run"
+        next_action = f"mew work {task_id} --start-session"
     elif latest_implementation.get("status") in ("created", "running"):
         next_action = f"mew agent wait {latest_implementation['id']}"
     elif latest_implementation.get("status") == "dry_run":
@@ -535,7 +537,7 @@ def _work_live_continue_command(args, task_id):
         parts.extend(["--model", args.model])
     if getattr(args, "base_url", None):
         parts.extend(["--base-url", args.base_url])
-    for root in getattr(args, "allow_read", None) or []:
+    for root in getattr(args, "allow_read", None) or ["."]:
         parts.extend(["--allow-read", root])
     for root in getattr(args, "allow_write", None) or []:
         parts.extend(["--allow-write", root])
@@ -556,7 +558,7 @@ def _work_resume_command(args, task_id):
     if task_id is not None:
         parts.append(str(task_id))
     parts.extend(["--session", "--resume"])
-    for root in getattr(args, "allow_read", None) or []:
+    for root in getattr(args, "allow_read", None) or ["."]:
         parts.extend(["--allow-read", root])
     return shlex.join(parts)
 
@@ -1392,22 +1394,43 @@ def cmd_work_start_session(args):
     return 0
 
 
-def format_no_active_work_session(state, limit=5):
-    lines = ["No active work session."]
+def recent_work_session_summaries(state, limit=5):
     sessions = list(state.get("work_sessions") or [])
     recent = list(reversed(sessions[-limit:]))
+    summaries = []
+    for session in recent:
+        task = work_session_task(state, session)
+        resume = build_work_session_resume(session, task=task, limit=3)
+        task_id = session.get("task_id")
+        resume_command = f"mew work {task_id} --session --resume" if task_id is not None else "mew work --session --resume"
+        chat_resume_command = f"/work-session resume {task_id}" if task_id is not None else "/work-session resume"
+        summaries.append(
+            {
+                "id": session.get("id"),
+                "status": session.get("status"),
+                "task_id": task_id,
+                "phase": (resume or {}).get("phase") or "unknown",
+                "title": session.get("title") or "",
+                "resume_command": resume_command,
+                "chat_resume_command": chat_resume_command,
+            }
+        )
+    return summaries
+
+
+def format_no_active_work_session(state, limit=5):
+    lines = ["No active work session."]
+    recent = recent_work_session_summaries(state, limit=limit)
     if recent:
         lines.extend(["", "Recent work sessions"])
         for session in recent:
-            task = work_session_task(state, session)
-            resume = build_work_session_resume(session, task=task, limit=3)
-            task_id = session.get("task_id")
             lines.append(
-                f"- #{session.get('id')} [{session.get('status')}] task=#{task_id} "
-                f"phase={(resume or {}).get('phase') or 'unknown'} {session.get('title') or ''}"
+                f"- #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')} "
+                f"phase={session.get('phase')} {session.get('title') or ''}"
             )
-            lines.append(f"  resume: mew work {task_id} --session --resume")
-    lines.extend(["", "Start or resume", "- mew work <task-id> --start-session"])
+            lines.append(f"  resume: {session.get('resume_command')}")
+            lines.append(f"  chat: {session.get('chat_resume_command')}")
+    lines.extend(["", "Start or resume", "- mew work <task-id> --start-session", "- /work-session start <task-id>"])
     return "\n".join(lines)
 
 
@@ -1423,18 +1446,39 @@ def cmd_work_show_session(args):
         resume = build_work_session_resume(session, task=task)
         if resume and getattr(args, "allow_read", None):
             resume["world_state"] = build_work_world_state(resume, args.allow_read)
+        if not resume and not getattr(args, "task_id", None):
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "resume": None,
+                            "recent_work_sessions": recent_work_session_summaries(state),
+                            "start_commands": ["mew work <task-id> --start-session", "/work-session start <task-id>"],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print(format_no_active_work_session(state))
+            return 0
         if args.json:
             print(json.dumps({"resume": resume}, ensure_ascii=False, indent=2))
         else:
             print(format_work_session_resume(resume))
         return 0
     if args.json:
-        print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
+        payload = {"work_session": session}
+        if not session and not getattr(args, "task_id", None):
+            payload["recent_work_sessions"] = recent_work_session_summaries(state)
+            payload["start_commands"] = ["mew work <task-id> --start-session", "/work-session start <task-id>"]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if not session and not getattr(args, "task_id", None):
             print(format_no_active_work_session(state))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
+            print(format_work_cli_controls(session, args))
     return 0
 
 
@@ -4699,7 +4743,7 @@ def cmd_listen(args):
         return 0
 
 CHAT_HELP = """Commands:
-/help                 show this help
+/help [work]          show this help, or focused work-session help
 /focus                show the quiet next-action view
 /daily                alias for /focus
 /brief                show the current operational brief
@@ -4754,6 +4798,20 @@ CHAT_HELP = """Commands:
 /history              print all outbox messages
 /exit                 leave chat
 Any non-slash line is sent to mew as a user message."""
+
+CHAT_WORK_HELP = """Work session quick help:
+/work-session                         show active session, or recent sessions if none is active
+/work-session details                 show active session with decisions, diffs, failures, and tool calls
+/work-session resume [task-id]        show a compact reentry bundle
+/work-session <task-id> resume        same as resume; task-first order is accepted
+/work-session resume --allow-read .   add live git/file world state to the reentry bundle
+/work-session start <task-id>         start or reuse a native work session
+/continue --allow-read .              run one live resident-model step
+/continue <guidance>                  reuse prior live options with new guidance
+/work-session stop <reason>           pause the live loop at the next boundary
+/work-session note <text>             save a durable note for future work context
+/work-session approve <id> ...        apply a dry-run write after explicit gates
+/work-session reject <id> <reason>    reject a pending write"""
 
 CHAT_EOF = object()
 
@@ -5071,6 +5129,9 @@ def chat_work_session(rest, chat_state=None):
         return
     details = "details" in {part.casefold() for part in parts}
     parts = [part for part in parts if part.casefold() != "details"]
+    task_first_actions = {"show", "start", "close", "stop", "note", "recover", "ai", "step", "live", "resume"}
+    if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
+        parts = [parts[1], parts[0], *parts[2:]]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
     if action not in (
@@ -5185,6 +5246,9 @@ def chat_work_session(rest, chat_state=None):
         resume = build_work_session_resume(session, task=work_session_task(state, session))
         if resume and allow_read:
             resume["world_state"] = build_work_world_state(resume, allow_read)
+        if not resume and not task_id:
+            print(format_no_active_work_session(state))
+            return
         print(format_work_session_resume(resume))
         return
 
@@ -5310,7 +5374,11 @@ def chat_work_session(rest, chat_state=None):
     session = active_work_session(state)
     if task_id:
         session = _latest_work_session_for_task(state, task_id)
+    elif not session:
+        print(format_no_active_work_session(state))
+        return
     print(format_work_session(session, task=work_session_task(state, session), details=details))
+    print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
 
 
 def chat_add_task(rest):
@@ -6214,7 +6282,11 @@ def run_chat_slash_command(line, chat_state):
     if command in ("exit", "quit", "q"):
         return "exit"
     if command in ("help", "?"):
-        print(CHAT_HELP)
+        topic = rest.casefold()
+        if topic in ("work", "work-session", "session", "sessions"):
+            print(CHAT_WORK_HELP)
+        else:
+            print(CHAT_HELP)
         return "continue"
     if command in ("focus", "daily"):
         print(format_focus(build_focus_data(load_state(), limit=3)))
@@ -6472,8 +6544,12 @@ def read_chat_line(poll_interval, prompt_state):
 
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
+    state = load_state()
     if not args.no_brief:
-        print(build_brief(load_state(), limit=args.limit), flush=True)
+        print(build_brief(state, limit=args.limit), flush=True)
+        session = active_work_session(state)
+        if session:
+            print(format_work_cockpit_controls(state=state, session=session), flush=True)
 
     seen_ids = emit_initial_outbox(
         history=False,

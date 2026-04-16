@@ -235,7 +235,10 @@ Use `--focus` to steer a short step loop toward the current development session
 without rewriting persistent guidance.
 Use `mew work [task-id]` as a read-only resume surface for one coding task: it
 shows the current plan, recent agent runs, verification, writes, open questions,
-and exactly one recommended next action.
+and exactly one recommended next action. For coding tasks that do not already
+have a running implementation path, the next action starts or continues a native
+work session so the resident model can work from inside mew instead of forcing
+the older external-agent planner path first.
 Native work sessions are the first Milestone 1 path toward giving the resident
 model its own hands. Start one with `mew work <task-id> --start-session`, inspect
 it with `mew work --session` or `/work-session` in chat, and run tools with
@@ -243,8 +246,15 @@ explicit gates. Write tools default to dry-run. Applied writes require
 `--allow-verify` and `--verify-command`; failed verification rolls the change
 back and records the failed tool result. Nonzero `run_tests` exits are treated
 as failed tool calls and summarized in `mew work --session --details`.
-When no work session is active, `mew work --session` lists recent sessions with
-resume commands instead of leaving reentry discovery to memory.
+When no work session is active, `mew work --session` and
+`mew work --session --resume` list recent sessions with resume commands instead
+of leaving reentry discovery to memory.
+`/work-session` in chat uses the same recent-session fallback, so a user can
+reenter from the REPL without remembering the last task id.
+The same recent-session summaries are available in `mew work --session --json`
+for scripts and model-facing tools.
+When a session is active, both `mew work --session` and `/work-session` include
+the next controls for continuing, stopping, resuming, or opening chat.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
@@ -278,6 +288,9 @@ tool/turn windows and leaves a `context_compaction` note for the model. Passing
 `--allow-read` to `mew work --session --resume` adds a live world-state check
 with current git status and touched-file stats; the same bounded summary is
 included in future work-model context when read access is allowed.
+Model-selected `read_file` calls default to a smaller page than manual reads,
+and model-selected `git_diff` defaults to diffstat, so broad read-only batches
+do not immediately bloat a resident session.
 
 ```sh
 uv run mew work 1 --start-session
@@ -341,11 +354,13 @@ blockers.
 
 ## Chat
 
-`mew chat` is the human-facing REPL for a running runtime. Non-slash input is
+`mew chat` is the human-facing REPL for a running runtime. `mew chat --help`
+prints the startup options plus the slash-command reference. Non-slash input is
 sent to mew as a user message, and slash commands let you inspect or update
 state without leaving the session:
 
 ```text
+/help work
 /focus
 /brief
 /next
