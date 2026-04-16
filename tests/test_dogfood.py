@@ -313,7 +313,7 @@ class DogfoodTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            report = build_dogfood_report(workspace, ["mew", "run"], 0, 1.5)
+            report = build_dogfood_report(workspace, ["mew", "run", "--trace-model"], 0, 1.5)
             report["agent_reflex_results"] = [
                 {
                     "phase": "review_wait",
@@ -332,6 +332,7 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["events"]["processed"], 1)
             self.assertEqual(report["model_phases"]["think_ok"], 1)
+            self.assertTrue(report["trace_model_enabled"])
             self.assertEqual(report["model_traces"]["total"], 1)
             self.assertNotIn("prompt", report["model_traces"]["latest"][0])
             self.assertEqual(report["runtime_status"]["last_cycle_reason"], "passive_tick")
@@ -350,7 +351,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
-            self.assertIn("model_traces", text)
+            self.assertIn("model_traces: enabled=True", text)
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
             self.assertIn("read_inspection:", text)

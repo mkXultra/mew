@@ -948,6 +948,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         },
         "runtime_status": state.get("runtime_status", {}) if state else {},
         "model_phases": parse_phase_counts(log_text),
+        "trace_model_enabled": any(part == "--trace-model" for part in command or []),
         "model_traces": model_trace_summary(workspace),
         "plan_schema_issues": plan_schema_issues(inbox),
         "outbox": {
@@ -1079,7 +1080,7 @@ def format_dogfood_report(report):
         "model_phases: " + ", ".join(
             f"{key}={value}" for key, value in report.get("model_phases", {}).items()
         ),
-        f"model_traces: {report.get('model_traces')}",
+        f"model_traces: enabled={bool(report.get('trace_model_enabled'))} {report.get('model_traces')}",
         "runtime_cycle: "
         f"last_reason={report.get('runtime_status', {}).get('last_cycle_reason')} "
         f"duration={report.get('runtime_status', {}).get('last_cycle_duration_seconds')} "
