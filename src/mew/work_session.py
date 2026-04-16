@@ -1,3 +1,5 @@
+import shlex
+
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
     glob_paths,
@@ -475,12 +477,19 @@ def build_work_session_resume(session, task=None, limit=8):
             and result.get("changed")
             and not call.get("approval_status")
         ):
+            tool_call_id = call.get("id")
+            write_path = path or "."
             pending_approvals.append(
                 {
-                    "tool_call_id": call.get("id"),
+                    "tool_call_id": tool_call_id,
                     "tool": call.get("tool"),
                     "path": path,
                     "summary": call.get("summary") or "",
+                    "approve_hint": (
+                        f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
+                        '--allow-verify --verify-command "<command>"'
+                    ),
+                    "reject_hint": f"/work-session reject {tool_call_id} <reason>",
                 }
             )
 
@@ -552,6 +561,10 @@ def format_work_session_resume(resume):
     if approvals:
         for approval in approvals:
             lines.append(f"#{approval.get('tool_call_id')} {approval.get('tool')} {approval.get('path') or ''}")
+            if approval.get("approve_hint"):
+                lines.append(f"  approve: {approval.get('approve_hint')}")
+            if approval.get("reject_hint"):
+                lines.append(f"  reject: {approval.get('reject_hint')}")
     else:
         lines.append("(none)")
 

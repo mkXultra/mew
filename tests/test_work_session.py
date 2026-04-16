@@ -653,6 +653,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["commands"][0]["tool"], "run_tests")
                 self.assertEqual(resume["commands"][0]["exit_code"], 0)
                 self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 3)
+                self.assertIn("/work-session approve 3", resume["pending_approvals"][0]["approve_hint"])
+                self.assertIn("/work-session reject 3", resume["pending_approvals"][0]["reject_hint"])
                 self.assertEqual(resume["next_action"], "approve or reject pending write tool calls")
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -661,6 +663,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work resume #1 [active] task=#1", text)
                 self.assertIn("Pending approvals", text)
                 self.assertIn("#3 edit_file", text)
+                self.assertIn("approve: /work-session approve 3", text)
+                self.assertIn("reject: /work-session reject 3", text)
             finally:
                 os.chdir(old_cwd)
 
@@ -1324,6 +1328,41 @@ class WorkSessionTests(unittest.TestCase):
                 session = state["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["tool"], "read_file")
                 self.assertIn("chat ai content", session["tool_calls"][0]["result"]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_live_alias_runs_live_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("chat live content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/work-session live 1 --auth auth.json --allow-read . --max-steps 1 --act-mode deterministic",
+                                    {},
+                                ),
+                                "continue",
+                            )
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("Work live step #1 resume", output)
+                self.assertIn("action: read_file", output)
+                self.assertIn("chat live content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
+                self.assertIn("THINK start", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

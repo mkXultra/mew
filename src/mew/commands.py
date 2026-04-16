@@ -4070,7 +4070,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/ai/resume/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/ai/live/resume/approve/reject native work session; add details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -4310,7 +4310,7 @@ def chat_work_session(rest):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "ai", "step", "resume", "approve", "reject"):
+    if action not in ("show", "start", "close", "ai", "step", "live", "resume", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4345,11 +4345,13 @@ def chat_work_session(rest):
         print(f"closed work session #{session['id']}")
         return
 
-    if action in ("ai", "step"):
+    if action in ("ai", "step", "live"):
         args, error = _parse_chat_work_ai_args(parts)
         if error:
             print(error)
             return
+        if action == "live":
+            args.live = True
         cmd_work_ai(args)
         return
 
