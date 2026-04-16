@@ -708,6 +708,7 @@ class WorkSessionTests(unittest.TestCase):
                             self.assertEqual(main(["work", "1", "--ai", "--auth", "auth.json", "--json"]), 0)
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(report["stop_reason"], "stop_requested")
+                self.assertEqual(report["stop_request"]["reason"], "pause after this boundary")
                 self.assertEqual(report["steps"], [])
                 call_model.assert_not_called()
 
@@ -715,8 +716,29 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("stop_requested_at", session)
                 self.assertEqual(session["last_stop_request"]["reason"], "pause after this boundary")
                 self.assertTrue(session["stop_acknowledged_at"])
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(resume["last_stop_request"]["reason"], "pause after this boundary")
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_ai_report_includes_stop_request_reason(self):
+        from mew.commands import format_work_ai_report
+
+        text = format_work_ai_report(
+            {
+                "steps": [],
+                "max_steps": 1,
+                "stop_reason": "stop_requested",
+                "session_id": 1,
+                "task_id": 1,
+                "stop_request": {"reason": "pause here"},
+            }
+        )
+
+        self.assertIn("stop=stop_requested", text)
+        self.assertIn("stop_request: pause here", text)
 
     def test_work_session_resume_next_action_uses_latest_tool_status(self):
         old_cwd = os.getcwd()

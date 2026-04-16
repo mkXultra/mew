@@ -512,6 +512,9 @@ def format_work_ai_report(report):
         summary = step.get("summary") or tool_call.get("summary") or ""
         if summary:
             lines.append(clip_output(summary, 1000))
+    stop_request = report.get("stop_request") or {}
+    if stop_request:
+        lines.append(f"stop_request: {stop_request.get('reason') or 'stop requested'}")
     return "\n".join(lines)
 
 

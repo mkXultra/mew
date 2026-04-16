@@ -695,6 +695,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "pending_approvals": pending_approvals[-limit:],
         "recent_decisions": recent_decisions,
         "context": build_work_context_metrics(calls, turns),
+        "last_stop_request": session.get("last_stop_request") or {},
         "next_action": next_action,
     }
 
@@ -761,6 +762,11 @@ def format_work_session_resume(resume):
             )
     else:
         lines.append("(none)")
+
+    last_stop = resume.get("last_stop_request") or {}
+    if last_stop:
+        lines.extend(["", "Last stop request"])
+        lines.append(f"{last_stop.get('requested_at') or ''} {last_stop.get('reason') or ''}".strip())
 
     context = resume.get("context") or {}
     lines.extend(["", "Context pressure"])

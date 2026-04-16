@@ -90,6 +90,7 @@ Evidence:
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
 - Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
+- Stop requests leave their reason in the work report and resume bundle after they are consumed, preserving why a live loop paused.
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 
 Missing proof:
@@ -177,9 +178,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `479 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `38 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `53 passed`.
+- `uv run pytest -q` current: `480 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `39 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `54 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
