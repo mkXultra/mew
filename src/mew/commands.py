@@ -566,17 +566,35 @@ def remember_work_session_default_options(session, args):
     )
     if not has_meaningful_defaults:
         return
+    current = session.get("default_options") or {}
+
+    def merged_list(name):
+        merged = []
+        for item in list(current.get(name) or []) + list(options.get(name) or []):
+            if item and item not in merged:
+                merged.append(item)
+        return merged
+
+    def merged_scalar(name):
+        value = options.get(name)
+        if value not in (None, "", [], False):
+            parser_defaults = {"auth": "auth.json", "model_backend": "codex", "act_mode": "model"}
+            if current.get(name) and value == parser_defaults.get(name):
+                return current.get(name) or ""
+            return value
+        return current.get(name) or ""
+
     session["default_options"] = {
-        "auth": options.get("auth") or "",
-        "model_backend": options.get("model_backend") or "",
-        "model": options.get("model") or "",
-        "base_url": options.get("base_url") or "",
-        "allow_read": options.get("allow_read") or [],
-        "allow_write": options.get("allow_write") or [],
-        "allow_shell": bool(options.get("allow_shell")),
-        "allow_verify": bool(options.get("allow_verify")),
-        "verify_command": options.get("verify_command") or "",
-        "act_mode": options.get("act_mode") or "",
+        "auth": merged_scalar("auth"),
+        "model_backend": merged_scalar("model_backend"),
+        "model": merged_scalar("model"),
+        "base_url": merged_scalar("base_url"),
+        "allow_read": merged_list("allow_read"),
+        "allow_write": merged_list("allow_write"),
+        "allow_shell": bool(current.get("allow_shell") or options.get("allow_shell")),
+        "allow_verify": bool(current.get("allow_verify") or options.get("allow_verify")),
+        "verify_command": merged_scalar("verify_command"),
+        "act_mode": merged_scalar("act_mode"),
     }
 
 

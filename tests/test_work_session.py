@@ -2748,6 +2748,74 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_reentry_options_preserve_existing_gates_when_partially_updated(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src").mkdir()
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--auth",
+                                "custom-auth.json",
+                                "--model-backend",
+                                "openai",
+                                "--model",
+                                "gpt-test",
+                                "--base-url",
+                                "http://127.0.0.1:9999",
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "uv run pytest -q",
+                                "--act-mode",
+                                "deterministic",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "src"]), 0)
+
+                defaults = load_state()["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["auth"], "custom-auth.json")
+                self.assertEqual(defaults["model_backend"], "openai")
+                self.assertEqual(defaults["model"], "gpt-test")
+                self.assertEqual(defaults["base_url"], "http://127.0.0.1:9999")
+                self.assertEqual(defaults["allow_read"], [".", "src"])
+                self.assertEqual(defaults["allow_write"], ["."])
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "uv run pytest -q")
+                self.assertEqual(defaults["act_mode"], "deterministic")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--auth custom-auth.json", output)
+                self.assertIn("--model-backend openai", output)
+                self.assertIn("--model gpt-test", output)
+                self.assertIn("--base-url http://127.0.0.1:9999", output)
+                self.assertIn("--allow-read . --allow-read src", output)
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
+                self.assertIn("--act-mode deterministic", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_continue_uses_persisted_session_options_after_reentry(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

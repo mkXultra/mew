@@ -268,7 +268,8 @@ used, so quiet chat still preserves the reentry affordance.
 When a live work command uses read/write/verify/model options, the active
 session remembers those defaults and reuses them in later CLI and chat controls.
 Starting a session with those options also seeds the same defaults before the
-first live step.
+first live step. Later partial commands add explicit new options without
+forgetting earlier read/write/verify/model gates.
 Controls include both a one-step continue and a bounded `--max-steps 3`
 continue, so short autonomous runs are discoverable without hiding the safer
 single-step path. Multi-step work stops at pending dry-run write approvals
