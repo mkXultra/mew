@@ -34,7 +34,7 @@ from .brief import (
     verification_outcome,
 )
 from .codex_api import load_codex_oauth
-from .config import EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
+from .config import DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
 from .dogfood import (
     format_dogfood_loop_report,
@@ -4033,7 +4033,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/ai/approve/reject native work session; add details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -4146,6 +4146,107 @@ def print_chat_workbench(task_id):
     print(format_workbench(build_workbench_data(state, task)))
 
 
+def _chat_option_value(token, parts, index):
+    if "=" in token:
+        return token.partition("=")[2], index + 1
+    if index + 1 >= len(parts):
+        return None, index + 1
+    return parts[index + 1], index + 2
+
+
+def _parse_chat_work_ai_args(parts):
+    value_options = {
+        "--auth",
+        "--model-backend",
+        "--model",
+        "--base-url",
+        "--model-timeout",
+        "--max-steps",
+        "--work-guidance",
+        "--allow-read",
+        "--allow-write",
+        "--verify-command",
+        "--verify-timeout",
+    }
+    value_option_prefixes = tuple(f"{option}=" for option in value_options)
+    args = {
+        "task_id": None,
+        "auth": "auth.json",
+        "model_backend": DEFAULT_MODEL_BACKEND,
+        "model": None,
+        "base_url": None,
+        "model_timeout": 60.0,
+        "max_steps": 1,
+        "work_guidance": "",
+        "progress": False,
+        "allow_read": [],
+        "allow_write": [],
+        "allow_shell": False,
+        "allow_verify": False,
+        "verify_command": "",
+        "verify_timeout": 300.0,
+        "json": False,
+    }
+    index = 1
+    if index < len(parts) and not parts[index].startswith("--"):
+        args["task_id"] = parts[index]
+        index += 1
+    while index < len(parts):
+        token = parts[index]
+        if token in value_options or token.startswith(value_option_prefixes):
+            value, next_index = _chat_option_value(token, parts, index)
+            if value is None:
+                return None, f"mew: missing value for {token}"
+            name = token.split("=", 1)[0]
+            if name == "--auth":
+                args["auth"] = value
+            elif name == "--model-backend":
+                args["model_backend"] = value
+            elif name == "--model":
+                args["model"] = value
+            elif name == "--base-url":
+                args["base_url"] = value
+            elif name == "--model-timeout":
+                try:
+                    args["model_timeout"] = float(value)
+                except ValueError:
+                    return None, f"mew: invalid --model-timeout: {value}"
+            elif name == "--max-steps":
+                try:
+                    args["max_steps"] = int(value)
+                except ValueError:
+                    return None, f"mew: invalid --max-steps: {value}"
+            elif name == "--work-guidance":
+                args["work_guidance"] = value
+            elif name == "--allow-read":
+                args["allow_read"].append(value)
+            elif name == "--allow-write":
+                args["allow_write"].append(value)
+            elif name == "--verify-command":
+                args["verify_command"] = value
+            elif name == "--verify-timeout":
+                try:
+                    args["verify_timeout"] = float(value)
+                except ValueError:
+                    return None, f"mew: invalid --verify-timeout: {value}"
+            index = next_index
+            continue
+        if token == "--allow-shell":
+            args["allow_shell"] = True
+            index += 1
+            continue
+        if token == "--allow-verify":
+            args["allow_verify"] = True
+            index += 1
+            continue
+        if token == "--progress":
+            args["progress"] = True
+            index += 1
+            continue
+        return None, f"mew: unsupported ai option: {token}"
+    return SimpleNamespace(**args), ""
+
+
 def chat_work_session(rest):
     try:
         parts = shlex.split(rest)
@@ -4156,7 +4257,7 @@ def chat_work_session(rest):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "approve", "reject"):
+    if action not in ("show", "start", "close", "ai", "step", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4189,6 +4290,14 @@ def chat_work_session(rest):
             close_work_session(session)
             save_state(state)
         print(f"closed work session #{session['id']}")
+        return
+
+    if action in ("ai", "step"):
+        args, error = _parse_chat_work_ai_args(parts)
+        if error:
+            print(error)
+            return
+        cmd_work_ai(args)
         return
 
     if action == "approve":

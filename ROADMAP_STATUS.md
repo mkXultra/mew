@@ -61,11 +61,12 @@ Evidence:
 - `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
 - `run_tests` tool calls now fail the work-session step when the verifier exits nonzero, and `/work-session details` includes a compact `Verification failures` section with command, cwd, exit code, stderr, and stdout context.
 - `--progress` streams `run_tests`, `run_command`, and write-verification stdout/stderr lines to stderr for both manual work tools and `mew work --ai`.
+- `/work-session ai ...` lets the user run a resident model work step from inside `mew chat`, using the same gates as `mew work --ai`.
 
 Missing proof:
 
 - No streaming model token output.
-- Live coding work session UX is improving, but it is still report-style rather than an interactive cockpit.
+- Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit.
 
 Next action:
 
@@ -138,9 +139,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `457 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `19 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `20 passed`.
+- `uv run pytest -q` current: `458 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `20 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `21 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

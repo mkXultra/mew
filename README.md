@@ -261,7 +261,9 @@ uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --al
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 ```
 
-Inside `mew chat`, use `/work-session details`, `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or `/work-session reject 7 not the right change`.
+Inside `mew chat`, use `/work-session details`, `/work-session ai 1 --allow-read . --max-steps 1`,
+`/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
+`/work-session reject 7 not the right change`.
 
 ## Resident Model
 

@@ -1006,6 +1006,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_can_run_ai_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("chat ai content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/work-session ai 1 --auth auth.json --allow-read . --max-steps 1",
+                                    {},
+                                ),
+                                "continue",
+                            )
+                output = stdout.getvalue()
+                self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
+                self.assertIn("#1 [completed] read_file tool_call=#1", output)
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["tool"], "read_file")
+                self.assertIn("chat ai content", session["tool_calls"][0]["result"]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_approve_and_reject_tool_changes(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
