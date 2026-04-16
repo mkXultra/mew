@@ -140,6 +140,28 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_save_state_rotates_previous_state_backup(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                first = default_state()
+                first["memory"]["shallow"]["latest_task_summary"] = "before"
+                save_state(first)
+
+                second = default_state()
+                second["memory"]["shallow"]["latest_task_summary"] = "after"
+                save_state(second)
+
+                backup = STATE_FILE.with_name(f"{STATE_FILE.name}.bak")
+                self.assertTrue(backup.exists())
+                backup_state = json.loads(backup.read_text(encoding="utf-8"))
+                current_state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                self.assertEqual(backup_state["memory"]["shallow"]["latest_task_summary"], "before")
+                self.assertEqual(current_state["memory"]["shallow"]["latest_task_summary"], "after")
+            finally:
+                os.chdir(old_cwd)
+
     def test_load_state_migrates_legacy_status_and_reflex_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

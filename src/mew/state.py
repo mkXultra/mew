@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 
 from .config import (
     DESIRES_FILE,
@@ -432,6 +433,11 @@ def save_state(state):
     with tmp_file.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
+    if STATE_FILE.exists():
+        backup_file = STATE_FILE.with_name(f"{STATE_FILE.name}.bak")
+        backup_tmp = backup_file.with_name(f"{backup_file.name}.{os.getpid()}.tmp")
+        shutil.copy2(STATE_FILE, backup_tmp)
+        os.replace(backup_tmp, backup_file)
     os.replace(tmp_file, STATE_FILE)
     append_state_effect(state)
 

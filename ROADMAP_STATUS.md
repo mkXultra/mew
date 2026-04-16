@@ -185,6 +185,7 @@ Evidence:
 - Interrupted work-session resumes now include a recovery plan that classifies retryable read/git tools, replannable model turns, and side-effecting work that needs human review.
 - Side-effecting interrupted command/write recovery items now include the original command or path, a review hint, and short review steps; `mew work --recover-session --json` reports the same review context instead of only refusing automatic retry.
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
+- `save_state` now rotates the previous `state.json` to `state.json.bak` before replacing it, giving the resident shell a simple recovery point if the current state file is damaged.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
 
@@ -223,7 +224,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `523 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `524 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
@@ -236,6 +237,7 @@ Next action:
 - Mew dogfood task #27 used `mew work --live` with Codex Web API in this repository; it found high context pressure from broad batch reads, which led to smaller model read defaults and diffstat-first model `git_diff`.
 - Mew dogfood task #28 used `mew work --live` with Codex Web API as a read-only self-improvement buddy; it reentered docs, chose `finish`, and exposed the need to distinguish session finish from task completion.
 - `codex-ultra` distracted-user dogfood found that generated live/continue controls failed when only `~/.codex/auth.json` existed; work/do/chat defaults now preserve normal auth fallback instead of baking in `--auth auth.json`.
+- `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 
 ## Current Roadmap Focus
 
