@@ -543,6 +543,34 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["tool_call"]["status"], "completed")
                 self.assertIn("shell ok", data["tool_call"]["result"]["stdout"])
+
+                failing_command = f"{os.environ.get('PYTHON', 'python3')} -c \"import sys; sys.exit(2)\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                failing_command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                failed_data = json.loads(stdout.getvalue())
+                self.assertEqual(failed_data["tool_call"]["status"], "completed")
+                self.assertEqual(failed_data["tool_call"]["result"]["exit_code"], 2)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                resume = stdout.getvalue()
+                self.assertIn("Failures", resume)
+                self.assertIn(f"#{failed_data['tool_call']['id']} run_command exit=2", resume)
+                self.assertIn("phase: failed", resume)
             finally:
                 os.chdir(old_cwd)
 

@@ -634,6 +634,8 @@ def work_tool_failure_record(call):
     result = call.get("result") or {}
     if call.get("tool") == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
         return result
+    if call.get("tool") == "run_command" and "exit_code" in result and result.get("exit_code") != 0:
+        return result
     if call.get("tool") in WRITE_WORK_TOOLS:
         verification = result.get("verification") or {}
         if "exit_code" in verification and verification.get("exit_code") != 0:

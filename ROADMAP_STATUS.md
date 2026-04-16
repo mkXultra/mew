@@ -143,6 +143,7 @@ Evidence:
 - Model-selected `read_file` now defaults to a smaller 12,000-character page, and model-selected `git_diff` defaults to diffstat unless full diff is explicitly requested, reducing the chance that a broad read-only batch bloats a resident session.
 - Work-mode prompts now tell the resident model that current capability gates are authoritative, reducing stale permission-failure loops where it asks for a flag already present.
 - Work-mode prompts now tell the resident model that `run_command` is shlex-parsed without a shell, reducing failed probes that use `&&`, pipes, or redirection.
+- Nonzero `run_command` exits now surface in work-session failure summaries and `phase=failed` without treating the command launch itself as a tool crash.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.

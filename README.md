@@ -99,7 +99,9 @@ uv run mew run --execute-tasks
 Native work-session `run_command` calls are parsed with `shlex` and executed
 without an interactive shell. Avoid shell operators such as pipes, redirection,
 `&&`, `||`, and `;`; wrap complex probes in an interpreter command such as
-`python -c` when needed.
+`python -c` when needed. A nonzero `run_command` exit does not stop the resident
+loop as a tool crash, but it is surfaced in the work-session failure summary and
+phase so the cockpit does not miss it.
 
 Passive verification is a narrower gate for letting the runtime check the repo
 without executing arbitrary task commands:
