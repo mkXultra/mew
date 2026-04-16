@@ -299,7 +299,7 @@ uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-st
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
 
-Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session live 1 --allow-read . --max-steps 1`,
+Inside `mew chat`, use `/work-session details`, `/work-session resume --allow-read .`, `/work-session live 1 --allow-read . --max-steps 1`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/continue focus on README.md` to reuse the previous live options with new guidance,
 `/work-session note prefer small verified steps`,

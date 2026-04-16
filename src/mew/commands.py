@@ -4810,6 +4810,32 @@ def _remember_work_continue_options(parts, chat_state):
         chat_state["work_continue_options"] = options
 
 
+def _parse_chat_work_resume_args(parts):
+    task_id = None
+    allow_read = []
+    index = 1
+    while index < len(parts):
+        token = parts[index]
+        if token in ("--task", "--task-id") and index + 1 < len(parts):
+            task_id = parts[index + 1]
+            index += 2
+            continue
+        if token == "--allow-read" and index + 1 < len(parts):
+            allow_read.append(parts[index + 1])
+            index += 2
+            continue
+        if token.startswith("--allow-read="):
+            allow_read.append(token.partition("=")[2])
+            index += 1
+            continue
+        if token.lstrip("#").isdigit() and task_id is None:
+            task_id = token.lstrip("#")
+            index += 1
+            continue
+        return None, None, f"mew: unsupported resume option: {token}"
+    return task_id, allow_read, ""
+
+
 def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     state = state or load_state()
     if session is None:
@@ -4841,6 +4867,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append("- /continue --allow-read .")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
+    lines.append("- /work-session resume --allow-read .")
     lines.append("- /work-session details")
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session recover --allow-read .")
@@ -4960,11 +4987,18 @@ def chat_work_session(rest, chat_state=None):
         return
 
     if action == "resume":
+        task_id, allow_read, error = _parse_chat_work_resume_args(parts)
+        if error:
+            print(error)
+            return
         state = load_state()
         session = active_work_session(state)
         if task_id:
             session = _latest_work_session_for_task(state, task_id)
-        print(format_work_session_resume(build_work_session_resume(session, task=work_session_task(state, session))))
+        resume = build_work_session_resume(session, task=work_session_task(state, session))
+        if resume and allow_read:
+            resume["world_state"] = build_work_world_state(resume, allow_read)
+        print(format_work_session_resume(resume))
         return
 
     if action == "approve":

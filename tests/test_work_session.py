@@ -676,6 +676,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("pressure=low tool_calls=3", text)
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", {}), "continue")
+                chat_world_text = stdout.getvalue()
+                self.assertIn("World state", chat_world_text)
+                self.assertIn("git_status exit=", chat_world_text)
+                self.assertIn("README.md", chat_world_text)
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]), 0)
                 world_resume = json.loads(stdout.getvalue())["resume"]
                 self.assertIn("exit_code", world_resume["world_state"]["git_status"])
