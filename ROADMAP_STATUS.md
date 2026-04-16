@@ -67,6 +67,7 @@ Evidence:
 - Work sessions now expose read-only `git_status`, `git_diff`, and `git_log` tools behind the read gate, avoiding unnecessary `--allow-shell` for common coding context.
 - `mew work --ai --act-mode deterministic` can skip the second model ACT call and normalize THINK output locally; the default remains model ACT to preserve the original THINK/ACT architecture.
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
+- The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
 
 Missing proof:
 

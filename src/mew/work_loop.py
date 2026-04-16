@@ -4,7 +4,7 @@ from .agent import call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .tasks import clip_output
 from .timeutil import now_iso
-from .work_session import WORK_TOOLS, WRITE_WORK_TOOLS
+from .work_session import WORK_TOOLS, WRITE_WORK_TOOLS, build_work_session_resume
 
 
 WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "wait"}
@@ -129,6 +129,7 @@ def build_work_model_context(
             "goal": session.get("goal"),
             "created_at": session.get("created_at"),
             "updated_at": session.get("updated_at"),
+            "resume": build_work_session_resume(session, task=task, limit=8),
             "tool_calls": [
                 work_tool_call_for_model(call)
                 for call in list(session.get("tool_calls") or [])[-12:]

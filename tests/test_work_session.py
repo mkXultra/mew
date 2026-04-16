@@ -611,6 +611,14 @@ class WorkSessionTests(unittest.TestCase):
                         0,
                     )
 
+                from mew.work_loop import build_work_model_context
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                task = state["tasks"][0]
+                context = build_work_model_context(state, session, task, "now")
+                self.assertEqual(context["work_session"]["resume"]["pending_approvals"][0]["tool_call_id"], 3)
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
                 resume = json.loads(stdout.getvalue())["resume"]
