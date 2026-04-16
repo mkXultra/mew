@@ -96,6 +96,7 @@ Evidence:
 - Text resume surfaces (`mew work --session --resume` and `/work-session resume`) now print controls after the compact resume bundle.
 - Quiet `mew chat --no-brief` startup still surfaces active work-session controls, so suppressing the brief does not remove the reentry affordance.
 - Active sessions remember live read/write/verify/model options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
+- CLI/chat controls now show both one-step continue and bounded `--max-steps 3` continue paths, making short autonomous runs discoverable without removing the safer single-step path.
 - Chat work-session parsing accepts task-first resume order such as `/work-session 26 resume --allow-read .`, reducing command-order friction during reentry.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.

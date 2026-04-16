@@ -591,7 +591,7 @@ def work_chat_continue_options(session):
     return shlex.join(parts)
 
 
-def _work_live_continue_command(args, task_id, session=None):
+def _work_live_continue_command(args, task_id, session=None, max_steps=1):
     parts = ["mew", "work"]
     if task_id is not None:
         parts.append(str(task_id))
@@ -617,7 +617,7 @@ def _work_live_continue_command(args, task_id, session=None):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
-    parts.extend(["--max-steps", "1"])
+    parts.extend(["--max-steps", str(max_steps)])
     return shlex.join(parts)
 
 
@@ -640,6 +640,7 @@ def work_cli_control_commands(session, args):
         return [_work_resume_command(args, task_id, session=session), f"mew work {task_id} --start-session"]
     return [
         _work_live_continue_command(args, task_id, session=session),
+        _work_live_continue_command(args, task_id, session=session, max_steps=3),
         f"mew work {task_id} --stop-session --stop-reason pause",
         _work_resume_command(args, task_id, session=session),
         "mew chat",
@@ -5107,6 +5108,27 @@ def _strip_work_guidance_options(rest):
     return shlex.join(kept)
 
 
+def _work_options_with_max_steps(rest, max_steps):
+    try:
+        parts = shlex.split(rest or "")
+    except ValueError:
+        return " ".join(part for part in ((rest or "").strip(), "--max-steps", str(max_steps)) if part)
+    kept = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        if token == "--max-steps":
+            index += 2
+            continue
+        if token.startswith("--max-steps="):
+            index += 1
+            continue
+        kept.append(token)
+        index += 1
+    kept.extend(["--max-steps", str(max_steps)])
+    return shlex.join(kept)
+
+
 def _looks_like_work_continue_options(rest):
     try:
         parts = shlex.split(rest or "")
@@ -5194,8 +5216,10 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append("- /continue")
         lines.append("- /continue <guidance>")
         lines.append(f"- /work-session live {cached}")
+        lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
         lines.append("- /continue --allow-read .")
+        lines.append("- /work-session live --allow-read . --max-steps 3")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
     lines.append("- /work-session resume --allow-read .")

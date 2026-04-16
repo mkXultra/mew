@@ -827,6 +827,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session #1 [active] task=#1", output)
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --live --auth auth.json --model-backend codex --allow-read .", output)
+                self.assertIn("--max-steps 3", output)
                 self.assertIn("mew chat", output)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -2545,6 +2546,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew chat. Type /help", output)
                 self.assertIn("Next controls", output)
                 self.assertIn("/continue --allow-read .", output)
+                self.assertIn("/work-session live --allow-read . --max-steps 3", output)
                 self.assertIn("/work-session resume", output)
             finally:
                 os.chdir(old_cwd)
@@ -2627,6 +2629,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("/work-session live --auth auth.json", output)
                 self.assertIn("--allow-write .", output)
                 self.assertIn("--verify-command 'uv run pytest -q'", output)
+                self.assertIn("--max-steps 3", output)
             finally:
                 os.chdir(old_cwd)
 
