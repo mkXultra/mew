@@ -86,6 +86,7 @@ Evidence:
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
+- Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 
 Missing proof:
 
@@ -135,6 +136,7 @@ Evidence:
 - Interrupted effects receive `recovery_hint`.
 - Runtime effects now record user-visible `outcome`.
 - `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
+- Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
 
 Missing proof:
 

@@ -385,6 +385,11 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(session["model_turns"][0]["status"], "interrupted")
                 self.assertTrue(session["tool_calls"][0]["finished_at"])
                 self.assertIn("verify world state", session["tool_calls"][0]["recovery_hint"])
+                with redirect_stdout(StringIO()) as resume_stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(resume_stdout.getvalue())["resume"]
+                self.assertEqual(resume["phase"], "interrupted")
+                self.assertIn("verify the world", resume["next_action"])
             finally:
                 os.chdir(old_cwd)
 

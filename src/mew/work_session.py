@@ -521,6 +521,26 @@ def build_work_context_metrics(calls, turns):
     }
 
 
+def work_session_phase(session, calls, turns, pending_approvals):
+    if not session:
+        return "none"
+    if session.get("status") == "closed":
+        return "closed"
+    if pending_approvals:
+        return "awaiting_approval"
+    if any((call or {}).get("status") == "running" for call in calls):
+        return "running_tool"
+    if any((turn or {}).get("status") == "running" for turn in turns):
+        return "planning"
+    latest_call = calls[-1] if calls else None
+    latest_turn = turns[-1] if turns else None
+    if (latest_call or {}).get("status") == "interrupted" or (latest_turn or {}).get("status") == "interrupted":
+        return "interrupted"
+    if latest_call and (latest_call.get("status") == "failed" or work_tool_failure_record(latest_call)):
+        return "failed"
+    return "idle"
+
+
 def build_work_session_resume(session, task=None, limit=8):
     if not session:
         return None
@@ -608,6 +628,7 @@ def build_work_session_resume(session, task=None, limit=8):
             }
         )
 
+    phase = work_session_phase(session, calls, turns, pending_approvals)
     latest_call = calls[-1] if calls else None
     latest_failed = bool(
         latest_call
@@ -621,6 +642,12 @@ def build_work_session_resume(session, task=None, limit=8):
         next_action = "review this closed work session or start a new one with mew work --ai"
     elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
+    elif phase == "running_tool":
+        next_action = "wait for the running work tool, or run mew repair if the process died"
+    elif phase == "planning":
+        next_action = "wait for the running work model turn, or run mew repair if the process died"
+    elif phase == "interrupted":
+        next_action = "inspect interrupted work state, verify the world, then retry or choose a new action"
     elif latest_failed:
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
     else:
@@ -632,6 +659,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "status": session.get("status"),
         "title": session.get("title") or (task or {}).get("title") or "",
         "goal": session.get("goal") or "",
+        "phase": phase,
         "updated_at": session.get("updated_at"),
         "files_touched": paths[-limit:],
         "commands": commands[-limit:],
@@ -649,6 +677,7 @@ def format_work_session_resume(resume):
     lines = [
         f"Work resume #{resume.get('session_id')} [{resume.get('status')}] task=#{resume.get('task_id')}",
         f"title: {resume.get('title') or ''}",
+        f"phase: {resume.get('phase') or 'unknown'}",
         f"updated_at: {resume.get('updated_at')}",
         "",
         "Files touched",
