@@ -140,6 +140,8 @@ from .work_session import (
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
+    GIT_WORK_TOOLS,
+    READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
     work_session_task,
 )
@@ -487,11 +489,14 @@ def format_work_ai_report(report):
     for step in report.get("steps") or []:
         action = step.get("action") or {}
         tool_call = step.get("tool_call") or {}
+        tool_calls = step.get("tool_calls") or []
         status = step.get("status") or tool_call.get("status") or "unknown"
         action_type = action.get("type") or "unknown"
         line = f"#{step.get('index')} [{status}] {action_type}"
         if tool_call:
             line += f" tool_call=#{tool_call.get('id')}"
+        if tool_calls:
+            line += " tool_calls=" + ",".join(f"#{call.get('id')}" for call in tool_calls)
         if step.get("outbox_message"):
             line += f" message=#{step['outbox_message'].get('id')}"
         if step.get("question"):
@@ -582,6 +587,98 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
     if output_progress:
         return execute_work_tool(tool, parameters, allowed_read_roots, on_output=output_progress)
     return execute_work_tool(tool, parameters, allowed_read_roots)
+
+
+BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
+
+
+def run_work_batch_action(session_id, task_id, index, planned, action, args, progress):
+    sub_actions = [
+        sub_action
+        for sub_action in (action.get("tools") or [])[:5]
+        if (sub_action.get("type") or sub_action.get("tool")) in BATCH_READ_WORK_TOOLS
+    ]
+    if not sub_actions:
+        sub_actions = [{"type": "wait", "reason": "batch has no read-only tools"}]
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        turn = start_work_model_turn(
+            state,
+            session,
+            planned.get("decision_plan") or {},
+            planned.get("action_plan") or {},
+            action,
+        )
+        turn_id = turn.get("id")
+        save_state(state)
+
+    tool_calls = []
+    error = ""
+    for sub_action in sub_actions:
+        action_type = sub_action.get("type") or sub_action.get("tool")
+        if action_type not in BATCH_READ_WORK_TOOLS:
+            error = f"batch tool is not read-only: {action_type or 'missing'}"
+            break
+        parameters = work_tool_parameters_from_action(
+            sub_action,
+            allowed_write_roots=[],
+            allow_shell=False,
+            allow_verify=False,
+            verify_command="",
+            verify_timeout=args.verify_timeout,
+        )
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            tool_call = start_work_tool_call(state, session, action_type, parameters)
+            tool_call_id = tool_call.get("id")
+            save_state(state)
+        if progress:
+            progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
+        try:
+            result = execute_work_tool_with_output(
+                action_type,
+                parameters,
+                args.allow_read or [],
+                work_tool_output_progress(progress, tool_call_id),
+            )
+            error = work_tool_result_error(action_type, result)
+        except (OSError, ValueError) as exc:
+            result = None
+            error = str(exc)
+        with state_lock():
+            state = load_state()
+            tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+            save_state(state)
+        tool_calls.append(tool_call)
+        if progress:
+            progress(f"step #{index}: batch tool #{tool_call_id} {tool_call.get('status')}")
+        if error:
+            break
+
+    tool_call_ids = [call.get("id") for call in tool_calls if call]
+    with state_lock():
+        state = load_state()
+        turn = finish_work_model_turn(
+            state,
+            session_id,
+            turn_id,
+            tool_call_id=tool_call_ids[0] if tool_call_ids else None,
+            error=error,
+        )
+        if turn is not None:
+            turn["tool_call_ids"] = tool_call_ids
+        save_state(state)
+    return {
+        "index": index,
+        "status": "failed" if error else "completed",
+        "action": action,
+        "model_turn": turn,
+        "tool_calls": tool_calls,
+        "error": error,
+        "summary": f"ran {len(tool_calls)} batch tool(s)",
+    }
 
 
 def cmd_work(args):
@@ -730,6 +827,25 @@ def cmd_work_ai(args):
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
         action_type = action.get("type")
+        if action_type == "batch":
+            if getattr(args, "live", False):
+                print("")
+                print(f"Work live step #{index} action")
+                print(format_work_action(action))
+            batch_step = run_work_batch_action(session_id, task_id, index, planned, action, args, progress)
+            report["steps"].append(batch_step)
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                print("")
+                print(f"Work live step #{index} resume")
+                print(format_work_session_resume(build_work_session_resume(session, task=task)))
+            if batch_step.get("error"):
+                report["stop_reason"] = "tool_failed"
+                break
+            continue
         if action_type not in WORK_TOOLS:
             if getattr(args, "live", False):
                 print("")

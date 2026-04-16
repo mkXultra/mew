@@ -1203,6 +1203,47 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_batch_runs_multiple_read_only_tools_in_one_turn(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("batch content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "collect context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "inspect_dir", "path": "."},
+                                {"type": "read_file", "path": "README.md"},
+                            ],
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--allow-read", ".", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["steps"][0]["action"]["type"], "batch")
+                self.assertEqual([call["tool"] for call in data["steps"][0]["tool_calls"]], ["inspect_dir", "read_file"])
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(len(session["model_turns"]), 1)
+                self.assertEqual(session["model_turns"][0]["tool_call_ids"], [1, 2])
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["inspect_dir", "read_file"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prints_resume_after_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

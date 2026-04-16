@@ -655,6 +655,19 @@ def format_work_action(action, parameters=None, tool_call_id=None):
     reason = action.get("reason") or action.get("summary") or action.get("text") or action.get("question") or ""
     if reason:
         lines.append(f"reason: {clip_output(str(reason), 500)}")
+    if action_type == "batch":
+        tools = action.get("tools") or []
+        lines.append(f"tools: {len(tools)}")
+        for index, tool in enumerate(tools[:5], start=1):
+            tool_type = tool.get("type") or tool.get("tool") or "unknown"
+            details = []
+            for key in ("path", "query", "pattern", "command", "cwd", "base", "offset", "limit"):
+                value = tool.get(key)
+                if value is not None and value != "":
+                    details.append(f"{key}={clip_output(str(value), 120)}")
+            suffix = " " + " ".join(details) if details else ""
+            lines.append(f"- {index}. {tool_type}{suffix}")
+        return "\n".join(lines)
     for key in WORK_ACTION_DISPLAY_FIELDS:
         value = _display_value(action, parameters, key)
         if value is None or value == "":

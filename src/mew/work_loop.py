@@ -4,11 +4,19 @@ from .agent import call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .tasks import clip_output
 from .timeutil import now_iso
-from .work_session import WORK_TOOLS, WRITE_WORK_TOOLS, build_work_session_resume
+from .work_session import (
+    GIT_WORK_TOOLS,
+    READ_ONLY_WORK_TOOLS,
+    WORK_TOOLS,
+    WRITE_WORK_TOOLS,
+    build_work_session_resume,
+)
 
 
+WORK_BATCH_ACTIONS = {"batch"}
 WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "wait"}
 WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
+WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
 
 
@@ -95,6 +103,7 @@ def work_model_turn_for_model(turn):
             if key in ("type", "tool", "path", "query", "pattern", "reason", "summary")
         },
         "tool_call_id": turn.get("tool_call_id"),
+        "tool_call_ids": turn.get("tool_call_ids") or [],
         "summary": clip_output(turn.get("summary") or "", WORK_RESULT_TEXT_LIMIT),
         "error": clip_output(turn.get("error") or "", WORK_RESULT_TEXT_LIMIT),
         "started_at": turn.get("started_at"),
@@ -159,7 +168,8 @@ def _work_action_schema_text():
         "{\n"
         '  "summary": "short reason",\n'
         '  "action": {\n'
-        '    "type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
+        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
+        '    "tools": [{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
         '    "pattern": "glob pattern",\n'
@@ -223,6 +233,24 @@ def normalize_work_model_action(action_plan, verify_command=""):
             "type": "wait",
             "reason": f"unsupported work action: {action_type or 'missing'}",
         }
+
+    if action_type == "batch":
+        raw_tools = action.get("tools") or action.get("actions") or []
+        normalized_tools = []
+        for item in raw_tools[:5]:
+            if not isinstance(item, dict):
+                continue
+            sub_action = normalize_work_model_action({"action": item}, verify_command=verify_command)
+            if sub_action.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+                normalized_tools.append(sub_action)
+        if not normalized_tools:
+            return {"type": "wait", "reason": "batch requires at least one read-only tool"}
+        normalized = {"type": "batch", "tools": normalized_tools}
+        if action.get("reason") is not None:
+            normalized["reason"] = action.get("reason")
+        if action_plan.get("summary"):
+            normalized["summary"] = action_plan.get("summary")
+        return normalized
 
     normalized = {"type": action_type}
     for key in (
