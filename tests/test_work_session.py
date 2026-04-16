@@ -928,11 +928,16 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(interrupted_resume["phase"], "interrupted")
                 self.assertEqual(interrupted_resume["recovery_plan"]["items"][0]["action"], "retry_tool")
                 self.assertIn("recover-session", interrupted_resume["recovery_plan"]["items"][0]["hint"])
+                self.assertIn("--auto-recover-safe", interrupted_resume["recovery_plan"]["items"][0]["auto_hint"])
+                self.assertIn("--auto-recover-safe", interrupted_resume["recovery_plan"]["items"][0]["chat_auto_hint"])
                 self.assertIn("--auto-recover-safe", stdout.getvalue())
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
-                self.assertIn("Recovery plan", stdout.getvalue())
+                text_resume = stdout.getvalue()
+                self.assertIn("Recovery plan", text_resume)
+                self.assertIn("auto: mew work 1 --session --resume --allow-read <path> --auto-recover-safe", text_resume)
+                self.assertIn("chat_auto: /work-session resume 1 --allow-read <path> --auto-recover-safe", text_resume)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)

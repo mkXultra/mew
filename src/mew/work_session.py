@@ -698,6 +698,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         }
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
             item["hint"] = f"mew work{task_arg} --recover-session --allow-read <path>"
+            item["auto_hint"] = f"mew work{task_arg} --session --resume --allow-read <path> --auto-recover-safe"
+            item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read <path> --auto-recover-safe"
         if action == "needs_user_review":
             item["review_hint"] = f"mew work{task_arg} --session --resume --allow-read <path>"
             item["review_steps"] = review_steps
@@ -976,6 +978,10 @@ def format_work_session_resume(resume):
             )
             if item.get("hint"):
                 lines.append(f"  hint: {item.get('hint')}")
+            if item.get("auto_hint"):
+                lines.append(f"  auto: {item.get('auto_hint')}")
+            if item.get("chat_auto_hint"):
+                lines.append(f"  chat_auto: {item.get('chat_auto_hint')}")
             if item.get("path"):
                 lines.append(f"  path: {item.get('path')}")
             if item.get("command"):
