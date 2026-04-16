@@ -923,6 +923,57 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_reuses_latest_verification_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; assert Path('notes.md').read_text() == 'after\\n'\""
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]), 1)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--approve-tool", "2", "--allow-write", ".", "--json"]), 0)
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                self.assertEqual(approved["tool_call"]["result"]["verification"]["command"], command)
+                self.assertEqual(approved["tool_call"]["result"]["verification"]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_rolls_back_failed_applied_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -85,6 +85,7 @@ Evidence:
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
+- Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.
@@ -182,9 +183,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `483 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `42 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `57 passed`.
+- `uv run pytest -q` current: `484 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `43 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `58 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

@@ -139,6 +139,7 @@ from .work_session import (
     format_work_action,
     format_work_session_resume,
     format_work_session,
+    latest_work_verify_command,
     mark_running_work_interrupted,
     request_work_session_stop,
     start_work_model_turn,
@@ -1115,6 +1116,12 @@ def cmd_work_approve_tool(args):
         if not session:
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1
+        task = work_session_task(state, session)
+        if not getattr(args, "verify_command", None):
+            inferred_verify_command = latest_work_verify_command(session.get("tool_calls") or [], task=task)
+            if inferred_verify_command:
+                args.verify_command = inferred_verify_command
+                args.allow_verify = True
         source_call = find_work_tool_call(session, args.approve_tool)
         if not source_call:
             print(f"mew: work tool call not found: {args.approve_tool}", file=sys.stderr)
@@ -4908,14 +4915,14 @@ def chat_work_session(rest, chat_state=None):
                 continue
             print(f"mew: unsupported approve option: {token}")
             return
-        if not allow_write or not verify_command:
-            print("mew: approve requires --allow-write and --verify-command")
+        if not allow_write:
+            print("mew: approve requires --allow-write")
             return
         args = SimpleNamespace(
             task_id=approve_task_id,
             approve_tool=tool_call_id,
             allow_write=allow_write,
-            allow_verify=True,
+            allow_verify=bool(verify_command),
             verify_command=verify_command,
             verify_cwd=verify_cwd,
             verify_timeout=verify_timeout,

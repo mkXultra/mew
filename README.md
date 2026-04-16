@@ -258,7 +258,9 @@ to pause at the next model/tool boundary with `mew work --stop-session` or
 continue, stop, resume, or chat command is visible. Work-mode `remember` records
 durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
-`/work-session note`.
+`/work-session note`. Approving a dry-run write can reuse the latest session
+verification command, so `--verify-command` does not need to be repeated when a
+recent `run_tests` or task command already defines it.
 
 ```sh
 uv run mew work 1 --start-session
