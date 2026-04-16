@@ -199,7 +199,7 @@ def dogfood_subprocess_env():
     return env
 
 
-def run_command(command, workspace, timeout=30, env=None):
+def run_command(command, workspace, timeout=30, env=None, input_text=None):
     try:
         result = subprocess.run(
             command,
@@ -209,6 +209,7 @@ def run_command(command, workspace, timeout=30, env=None):
             timeout=timeout,
             shell=False,
             env=env,
+            input=input_text,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout if isinstance(exc.stdout, str) else ""
@@ -497,8 +498,8 @@ def run_work_session_scenario(workspace, env=None):
     commands = []
     checks = []
 
-    def run(args, timeout=30):
-        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+    def run(args, timeout=30, input_text=None):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env, input_text=input_text)
         commands.append(result)
         return result
 
@@ -564,6 +565,11 @@ def run_work_session_scenario(workspace, env=None):
         ]
     )
     work_result = run(["work", "1", "--json"])
+    chat_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session details\n",
+    )
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -635,6 +641,15 @@ def run_work_session_scenario(workspace, env=None):
         == ["read_file", "glob", "run_tests", "edit_file", "write_file"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
         expected=["read_file", "glob", "run_tests", "edit_file", "write_file"],
+    )
+    _scenario_check(
+        checks,
+        "chat_surfaces_work_session_details",
+        chat_result.get("exit_code") == 0
+        and "Work session #1 [active] task=#1" in (chat_result.get("stdout") or "")
+        and "Recent diffs" in (chat_result.get("stdout") or ""),
+        observed=command_result_tail(chat_result),
+        expected="chat /work-session details shows active session and recent diffs",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 
