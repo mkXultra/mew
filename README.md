@@ -368,7 +368,9 @@ unless `--auth` is explicitly supplied. Use `--prompt-approval` to review
 dry-run writes inline, or `--read-only` / `--no-verify` to remove the default
 write and verification gates.
 
-Inside `mew chat`, use `/work-session details`, `/work-session resume --allow-read .`, `/work-session live 1 --allow-read . --max-steps 1`,
+Inside `mew chat`, use `/work-session details`, `/work-session resume --allow-read .`,
+`/work-session resume --allow-read . --auto-recover-safe`,
+`/work-session live 1 --allow-read . --max-steps 1`,
 `/work-session live --prompt-approval --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/continue focus on README.md` to reuse the previous or persisted live options with new guidance,

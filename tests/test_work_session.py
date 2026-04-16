@@ -1078,6 +1078,62 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_resume_auto_recovers_safe_read_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("chat auto recover me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Chat auto recover read.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session resume --allow-read . --auto-recover-safe", {}),
+                        "continue",
+                    )
+                output = stdout.getvalue()
+                self.assertIn("Auto recovery", output)
+                self.assertIn("recovered work tool #1 -> #2 [completed] read_file", output)
+                self.assertIn("phase: idle", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recovery_plan_deduplicates_turn_for_interrupted_tool(self):
         from mew.work_session import build_work_session_resume
 

@@ -183,7 +183,7 @@ Evidence:
 - Runtime effects now record user-visible `outcome`.
 - `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
 - Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
-- `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; `mew work --session --resume --allow-read ... --auto-recover-safe` can opt into the same safe read/git retry while showing the refreshed resume. Write/shell/verification recovery remains gated by human review.
+- `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; `mew work --session --resume --allow-read ... --auto-recover-safe` and `/work-session resume --allow-read ... --auto-recover-safe` can opt into the same safe read/git retry while showing the refreshed resume. Write/shell/verification recovery remains gated by human review.
 - Interrupted work-session resumes now include a recovery plan that classifies retryable read/git tools, replannable model turns, and side-effecting work that needs human review.
 - Side-effecting interrupted command/write recovery items now include the original command or path, a review hint, and short review steps; `mew work --recover-session --json` reports the same review context instead of only refusing automatic retry.
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
@@ -226,7 +226,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `528 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `529 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

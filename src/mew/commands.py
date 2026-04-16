@@ -5175,6 +5175,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
 /work-session resume --allow-read .   add live git/file world state to the reentry bundle
+/work-session resume --auto-recover-safe --allow-read .
+                                      retry one interrupted read/git tool before showing resume
 /work-session start <task-id>         start or reuse a native work session
 /outside chat: mew do <task-id>       run the common supervised coding loop
 /continue --allow-read .              run one live resident-model step
@@ -5460,6 +5462,7 @@ def _remember_work_continue_options(parts, chat_state):
 def _parse_chat_work_resume_args(parts):
     task_id = None
     allow_read = []
+    auto_recover_safe = False
     index = 1
     while index < len(parts):
         token = parts[index]
@@ -5475,12 +5478,16 @@ def _parse_chat_work_resume_args(parts):
             allow_read.append(token.partition("=")[2])
             index += 1
             continue
+        if token == "--auto-recover-safe":
+            auto_recover_safe = True
+            index += 1
+            continue
         if token.lstrip("#").isdigit() and task_id is None:
             task_id = token.lstrip("#")
             index += 1
             continue
-        return None, None, f"mew: unsupported resume option: {token}"
-    return task_id, allow_read, ""
+        return None, None, False, f"mew: unsupported resume option: {token}"
+    return task_id, allow_read, auto_recover_safe, ""
 
 
 def format_work_cockpit_controls(state=None, session=None, continue_options=""):
@@ -5499,6 +5506,9 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         return "\n".join(lines)
 
     resume = build_work_session_resume(session, task=work_session_task(state, session))
+    recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
+    if any(item.get("action") == "retry_tool" for item in recovery_items):
+        lines.append("- /work-session resume --allow-read . --auto-recover-safe")
     for approval in (resume or {}).get("pending_approvals") or []:
         if approval.get("approve_hint"):
             lines.append(f"- {approval.get('approve_hint')}")
@@ -5639,7 +5649,7 @@ def chat_work_session(rest, chat_state=None):
         return
 
     if action == "resume":
-        task_id, allow_read, error = _parse_chat_work_resume_args(parts)
+        task_id, allow_read, auto_recover_safe, error = _parse_chat_work_resume_args(parts)
         if error:
             print(error)
             return
@@ -5647,12 +5657,28 @@ def chat_work_session(rest, chat_state=None):
         session = active_work_session(state)
         if task_id:
             session = _latest_work_session_for_task(state, task_id)
+        auto_recovery = None
+        if auto_recover_safe:
+            recover_args = SimpleNamespace(task_id=task_id, allow_read=allow_read, progress=False, json=False)
+            _, auto_recovery = _work_recover_session_once(recover_args, safe_only=True)
+            state = load_state()
+            session = active_work_session(state)
+            if task_id:
+                session = _latest_work_session_for_task(state, task_id)
         resume = build_work_session_resume(session, task=work_session_task(state, session))
         if resume and allow_read:
             resume["world_state"] = build_work_world_state(resume, allow_read)
         if not resume and not task_id:
+            if auto_recovery is not None:
+                print("Auto recovery")
+                print_work_recovery_report(auto_recovery)
+                print("")
             print(format_no_active_work_session(state))
             return
+        if auto_recovery is not None:
+            print("Auto recovery")
+            print_work_recovery_report(auto_recovery)
+            print("")
         print(format_work_session_resume(resume))
         if resume:
             print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))

@@ -2951,6 +2951,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("/work-session <task-id> resume", output)
         self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
+        self.assertIn("/work-session resume --auto-recover-safe", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
         self.assertIn("/work-session live --prompt-approval", output)
         self.assertNotIn("/agents [all]", output)
