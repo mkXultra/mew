@@ -20,7 +20,15 @@ from mew.agent import (
     think_phase,
 )
 from mew.read_tools import read_file
-from mew.state import add_attention_item, add_event, add_outbox_message, add_question, default_state, migrate_state
+from mew.state import (
+    add_attention_item,
+    add_event,
+    add_outbox_message,
+    add_question,
+    default_state,
+    has_open_question,
+    migrate_state,
+)
 from mew.thoughts import format_thought_entry
 from mew.timeutil import now_iso
 
@@ -134,6 +142,15 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(waiting["status"], "open")
         self.assertIn(waiting["id"], [item["id"] for item in migrated["attention"]["items"]])
+
+    def test_has_open_question_checks_question_state_after_outbox_read(self):
+        state = default_state()
+        question, _created = add_question(state, "Should I keep observing?")
+        for message in state["outbox"]:
+            if message.get("question_id") == question["id"]:
+                message["read_at"] = "already-seen"
+
+        self.assertTrue(has_open_question(state, "Should I keep observing?"))
 
     def test_action_plan_records_thought_journal_threads(self):
         state = default_state()

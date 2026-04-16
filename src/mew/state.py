@@ -1117,6 +1117,16 @@ def pending_question_for_task(state, task_id):
     return None
 
 def has_open_question(state, text, task_id=None):
+    if text:
+        for question in state.get("questions", []):
+            if question.get("status") != "open":
+                continue
+            if question.get("text") != text:
+                continue
+            if task_id is None and question.get("related_task_id") is None:
+                return True
+            if task_id is not None and str(question.get("related_task_id")) == str(task_id):
+                return True
     if task_id is not None and pending_question_for_task(state, task_id):
         return True
     if task_id is None and text and has_unread_outbox_message(state, "question", text):
