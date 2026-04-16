@@ -704,6 +704,13 @@ def stop_process(process, timeout=10.0):
     return process.wait(timeout=timeout)
 
 
+def dogfood_stop_timeout(args):
+    timeout = max(0.0, float(getattr(args, "stop_timeout", 10.0) or 0.0))
+    if getattr(args, "ai", False):
+        timeout = max(timeout, float(getattr(args, "model_timeout", 60.0) or 60.0) + 15.0)
+    return timeout
+
+
 def read_json_file(path, default):
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -1358,7 +1365,7 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
     try:
         time.sleep(max(0.0, args.duration))
     finally:
-        exit_code = stop_process(process, timeout=args.stop_timeout)
+        exit_code = stop_process(process, timeout=dogfood_stop_timeout(args))
 
     duration = time.monotonic() - started_at
     agent_wait_results = wait_for_active_agent_runs(

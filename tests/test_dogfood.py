@@ -15,6 +15,7 @@ from mew.dogfood import (
     build_dogfood_report,
     build_runtime_command,
     copy_source_workspace,
+    dogfood_stop_timeout,
     format_dogfood_loop_report,
     format_dogfood_report,
     format_dogfood_scenario_report,
@@ -35,6 +36,16 @@ from mew.state import add_event, add_outbox_message, default_state
 
 
 class DogfoodTests(unittest.TestCase):
+    def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
+        args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
+
+        self.assertEqual(dogfood_stop_timeout(args), 75.0)
+
+    def test_dogfood_stop_timeout_keeps_explicit_longer_timeout(self):
+        args = SimpleNamespace(ai=True, stop_timeout=120.0, model_timeout=60.0)
+
+        self.assertEqual(dogfood_stop_timeout(args), 120.0)
+
     def test_prepare_workspace_creates_readme(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace, created = prepare_dogfood_workspace(Path(tmp) / "dog")
