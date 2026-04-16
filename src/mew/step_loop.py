@@ -188,6 +188,24 @@ def compact_step_action(action):
     return compact
 
 
+def compact_step_reflex_observation(observation):
+    action = observation.get("action") if isinstance(observation.get("action"), dict) else {}
+    compact = {
+        "round": observation.get("round"),
+        "status": observation.get("status") or "unknown",
+        "action": {
+            key: clip_step_text(value) if isinstance(value, str) else value
+            for key, value in action.items()
+            if value is not None
+        },
+    }
+    if observation.get("result"):
+        compact["result"] = clip_step_text(observation.get("result"))
+    if observation.get("error"):
+        compact["error"] = clip_step_text(observation.get("error"))
+    return {key: value for key, value in compact.items() if value is not None}
+
+
 def compact_step_effect(effect_type, item):
     effect = {"type": effect_type, "id": item.get("id")}
     timestamp = item.get("created_at") or item.get("updated_at")
@@ -298,6 +316,10 @@ def record_step_run(state, step, stop_reason, at):
         "skipped_actions": [
             compact_step_action(action) for action in step.get("skipped_actions") or []
         ],
+        "reflex_observations": [
+            compact_step_reflex_observation(observation)
+            for observation in step.get("reflex_observations") or []
+        ],
         "effects": [
             dict(effect)
             for effect in list(step.get("effects") or [])[:MAX_STEP_EFFECTS]
@@ -391,6 +413,10 @@ def run_step_loop(
                 f"step #{index + 1}: planning ok "
                 f"planned_event={_planned_event_label(event_snapshot, dry_run=dry_run)}"
             )
+        reflex_observations = [
+            compact_step_reflex_observation(observation)
+            for observation in decision_plan.get("reflex_observations") or []
+        ]
         filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
         filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
@@ -452,6 +478,7 @@ def run_step_loop(
                     "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
                     "actions": filtered_action_plan.get("actions", []),
                     "skipped_actions": filtered_action_plan.get("skipped_actions", []),
+                    "reflex_observations": reflex_observations,
                     "effects": collect_step_effects(state, event_id),
                     "counts": counts,
                 }
@@ -465,6 +492,7 @@ def run_step_loop(
                 "summary": filtered_action_plan.get("summary") or decision_plan.get("summary") or "",
                 "actions": filtered_action_plan.get("actions", []),
                 "skipped_actions": filtered_action_plan.get("skipped_actions", []),
+                "reflex_observations": reflex_observations,
                 "counts": counts,
             }
         steps.append(step)
@@ -503,6 +531,13 @@ def format_step_loop_report(report):
             target = action.get("path") or action.get("title") or action.get("task_id") or ""
             suffix = f" {target}" if target else ""
             lines.append(f"  - {label}{suffix}")
+        for observation in step.get("reflex_observations") or []:
+            action = observation.get("action") or {}
+            label = action.get("type") or "observation"
+            target = action.get("path") or action.get("query") or ""
+            target_suffix = f" {target}" if target else ""
+            status = observation.get("status") or "unknown"
+            lines.append(f"  reflex round {observation.get('round')}: {label}{target_suffix} {status}")
         skipped = step.get("skipped_actions") or []
         if skipped:
             labels = ", ".join(action.get("type") or "unknown" for action in skipped)

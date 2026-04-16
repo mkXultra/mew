@@ -10,6 +10,7 @@ from mew.step_loop import (
     MAX_STEP_EFFECTS,
     collect_step_effects,
     filter_step_action_plan,
+    format_step_loop_report,
     load_state_readonly,
     run_step_loop,
     step_stop_reason,
@@ -225,6 +226,42 @@ class StepLoopTests(unittest.TestCase):
         text = format_step_loop_report(report)
 
         self.assertIn("dry-run: read actions were planned but not executed", text)
+
+    def test_step_loop_reports_reflex_observations(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Observed README.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [{"type": "remember", "summary": "Observed README."}],
+                    "reflex_observations": [
+                        {
+                            "round": 1,
+                            "status": "ok",
+                            "action": {"type": "read_file", "path": "README.md"},
+                            "result": "Read file README.md\nhello from report",
+                        }
+                    ],
+                }
+                fake_actions = {
+                    "summary": "Observed README.",
+                    "actions": [{"type": "record_memory", "summary": "Observed README."}],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(max_steps=1)
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        observation = report["steps"][0]["reflex_observations"][0]
+        self.assertEqual(observation["action"]["path"], "README.md")
+        self.assertIn("hello from report", observation["result"])
+        self.assertEqual(state["step_runs"][0]["reflex_observations"][0]["status"], "ok")
+        self.assertIn("reflex round 1: read_file README.md ok", format_step_loop_report(report))
 
     def test_step_run_records_visible_effects(self):
         old_cwd = os.getcwd()
