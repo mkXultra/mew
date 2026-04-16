@@ -515,6 +515,33 @@ def summarize_work_tool_result(tool, result):
     return format_command_record(result or {})
 
 
+def compact_work_tool_summary(call):
+    tool = call.get("tool")
+    result = call.get("result") or {}
+    summary = call.get("summary") or call.get("error") or ""
+    if tool == "read_file":
+        suffix = " (truncated)" if result.get("truncated") else ""
+        offset = result.get("offset") or 0
+        next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
+        return (
+            f"Read file {result.get('path') or (call.get('parameters') or {}).get('path')} "
+            f"size={result.get('size')} chars offset={offset}{next_text}{suffix}"
+        )
+    if tool == "search_text":
+        suffix = " (truncated)" if result.get("truncated") else ""
+        return (
+            f"Searched {result.get('path') or (call.get('parameters') or {}).get('path')} "
+            f"for {result.get('query')!r} matches={len(result.get('matches') or [])}{suffix}"
+        )
+    if tool == "glob":
+        suffix = " (truncated)" if result.get("truncated") else ""
+        return (
+            f"Globbed {result.get('path') or (call.get('parameters') or {}).get('path')} "
+            f"for {result.get('pattern')!r} matches={len(result.get('matches') or [])}{suffix}"
+        )
+    return summary
+
+
 def work_tool_failure_record(call):
     result = call.get("result") or {}
     if call.get("tool") == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
@@ -905,7 +932,12 @@ def format_work_session_resume(resume):
     if world:
         lines.extend(["", "World state"])
         git_status = world.get("git_status") or {}
-        lines.append(f"git_status exit={git_status.get('exit_code')} {git_status.get('stdout') or '(clean)'}")
+        git_exit = git_status.get("exit_code")
+        if git_exit == 0:
+            git_detail = git_status.get("stdout") or "(clean)"
+        else:
+            git_detail = git_status.get("stderr") or git_status.get("stdout") or "(unavailable)"
+        lines.append(f"git_status exit={git_exit} {git_detail}")
         files = world.get("files") or []
         if files:
             for item in files[:8]:
@@ -1105,9 +1137,12 @@ def format_work_session(session, task=None, limit=8, details=False):
         lines.append("(none)")
     else:
         for call in recent_calls:
+            summary = call.get("summary") or call.get("error") or ""
+            if not details:
+                summary = compact_work_tool_summary(call)
             lines.append(
                 f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
-                f"{call.get('summary') or call.get('error') or ''}"
+                f"{summary}"
             )
     return "\n".join(lines)
 

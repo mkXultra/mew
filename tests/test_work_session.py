@@ -119,6 +119,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session", text)
                 self.assertIn("phase=idle", text)
                 self.assertIn("tool_calls=2", text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                session_text = stdout.getvalue()
+                self.assertIn("Read file", session_text)
+                self.assertIn("matches=1", session_text)
+                self.assertNotIn("hello native hands", session_text)
             finally:
                 os.chdir(old_cwd)
 
@@ -680,6 +687,8 @@ class WorkSessionTests(unittest.TestCase):
                 chat_world_text = stdout.getvalue()
                 self.assertIn("World state", chat_world_text)
                 self.assertIn("git_status exit=", chat_world_text)
+                git_status_line = next(line for line in chat_world_text.splitlines() if line.startswith("git_status exit="))
+                self.assertNotIn("exit=128 (clean)", git_status_line)
                 self.assertIn("README.md", chat_world_text)
 
                 with redirect_stdout(StringIO()) as stdout:
