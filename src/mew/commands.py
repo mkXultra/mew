@@ -700,12 +700,23 @@ def apply_work_control_action(state, session, task, action):
     task_id = task.get("id") if task else None
     if action_type == "finish":
         note = _work_control_text(action, "Work session finished.")
+        current_time = now_iso()
         if session:
             close_work_session(session)
         if task is not None:
             append_task_note(task, f"Work session finished: {note}")
-            task["updated_at"] = now_iso()
-        return {"finished_note": note}
+            if action.get("task_done"):
+                completion_summary = str(action.get("completion_summary") or note)
+                task["status"] = "done"
+                append_task_note(task, f"{current_time} done: {completion_summary}")
+                resolve_open_questions_for_task(
+                    state,
+                    task["id"],
+                    reason="work session marked task done",
+                )
+                sync_task_done_state(state, task, completion_summary, current_time)
+            task["updated_at"] = current_time
+        return {"finished_note": note, "task_done": bool(action.get("task_done"))}
     if action_type == "send_message":
         message_type = action.get("message_type") or "assistant"
         if message_type not in ("assistant", "info", "warning"):

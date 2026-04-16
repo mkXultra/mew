@@ -2342,6 +2342,59 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --session --resume", output)
                 self.assertIn("Work session finished: finished live", load_state()["tasks"][0]["notes"])
+                self.assertEqual(load_state()["tasks"][0]["status"], "todo")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_finish_can_mark_task_done_when_requested(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "done",
+                        "action": {
+                            "type": "finish",
+                            "reason": "implemented and verified",
+                            "task_done": True,
+                            "completion_summary": "resident completed the task",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertIn("action: finish", stdout.getvalue())
+                state = load_state()
+                task = state["tasks"][0]
+                self.assertEqual(task["status"], "done")
+                self.assertIn("Work session finished: implemented and verified", task["notes"])
+                self.assertIn("done: resident completed the task", task["notes"])
+                self.assertEqual(
+                    state["memory"]["shallow"]["latest_task_summary"],
+                    "Task #1 completed: Build native hands. resident completed the task",
+                )
             finally:
                 os.chdir(old_cwd)
 

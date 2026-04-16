@@ -387,6 +387,8 @@ def _work_action_schema_text():
         '    "note": "remember note",\n'
         '    "question": "ask_user question",\n'
         '    "message_type": "assistant|info|warning",\n'
+        '    "task_done": false,\n'
+        '    "completion_summary": "optional task completion summary for finish",\n'
         '    "create": false,\n'
         '    "replace_all": false,\n'
         '    "dry_run": true,\n'
@@ -405,7 +407,8 @@ def build_work_think_prompt(context):
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
         "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "Use run_tests for the configured verification command or a narrow test command. Use run_command only when shell is explicitly allowed. "
-        "Use finish when the task is done or the next step is clear enough to stop.\n"
+        "Use finish when the task is done or the next step is clear enough to stop. "
+        "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
@@ -480,10 +483,11 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "note",
         "question",
         "message_type",
+        "completion_summary",
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)
-    for key in ("create", "replace_all", "staged", "stat"):
+    for key in ("create", "replace_all", "staged", "stat", "task_done"):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
 

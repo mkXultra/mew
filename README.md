@@ -277,7 +277,9 @@ instead of continuing past a human review boundary.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
-can still show the closed session. Work-mode `send_message` writes to outbox;
+can still show the closed session. A `finish` action can explicitly set
+`task_done: true` to mark the task done; otherwise it only closes the work
+session. Work-mode `send_message` writes to outbox;
 `ask_user` creates a normal question. The model can also choose a read-only
 `batch` action to run up to five inspection tools in one work turn; writes and
 shell commands remain outside batch mode. In `mew chat`, live work steps print
