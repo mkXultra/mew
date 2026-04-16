@@ -1494,17 +1494,29 @@ def repair_stale_task_questions(state):
         )
     return repairs
 
+def runtime_effect_recovery_hint(effect, old_status):
+    event_id = effect.get("event_id")
+    event_ref = "the selected event" if event_id is None else f"event #{event_id}"
+    if old_status in ("planning", "planned", "precomputing", "precomputed"):
+        return f"Re-run {event_ref}; no action was recorded as committed."
+    if old_status == "committing":
+        actions = ", ".join(effect.get("action_types") or []) or "unknown actions"
+        return f"Inspect effect #{effect.get('id')} before retrying; it stopped while committing {actions}."
+    return f"Inspect effect #{effect.get('id')} before retrying {event_ref}."
+
 def repair_incomplete_runtime_effects(state):
     current_time = now_iso()
     repairs = []
     for effect in incomplete_runtime_effects(state):
         old_status = effect.get("status")
+        recovery_hint = runtime_effect_recovery_hint(effect, old_status)
         update_runtime_effect(
             state,
             effect.get("id"),
             current_time=current_time,
             status="interrupted",
             error="Runtime stopped before this effect reached a terminal state.",
+            recovery_hint=recovery_hint,
             finished_at=current_time,
         )
         repairs.append(
@@ -1514,6 +1526,7 @@ def repair_incomplete_runtime_effects(state):
                 "event_id": effect.get("event_id"),
                 "old_status": old_status,
                 "new_status": "interrupted",
+                "recovery_hint": recovery_hint,
             }
         )
     return repairs
@@ -1600,6 +1613,7 @@ def cmd_repair(args):
                             f"- {repair.get('type')} effect=#{repair.get('effect_id')} "
                             f"event=#{repair.get('event_id')} {repair.get('old_status')}->{repair.get('new_status')}"
                         )
+                        print(f"  next: {repair.get('recovery_hint')}")
                     else:
                         print(
                             f"- {repair.get('type')} question=#{repair.get('question_id')} "
@@ -4827,12 +4841,16 @@ def format_runtime_effect(effect):
     verification = ",".join(str(item) for item in effect.get("verification_run_ids") or []) or "-"
     writes = ",".join(str(item) for item in effect.get("write_run_ids") or []) or "-"
     finished = effect.get("finished_at") or ""
-    return (
+    text = (
         f"#{effect.get('id')} [{effect.get('status')}] "
         f"event=#{effect.get('event_id')} reason={effect.get('reason')} "
         f"actions={actions} verification={verification} writes={writes} "
         f"finished={finished}"
     )
+    recovery_hint = effect.get("recovery_hint")
+    if recovery_hint:
+        text += f" next={recovery_hint}"
+    return text
 
 def cmd_runtime_effects(args):
     state = load_state()

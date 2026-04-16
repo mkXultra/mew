@@ -301,7 +301,12 @@ class ValidationTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("interrupted_runtime_effect effect=#1 event=#1 planning->interrupted", stdout.getvalue())
+                self.assertIn("next: Re-run event #1; no action was recorded as committed.", stdout.getvalue())
                 self.assertEqual(repaired["runtime_effects"][0]["status"], "interrupted")
+                self.assertEqual(
+                    repaired["runtime_effects"][0]["recovery_hint"],
+                    "Re-run event #1; no action was recorded as committed.",
+                )
                 self.assertTrue(repaired["runtime_effects"][0]["finished_at"])
             finally:
                 os.chdir(old_cwd)

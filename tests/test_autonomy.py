@@ -887,6 +887,7 @@ class AutonomyTests(unittest.TestCase):
                     "write_run_ids": [],
                     "deferred": False,
                     "error": "",
+                    "recovery_hint": "Retry this effect" if index == 11 else "",
                 }
             )
         event = add_event(state, "passive_tick", "test")
@@ -896,6 +897,7 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(context["runtime_effects"]), 10)
         self.assertEqual(context["runtime_effects"][0]["id"], 3)
         self.assertEqual(context["runtime_effects"][-1]["verification_run_ids"], [111])
+        self.assertEqual(context["runtime_effects"][-1]["recovery_hint"], "Retry this effect")
         self.assertLessEqual(len(context["runtime_effects"][0]["summary"]), 1220)
         self.assertEqual(context["context_stats"]["source_counts"]["runtime_effects"], 12)
         self.assertEqual(context["context_stats"]["included_counts"]["runtime_effects"], 10)

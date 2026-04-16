@@ -551,6 +551,7 @@ def runtime_effect_for_context(effect):
         "write_run_ids": list(effect.get("write_run_ids") or []),
         "deferred": bool(effect.get("deferred")),
         "error": clip_context_text(effect.get("error"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
+        "recovery_hint": clip_context_text(effect.get("recovery_hint"), MAX_CONTEXT_TEXT_CHARS),
         "started_at": effect.get("started_at"),
         "updated_at": effect.get("updated_at"),
         "finished_at": effect.get("finished_at"),
