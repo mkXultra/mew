@@ -1306,6 +1306,8 @@ class WorkSessionTests(unittest.TestCase):
                         self.assertEqual(session["model_turns"][0]["status"], "running")
                         self.assertEqual(session["model_turns"][0]["action"]["type"], "planning")
                         self.assertEqual(build_work_session_resume(session, task=state["tasks"][0])["phase"], "planning")
+                    prompt_context = json.loads(prompt.split("Context JSON:\n", 1)[1])
+                    self.assertEqual(prompt_context["work_session"]["model_turns"], [])
                     return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):

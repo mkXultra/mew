@@ -872,6 +872,9 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: stop requested")
             break
 
+        prompt_state = state
+        prompt_session = session
+        prompt_task = task
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -887,9 +890,9 @@ def cmd_work_ai(args):
 
         try:
             planned = plan_work_model_turn(
-                state,
-                session,
-                task,
+                prompt_state,
+                prompt_session,
+                prompt_task,
                 model_auth,
                 model=model,
                 base_url=base_url,
