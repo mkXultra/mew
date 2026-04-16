@@ -729,6 +729,11 @@ def run_work_session_scenario(workspace, env=None):
         timeout=15,
         input_text="/work-session details\n",
     )
+    chat_diffs_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session diffs\n",
+    )
     chat_world_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
@@ -1015,6 +1020,15 @@ def run_work_session_scenario(workspace, env=None):
         and "Recent diffs" in (chat_result.get("stdout") or ""),
         observed=command_result_tail(chat_result),
         expected="chat /work-session details shows active session and recent diffs",
+    )
+    _scenario_check(
+        checks,
+        "chat_surfaces_work_session_diffs",
+        chat_diffs_result.get("exit_code") == 0
+        and "Work diffs #1 [active] task=#1" in (chat_diffs_result.get("stdout") or "")
+        and "Diff preview" in (chat_diffs_result.get("stdout") or ""),
+        observed=command_result_tail(chat_diffs_result),
+        expected="chat /work-session diffs shows focused diff previews",
     )
     _scenario_check(
         checks,

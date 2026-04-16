@@ -1254,6 +1254,66 @@ def format_work_session_timeline(session, task=None, limit=20):
     return "\n".join(lines)
 
 
+def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS):
+    entries = []
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        diff = result.get("diff") or ""
+        if not diff:
+            continue
+        entries.append(
+            {
+                "tool_call_id": call.get("id"),
+                "status": call.get("status") or "unknown",
+                "tool": call.get("tool") or "unknown",
+                "path": result.get("path") or parameters.get("path") or "",
+                "changed": result.get("changed"),
+                "dry_run": result.get("dry_run"),
+                "written": result.get("written"),
+                "rolled_back": result.get("rolled_back"),
+                "verification_exit_code": result.get("verification_exit_code"),
+                "approval_status": call.get("approval_status") or "",
+                "diff_stats": diff_line_counts(diff),
+                "diff_preview": format_diff_preview(diff, max_chars=max_chars),
+            }
+        )
+    return entries[-limit:]
+
+
+def format_work_session_diffs(session, task=None, limit=8):
+    if not session:
+        return "No active work session."
+    lines = [
+        f"Work diffs #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
+        f"title: {session.get('title') or (task or {}).get('title') or ''}",
+        "",
+        "Diffs",
+    ]
+    entries = build_work_session_diff_entries(session, limit=limit)
+    if not entries:
+        lines.append("(none)")
+        return "\n".join(lines)
+    for entry in entries:
+        verification = (
+            f" verification_exit_code={entry.get('verification_exit_code')}"
+            if entry.get("verification_exit_code") is not None
+            else ""
+        )
+        approval = f" approval={entry.get('approval_status')}" if entry.get("approval_status") else ""
+        lines.append(
+            f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
+            f"{entry.get('path') or ''} changed={entry.get('changed')} "
+            f"written={entry.get('written')} dry_run={entry.get('dry_run')} "
+            f"rolled_back={entry.get('rolled_back')}{verification}{approval}"
+        )
+        if entry.get("diff_preview"):
+            lines.append(entry["diff_preview"])
+    return "\n".join(lines)
+
+
 def format_work_session(session, task=None, limit=8, details=False):
     if not session:
         return "No active work session."
@@ -1319,7 +1379,7 @@ def format_work_session(session, task=None, limit=8, details=False):
                     f"written={result.get('written')} rolled_back={result.get('rolled_back')} "
                     f"verification_exit_code={result.get('verification_exit_code')}{approval}"
                 )
-                lines.append(result.get("diff") or "")
+                lines.append(format_diff_preview(result.get("diff") or ""))
         else:
             lines.append("(none)")
 

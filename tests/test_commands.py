@@ -3555,6 +3555,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Work session quick help", output)
         self.assertIn("/work-session <task-id> resume", output)
         self.assertIn("/work-session timeline", output)
+        self.assertIn("/work-session diffs", output)
         self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session resume --auto-recover-safe", output)

@@ -141,8 +141,10 @@ from .work_session import (
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
+    build_work_session_diff_entries,
     format_diff_preview,
     format_work_action,
+    format_work_session_diffs,
     format_work_session_resume,
     format_work_session,
     format_work_session_timeline,
@@ -1998,6 +2000,8 @@ def cmd_work_show_session(args):
         elif session:
             if getattr(args, "timeline", False):
                 payload["timeline"] = build_work_session_timeline(session, limit=getattr(args, "limit", 20))
+            if getattr(args, "diffs", False):
+                payload["diffs"] = build_work_session_diff_entries(session, limit=getattr(args, "limit", 8))
             payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -2005,6 +2009,9 @@ def cmd_work_show_session(args):
             print(format_no_active_work_session(state))
         elif getattr(args, "timeline", False):
             print(format_work_session_timeline(session, task=task, limit=getattr(args, "limit", 20)))
+            print(format_work_cli_controls(session, args))
+        elif getattr(args, "diffs", False):
+            print(format_work_session_diffs(session, task=task, limit=getattr(args, "limit", 8)))
             print(format_work_cli_controls(session, args))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
@@ -5536,6 +5543,7 @@ def chat_kind_filter(rest, default_kind=None, usage="usage: /focus [kind] or /fo
 CHAT_WORK_HELP = """Work session quick help:
 /work-session                         show active session, or recent sessions if none is active
 /work-session details                 show active session with decisions, diffs, failures, and tool calls
+/work-session diffs                   show only recent write/edit diff previews
 /work-session timeline                show compact model/tool event timeline
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
@@ -5967,6 +5975,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     lines.append("- /work-session resume")
     lines.append("- /work-session resume --allow-read .")
     lines.append("- /work-session timeline")
+    lines.append("- /work-session diffs")
     lines.append("- /work-session details")
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session recover --allow-read .")
@@ -5983,7 +5992,20 @@ def chat_work_session(rest, chat_state=None):
         return
     details = "details" in {part.casefold() for part in parts}
     parts = [part for part in parts if part.casefold() != "details"]
-    task_first_actions = {"show", "start", "close", "stop", "note", "recover", "ai", "step", "live", "resume", "timeline"}
+    task_first_actions = {
+        "show",
+        "start",
+        "close",
+        "stop",
+        "note",
+        "recover",
+        "ai",
+        "step",
+        "live",
+        "resume",
+        "timeline",
+        "diffs",
+    }
     if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
         parts = [parts[1], parts[0], *parts[2:]]
     action = parts[0].casefold() if parts else "show"
@@ -6000,6 +6022,7 @@ def chat_work_session(rest, chat_state=None):
         "live",
         "resume",
         "timeline",
+        "diffs",
         "approve",
         "reject",
     ):
@@ -6353,7 +6376,10 @@ def chat_work_session(rest, chat_state=None):
     elif not session:
         print(format_no_active_work_session(state, kind=scope_kind))
         return
-    print(format_work_session(session, task=work_session_task(state, session), details=details))
+    if action == "diffs":
+        print(format_work_session_diffs(session, task=work_session_task(state, session)))
+    else:
+        print(format_work_session(session, task=work_session_task(state, session), details=details))
     print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
 
 

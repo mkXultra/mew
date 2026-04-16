@@ -55,6 +55,7 @@ Evidence:
 - `mew chat` exists.
 - Chat can inspect focus, status, workbench, agents, verification, writes, thoughts, runtime effects, doctor, and repair.
 - `mew work --session --details` and `/work-session details` expose touched files, model turns, and tool-call summaries for the active work session.
+- `mew work --session --diffs` and `/work-session diffs` expose a focused cockpit diff pane for recent write/edit previews and applied writes.
 - `mew work --session --timeline` and `/work-session timeline` show a compact chronological model/tool event timeline for cockpit reorientation.
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
@@ -264,11 +265,12 @@ Next action:
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_dogfood.py` current: `31 passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, and scoped `/work-session`.
-- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 27 commands.
+- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, focused chat diff previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 28 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
 - `./mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.

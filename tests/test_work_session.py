@@ -752,9 +752,24 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
                 details = stdout.getvalue()
                 self.assertIn("Recent diffs", details)
+                self.assertIn("Diff preview (+1 -1)", details)
                 self.assertIn("-old text", details)
                 self.assertIn("+new text", details)
                 self.assertIn("verification_exit_code=0", details)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--diffs"]), 0)
+                diffs = stdout.getvalue()
+                self.assertIn("Work diffs #1 [active] task=#1", diffs)
+                self.assertIn("Diff preview (+1 -1)", diffs)
+                self.assertIn("-old text", diffs)
+                self.assertIn("+new text", diffs)
+                self.assertIn("verification_exit_code=0", diffs)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--diffs", "--json"]), 0)
+                diff_data = json.loads(stdout.getvalue())
+                self.assertEqual(diff_data["diffs"][0]["diff_stats"], {"added": 1, "removed": 1})
             finally:
                 os.chdir(old_cwd)
 
@@ -844,6 +859,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("reject: /work-session reject 3", text)
                 self.assertIn("Context pressure", text)
                 self.assertIn("pressure=low tool_calls=3", text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session diffs", {}), "continue")
+                diff_text = stdout.getvalue()
+                self.assertIn("Work diffs #1 [active] task=#1", diff_text)
+                self.assertIn("Diff preview (+1 -1)", diff_text)
+                self.assertIn("-before", diff_text)
+                self.assertIn("+after", diff_text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", {}), "continue")
