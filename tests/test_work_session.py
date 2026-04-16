@@ -235,12 +235,16 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(result["line_start"], 3)
                 self.assertEqual(result["line_end"], 4)
                 self.assertEqual(result["next_line"], 5)
+                self.assertTrue(result["has_more_lines"])
+                self.assertFalse(result["truncated"])
                 self.assertEqual(result["text"], "line three\nline four\n")
                 self.assertNotIn("line two", result["text"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session"]), 0)
-                self.assertIn("lines=3-4 next_line=5", stdout.getvalue())
+                session_output = stdout.getvalue()
+                self.assertIn("lines=3-4 next_line=5", session_output)
+                self.assertNotIn("lines=3-4 next_line=5 (truncated)", session_output)
             finally:
                 os.chdir(old_cwd)
 
@@ -312,6 +316,34 @@ class WorkSessionTests(unittest.TestCase):
                 session_text = stdout.getvalue()
                 self.assertIn("lines=99-EOF", session_text)
                 self.assertIn("line_start 99 is beyond EOF at line 2", session_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--timeline"]), 0)
+                self.assertIn("read_file failed: line_start must be >= 1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_controls_prefer_local_mew_executable(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                local_mew = Path("mew")
+                local_mew.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                local_mew.chmod(0o755)
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("./mew work 1 --live --model-backend codex --allow-read . --max-steps 1", output)
+                self.assertIn("./mew chat", output)
             finally:
                 os.chdir(old_cwd)
 
@@ -1530,7 +1562,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("git status/diff", " ".join(items[1]["review_steps"]))
 
         text = format_work_session_resume(resume)
-        self.assertIn("review: mew work 1 --session --resume --allow-read <path>", text)
+        self.assertIn("review: ./mew work 1 --session --resume --allow-read <path>", text)
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
 

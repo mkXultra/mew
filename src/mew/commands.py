@@ -23,6 +23,7 @@ from .agent_runs import (
     wait_agent_run,
 )
 from .archive import archive_state_records, format_archive_result
+from .cli_command import mew_command, mew_executable
 from .brief import (
     build_activity_data,
     build_brief,
@@ -358,31 +359,31 @@ def build_workbench_data(state, task):
         if work_session is None:
             work_session = session
 
-    next_action = "mew task show {task_id}".format(task_id=task_id)
+    next_action = mew_command("task", "show", task_id)
     if task.get("status") == "done":
         next_action = "wait for the next user request"
     elif questions:
-        next_action = f"mew reply {questions[0]['id']} \"...\""
+        next_action = f"{mew_command('reply', questions[0]['id'])} \"...\""
     elif not is_programmer_task(task):
-        next_action = f"mew task update {task_id} --kind coding"
+        next_action = mew_command("task", "update", task_id, "--kind", "coding")
     elif active_task_work_session:
-        next_action = f"mew work {task_id} --live --allow-read . --max-steps 1"
+        next_action = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
     elif not plan:
-        next_action = f"mew work {task_id} --start-session"
+        next_action = mew_command("work", task_id, "--start-session")
     elif not latest_implementation:
-        next_action = f"mew work {task_id} --start-session"
+        next_action = mew_command("work", task_id, "--start-session")
     elif latest_implementation.get("status") in ("created", "running"):
-        next_action = f"mew agent wait {latest_implementation['id']}"
+        next_action = mew_command("agent", "wait", latest_implementation["id"])
     elif latest_implementation.get("status") == "dry_run":
-        next_action = f"mew buddy --task {task_id} --dispatch"
+        next_action = mew_command("buddy", "--task", task_id, "--dispatch")
     elif latest_implementation.get("status") == "failed":
-        next_action = f"mew agent retry {latest_implementation['id']} --dry-run"
+        next_action = mew_command("agent", "retry", latest_implementation["id"], "--dry-run")
     elif latest_implementation.get("status") == "completed" and not latest_review:
-        next_action = f"mew agent review {latest_implementation['id']}"
+        next_action = mew_command("agent", "review", latest_implementation["id"])
     elif latest_review and latest_review.get("status") in ("created", "running"):
-        next_action = f"mew agent wait {latest_review['id']}"
+        next_action = mew_command("agent", "wait", latest_review["id"])
     elif latest_review and latest_review.get("status") == "completed" and not latest_review.get("followup_processed_at"):
-        next_action = f"mew agent followup {latest_review['id']}"
+        next_action = mew_command("agent", "followup", latest_review["id"])
 
     return {
         "task": task_data,
@@ -779,7 +780,7 @@ def work_chat_continue_options(session):
 
 
 def _work_live_continue_command(args, task_id, session=None, max_steps=1):
-    parts = ["mew", "work"]
+    parts = [mew_executable(), "work"]
     if task_id is not None:
         parts.append(str(task_id))
     parts.append("--live")
@@ -811,7 +812,7 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1):
 
 
 def _work_resume_command(args, task_id, session=None):
-    parts = ["mew", "work"]
+    parts = [mew_executable(), "work"]
     if task_id is not None:
         parts.append(str(task_id))
     parts.extend(["--session", "--resume"])
@@ -823,23 +824,25 @@ def _work_resume_command(args, task_id, session=None):
 
 def work_cli_control_commands(session, args):
     if not session:
-        return ["mew work <task-id> --start-session"]
+        return [f"{mew_executable()} work <task-id> --start-session"]
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        return [_work_resume_command(args, task_id, session=session), f"mew work {task_id} --start-session"]
+        return [_work_resume_command(args, task_id, session=session), mew_command("work", task_id, "--start-session")]
     controls = []
     resume = build_work_session_resume(session)
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
         task_part = f" {task_id}" if task_id is not None else ""
-        controls.append(f"mew work{task_part} --session --resume --allow-read . --auto-recover-safe")
+        controls.append(
+            f"{mew_executable()} work{task_part} --session --resume --allow-read . --auto-recover-safe"
+        )
     controls.extend(
         [
             _work_live_continue_command(args, task_id, session=session),
             _work_live_continue_command(args, task_id, session=session, max_steps=3),
-            f"mew work {task_id} --stop-session --stop-reason pause",
+            mew_command("work", task_id, "--stop-session", "--stop-reason", "pause"),
             _work_resume_command(args, task_id, session=session),
-            "mew chat",
+            mew_command("chat"),
         ]
     )
     return controls
@@ -1867,7 +1870,11 @@ def recent_work_session_summaries(state, limit=5, kind=None):
         task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task, limit=3)
         task_id = session.get("task_id")
-        resume_command = f"mew work {task_id} --session --resume" if task_id is not None else "mew work --session --resume"
+        resume_command = (
+            mew_command("work", task_id, "--session", "--resume")
+            if task_id is not None
+            else mew_command("work", "--session", "--resume")
+        )
         chat_resume_command = f"/work-session resume {task_id}" if task_id is not None else "/work-session resume"
         summaries.append(
             {
@@ -1895,7 +1902,9 @@ def format_no_active_work_session(state, limit=5, kind=None):
             )
             lines.append(f"  resume: {session.get('resume_command')}")
             lines.append(f"  chat: {session.get('chat_resume_command')}")
-    lines.extend(["", "Start or resume", "- mew work <task-id> --start-session", "- /work-session start <task-id>"])
+    lines.extend(
+        ["", "Start or resume", f"- {mew_executable()} work <task-id> --start-session", "- /work-session start <task-id>"]
+    )
     return "\n".join(lines)
 
 
@@ -1927,7 +1936,10 @@ def cmd_work_show_session(args):
                 payload = {
                     "resume": None,
                     "recent_work_sessions": recent_work_session_summaries(state),
-                    "start_commands": ["mew work <task-id> --start-session", "/work-session start <task-id>"],
+                    "start_commands": [
+                        f"{mew_executable()} work <task-id> --start-session",
+                        "/work-session start <task-id>",
+                    ],
                 }
                 if auto_recovery is not None:
                     payload["auto_recovery"] = auto_recovery
@@ -1960,7 +1972,10 @@ def cmd_work_show_session(args):
         payload = {"work_session": session}
         if not session and not getattr(args, "task_id", None):
             payload["recent_work_sessions"] = recent_work_session_summaries(state)
-            payload["start_commands"] = ["mew work <task-id> --start-session", "/work-session start <task-id>"]
+            payload["start_commands"] = [
+                f"{mew_executable()} work <task-id> --start-session",
+                "/work-session start <task-id>",
+            ]
         elif session:
             if getattr(args, "timeline", False):
                 payload["timeline"] = build_work_session_timeline(session, limit=getattr(args, "limit", 20))
@@ -3057,7 +3072,7 @@ def cmd_status(args):
     print(f"unread_outbox: {len(unread)}")
     print(f"routine_unread_info: {len(routine_unread)}")
     if routine_unread:
-        print("routine_cleanup: mew ack --routine")
+        print(f"routine_cleanup: {mew_command('ack', '--routine')}")
     memory = state.get("memory", {}).get("shallow", {})
     latest_summary = memory.get("current_context") or state["knowledge"]["shallow"].get("latest_task_summary")
     print(f"latest_summary: {latest_summary}")
@@ -3780,7 +3795,7 @@ def command_from_next_move(move):
     parts = (move or "").split("`")
     for index in range(1, len(parts), 2):
         candidate = parts[index].strip()
-        if candidate.startswith("mew ") or candidate.startswith("uv run mew "):
+        if candidate.startswith(("mew ", "./mew ", "uv run mew ")):
             return candidate
     practical_prefixes = (
         "advance coding task #",
@@ -3794,7 +3809,7 @@ def command_from_next_move(move):
             continue
         task_id = (move or "")[len(prefix):].split(":", 1)[0].strip()
         if task_id.isdigit():
-            return f"mew work {task_id}"
+            return mew_command("work", task_id)
     return ""
 
 def format_verification_run(run):
@@ -4135,8 +4150,8 @@ def cmd_self_improve(args):
     if session:
         print(("started" if session_created else "reused") + f" work session #{session['id']}")
     if native:
-        print(f"native work: mew work {task['id']} --start-session")
-        print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
+        print(f"native work: {mew_command('work', task['id'], '--start-session')}")
+        print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']}")
@@ -4817,20 +4832,20 @@ def cmd_buddy(args):
 
         save_state(state)
 
-    next_text = f"inspect with `mew task show {task['id']}`"
+    next_text = f"inspect with `{mew_command('task', 'show', task['id'])}`"
     if review_run and review_run.get("status") == "dry_run":
-        force = " --force-review" if review_requires_force else ""
-        next_text = f"start review for real with `mew buddy --task {task['id']} --review{force}`"
+        force = ["--force-review"] if review_requires_force else []
+        next_text = f"start review for real with `{mew_command('buddy', '--task', task['id'], '--review', *force)}`"
     elif review_run and review_run.get("status") == "running":
-        next_text = f"wait for review with `mew agent wait {review_run['id']}`"
+        next_text = f"wait for review with `{mew_command('agent', 'wait', review_run['id'])}`"
     elif plan and not args.dispatch and not args.review:
-        next_text = f"dispatch with `mew buddy --task {task['id']} --dispatch --dry-run`"
+        next_text = f"dispatch with `{mew_command('buddy', '--task', task['id'], '--dispatch', '--dry-run')}`"
     elif run and run.get("status") == "dry_run":
-        next_text = f"start for real with `mew buddy --task {task['id']} --dispatch`"
+        next_text = f"start for real with `{mew_command('buddy', '--task', task['id'], '--dispatch')}`"
     elif run and run.get("status") == "running":
-        next_text = f"wait with `mew agent wait {run['id']}`"
+        next_text = f"wait with `{mew_command('agent', 'wait', run['id'])}`"
     elif run and run.get("status") in ("completed", "failed") and not review_run:
-        next_text = f"review with `mew buddy --task {task['id']} --review --dry-run`"
+        next_text = f"review with `{mew_command('buddy', '--task', task['id'], '--review', '--dry-run')}`"
 
     report = {
         "task": {"id": task["id"], "title": task.get("title"), "kind": task_kind(task), "status": task.get("status")},
@@ -7224,8 +7239,8 @@ def chat_self_improve(rest):
     if native:
         if session:
             print(("started " if session_created else "reused ") + f"work session #{session['id']}")
-        print(f"native work: mew work {task['id']} --start-session")
-        print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
+        print(f"native work: {mew_command('work', task['id'], '--start-session')}")
+        print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
     if show_prompt:
         if not plan:
             print("No programmer plan was created for native self-improvement.")

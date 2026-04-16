@@ -51,7 +51,7 @@ class BriefTests(unittest.TestCase):
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
         self.assertEqual(
             next_move(default_state(), kind="coding"),
-            'start a native self-improvement session with `mew self-improve --start-session --focus "Pick the next small mew improvement"`',
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
         )
 
     def test_next_move_prefers_open_question(self):
@@ -94,7 +94,7 @@ class BriefTests(unittest.TestCase):
 
         self.assertEqual(
             next_move(state),
-            f"answer question #{running_question.get('id')} with `mew reply {running_question.get('id')} \"...\"`",
+            f"answer question #{running_question.get('id')} with `./mew reply {running_question.get('id')} \"...\"`",
         )
 
     def test_next_move_ignores_deferred_question(self):
@@ -103,7 +103,7 @@ class BriefTests(unittest.TestCase):
         question, _ = add_question(state, "What should I do?", related_task_id=1)
         mark_question_deferred(state, question, reason="later")
 
-        self.assertEqual(next_move(state), "start native work session for task #1 with `mew work 1 --start-session`")
+        self.assertEqual(next_move(state), "start native work session for task #1 with `./mew work 1 --start-session`")
 
     def test_next_move_kind_filter_ignores_unrelated_questions(self):
         state = default_state()
@@ -112,7 +112,7 @@ class BriefTests(unittest.TestCase):
         add_question(state, "Which city should I research?", related_task_id=1)
 
         self.assertIn("mew reply", next_move(state))
-        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `mew work 2 --start-session`")
+        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `./mew work 2 --start-session`")
 
     def test_brief_kind_filter_scopes_tasks_questions_and_messages(self):
         state = default_state()
@@ -169,7 +169,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["recent_steps"], [])
         self.assertEqual(
             data["next_move"],
-            "start native work session for task #2 with `mew work 2 --start-session`",
+            "start native work session for task #2 with `./mew work 2 --start-session`",
         )
         self.assertEqual(focus["unread_outbox_count"], 1)
 
@@ -180,7 +180,7 @@ class BriefTests(unittest.TestCase):
         run = create_implementation_run_from_plan(state, task, plan, dry_run=True)
         run["status"] = "completed"
 
-        self.assertEqual(next_move(state), "review implementation run #1 with `mew agent review 1`")
+        self.assertEqual(next_move(state), "review implementation run #1 with `./mew agent review 1`")
         self.assertIn("review needed: run #1", build_brief(state))
 
     def test_dry_run_review_does_not_hide_needed_real_review(self):
@@ -192,7 +192,7 @@ class BriefTests(unittest.TestCase):
         review = create_review_run_for_implementation(state, task, implementation, plan=plan)
         review["status"] = "dry_run"
 
-        self.assertEqual(next_move(state), "review implementation run #1 with `mew agent review 1`")
+        self.assertEqual(next_move(state), "review implementation run #1 with `./mew agent review 1`")
         self.assertIn("review needed: run #1", build_brief(state))
 
     def test_next_move_recommends_dispatch_for_ready_planned_task(self):
@@ -211,7 +211,7 @@ class BriefTests(unittest.TestCase):
 
         self.assertEqual(
             next_move(state),
-            "dispatch dry-run task #1 for real with `mew buddy --task 1 --dispatch`",
+            "dispatch dry-run task #1 for real with `./mew buddy --task 1 --dispatch`",
         )
         self.assertIn("dry-run ready: run #1 task=#1", build_brief(state))
         data = build_brief_data(state)
@@ -221,7 +221,7 @@ class BriefTests(unittest.TestCase):
         state = default_state()
         add_task(state)
 
-        self.assertEqual(next_move(state), "start native work session for task #1 with `mew work 1 --start-session`")
+        self.assertEqual(next_move(state), "start native work session for task #1 with `./mew work 1 --start-session`")
 
     def test_next_move_does_not_programmer_plan_admin_task(self):
         state = default_state()
@@ -504,9 +504,9 @@ class BriefTests(unittest.TestCase):
         data = build_brief_data(state, limit=3)
         focus = format_focus(build_focus_data(state, limit=3))
 
-        self.assertIn("routine info: 1; clear with `mew ack --routine`", brief)
+        self.assertIn("routine info: 1; clear with `./mew ack --routine`", brief)
         self.assertEqual(data["routine_unread_info_count"], 1)
-        self.assertIn("Routine info: 1 clear with `mew ack --routine`", focus)
+        self.assertIn("Routine info: 1 clear with `./mew ack --routine`", focus)
 
     def test_focus_surfaces_active_work_session_reentry(self):
         state = default_state()
@@ -532,12 +532,12 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"][0]["phase"], "idle")
         self.assertEqual(
             data["next_move"],
-            "continue active work session #3 for task #7 with `mew work 7 --live --allow-read . --max-steps 1`",
+            "continue active work session #3 for task #7 with `./mew work 7 --live --allow-read . --max-steps 1`",
         )
         self.assertIn("Active work sessions", focus)
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
-        self.assertIn("resume: mew work 7 --session --resume --allow-read .", focus)
-        self.assertIn("continue: mew work 7 --live --allow-read . --max-steps 1", focus)
+        self.assertIn("resume: ./mew work 7 --session --resume --allow-read .", focus)
+        self.assertIn("continue: ./mew work 7 --live --allow-read . --max-steps 1", focus)
 
     def test_focus_ignores_active_work_session_for_done_task(self):
         state = default_state()
@@ -561,7 +561,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(
             data["next_move"],
-            'start a native self-improvement session with `mew self-improve --start-session --focus "Pick the next small mew improvement"`',
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
         )
 
     def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
@@ -592,7 +592,7 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(next_move(state), "inspect verification run #2 with `mew verification`")
+        self.assertEqual(next_move(state), "inspect verification run #2 with `./mew verification`")
 
     def test_next_move_kind_filter_ignores_unrelated_failed_verification(self):
         state = default_state()
@@ -608,7 +608,7 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `mew work 2 --start-session`")
+        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `./mew work 2 --start-session`")
 
 
 if __name__ == "__main__":

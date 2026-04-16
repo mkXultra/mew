@@ -2534,7 +2534,7 @@ class AutonomyTests(unittest.TestCase):
         )
 
         messages = [decision for decision in plan["decisions"] if decision.get("type") == "send_message"]
-        self.assertEqual(messages[0]["text"], "Next: start native work session for task #1 with `mew work 1 --start-session`")
+        self.assertEqual(messages[0]["text"], "Next: start native work session for task #1 with `./mew work 1 --start-session`")
 
     def test_non_ai_passive_wait_surfaces_next_move(self):
         state = default_state()
@@ -2583,7 +2583,7 @@ class AutonomyTests(unittest.TestCase):
         waits = [decision for decision in plan["decisions"] if decision.get("type") == "wait_for_user"]
         self.assertEqual(
             waits[0]["reason"],
-            'Next: dispatch dry-run task #1 for real with `mew buddy --task 1 --dispatch`',
+            'Next: dispatch dry-run task #1 for real with `./mew buddy --task 1 --dispatch`',
         )
 
     def test_autonomous_high_priority_propose_task_can_interrupt_open_tasks(self):

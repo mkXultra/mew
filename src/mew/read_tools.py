@@ -163,10 +163,11 @@ def read_file(
             "line_count": count,
             "line_end": end_line,
             "next_line": (end_line + 1) if end_line is not None and more_lines else None,
+            "has_more_lines": more_lines,
             "eof": eof,
             "message": message,
             "text": text,
-            "truncated": more_lines or char_truncated,
+            "truncated": char_truncated,
         }
 
     offset = max(0, min(int(offset or 0), 1_000_000))

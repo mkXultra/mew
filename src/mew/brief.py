@@ -1,3 +1,4 @@
+from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
@@ -554,7 +555,7 @@ def active_work_session_items(state, limit=3, kind=None):
             continue
         resume = build_work_session_resume(session, task=task, limit=3) or {}
         task_id = session.get("task_id")
-        task_arg = f" {task_id}" if task_id is not None else ""
+        task_parts = [task_id] if task_id is not None else []
         items.append(
             {
                 "id": session.get("id"),
@@ -562,8 +563,12 @@ def active_work_session_items(state, limit=3, kind=None):
                 "title": session.get("title") or (task or {}).get("title") or "",
                 "phase": resume.get("phase") or "unknown",
                 "next_action": resume.get("next_action") or "",
-                "resume_command": f"mew work{task_arg} --session --resume --allow-read .",
-                "continue_command": f"mew work{task_arg} --live --allow-read . --max-steps 1",
+                "resume_command": mew_command(
+                    "work", *task_parts, "--session", "--resume", "--allow-read", "."
+                ),
+                "continue_command": mew_command(
+                    "work", *task_parts, "--live", "--allow-read", ".", "--max-steps", "1"
+                ),
             }
         )
         if len(items) >= limit:
@@ -581,7 +586,7 @@ def format_focus(data):
         lines.append(f"Unread: {unread}")
     routine_unread = data.get("routine_unread_info_count") or 0
     if routine_unread:
-        lines.append(f"Routine info: {routine_unread} clear with `mew ack --routine`")
+        lines.append(f"Routine info: {routine_unread} clear with `{mew_command('ack', '--routine')}`")
 
     questions = data.get("open_questions") or []
     if questions:
@@ -671,16 +676,16 @@ def next_move(state, kind=None):
     if running_tasks:
         for question in questions:
             if str(question.get("related_task_id")) in running_task_ids:
-                return f"answer question #{question.get('id')} with `mew reply {question.get('id')} \"...\"`"
+                return f"answer question #{question.get('id')} with `{mew_command('reply', question.get('id'))} \"...\"`"
         if running_task_runs:
-            return f"check agent run #{running_task_runs[0].get('id')} with `mew agent result {running_task_runs[0].get('id')}`"
+            return f"check agent run #{running_task_runs[0].get('id')} with `{mew_command('agent', 'result', running_task_runs[0].get('id'))}`"
         return practical_next_step(running_tasks[0])
     if questions:
-        return f"answer question #{questions[0].get('id')} with `mew reply {questions[0].get('id')} \"...\"`"
+        return f"answer question #{questions[0].get('id')} with `{mew_command('reply', questions[0].get('id'))} \"...\"`"
     if running_runs:
-        return f"check agent run #{running_runs[0].get('id')} with `mew agent result {running_runs[0].get('id')}`"
+        return f"check agent run #{running_runs[0].get('id')} with `{mew_command('agent', 'result', running_runs[0].get('id'))}`"
     if recent_verifications and verification_outcome(recent_verifications[0]) == "failed":
-        return f"inspect verification run #{recent_verifications[0].get('id')} with `mew verification`"
+        return f"inspect verification run #{recent_verifications[0].get('id')} with `{mew_command('verification')}`"
     if active_work:
         session = active_work[0]
         return (
@@ -688,18 +693,18 @@ def next_move(state, kind=None):
             f"with `{session.get('continue_command')}`"
         )
     if followup_waiting:
-        return f"process review run #{followup_waiting[0].get('id')} with `mew agent followup {followup_waiting[0].get('id')}`"
+        return f"process review run #{followup_waiting[0].get('id')} with `{mew_command('agent', 'followup', followup_waiting[0].get('id'))}`"
     if review_waiting:
-        return f"review implementation run #{review_waiting[0].get('id')} with `mew agent review {review_waiting[0].get('id')}`"
+        return f"review implementation run #{review_waiting[0].get('id')} with `{mew_command('agent', 'review', review_waiting[0].get('id'))}`"
     if dry_run_waiting:
         task_id = dry_run_waiting[0].get("task_id")
-        return f"dispatch dry-run task #{task_id} for real with `mew buddy --task {task_id} --dispatch`"
+        return f"dispatch dry-run task #{task_id} for real with `{mew_command('buddy', '--task', task_id, '--dispatch')}`"
     if dispatchable:
         task, plan = dispatchable[0]
-        return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `mew task dispatch {task.get('id')}`"
+        return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `{mew_command('task', 'dispatch', task.get('id'))}`"
     if plan_needed:
         task_id = plan_needed[0].get("id")
-        return f"start native work session for task #{task_id} with `mew work {task_id} --start-session`"
+        return f"start native work session for task #{task_id} with `{mew_command('work', task_id, '--start-session')}`"
     if attention:
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
@@ -707,7 +712,7 @@ def next_move(state, kind=None):
     if kind == "coding":
         return (
             "start a native self-improvement session with "
-            '`mew self-improve --start-session --focus "Pick the next small mew improvement"`'
+            f"`{mew_command('self-improve', '--start-session', '--focus', 'Pick the next small mew improvement')}`"
         )
     return "wait for the next user request"
 
@@ -785,7 +790,7 @@ def build_brief(state, limit=5, kind=None):
     if unread:
         lines.append("Unread messages")
         if routine_unread:
-            lines.append(f"- routine info: {len(routine_unread)}; clear with `mew ack --routine`")
+            lines.append(f"- routine info: {len(routine_unread)}; clear with `{mew_command('ack', '--routine')}`")
         if len(unread) > len(recent_unread):
             lines.append(
                 f"- showing latest {len(recent_unread)}; {len(unread) - len(recent_unread)} older unread omitted"

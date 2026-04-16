@@ -1,6 +1,7 @@
 import json
 import shlex
 
+from .cli_command import mew_command, mew_executable
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
     glob_paths,
@@ -539,6 +540,8 @@ def compact_work_tool_summary(call):
     tool = call.get("tool")
     result = call.get("result") or {}
     summary = call.get("summary") or call.get("error") or ""
+    if call.get("status") in ("failed", "interrupted") and summary:
+        return f"{tool} {call.get('status')}: {clip_output(summary, 240)}"
     if tool == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
         if result.get("line_start") is not None:
@@ -715,11 +718,13 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "reason": reason,
         }
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
-            item["hint"] = f"mew work{task_arg} --recover-session --allow-read <path>"
-            item["auto_hint"] = f"mew work{task_arg} --session --resume --allow-read <path> --auto-recover-safe"
+            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-read <path>"
+            item["auto_hint"] = (
+                f"{mew_executable()} work{task_arg} --session --resume --allow-read <path> --auto-recover-safe"
+            )
             item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read <path> --auto-recover-safe"
         if action == "needs_user_review":
-            item["review_hint"] = f"mew work{task_arg} --session --resume --allow-read <path>"
+            item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read <path>"
             item["review_steps"] = review_steps
             if path:
                 item["path"] = path
@@ -739,7 +744,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 "action": "replan",
                 "safety": "no_tool_started",
                 "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
-                "hint": f"mew work{task_arg} --live --allow-read <path>",
+                "hint": f"{mew_executable()} work{task_arg} --live --allow-read <path>",
             }
         )
 
@@ -855,21 +860,21 @@ def build_work_session_resume(session, task=None, limit=8):
     )
 
     if session.get("status") == "closed":
-        next_action = "review this closed work session or start a new one with mew work --ai"
+        next_action = f"review this closed work session or start a new one with {mew_command('work', '--ai')}"
     elif phase == "stop_requested":
         next_action = "stop requested; the running work loop should pause at the next boundary"
     elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
     elif phase == "running_tool":
-        next_action = "wait for the running work tool, or run mew repair if the process died"
+        next_action = f"wait for the running work tool, or run {mew_command('repair')} if the process died"
     elif phase == "planning":
-        next_action = "wait for the running work model turn, or run mew repair if the process died"
+        next_action = f"wait for the running work model turn, or run {mew_command('repair')} if the process died"
     elif phase == "interrupted":
         next_action = "inspect interrupted work state, verify the world, then retry or choose a new action"
     elif latest_failed:
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
     else:
-        next_action = "continue the work session with /continue in chat or mew work --live"
+        next_action = f"continue the work session with /continue in chat or {mew_command('work', '--live')}"
 
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
     if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
