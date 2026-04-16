@@ -298,7 +298,9 @@ durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
 `/work-session note`. Approving a dry-run write can reuse the latest session
 verification command, so `--verify-command` does not need to be repeated when a
-recent `run_tests` or task command already defines it.
+recent `run_tests` or task command already defines it. A successful `run_tests`
+or write verification refreshes the session's default verification command, so
+future controls do not keep recommending a stale failing command.
 Interrupted read-only tools can be retried with `mew work --recover-session
 --allow-read .`; write, shell, and verification interruptions still require
 human review, and interrupted resumes include a `Recovery plan` that classifies

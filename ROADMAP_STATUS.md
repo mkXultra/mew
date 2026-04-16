@@ -88,6 +88,7 @@ Evidence:
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
+- Successful `run_tests` and write verification results now refresh the session default verification command, preventing reentry controls from preserving a known-stale verifier after a better command succeeds.
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 - `mew chat --help` now includes the slash-command reference, and `/help work` prints focused work-session reentry/continue commands.
 - `mew do <task-id>` now provides a compact supervised resident coding entrypoint over `mew work --live`, defaulting to deterministic ACT, read/write roots at `.`, and an auto-detected verification command when available.
@@ -214,8 +215,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `515 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `184 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `516 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `185 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.

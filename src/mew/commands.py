@@ -598,6 +598,22 @@ def remember_work_session_default_options(session, args):
     }
 
 
+def remember_successful_work_verification(session, tool, result):
+    if not session or not isinstance(result, dict):
+        return
+    command = ""
+    if tool == "run_tests" and result.get("exit_code") == 0:
+        command = result.get("command") or ""
+    verification = result.get("verification") or {}
+    if verification.get("exit_code") == 0:
+        command = verification.get("command") or command
+    if not command:
+        return
+    defaults = session.setdefault("default_options", {})
+    defaults["allow_verify"] = True
+    defaults["verify_command"] = command
+
+
 def work_chat_continue_options(session):
     options = (session or {}).get("default_options") or {}
     parts = []
@@ -1364,6 +1380,8 @@ def cmd_work_ai(args):
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+            session = find_work_session(state, session_id)
+            remember_successful_work_verification(session, action_type, result)
             turn = finish_work_model_turn(state, session_id, turn_id, tool_call_id=tool_call_id, error=error)
             save_state(state)
         if progress:
@@ -1512,6 +1530,7 @@ def cmd_work_approve_tool(args):
         session = find_work_session(state, session_id)
         source_call = find_work_tool_call(session, args.approve_tool)
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        remember_successful_work_verification(session, source_call.get("tool") if source_call else "", result)
         if source_call:
             source_call["approval_status"] = "applied" if tool_call.get("status") == "completed" else "failed"
             source_call["approval_error"] = tool_call.get("error") or ""
@@ -1901,6 +1920,8 @@ def cmd_work_tool(args):
     with state_lock():
         state = load_state()
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        session = find_work_session(state, session_id)
+        remember_successful_work_verification(session, args.tool, result)
         save_state(state)
     if args.json:
         print(json.dumps({"tool_call": tool_call}, ensure_ascii=False, indent=2))

@@ -2922,6 +2922,52 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_successful_run_tests_refreshes_session_verify_default(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                stale_command = "python -m pytest -q"
+                command = f"{sys.executable} -c \"print('ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                stale_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]),
+                        0,
+                    )
+
+                state = load_state()
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["verify_command"], command)
+                self.assertTrue(defaults["allow_verify"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn(f"--verify-command {shlex.quote(command)}", output)
+                self.assertNotIn(shlex.quote(stale_command), output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_continue_uses_persisted_session_options_after_reentry(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
