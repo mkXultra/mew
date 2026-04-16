@@ -148,7 +148,9 @@ Evidence:
 - Invalid line-based `read_file` requests now fail clearly (`line_start must be >= 1`), while out-of-range line reads return structured EOF metadata and summaries like `lines=99-EOF`.
 - Line-window reads now distinguish `has_more_lines` from `truncated`, so a fully returned requested window can expose `next_line` without falsely saying the returned text was truncated.
 - Compact work-session timelines now preserve failed/interrupted tool errors instead of formatting failed `read_file` calls as empty offset reads.
+- Failed/interrupted timeline summaries now avoid duplicate labels such as `read_file failed: read_file failed: ...`.
 - Generated cockpit commands now prefer `./mew ...` when the current checkout has an executable local wrapper, making next controls copy-paste runnable in source worktrees where `mew` is not installed on `PATH`.
+- Text outbox/listen/chat history views now clip very large message bodies and point to `outbox --json` for the full payload, reducing the chance that historical agent payloads swamp the cockpit.
 - `edit_file` now permits small exact replacements in large files by limiting replacement/delta size instead of rejecting based on total edited file size.
 - `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
 - `dogfood --scenario work-session` now covers line-based `read_file` and large-file dry-run `edit_file`, bringing the recurring scenario to 27 commands.
@@ -257,7 +259,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `578 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `579 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `156 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
@@ -277,6 +279,7 @@ Next action:
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
 - Isolated `codex-ultra` agent-as-human E2E in `/tmp/mew-agent-human-role-20260417-013828` ran `chat-cockpit`, `work-session`, `all`, manual `chat --kind coding`, work-session reentry, line reads, and a live read-only resident model step. It judged mew usable for narrow task-coding shell work and found three papercuts: source-checkout command prefixes, timeline failure summaries, and line-window truncation wording; all three were fixed in commit `4e8ecf1`.
+- Isolated `codex-ultra` retest in `/tmp/mew-agent-human-role-retest-20260417-015606` verified the three papercut fixes: `./mew` next controls, timeline failure text, and line-window `has_more_lines` without `(truncated)`; `chat-cockpit` dogfood also passed.
 - `mew chat --kind coding`, `mew next --kind coding`, and `mew status --kind coding` were dogfooded locally after the scoped-chat changes; startup and slash-view scoping stayed quiet and task/coding-focused.
 - `mew work --live` task #44 dogfood verified the quieter deterministic live path, then used line-based reads and large-file edit support to reach and approve a real cockpit improvement.
 - `claude-ultra` reviews found no ship-blockers after fixes for work-session global ledgers and status/brief kind scoping.
