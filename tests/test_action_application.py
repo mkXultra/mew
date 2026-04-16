@@ -4,6 +4,7 @@ from mew.action_application import (
     public_action_plan,
     should_skip_outbox_send,
     suppress_done_task_wait_actions,
+    suppress_low_intent_task_wait_actions,
 )
 from mew.state import default_state
 
@@ -59,4 +60,98 @@ class ActionApplicationTests(unittest.TestCase):
                 {"type": "ask_user", "task_id": 2},
                 {"type": "send_message", "text": "keep"},
             ],
+        )
+
+    def test_suppress_low_intent_research_routing_question(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 20,
+                "title": "補助金について調べる",
+                "kind": "research",
+                "status": "ready",
+                "command": "",
+                "agent_backend": "",
+            }
+        )
+        event = {"type": "user_message", "payload": {"text": "dogfood no-op check"}}
+        plan = {
+            "actions": [
+                {
+                    "type": "ask_user",
+                    "task_id": 20,
+                    "question": "Task #20 is ready but has no command. What should I execute for it?",
+                }
+            ]
+        }
+
+        filtered = suppress_low_intent_task_wait_actions(state, event, plan)
+
+        self.assertEqual(filtered["actions"][0]["type"], "record_memory")
+        self.assertEqual(
+            filtered["skipped_actions"][0]["skip_reason"],
+            "low_intent_research_task_routing",
+        )
+
+    def test_suppress_low_intent_research_routing_keeps_real_user_question(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 20,
+                "title": "補助金について調べる",
+                "kind": "research",
+                "status": "ready",
+                "command": "",
+                "agent_backend": "",
+            }
+        )
+        event = {"type": "user_message", "payload": {"text": "What should task 20 do next?"}}
+        plan = {
+            "actions": [
+                {
+                    "type": "ask_user",
+                    "task_id": 20,
+                    "question": "Task #20 is ready research work. Should I assign it to an agent, add research criteria, or block it?",
+                }
+            ]
+        }
+
+        filtered = suppress_low_intent_task_wait_actions(state, event, plan)
+
+        self.assertEqual(filtered["actions"], plan["actions"])
+
+    def test_suppress_low_intent_research_routing_checks_fallback_before_reason(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 20,
+                "title": "補助金について調べる",
+                "kind": "research",
+                "status": "ready",
+                "command": "",
+                "agent_backend": "",
+            }
+        )
+        event = {"type": "passive_tick", "source": "manual_step_planning", "payload": {}}
+        plan = {
+            "actions": [
+                {
+                    "type": "wait_for_user",
+                    "task_id": 20,
+                    "reason": "Need user input.",
+                }
+            ]
+        }
+
+        filtered = suppress_low_intent_task_wait_actions(
+            state,
+            event,
+            plan,
+            fallback_question="Task #20 is ready but has no command. What should I execute for it?",
+        )
+
+        self.assertEqual(filtered["actions"][0]["type"], "record_memory")
+        self.assertEqual(
+            filtered["skipped_actions"][0]["skip_reason"],
+            "low_intent_research_task_routing",
         )

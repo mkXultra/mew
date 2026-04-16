@@ -6,7 +6,9 @@ from .action_application import (
     new_action_counts,
     public_action_plan,
     should_skip_outbox_send,
+    should_skip_low_intent_task_wait_action,
     suppress_done_task_wait_actions,
+    suppress_low_intent_task_wait_actions,
 )
 from .brief import next_move
 from .config import (
@@ -1454,7 +1456,7 @@ def update_user_status_after_plan(state, event, action_plan, counts, current_tim
     actions = action_plan.get("actions", [])
     if any(action.get("type") in ("ask_user", "wait_for_user") for action in actions):
         user["mode"] = "needs_user"
-    elif counts.get("messages", 0) > 0 or event.get("processed_at"):
+    elif counts.get("messages", 0) > 0 or counts.get("actions", 0) > 0 or event.get("processed_at"):
         user["mode"] = "idle"
     user["updated_at"] = current_time
 
@@ -2433,6 +2435,24 @@ def apply_action_plan(
 ):
     counts = new_action_counts()
     action_plan = suppress_done_task_wait_actions(state, action_plan)
+    planned_status = decision_plan.get("agent_status", {})
+    planned_question = planned_status.get("pending_question")
+    action_plan = suppress_low_intent_task_wait_actions(
+        state,
+        event,
+        action_plan,
+        fallback_question=planned_question if isinstance(planned_question, str) else "",
+    )
+    if any(
+        action.get("skip_reason") == "low_intent_research_task_routing"
+        for action in action_plan.get("skipped_actions", [])
+    ):
+        decision_plan = dict(decision_plan)
+        planned_status = dict(planned_status)
+        planned_status.pop("pending_question", None)
+        if planned_status.get("mode") == "waiting_for_user":
+            planned_status.pop("mode", None)
+        decision_plan["agent_status"] = planned_status
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
     auto_verified_write = False
 
@@ -2620,6 +2640,8 @@ def apply_action_plan(
         elif action_type == "ask_user":
             text = action.get("question") or action.get("text") or ""
             task_id = action.get("task_id")
+            if text and should_skip_low_intent_task_wait_action(state, event, action, text=text):
+                continue
             if text and not has_open_question(state, text, task_id):
                 add_question(
                     state,
@@ -2637,6 +2659,8 @@ def apply_action_plan(
             text = action.get("question") or action.get("text")
             if not text and isinstance(planned_question, str):
                 text = planned_question
+            if text and should_skip_low_intent_task_wait_action(state, event, action, text=text):
+                continue
             if text and not has_open_question(state, text, task_id):
                 add_question(
                     state,

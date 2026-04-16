@@ -2,6 +2,7 @@ from copy import deepcopy
 import json
 
 from .agent import apply_event_plans, plan_event, update_runtime_processing_summary
+from .action_application import suppress_low_intent_task_wait_actions
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, STATE_FILE
 from .state import (
     add_event,
@@ -182,7 +183,18 @@ def clip_step_text(value, limit=MAX_STEP_TEXT_CHARS):
 
 def compact_step_action(action):
     compact = {"type": action.get("type") or "unknown"}
-    for key in ("task_id", "path", "query", "title", "kind", "question", "reason", "summary", "text"):
+    for key in (
+        "task_id",
+        "path",
+        "query",
+        "title",
+        "kind",
+        "question",
+        "reason",
+        "summary",
+        "text",
+        "skip_reason",
+    ):
         value = action.get(key)
         if value is None:
             continue
@@ -430,6 +442,14 @@ def run_step_loop(
             action_plan,
             allow_verify=allow_verify,
             allow_write=allow_write,
+        )
+        planned_status = decision_plan.get("agent_status", {})
+        pending_question = planned_status.get("pending_question")
+        filtered_action_plan = suppress_low_intent_task_wait_actions(
+            state_snapshot,
+            event_snapshot,
+            filtered_action_plan,
+            fallback_question=pending_question if isinstance(pending_question, str) else "",
         )
         filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)

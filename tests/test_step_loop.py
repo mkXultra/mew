@@ -6,7 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from mew.state import add_event, add_outbox_message, add_question, default_state, load_state, next_id
+from mew.state import (
+    add_event,
+    add_outbox_message,
+    add_question,
+    default_state,
+    load_state,
+    next_id,
+    save_state,
+)
 from mew.step_loop import (
     MAX_STEP_EFFECTS,
     collect_step_effects,
@@ -81,6 +89,57 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(filtered["actions"][0]["type"], "self_review")
         self.assertEqual(filtered["skipped_actions"][0]["skip_reason"], "existing_open_question")
         self.assertEqual(step_stop_reason(filtered), "")
+
+    def test_manual_step_suppresses_low_intent_research_routing_question(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = load_state()
+                state["tasks"].append(
+                    {
+                        "id": 20,
+                        "title": "補助金について調べる",
+                        "kind": "research",
+                        "status": "ready",
+                        "command": "",
+                        "agent_backend": "",
+                    }
+                )
+                save_state(state)
+                fake_decision = {
+                    "summary": "Avoid unrelated old question.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {
+                        "pending_question": (
+                            "Task #20 is ready but has no command. What should I execute for it?"
+                        )
+                    },
+                    "decisions": [{"type": "wait_for_user", "task_id": 20}],
+                }
+                fake_actions = {
+                    "summary": "Avoid unrelated old question.",
+                    "actions": [
+                        {
+                            "type": "wait_for_user",
+                            "task_id": 20,
+                            "reason": "Need user input.",
+                        }
+                    ],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(max_steps=1)
+                state = load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertNotEqual(report["stop_reason"], "waiting_for_user")
+        self.assertEqual(state["questions"], [])
+        self.assertEqual(
+            state["step_runs"][0]["skipped_actions"][0]["skip_reason"],
+            "low_intent_research_task_routing",
+        )
 
     def test_refine_task_counts_as_step_feedback(self):
         action_plan = {"actions": [{"type": "refine_task", "task_id": 1, "title": "Concrete"}]}

@@ -559,6 +559,46 @@ class AutonomyTests(unittest.TestCase):
             [(question, 1), (question, 2)],
         )
 
+    def test_low_intent_user_message_does_not_create_ready_research_routing_question(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "dogfood no-op check"})
+        task = add_planned_ready_task(state)
+        task["title"] = "補助金について調べる"
+        task["kind"] = "research"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        question = "Task #1 is ready but has no command. What should I execute for it?"
+
+        counts = apply_action_plan(
+            state,
+            event,
+            {
+                "summary": "wait",
+                "agent_status": {"pending_question": question},
+                "decisions": [{"type": "wait_for_user", "task_id": 1}],
+            },
+            {
+                "summary": "wait",
+                "actions": [
+                    {
+                        "type": "wait_for_user",
+                        "task_id": 1,
+                    }
+                ],
+            },
+            "now",
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="user_input",
+        )
+
+        self.assertEqual(counts["messages"], 0)
+        self.assertEqual(state["questions"], [])
+        self.assertEqual(state["attention"]["items"], [])
+        self.assertNotEqual(state["agent_status"].get("mode"), "waiting_for_user")
+        self.assertFalse(state["agent_status"].get("pending_question"))
+        self.assertEqual(state["user_status"].get("mode"), "idle")
+
     def test_thought_journal_keeps_equivalent_waiting_question_thread(self):
         state = default_state()
         first = add_event(state, "passive_tick", "test")
