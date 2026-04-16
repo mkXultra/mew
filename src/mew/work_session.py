@@ -259,7 +259,11 @@ def find_work_model_turn(session, turn_id):
     return None
 
 
-def start_work_model_turn(state, session, decision_plan, action_plan, action):
+def work_turn_guidance_snapshot(turn):
+    return clip_output((turn or {}).get("guidance_snapshot") or (turn or {}).get("guidance") or "", 1000)
+
+
+def start_work_model_turn(state, session, decision_plan, action_plan, action, guidance=""):
     current_time = now_iso()
     turn = {
         "id": next_id(state, "work_model_turn"),
@@ -269,6 +273,7 @@ def start_work_model_turn(state, session, decision_plan, action_plan, action):
         "decision_plan": dict(decision_plan or {}),
         "action_plan": dict(action_plan or {}),
         "action": dict(action or {}),
+        "guidance_snapshot": clip_output(str(guidance or ""), 1000),
         "tool_call_id": None,
         "summary": (action_plan or {}).get("summary") or (decision_plan or {}).get("summary") or "",
         "error": "",
@@ -821,6 +826,7 @@ def build_work_session_resume(session, task=None, limit=8):
                 "status": turn.get("status"),
                 "action": action.get("type") or action.get("tool") or "unknown",
                 "summary": turn.get("finished_note") or turn.get("summary") or turn.get("error") or "",
+                "guidance_snapshot": clip_output(work_turn_guidance_snapshot(turn), 240),
                 "tool_call_id": turn.get("tool_call_id"),
             }
         )
@@ -954,6 +960,9 @@ def format_work_session_resume(resume):
                 f"#{decision.get('model_turn_id')} [{decision.get('status')}] "
                 f"{decision.get('action')}{tool_text} {decision.get('summary') or ''}"
             )
+            guidance = decision.get("guidance_snapshot") or decision.get("guidance")
+            if guidance:
+                lines.append(f"  guidance: {guidance}")
     else:
         lines.append("(none)")
 
@@ -1136,6 +1145,7 @@ def build_work_session_timeline(session, limit=20):
                 "status": turn.get("status") or "unknown",
                 "label": action_type,
                 "summary": timeline_summary(turn.get("finished_note") or turn.get("summary") or turn.get("error") or ""),
+                "guidance_snapshot": timeline_summary(work_turn_guidance_snapshot(turn)),
                 "started_at": turn.get("started_at") or "",
                 "finished_at": turn.get("finished_at") or "",
                 "linked": linked,
@@ -1184,9 +1194,11 @@ def format_work_session_timeline(session, task=None, limit=20):
         prefix = "model" if event.get("kind") == "model_turn" else "tool"
         linked = event.get("linked") or ""
         summary = f" {event.get('summary')}" if event.get("summary") else ""
+        guidance_snapshot = event.get("guidance_snapshot") or event.get("guidance")
+        guidance = f" guidance={guidance_snapshot}" if guidance_snapshot else ""
         lines.append(
             f"- {event.get('started_at') or ''} {prefix}#{event.get('id')} "
-            f"[{event.get('status')}] {event.get('label')}{linked}{summary}".strip()
+            f"[{event.get('status')}] {event.get('label')}{linked}{guidance}{summary}".strip()
         )
     return "\n".join(lines)
 
@@ -1235,6 +1247,9 @@ def format_work_session(session, task=None, limit=8, details=False):
                     f"#{turn.get('id')} [{turn.get('status')}] {action_type}{tool_text} "
                     f"{turn.get('summary') or turn.get('error') or ''}"
                 )
+                guidance_snapshot = work_turn_guidance_snapshot(turn)
+                if guidance_snapshot:
+                    lines.append(f"  guidance: {clip_output(guidance_snapshot, 240)}")
         else:
             lines.append("(none)")
 

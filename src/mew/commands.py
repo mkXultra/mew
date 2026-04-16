@@ -1178,6 +1178,7 @@ def cmd_work_ai(args):
                 {"summary": "planning work step"},
                 {"summary": "planning work step"},
                 {"type": "planning", "reason": "THINK/ACT in progress"},
+                guidance=args.work_guidance or "",
             )
             planning_turn_id = planning_turn.get("id")
             save_state(state)

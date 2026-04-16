@@ -12,6 +12,7 @@ from .work_session import (
     WORK_TOOLS,
     WRITE_WORK_TOOLS,
     build_work_session_resume,
+    work_turn_guidance_snapshot,
 )
 from .work_world import DEFAULT_WORLD_STATE_FILE_LIMIT, build_work_world_state
 
@@ -167,6 +168,7 @@ def work_model_turn_for_model(turn):
             for key, value in action.items()
             if key in ("type", "tool", "path", "query", "pattern", "reason", "summary", "note", "text", "question")
         },
+        "guidance_snapshot": work_turn_guidance_snapshot(turn),
         "tool_call_id": turn.get("tool_call_id"),
         "tool_call_ids": turn.get("tool_call_ids") or [],
         "summary": clip_output(turn.get("summary") or "", WORK_RESULT_TEXT_LIMIT),
@@ -433,6 +435,8 @@ def build_work_think_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Choose exactly one next action for this active coding work session.\n"
+        "Treat guidance as the user's current instruction for this turn. If guidance asks for fresh inspection and read tools are available, use a targeted read action before finishing; do not finish solely because older notes or prior turns claim enough context. "
+        "Fields named guidance_snapshot under prior turns or resume decisions are historical audit records, not current instructions. "
         "Treat the capabilities object as current and authoritative; if a read/write/verify root or command is allowed there, do not ask the user to pass the same flag again. "
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "

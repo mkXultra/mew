@@ -699,6 +699,67 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_model_turn_guidance_surfaces_in_reentry_views(self):
+        from mew.work_loop import build_work_model_context, work_model_turn_for_model
+        from mew.work_session import (
+            build_work_session_resume,
+            build_work_session_timeline,
+            finish_work_model_turn,
+            format_work_session_resume,
+            format_work_session_timeline,
+            start_work_model_turn,
+        )
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Guidance",
+            "goal": "Remember one-shot guidance.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+
+        turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "read first"},
+            {"summary": "read first"},
+            {"type": "read_file", "path": "README.md", "reason": "read before finish"},
+            guidance="Freshly inspect README before deciding.",
+        )
+        turn = finish_work_model_turn(state, 1, turn["id"])
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["recent_decisions"][0]["guidance_snapshot"], "Freshly inspect README before deciding.")
+        self.assertIn("guidance: Freshly inspect README before deciding.", format_work_session_resume(resume))
+        self.assertEqual(build_work_session_timeline(session)[0]["guidance_snapshot"], "Freshly inspect README before deciding.")
+        self.assertIn("guidance=Freshly inspect README before deciding.", format_work_session_timeline(session))
+        self.assertEqual(work_model_turn_for_model(turn)["guidance_snapshot"], "Freshly inspect README before deciding.")
+        self.assertNotIn("guidance", work_model_turn_for_model(turn))
+
+        context = build_work_model_context(
+            state,
+            session,
+            {"id": 1, "title": "Guidance", "description": "Remember one-shot guidance.", "status": "todo"},
+            "now",
+            guidance="",
+        )
+        self.assertEqual(context["guidance"], "")
+        self.assertEqual(
+            context["work_session"]["resume"]["recent_decisions"][0]["guidance_snapshot"],
+            "Freshly inspect README before deciding.",
+        )
+        self.assertEqual(
+            context["work_session"]["model_turns"][0]["guidance_snapshot"],
+            "Freshly inspect README before deciding.",
+        )
+        self.assertNotIn("guidance", context["work_session"]["model_turns"][0])
+
     def test_work_session_stop_request_is_consumed_before_model_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2408,6 +2469,10 @@ class WorkSessionTests(unittest.TestCase):
         from mew.work_loop import build_work_think_prompt
 
         prompt = build_work_think_prompt({"work_session": {"tool_calls": []}})
+        self.assertIn("Treat guidance as the user's current instruction", prompt)
+        self.assertIn("do not finish solely because older notes", prompt)
+        self.assertIn("guidance_snapshot", prompt)
+        self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)

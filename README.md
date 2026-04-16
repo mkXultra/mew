@@ -327,7 +327,11 @@ with current git status and touched-file stats; the same bounded summary is
 included in future work-model context when read access is allowed.
 Model-selected `read_file` calls default to a smaller page than manual reads,
 and model-selected `git_diff` defaults to diffstat, so broad read-only batches
-do not immediately bloat a resident session.
+do not immediately bloat a resident session. One-shot `--work-guidance` and
+`/continue <guidance>` text is treated as the current instruction for that turn
+and retained as a historical guidance snapshot on model turns so resume,
+timeline, and details views can show why the resident model chose the next
+action without making that old guidance current again.
 
 ```sh
 uv run mew work 1 --start-session
