@@ -3454,6 +3454,7 @@ CHAT_HELP = """Commands:
 /verification         show recent verification runs
 /verify <command>     run and record a verification command
 /writes               show recent runtime write/edit runs
+/runtime-effects [n]  show recent runtime effect journal entries
 /why                  explain the latest processed think/act decision
 /thoughts            show recent thought journal entries
 /digest               summarize activity since the last user message
@@ -4051,6 +4052,27 @@ def print_chat_writes():
         print(format_write_run(run))
 
 
+def print_chat_runtime_effects(rest=""):
+    limit = 10
+    if rest.strip():
+        try:
+            limit = int(rest.strip())
+        except ValueError:
+            print("usage: /runtime-effects [n]")
+            return
+    if limit < 1:
+        print("usage: /runtime-effects [n]")
+        return
+
+    state = load_state()
+    effects = list(reversed(state.get("runtime_effects", [])[-limit:]))
+    if not effects:
+        print("No runtime effects.")
+        return
+    for effect in effects:
+        print(format_runtime_effect(effect))
+
+
 def print_chat_thoughts(details=False):
     state = load_state()
     thoughts = list(reversed(state.get("thought_journal", [])[-10:]))
@@ -4517,6 +4539,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("writes", "write"):
         print_chat_writes()
+        return "continue"
+    if command in ("runtime-effects", "runtime_effects", "effects"):
+        print_chat_runtime_effects(rest)
         return "continue"
     if command in ("thoughts", "thought"):
         print_chat_thoughts(details=rest.casefold() in ("details", "--details"))

@@ -294,6 +294,7 @@ state without leaving the session:
 /verification
 /verify UV_CACHE_DIR=.uv-cache uv run python -m unittest
 /writes
+/runtime-effects
 /why
 /thoughts details
 /digest

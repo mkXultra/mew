@@ -2730,7 +2730,14 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import load_state, save_state, state_lock
+                from mew.state import (
+                    add_event,
+                    add_runtime_effect,
+                    complete_runtime_effect,
+                    load_state,
+                    save_state,
+                    state_lock,
+                )
 
                 with state_lock():
                     state = load_state()
@@ -2798,9 +2805,23 @@ class CommandTests(unittest.TestCase):
                             "counts": {"actions": 1},
                         }
                     )
+                    event = add_event(state, "passive_tick", "runtime", {})
+                    effect = add_runtime_effect(state, event, "passive_tick", "planning", "effect-start")
+                    effect["action_types"] = ["send_message"]
+                    complete_runtime_effect(
+                        state,
+                        effect["id"],
+                        "effect-done",
+                        "applied",
+                        processed_count=1,
+                        counts={"messages": 1},
+                    )
                     save_state(state)
 
-                stdin = StringIO("/focus\n/next\n/agents\n/verification\n/writes\n/thoughts details\nhello mew\n/exit\n")
+                stdin = StringIO(
+                    "/focus\n/next\n/agents\n/verification\n/writes\n/runtime-effects\n/thoughts details\n"
+                    "hello mew\n/exit\n"
+                )
                 with (
                     patch("sys.stdin", stdin),
                     redirect_stdout(StringIO()) as stdout,
@@ -2819,12 +2840,13 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [running/implementation]", output)
                 self.assertIn("#1 [passed]", output)
                 self.assertIn("#1 [edit_file]", output)
+                self.assertIn("#1 [applied] event=#1 reason=passive_tick", output)
                 self.assertIn("#1 event=passive_tick#1", output)
                 self.assertIn("open_threads:", output)
                 self.assertIn("queued message event", output)
 
                 state = load_state()
-                self.assertEqual(state["inbox"][0]["payload"]["text"], "hello mew")
+                self.assertEqual(state["inbox"][-1]["payload"]["text"], "hello mew")
             finally:
                 os.chdir(old_cwd)
 
