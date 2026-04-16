@@ -9,7 +9,7 @@ from .work_session import WORK_TOOLS, WRITE_WORK_TOOLS
 
 WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "wait"}
 WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
-WORK_RESULT_TEXT_LIMIT = 4000
+WORK_RESULT_TEXT_LIMIT = 20000
 
 
 def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):

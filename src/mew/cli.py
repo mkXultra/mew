@@ -85,6 +85,7 @@ from .config import (
     DEFAULT_TASK_TIMEOUT_SECONDS,
 )
 from .model_backends import SUPPORTED_MODEL_BACKENDS
+from .read_tools import DEFAULT_READ_MAX_CHARS
 from .runtime import run_runtime
 
 
@@ -695,7 +696,7 @@ def build_parser():
     work_parser.add_argument("--cwd", default=".", help="cwd for run_command or run_tests")
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
-    work_parser.add_argument("--max-chars", type=int, default=6000, help="maximum read_file characters")
+    work_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS, help="maximum read_file characters")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
@@ -740,7 +741,7 @@ def build_parser():
     tool_read_parser = tool_subparsers.add_parser("read", help="read a non-sensitive file")
     tool_read_parser.add_argument("path")
     tool_read_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
-    tool_read_parser.add_argument("--max-chars", type=int, default=6000)
+    tool_read_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS)
     tool_read_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_read_parser.set_defaults(func=cmd_tool_read)
 

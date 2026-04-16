@@ -119,6 +119,44 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_read_file_default_handles_larger_source_files(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                marker = "tail marker after old six kilobyte limit"
+                Path("large.py").write_text("x" * 7000 + marker, encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "large.py",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertFalse(result["truncated"])
+                self.assertIn(marker, result["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_requires_active_session_and_read_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

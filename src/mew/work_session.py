@@ -1,4 +1,11 @@
-from .read_tools import glob_paths, inspect_dir, read_file, search_text, summarize_read_result
+from .read_tools import (
+    DEFAULT_READ_MAX_CHARS,
+    glob_paths,
+    inspect_dir,
+    read_file,
+    search_text,
+    summarize_read_result,
+)
 from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso
@@ -186,7 +193,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
         return read_file(
             parameters.get("path") or "",
             allowed_read_roots,
-            max_chars=parameters.get("max_chars", 6000),
+            max_chars=parameters.get("max_chars", DEFAULT_READ_MAX_CHARS),
         )
     if tool == "search_text":
         return search_text(

@@ -63,15 +63,19 @@ Evidence:
 - `--progress` streams `run_tests`, `run_command`, and write-verification stdout/stderr lines to stderr for both manual work tools and `mew work --ai`.
 - `/work-session ai ...` lets the user run a resident model work step from inside `mew chat`, using the same gates as `mew work --ai`.
 - `dogfood --scenario work-session` now exercises chat `/work-session details`, so cockpit visibility is part of the recurring dogfood path.
+- Native work reads now default to 50,000 characters and model work-session context keeps up to 20,000 characters per result, reducing the chance that a model loses the relevant half of a normal source file.
 
 Missing proof:
 
 - No streaming model token output.
+- THINK/ACT still uses two model calls per work step; this preserves the current architecture but adds latency for tight coding loops.
+- Work mode still executes one tool per model step and lacks dedicated read-only git tools.
+- Large sessions can now carry more context, so state growth and prompt size need continued monitoring.
 - Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit.
 
 Next action:
 
-- Add live model-token streaming or a tighter chat prompt loop so model reasoning and tool feedback appear while the resident model is still working.
+- Build the first live work cockpit slice: visible model progress, current/pending tool action, and a clear continuation loop from chat.
 
 ## Milestone 3: Persistent Advantage
 
@@ -140,9 +144,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `458 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `20 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `21 passed`.
+- `uv run pytest -q` current: `459 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `21 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `22 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
