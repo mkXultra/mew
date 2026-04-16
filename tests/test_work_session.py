@@ -840,6 +840,13 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["resume"]["session_id"], 1)
                 self.assertIn("mew chat", data["next_cli_controls"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Work resume #1 [active] task=#1", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("mew chat", output)
             finally:
                 os.chdir(old_cwd)
 
@@ -2513,6 +2520,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work resume #1 [closed] task=#1", output)
                 self.assertIn("World state", output)
                 self.assertIn("README.md", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/work-session resume 1", output)
             finally:
                 os.chdir(old_cwd)
 

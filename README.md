@@ -255,6 +255,8 @@ The same recent-session summaries are available in `mew work --session --json`
 for scripts and model-facing tools.
 When a session is active, both `mew work --session` and `/work-session` include
 the next controls for continuing, stopping, resuming, or opening chat.
+`mew work --session --resume` and `/work-session resume` include the same
+controls after the compact resume bundle.
 Active `mew work --session --json` and `--resume --json` also include
 `next_cli_controls`, so machine readers get the same reentry commands.
 `mew chat` prints active-session controls on startup even when `--no-brief` is

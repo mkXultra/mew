@@ -1478,6 +1478,8 @@ def cmd_work_show_session(args):
             )
         else:
             print(format_work_session_resume(resume))
+            if resume:
+                print(format_work_cli_controls(session, args))
         return 0
     if args.json:
         payload = {"work_session": session}
@@ -5264,6 +5266,8 @@ def chat_work_session(rest, chat_state=None):
             print(format_no_active_work_session(state))
             return
         print(format_work_session_resume(resume))
+        if resume:
+            print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 
     if action == "approve":
