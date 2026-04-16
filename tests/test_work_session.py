@@ -4138,6 +4138,44 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_continue_accepts_options_followed_by_plain_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("option guidance content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "done", "action": {"type": "finish", "reason": "guided"}}
+
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/continue --auth auth.json --allow-read . inspect the README summary",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                self.assertEqual(chat_state["work_continue_options"], "--auth auth.json --allow-read .")
+                self.assertIn("inspect the README summary", prompts[-1])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

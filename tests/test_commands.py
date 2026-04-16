@@ -885,6 +885,73 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_uses_kind_scope_for_default_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Research default task",
+                                "description": "This should stay outside coding scope.",
+                                "kind": "research",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Implement scoped workbench",
+                                "description": "This should be the scoped default.",
+                                "kind": "coding",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work", {"kind": "coding"}), "continue")
+
+                output = stdout.getvalue()
+                self.assertIn("Work task #2: Implement scoped workbench", output)
+                self.assertNotIn("Research default task", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_handles_status_outbox_ack_and_message(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

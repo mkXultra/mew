@@ -599,17 +599,18 @@ def format_workbench(data):
     return "\n".join(lines)
 
 
-def select_workbench_task(state, task_id=None):
+def select_workbench_task(state, task_id=None, kind=None):
     task = find_task(state, task_id) if task_id else None
     if task or task_id:
         return task
     candidates = sorted(open_tasks(state), key=task_sort_key)
+    candidates = filter_tasks_by_kind(candidates, kind=kind)
     running_tasks = [task for task in candidates if task.get("status") == "running"]
     if running_tasks:
         return running_tasks[0]
     active_task_id = state.get("agent_status", {}).get("active_task_id")
     task = find_task(state, active_task_id) if active_task_id else None
-    if task:
+    if task and (not kind or task_kind(task) == kind):
         return task
     return candidates[0] if candidates else None
 
@@ -5558,12 +5559,14 @@ def print_chat_task(task_id):
     print(f"latest_plan_id: {task.get('latest_plan_id') or ''}")
 
 
-def print_chat_workbench(task_id):
+def print_chat_workbench(task_id, kind=None):
     state = load_state()
-    task = select_workbench_task(state, task_id)
+    task = select_workbench_task(state, task_id, kind=kind)
     if not task:
         if task_id:
             print(f"mew: task not found: {task_id}")
+        elif kind:
+            print(f"No {kind} tasks.")
         else:
             print("No tasks.")
         return
@@ -5746,6 +5749,57 @@ def _looks_like_work_continue_options(rest):
     return first.lstrip("#").isdigit()
 
 
+def _split_continue_options_and_guidance(rest):
+    try:
+        parts = shlex.split(rest or "")
+    except ValueError:
+        return (rest or "").strip(), ""
+    value_options = {
+        "--auth",
+        "--model-backend",
+        "--model",
+        "--base-url",
+        "--model-timeout",
+        "--max-steps",
+        "--act-mode",
+        "--work-guidance",
+        "--allow-read",
+        "--allow-write",
+        "--verify-command",
+        "--verify-timeout",
+    }
+    flag_options = {
+        "--allow-shell",
+        "--allow-verify",
+        "--progress",
+        "--live",
+        "--stream-model",
+        "--prompt-approval",
+    }
+    value_option_prefixes = tuple(f"{option}=" for option in value_options)
+    kept = []
+    index = 0
+    if parts and parts[0].lstrip("#").isdigit():
+        kept.append(parts[0])
+        index = 1
+    while index < len(parts):
+        token = parts[index]
+        if token in value_options:
+            if index + 1 >= len(parts):
+                return shlex.join(parts), ""
+            kept.extend([token, parts[index + 1]])
+            index += 2
+            continue
+        if token.startswith(value_option_prefixes) or token in flag_options:
+            kept.append(token)
+            index += 1
+            continue
+        if token.startswith("-"):
+            return shlex.join(parts), ""
+        return shlex.join(kept), " ".join(parts[index:])
+    return shlex.join(kept), ""
+
+
 def _chat_continue_rest(rest, chat_state):
     rest = (rest or "").strip()
     cached = (chat_state or {}).get("work_continue_options", "").strip()
@@ -5754,8 +5808,12 @@ def _chat_continue_rest(rest, chat_state):
     if not rest:
         return cached
     if _looks_like_work_continue_options(rest):
+        options, guidance_text = _split_continue_options_and_guidance(rest)
         if chat_state is not None:
-            chat_state["work_continue_options"] = _strip_work_guidance_options(rest)
+            chat_state["work_continue_options"] = _strip_work_guidance_options(options)
+        if guidance_text:
+            guidance = "--work-guidance " + shlex.quote(guidance_text)
+            return " ".join(part for part in (options, guidance) if part)
         return rest
     guidance = "--work-guidance " + shlex.quote(rest)
     return " ".join(part for part in (cached, guidance) if part)
@@ -7171,7 +7229,7 @@ def run_chat_slash_command(line, chat_state):
             print_chat_task(rest)
         return "continue"
     if command == "work":
-        print_chat_workbench(rest or None)
+        print_chat_workbench(rest or None, kind=chat_state.get("kind"))
         return "continue"
     if command in ("work-session", "work_session"):
         chat_work_session(rest, chat_state)
