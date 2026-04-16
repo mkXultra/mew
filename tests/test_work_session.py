@@ -828,6 +828,18 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --live --auth auth.json --model-backend codex --allow-read .", output)
                 self.assertIn("mew chat", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertIn("mew chat", data["next_cli_controls"])
+                self.assertTrue(any(command.startswith("mew work 1 --live") for command in data["next_cli_controls"]))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume"]["session_id"], 1)
+                self.assertIn("mew chat", data["next_cli_controls"])
             finally:
                 os.chdir(old_cwd)
 

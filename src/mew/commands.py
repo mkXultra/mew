@@ -563,20 +563,23 @@ def _work_resume_command(args, task_id):
     return shlex.join(parts)
 
 
-def format_work_cli_controls(session, args):
-    lines = ["", "Next CLI controls"]
+def work_cli_control_commands(session, args):
     if not session:
-        lines.append("mew work <task-id> --start-session")
-        return "\n".join(lines)
+        return ["mew work <task-id> --start-session"]
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        lines.append(_work_resume_command(args, task_id))
-        lines.append(f"mew work {task_id} --start-session")
-        return "\n".join(lines)
-    lines.append(_work_live_continue_command(args, task_id))
-    lines.append(f"mew work {task_id} --stop-session --stop-reason pause")
-    lines.append(_work_resume_command(args, task_id))
-    lines.append("mew chat")
+        return [_work_resume_command(args, task_id), f"mew work {task_id} --start-session"]
+    return [
+        _work_live_continue_command(args, task_id),
+        f"mew work {task_id} --stop-session --stop-reason pause",
+        _work_resume_command(args, task_id),
+        "mew chat",
+    ]
+
+
+def format_work_cli_controls(session, args):
+    lines = ["", "Next CLI controls"]
+    lines.extend(work_cli_control_commands(session, args))
     return "\n".join(lines)
 
 
@@ -1463,7 +1466,16 @@ def cmd_work_show_session(args):
                 print(format_no_active_work_session(state))
             return 0
         if args.json:
-            print(json.dumps({"resume": resume}, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "resume": resume,
+                        "next_cli_controls": work_cli_control_commands(session, args) if resume else [],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         else:
             print(format_work_session_resume(resume))
         return 0
@@ -1472,6 +1484,8 @@ def cmd_work_show_session(args):
         if not session and not getattr(args, "task_id", None):
             payload["recent_work_sessions"] = recent_work_session_summaries(state)
             payload["start_commands"] = ["mew work <task-id> --start-session", "/work-session start <task-id>"]
+        elif session:
+            payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if not session and not getattr(args, "task_id", None):
