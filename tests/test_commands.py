@@ -55,6 +55,36 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Manual step read permission:", guidance)
         self.assertIn("prefer one small targeted inspect_dir, read_file, or search_text", guidance)
 
+    def test_step_allow_write_enables_gated_write_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                report = {"steps": [], "stop_reason": "max_steps", "dry_run": True, "max_steps": 1}
+                with patch("mew.commands.run_step_loop", return_value=report) as run_step:
+                    with redirect_stdout(StringIO()):
+                        code = main(
+                            [
+                                "step",
+                                "--dry-run",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                f"{sys.executable} -c \"print('ok')\"",
+                            ]
+                        )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        guidance = run_step.call_args.kwargs["guidance"]
+        self.assertIn("Manual step write permission:", guidance)
+        self.assertIn("Omitting dry_run is treated as dry_run=true.", guidance)
+        self.assertTrue(run_step.call_args.kwargs["allow_write"])
+        self.assertEqual(run_step.call_args.kwargs["allowed_write_roots"], ["."])
+        self.assertTrue(run_step.call_args.kwargs["allow_verify"])
+
     def test_step_help_describes_model_flags(self):
         with redirect_stdout(StringIO()) as stdout:
             with self.assertRaises(SystemExit) as raised:

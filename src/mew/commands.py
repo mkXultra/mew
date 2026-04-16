@@ -1667,6 +1667,21 @@ def cmd_step(args):
             )
             if part
         )
+    if args.allow_write:
+        guidance = "\n\n".join(
+            part
+            for part in (
+                guidance.strip(),
+                (
+                    "Manual step write permission:\n"
+                    "Gated write_file/edit_file actions are available under --allow-write roots. "
+                    "Omitting dry_run is treated as dry_run=true. "
+                    "Set dry_run=false only for a small targeted write, and only when "
+                    "--allow-verify plus a verification command are configured."
+                ),
+            )
+            if part
+        )
 
     progress = None
     if args.ai and not args.json:
@@ -1686,9 +1701,11 @@ def cmd_step(args):
         desires=read_desires(args.desires),
         autonomy_level=args.autonomy_level,
         allowed_read_roots=args.allow_read or [],
+        allowed_write_roots=args.allow_write or [],
         allow_verify=args.allow_verify,
         verify_command=args.verify_command or "",
         verify_timeout=args.verify_timeout,
+        allow_write=bool(args.allow_write),
         trace_model=getattr(args, "trace_model", False),
         max_reflex_rounds=getattr(args, "max_reflex_rounds", 0),
         progress=progress,

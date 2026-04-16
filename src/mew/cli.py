@@ -470,7 +470,7 @@ def build_parser():
         "--autonomy-level",
         choices=("observe", "propose", "act"),
         default="act",
-        help="freedom level for the step loop; writes and agent runs remain disabled",
+        help="freedom level for the step loop; agent runs remain disabled",
     )
     step_parser.add_argument(
         "--allow-read",
@@ -481,6 +481,12 @@ def build_parser():
     step_parser.add_argument("--allow-verify", action="store_true", help="allow run_verification actions")
     step_parser.add_argument("--verify-command", help="verification command available to run_verification")
     step_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout in seconds")
+    step_parser.add_argument(
+        "--allow-write",
+        action="append",
+        default=[],
+        help="allow gated step write actions under this path; can be passed more than once",
+    )
     step_parser.add_argument(
         "--model-backend",
         default=os.environ.get("MEW_MODEL_BACKEND", DEFAULT_MODEL_BACKEND),

@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -49,6 +50,16 @@ class StepLoopTests(unittest.TestCase):
         filtered = filter_step_action_plan(action_plan, allow_verify=True)
 
         self.assertEqual(filtered["actions"][0]["type"], "run_verification")
+
+    def test_filter_step_action_plan_can_allow_writes(self):
+        action_plan = {
+            "summary": "Write.",
+            "actions": [{"type": "write_file", "path": "note.md", "content": "hello", "create": True}],
+        }
+
+        filtered = filter_step_action_plan(action_plan, allow_write=True)
+
+        self.assertEqual(filtered["actions"][0]["type"], "write_file")
 
     def test_suppress_redundant_wait_actions_keeps_step_moving(self):
         state = default_state()
@@ -174,6 +185,192 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(state["thought_journal"][0]["actions"][0]["type"], "record_memory")
         self.assertEqual(state["step_runs"][0]["event_id"], state["inbox"][0]["id"])
         self.assertEqual(state["step_runs"][0]["skipped_actions"][0]["type"], "write_file")
+
+    def test_step_loop_can_apply_gated_dry_run_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Preview write.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [{"type": "write_file", "path": "note.md", "content": "hello", "create": True}],
+                }
+                fake_actions = {
+                    "summary": "Preview write.",
+                    "actions": [{"type": "write_file", "path": "note.md", "content": "hello", "create": True}],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(max_steps=1, allow_write=True, allowed_write_roots=[tmp])
+                state = load_state()
+                note_exists = (Path(tmp) / "note.md").exists()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertFalse(note_exists)
+        self.assertEqual(report["steps"][0]["actions"][0]["type"], "write_file")
+        self.assertEqual(report["steps"][0]["counts"]["messages"], 1)
+        self.assertEqual(state["write_runs"][0]["dry_run"], True)
+        self.assertEqual(state["write_runs"][0]["written"], False)
+        self.assertEqual(state["step_runs"][0]["effects"][0]["type"], "message")
+        self.assertEqual(state["step_runs"][0]["effects"][1]["type"], "write_run")
+
+    def test_step_loop_refuses_real_write_without_verification_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Unsafe write.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                fake_actions = {
+                    "summary": "Unsafe write.",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(max_steps=1, allow_write=True, allowed_write_roots=[tmp])
+                state = load_state()
+                note_exists = (Path(tmp) / "note.md").exists()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertFalse(note_exists)
+        self.assertEqual(report["steps"][0]["actions"][0]["type"], "write_file")
+        self.assertEqual(report["steps"][0]["counts"]["messages"], 1)
+        self.assertEqual(state["write_runs"], [])
+        self.assertIn("non-dry-run writes require", state["outbox"][0]["text"])
+
+    def test_step_loop_can_write_and_verify_when_gated(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Write and verify.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                fake_actions = {
+                    "summary": "Write and verify.",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "hello",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                verify_command = (
+                    f"{sys.executable} -c "
+                    "\"from pathlib import Path; assert Path('note.md').read_text() == 'hello'\""
+                )
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(
+                        max_steps=1,
+                        allow_write=True,
+                        allowed_write_roots=[tmp],
+                        allow_verify=True,
+                        verify_command=verify_command,
+                    )
+                state = load_state()
+                note_text = (Path(tmp) / "note.md").read_text(encoding="utf-8")
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(note_text, "hello")
+        self.assertEqual(report["steps"][0]["counts"]["messages"], 2)
+        self.assertEqual(state["write_runs"][0]["dry_run"], False)
+        self.assertEqual(state["write_runs"][0]["written"], True)
+        self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+        self.assertIn("write_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
+        self.assertIn("verification_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
+
+    def test_step_loop_rolls_back_failed_gated_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                fake_decision = {
+                    "summary": "Write and fail verify.",
+                    "open_threads": [],
+                    "resolved_threads": [],
+                    "agent_status": {},
+                    "decisions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "bad",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                fake_actions = {
+                    "summary": "Write and fail verify.",
+                    "actions": [
+                        {
+                            "type": "write_file",
+                            "path": "note.md",
+                            "content": "bad",
+                            "create": True,
+                            "dry_run": False,
+                        }
+                    ],
+                }
+                verify_command = f"{sys.executable} -c \"import sys; sys.exit(1)\""
+                with patch("mew.step_loop.plan_event", return_value=(fake_decision, fake_actions)):
+                    report = run_step_loop(
+                        max_steps=1,
+                        allow_write=True,
+                        allowed_write_roots=[tmp],
+                        allow_verify=True,
+                        verify_command=verify_command,
+                    )
+                state = load_state()
+                note_exists = (Path(tmp) / "note.md").exists()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertFalse(note_exists)
+        self.assertEqual(report["steps"][0]["counts"]["messages"], 3)
+        self.assertEqual(state["write_runs"][0]["written"], True)
+        self.assertEqual(state["write_runs"][0]["rolled_back"], True)
+        self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
+        self.assertTrue(state["attention"]["items"])
 
     def test_step_loop_reports_progress(self):
         old_cwd = os.getcwd()

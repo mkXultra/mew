@@ -129,6 +129,7 @@ uv run mew step --dry-run
 uv run mew step --ai --auth auth.json --allow-read . --max-steps 3
 uv run mew step --ai --auth auth.json --allow-read . --max-reflex-rounds 1 --focus "Read README.md, then decide"
 uv run mew step --ai --auth auth.json --allow-read . --focus "Review the current mew implementation work"
+uv run mew step --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --focus "Make one small verified change"
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
 uv run mew dogfood --source-workspace . --ai --duration 60

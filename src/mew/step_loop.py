@@ -59,10 +59,12 @@ def load_state_readonly():
     return merge_defaults(migrate_state(state), default_state())
 
 
-def filter_step_action_plan(action_plan, allow_verify=False):
+def filter_step_action_plan(action_plan, allow_verify=False, allow_write=False):
     allowed = set(STEP_ACTION_TYPES)
     if allow_verify:
         allowed.add("run_verification")
+    if allow_write:
+        allowed.update({"write_file", "edit_file"})
 
     actions = []
     skipped = []
@@ -162,6 +164,8 @@ def step_stop_reason(action_plan, dry_run=False):
         "read_file",
         "search_text",
         "run_verification",
+        "write_file",
+        "edit_file",
         "refine_task",
     }
     if not any(action_type in feedback_types for action_type in action_types):
@@ -345,9 +349,11 @@ def run_step_loop(
     desires="",
     autonomy_level="act",
     allowed_read_roots=None,
+    allowed_write_roots=None,
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
+    allow_write=False,
     trace_model=False,
     max_reflex_rounds=0,
     progress=None,
@@ -356,6 +362,7 @@ def run_step_loop(
     stop_reason = "max_steps"
     max_steps = max(1, int(max_steps or 1))
     allowed_read_roots = allowed_read_roots or []
+    allowed_write_roots = allowed_write_roots or []
 
     for index in range(max_steps):
         current_time = now_iso()
@@ -401,9 +408,9 @@ def run_step_loop(
             allow_agent_run=False,
             allow_verify=allow_verify,
             verify_command=verify_command or "",
-            allow_write=False,
+            allow_write=allow_write,
             allowed_read_roots=allowed_read_roots,
-            allowed_write_roots=[],
+            allowed_write_roots=allowed_write_roots,
             log_phases=not dry_run,
             trace_model=bool(trace_model and not dry_run),
             max_reflex_rounds=max_reflex_rounds,
@@ -417,7 +424,11 @@ def run_step_loop(
             compact_step_reflex_observation(observation)
             for observation in decision_plan.get("reflex_observations") or []
         ]
-        filtered_action_plan = filter_step_action_plan(action_plan, allow_verify=allow_verify)
+        filtered_action_plan = filter_step_action_plan(
+            action_plan,
+            allow_verify=allow_verify,
+            allow_write=allow_write,
+        )
         filtered_action_plan = suppress_redundant_wait_actions(filtered_action_plan, state_snapshot)
         reason = step_stop_reason(filtered_action_plan, dry_run=dry_run)
         step_stop = reason or ("max_steps" if index == max_steps - 1 else "")
@@ -454,8 +465,8 @@ def run_step_loop(
                     allow_verify=allow_verify,
                     verify_command=verify_command or "",
                     verify_timeout=verify_timeout,
-                    allow_write=False,
-                    allowed_write_roots=[],
+                    allow_write=allow_write,
+                    allowed_write_roots=allowed_write_roots,
                 ) or counts
                 if progress:
                     progress(
