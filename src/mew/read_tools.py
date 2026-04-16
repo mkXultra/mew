@@ -102,10 +102,18 @@ def inspect_dir(path, allowed_roots, limit=50):
     }
 
 
-def _optional_positive_int(value, default, maximum):
+def _optional_int_in_range(value, name, default, minimum, maximum):
     if value in (None, ""):
         return default
-    return max(1, min(int(value), maximum))
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if number < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    if number > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
+    return number
 
 
 def read_file(
@@ -123,12 +131,14 @@ def read_file(
         raise ValueError(f"path is not a file: {resolved}")
 
     if line_start not in (None, ""):
-        start = _optional_positive_int(line_start, default=1, maximum=1_000_000)
-        count = _optional_positive_int(line_count, default=120, maximum=1000)
+        start = _optional_int_in_range(line_start, "line_start", default=1, minimum=1, maximum=1_000_000)
+        count = _optional_int_in_range(line_count, "line_count", default=120, minimum=1, maximum=1000)
         selected = []
         more_lines = False
+        total_lines = 0
         with resolved.open("r", encoding="utf-8", errors="replace") as handle:
             for line_number, line in enumerate(handle, 1):
+                total_lines = line_number
                 if line_number < start:
                     continue
                 if line_number >= start + count:
@@ -143,6 +153,8 @@ def read_file(
         except OSError:
             size = len(raw_text.encode("utf-8", errors="replace"))
         end_line = start + len(selected) - 1 if selected else None
+        eof = not selected and start > total_lines
+        message = f"line_start {start} is beyond EOF at line {total_lines}" if eof else ""
         return {
             "path": str(resolved),
             "type": "file",
@@ -151,6 +163,8 @@ def read_file(
             "line_count": count,
             "line_end": end_line,
             "next_line": (end_line + 1) if end_line is not None and more_lines else None,
+            "eof": eof,
+            "message": message,
             "text": text,
             "truncated": more_lines or char_truncated,
         }
@@ -297,10 +311,12 @@ def summarize_read_result(action_type, result):
         suffix = " (truncated)" if result.get("truncated") else ""
         if result.get("line_start") is not None:
             next_text = f" next_line={result.get('next_line')}" if result.get("next_line") is not None else ""
-            line_end = result.get("line_end") if result.get("line_end") is not None else result.get("line_start")
+            line_end = result.get("line_end")
+            line_span = f"{result.get('line_start')}-{line_end}" if line_end is not None else f"{result.get('line_start')}-EOF"
+            message = f" {result.get('message')}" if result.get("message") else ""
             return (
                 f"Read file {result.get('path')} size={result.get('size')} chars "
-                f"lines={result.get('line_start')}-{line_end}{next_text}{suffix}\n"
+                f"lines={line_span}{next_text}{suffix}{message}\n"
                 f"{result.get('text') or ''}"
             )
         offset = result.get("offset") or 0

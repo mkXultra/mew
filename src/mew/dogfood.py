@@ -34,7 +34,14 @@ DOGFOOD_SKIP_DIR_NAMES = {
 }
 DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
 DOGFOOD_READY_CODING_TASK_TITLE = "Dogfood programmer loop smoke task"
-DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search", "runtime-focus", "work-session")
+DOGFOOD_SCENARIOS = (
+    "interrupted-focus",
+    "trace-smoke",
+    "memory-search",
+    "runtime-focus",
+    "chat-cockpit",
+    "work-session",
+)
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -493,6 +500,59 @@ def run_runtime_focus_scenario(workspace, env=None):
         expected="doctor shows runtime effect count",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
+
+
+def run_chat_cockpit_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, input_text=None):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env, input_text=input_text)
+        commands.append(result)
+        return result
+
+    research_result = run(["task", "add", "Research default task", "--kind", "research"])
+    coding_result = run(["task", "add", "Implement scoped chat cockpit", "--kind", "coding"])
+    chat_result = run(
+        ["chat", "--kind", "coding", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/scope\n/tasks\n/work\n/exit\n",
+    )
+    chat_output = chat_result.get("stdout") or ""
+
+    _scenario_check(
+        checks,
+        "chat_kind_scope_starts_active",
+        chat_result.get("exit_code") == 0 and "scope: coding" in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="chat --kind coding starts with coding scope visible",
+    )
+    _scenario_check(
+        checks,
+        "chat_tasks_respect_kind_scope",
+        chat_result.get("exit_code") == 0
+        and "Implement scoped chat cockpit" in chat_output
+        and "Research default task" not in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="/tasks shows coding tasks and hides research tasks under coding scope",
+    )
+    _scenario_check(
+        checks,
+        "chat_work_respects_kind_scope",
+        chat_result.get("exit_code") == 0
+        and "Work task #2: Implement scoped chat cockpit" in chat_output
+        and "No coding tasks." not in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="/work selects the scoped coding task by default",
+    )
+    _scenario_check(
+        checks,
+        "chat_cockpit_seed_commands_succeed",
+        research_result.get("exit_code") == 0 and coding_result.get("exit_code") == 0,
+        observed=[command_result_tail(research_result), command_result_tail(coding_result)],
+        expected="scenario task seeds succeed",
+    )
+    return _scenario_report("chat-cockpit", workspace, commands, checks)
 
 
 def run_work_session_scenario(workspace, env=None):
@@ -986,6 +1046,8 @@ def run_dogfood_scenario(args):
             reports.append(run_memory_search_scenario(scenario_workspace, env=env))
         elif name == "runtime-focus":
             reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
+        elif name == "chat-cockpit":
+            reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":
             reports.append(run_work_session_scenario(scenario_workspace, env=env))
         else:

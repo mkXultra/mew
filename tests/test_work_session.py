@@ -244,6 +244,77 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_read_file_line_start_reports_invalid_and_eof(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("app.py").write_text("one\ntwo\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "app.py",
+                                "--allow-read",
+                                ".",
+                                "--line-start",
+                                "0",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                failed = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(failed["status"], "failed")
+                self.assertIn("line_start must be >= 1", failed["error"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "app.py",
+                                "--allow-read",
+                                ".",
+                                "--line-start",
+                                "99",
+                                "--line-count",
+                                "2",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                result = json.loads(stdout.getvalue())["tool_call"]["result"]
+                self.assertTrue(result["eof"])
+                self.assertIsNone(result["line_end"])
+                self.assertEqual(result["message"], "line_start 99 is beyond EOF at line 2")
+                self.assertEqual(result["text"], "")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                session_text = stdout.getvalue()
+                self.assertIn("lines=99-EOF", session_text)
+                self.assertIn("line_start 99 is beyond EOF at line 2", session_text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_requires_active_session_and_read_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

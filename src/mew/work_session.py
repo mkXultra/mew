@@ -542,11 +542,13 @@ def compact_work_tool_summary(call):
     if tool == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
         if result.get("line_start") is not None:
-            line_end = result.get("line_end") if result.get("line_end") is not None else result.get("line_start")
+            line_end = result.get("line_end")
+            line_span = f"{result.get('line_start')}-{line_end}" if line_end is not None else f"{result.get('line_start')}-EOF"
             next_text = f" next_line={result.get('next_line')}" if result.get("next_line") is not None else ""
+            message = f" {result.get('message')}" if result.get("message") else ""
             return (
                 f"Read file {result.get('path') or (call.get('parameters') or {}).get('path')} "
-                f"size={result.get('size')} chars lines={result.get('line_start')}-{line_end}{next_text}{suffix}"
+                f"size={result.get('size')} chars lines={line_span}{next_text}{suffix}{message}"
             )
         offset = result.get("offset") or 0
         next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
