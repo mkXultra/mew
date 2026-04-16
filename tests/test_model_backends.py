@@ -56,6 +56,30 @@ class ModelBackendTests(unittest.TestCase):
         self.assertEqual(result, expected)
         call.assert_called_once_with({"access_token": "x"}, "prompt", "model", "url", 10)
 
+    def test_call_model_json_forwards_stream_callback_to_codex(self):
+        expected = {"summary": "ok"}
+        callback = lambda delta: None
+        with patch("mew.model_backends.call_codex_json", return_value=expected) as call:
+            result = call_model_json(
+                "codex",
+                {"access_token": "x"},
+                "prompt",
+                "model",
+                "url",
+                10,
+                on_text_delta=callback,
+            )
+
+        self.assertEqual(result, expected)
+        call.assert_called_once_with(
+            {"access_token": "x"},
+            "prompt",
+            "model",
+            "url",
+            10,
+            on_text_delta=callback,
+        )
+
     def test_load_model_auth_delegates_to_claude_auth_loader(self):
         with patch("mew.model_backends.load_anthropic_auth", return_value={"path": "key.txt"}) as loader:
             auth = load_model_auth("claude", "key.txt")
