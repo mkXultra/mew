@@ -169,7 +169,7 @@ def _work_action_schema_text():
         '  "summary": "short reason",\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
-        '    "tools": [{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log"}],\n'
+        '    "tools": [{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", "path": "required for read_file/glob/search_text", "query": "required for search_text", "pattern": "required for glob"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
         '    "pattern": "glob pattern",\n'
@@ -241,7 +241,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
             if not isinstance(item, dict):
                 continue
             sub_action = normalize_work_model_action({"action": item}, verify_command=verify_command)
-            if sub_action.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+            if sub_action.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(sub_action):
                 normalized_tools.append(sub_action)
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
@@ -285,6 +285,17 @@ def normalize_work_model_action(action_plan, verify_command=""):
     if action_type == "run_tests" and not normalized.get("command") and verify_command:
         normalized["command"] = verify_command
     return normalized
+
+
+def valid_batch_sub_action(action):
+    action_type = (action or {}).get("type")
+    if action_type == "read_file":
+        return bool(action.get("path"))
+    if action_type == "search_text":
+        return bool(action.get("query"))
+    if action_type == "glob":
+        return bool(action.get("pattern"))
+    return action_type in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)
 
 
 def work_tool_parameters_from_action(

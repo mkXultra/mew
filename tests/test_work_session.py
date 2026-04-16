@@ -1244,6 +1244,41 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_batch_skips_read_tools_without_required_parameters(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "collect context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "inspect_dir", "path": "."},
+                                {"type": "read_file"},
+                            ],
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--allow-read", ".", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual([call["tool"] for call in data["steps"][0]["tool_calls"]], ["inspect_dir"])
+                self.assertEqual(load_state()["work_sessions"][0]["model_turns"][0]["tool_call_ids"], [1])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prints_resume_after_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
