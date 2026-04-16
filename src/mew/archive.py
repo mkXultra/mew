@@ -119,6 +119,11 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
         lambda run: True,
         keep_recent,
     )
+    work_session_remaining, work_session_archived = _split_archivable(
+        list(state.get("work_sessions", [])),
+        lambda session: session.get("status") == "closed",
+        keep_recent,
+    )
     effect_remaining_lines, effect_archived, _effect_total = _split_effect_log(keep_recent)
 
     archive_payload = {
@@ -129,6 +134,7 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
             "agent_runs": len(agent_run_archived),
             "verification_runs": len(verification_archived),
             "write_runs": len(write_archived),
+            "work_sessions": len(work_session_archived),
             "effects": len(effect_archived),
         },
         "inbox": inbox_archived,
@@ -136,6 +142,7 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
         "agent_runs": agent_run_archived,
         "verification_runs": verification_archived,
         "write_runs": write_archived,
+        "work_sessions": work_session_archived,
         "effects": effect_archived,
     }
     total = sum(archive_payload["counts"].values())
@@ -151,6 +158,7 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
         state["agent_runs"] = agent_run_remaining
         state["verification_runs"] = verification_remaining
         state["write_runs"] = write_remaining
+        state["work_sessions"] = work_session_remaining
         if effect_archived:
             EFFECT_LOG_FILE.write_text(
                 ("\n".join(effect_remaining_lines) + "\n") if effect_remaining_lines else "",
@@ -167,6 +175,7 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
             "agent_runs": len(agent_run_remaining),
             "verification_runs": len(verification_remaining),
             "write_runs": len(write_remaining),
+            "work_sessions": len(work_session_remaining),
             "effects": len(effect_remaining_lines),
         },
         "total_archived": total,
@@ -174,7 +183,7 @@ def archive_state_records(state, keep_recent=100, dry_run=True, current_time=Non
 
 
 def format_archive_result(result):
-    sections = ("inbox", "outbox", "agent_runs", "verification_runs", "write_runs", "effects")
+    sections = ("inbox", "outbox", "agent_runs", "verification_runs", "write_runs", "work_sessions", "effects")
     lines = [f"dry_run: {result.get('dry_run')}"]
     for section in sections:
         lines.append(f"archived_{section}: {result.get('archived', {}).get(section, 0)}")

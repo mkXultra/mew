@@ -69,13 +69,14 @@ Evidence:
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
+- `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 
 Missing proof:
 
 - No streaming model token output.
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Work mode still executes one tool per model step.
-- Large sessions can now carry more context, so state growth and prompt size need continued monitoring.
+- Large active sessions can now carry more context, so prompt size still needs monitoring while work is in progress.
 - Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit.
 
 Next action:

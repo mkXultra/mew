@@ -1482,6 +1482,13 @@ class CommandTests(unittest.TestCase):
                     for index in range(3):
                         state["verification_runs"].append({"id": index + 1, "exit_code": index})
                         state["write_runs"].append({"id": index + 1, "operation": "write_file"})
+                    state["work_sessions"].extend(
+                        [
+                            {"id": 1, "status": "closed"},
+                            {"id": 2, "status": "closed"},
+                            {"id": 3, "status": "active"},
+                        ]
+                    )
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -1493,6 +1500,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("archived_agent_runs: 1", stdout.getvalue())
                 self.assertIn("archived_verification_runs: 2", stdout.getvalue())
                 self.assertIn("archived_write_runs: 2", stdout.getvalue())
+                self.assertIn("archived_work_sessions: 1", stdout.getvalue())
 
                 state = load_state()
                 self.assertEqual(len(state["inbox"]), 2)
@@ -1500,6 +1508,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual([run["id"] for run in state["agent_runs"]], [2, 3, 4, 5, 6])
                 self.assertEqual([run["id"] for run in state["verification_runs"]], [3])
                 self.assertEqual([run["id"] for run in state["write_runs"]], [3])
+                self.assertEqual([session["id"] for session in state["work_sessions"]], [2, 3])
                 archives = list((Path(".mew") / "archive").glob("state-*.json"))
                 self.assertEqual(len(archives), 1)
                 archived = json.loads(archives[0].read_text(encoding="utf-8"))
@@ -1512,6 +1521,7 @@ class CommandTests(unittest.TestCase):
                         "agent_runs": 1,
                         "verification_runs": 2,
                         "write_runs": 2,
+                        "work_sessions": 1,
                     },
                 )
                 self.assertGreaterEqual(effect_count, 1)
