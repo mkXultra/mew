@@ -9,8 +9,8 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, and context pressure diagnostics; the remaining gap is a polished REPL-style cockpit. |
-| 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, context pressure diagnostics, and live world-state resume; the remaining gap is a polished REPL-style cockpit. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, and live world-state context now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Self-improvement and dogfood entry points exist; closed-loop self-improvement is not yet reliable. |
 
@@ -62,12 +62,13 @@ Evidence:
 - `run_tests` tool calls now fail the work-session step when the verifier exits nonzero, and `/work-session details` includes a compact `Verification failures` section with command, cwd, exit code, stderr, and stdout context.
 - `--progress` streams `run_tests`, `run_command`, and write-verification stdout/stderr lines to stderr for both manual work tools and `mew work --ai`.
 - `/work-session ai ...` lets the user run a resident model work step from inside `mew chat`, using the same gates as `mew work --ai`.
-- `dogfood --scenario work-session` now exercises chat `/work-session details`, so cockpit visibility is part of the recurring dogfood path.
-- Native work reads now default to 50,000 characters and model work-session context keeps up to 20,000 characters per result, reducing the chance that a model loses the relevant half of a normal source file.
+- `dogfood --scenario work-session` now exercises chat `/work-session details` and `/work-session resume --allow-read .`, so cockpit visibility and live world-state resume are part of the recurring dogfood path.
+- Native work reads now default to 50,000 characters, while model work-session context clips recent `read_file` text to a smaller page with `visible_chars`, `source_text_chars`, and a resume `next_offset`, reducing long-session prompt growth without losing the path to request more file content.
 - Work sessions now expose read-only `git_status`, `git_diff`, and `git_log` tools behind the read gate, avoiding unnecessary `--allow-shell` for common coding context.
 - `mew work --ai --act-mode deterministic` can skip the second model ACT call and normalize THINK output locally; the default remains model ACT to preserve the original THINK/ACT architecture.
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
+- `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and the same bounded world-state summary is injected into future work-model context when read access is allowed.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
@@ -101,7 +102,7 @@ Missing proof:
 - Model delta streaming is wired for Codex SSE, but live UX still prints raw JSON deltas rather than a polished reasoning view.
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
-- Large active-session growth is now visible, but there is no prompt budget enforcement or automatic compaction of noisy work-session history.
+- Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has a one-step `/continue` command, reusable options, inline guidance capture, and boundary stop requests, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
 
 Next action:
@@ -110,7 +111,7 @@ Next action:
 
 ## Milestone 3: Persistent Advantage
 
-Status: `foundation`
+Status: `in_progress`
 
 Evidence:
 
@@ -123,11 +124,13 @@ Evidence:
 - Work mode now has a `remember` control action that records durable session notes surfaced in resume bundles and future model context.
 - Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, making persistent guidance distinct from one-shot `/continue` guidance.
 - Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
+- Work model context now includes a bounded live `world_state` summary when read access is allowed, so resumed work can compare durable history with current git/file metadata.
+- Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 
 Missing proof:
 
 - Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
-- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, and automatic older-tool digests.
+- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic older-tool digests, and read-result clipping.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
@@ -150,6 +153,7 @@ Evidence:
 - Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
 - `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; write/shell/verification recovery remains gated by human review.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
+- The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
 
 Missing proof:
 
@@ -186,12 +190,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `486 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `45 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `60 passed`.
+- `uv run pytest -q` current: `488 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `47 passed`.
+- `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `./mew dogfood --scenario work-session --cleanup` current: pass.
-- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
+- `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
+- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 13 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 
 ## Current Roadmap Focus
