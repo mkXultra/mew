@@ -499,6 +499,10 @@ def active_work_session_items(state, limit=3, kind=None):
         if session.get("status") != "active":
             continue
         task = work_session_task(state, session)
+        if session.get("task_id") is not None and not task:
+            continue
+        if task and task.get("status") == "done":
+            continue
         if kind and task_kind(task or {}) != kind:
             continue
         resume = build_work_session_resume(session, task=task, limit=3) or {}
