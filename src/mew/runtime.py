@@ -244,6 +244,13 @@ def action_plan_needs_runtime_precompute(event_snapshot, action_plan, args, auto
         for action in action_plan.get("actions", [])
     )
 
+def should_defer_commit_for_user_message(state, reason, precomputed_effects=False):
+    if reason == "user_input":
+        return False
+    if precomputed_effects:
+        return False
+    return has_pending_user_message(state)
+
 def run_runtime_post_run_pipeline(state, args, autonomy_controls):
     return sweep_agent_runs(
         state,
@@ -451,6 +458,7 @@ def run_runtime(args):
             state_snapshot = None
             decision_plan = None
             action_plan = None
+            precomputed_effects = False
             current_time = None
             cycle_started_monotonic = None
             allow_task_execution = False
@@ -567,6 +575,7 @@ def run_runtime(args):
                             args,
                             autonomy_controls,
                         )
+                        precomputed_effects = True
 
             with state_lock():
                 state = load_state()
@@ -574,17 +583,28 @@ def run_runtime(args):
                     commit_time = now_iso()
                     state["runtime_status"]["current_phase"] = "committing"
                     save_state(state)
-                    processed_count, processing_counts = apply_runtime_event_plans(
+                    if should_defer_commit_for_user_message(
                         state,
-                        event_id,
-                        decision_plan,
-                        action_plan,
-                        commit_time,
                         reason,
-                        args,
-                        allow_task_execution,
-                        autonomy_controls,
-                    )
+                        precomputed_effects=precomputed_effects,
+                    ):
+                        processed_count = 0
+                        append_log(
+                            "- "
+                            f"{commit_time}: deferred {reason} commit because a user message arrived"
+                        )
+                    else:
+                        processed_count, processing_counts = apply_runtime_event_plans(
+                            state,
+                            event_id,
+                            decision_plan,
+                            action_plan,
+                            commit_time,
+                            reason,
+                            args,
+                            allow_task_execution,
+                            autonomy_controls,
+                        )
                 else:
                     processed_count = 0
                     update_runtime_processing_summary(

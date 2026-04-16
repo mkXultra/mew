@@ -9,7 +9,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
 from mew.errors import ModelBackendError
-from mew.runtime import compact_agent_reflex_report, guidance_with_runtime_focus, run_runtime_post_run_pipeline
+from mew.runtime import (
+    compact_agent_reflex_report,
+    guidance_with_runtime_focus,
+    run_runtime_post_run_pipeline,
+    should_defer_commit_for_user_message,
+)
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
 
 
@@ -82,6 +87,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(kwargs["start_reviews"])
         self.assertTrue(kwargs["followup"])
 
+    def test_should_defer_commit_for_new_user_message(self):
+        state = default_state()
+        add_event(state, "user_message", "test", {"text": "urgent"})
+
+        self.assertTrue(should_defer_commit_for_user_message(state, "startup"))
+        self.assertFalse(
+            should_defer_commit_for_user_message(state, "startup", precomputed_effects=True)
+        )
+        self.assertFalse(should_defer_commit_for_user_message(state, "user_input"))
+
     def test_runtime_reflex_runs_before_model_snapshot_and_echoes_outbox(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,6 +148,48 @@ class RuntimeTests(unittest.TestCase):
                     },
                 )
                 self.assertTrue(state["runtime_status"]["last_agent_reflex_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_runtime_defers_passive_commit_when_user_message_arrives_during_planning(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_plan_runtime_event(_state_snapshot, _event_snapshot, *args, **_kwargs):
+                    with state_lock():
+                        state = load_state()
+                        add_event(state, "user_message", "test", {"text": "urgent"})
+                        save_state(state)
+                    return (
+                        {"summary": "stale passive", "decisions": []},
+                        {
+                            "summary": "stale passive",
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "message_type": "info",
+                                    "text": "stale passive response",
+                                }
+                            ],
+                        },
+                    )
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--echo-outbox", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("processed 0 event(s) reason=startup", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(state["outbox"], [])
+                self.assertEqual([event["type"] for event in state["inbox"]], ["startup", "user_message"])
+                self.assertIsNone(state["inbox"][0]["processed_at"])
+                self.assertIsNone(state["inbox"][1]["processed_at"])
             finally:
                 os.chdir(old_cwd)
 
