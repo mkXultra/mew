@@ -802,7 +802,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--start-session"]), 0)
                 with redirect_stdout(StringIO()):
                     self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 0)
-                command = f"{sys.executable} -c \"print('resume ok')\""
+                command = f"{sys.executable} -c \"import sys; print('resume ok'); print('resume err', file=sys.stderr)\""
                 with redirect_stdout(StringIO()):
                     self.assertEqual(
                         main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]),
@@ -844,6 +844,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("README.md", resume["files_touched"][0])
                 self.assertEqual(resume["commands"][0]["tool"], "run_tests")
                 self.assertEqual(resume["commands"][0]["exit_code"], 0)
+                self.assertIn("resume ok", resume["commands"][0]["stdout"])
+                self.assertIn("resume err", resume["commands"][0]["stderr"])
                 self.assertEqual(resume["phase"], "awaiting_approval")
                 self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertEqual(resume["pending_approvals"][0]["diff_stats"], {"added": 1, "removed": 1})
@@ -864,6 +866,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work resume #1 [active] task=#1", text)
                 self.assertIn("phase: awaiting_approval", text)
                 self.assertIn("Pending approvals", text)
+                self.assertIn("stdout:", text)
+                self.assertIn("resume ok", text)
+                self.assertIn("stderr:", text)
+                self.assertIn("resume err", text)
                 self.assertIn("#3 edit_file", text)
                 self.assertIn("Diff preview (+1 -1)", text)
                 self.assertIn("-before", text)
@@ -887,6 +893,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work tests #1 [active] task=#1", tests_text)
                 self.assertIn("[passed] run_tests", tests_text)
                 self.assertIn("resume ok", tests_text)
+                self.assertIn("resume err", tests_text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", {}), "continue")

@@ -58,6 +58,7 @@ Evidence:
 - `mew work --session --diffs` and `/work-session diffs` expose a focused cockpit diff pane for recent write/edit previews and applied writes.
 - `mew work --session --tests` and `/work-session tests` expose a focused cockpit test/verification pane for recent run output.
 - `mew work --session --commands` and `/work-session commands` expose a focused cockpit command-output pane for recent command stdout/stderr.
+- Compact resume bundles now include clipped stdout/stderr previews for recent commands, so live/reentry output can show key test or shell output without switching panes.
 - `mew work --session --timeline` and `/work-session timeline` show a compact chronological model/tool event timeline for cockpit reorientation.
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
@@ -278,7 +279,7 @@ Next action:
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, and scoped `/work-session`.
-- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
+- `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
 - `./mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.

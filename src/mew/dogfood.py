@@ -900,6 +900,7 @@ def run_work_session_scenario(workspace, env=None):
         for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
     ]
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
+    resume_commands = (resume_data.get("resume") or {}).get("commands") or []
 
     _scenario_check(
         checks,
@@ -1013,6 +1014,15 @@ def run_work_session_scenario(workspace, env=None):
         and any("Diff preview" in preview and "native work sessions" in preview for preview in pending_diff_previews),
         observed=pending_diff_previews,
         expected="resume pending approvals include readable diff previews",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_command_output",
+        resume_result.get("exit_code") == 0
+        and any("work test ok" in (command.get("stdout") or "") for command in resume_commands)
+        and any("work command ok" in (command.get("stdout") or "") for command in resume_commands),
+        observed=resume_commands,
+        expected="resume commands include clipped stdout previews",
     )
     _scenario_check(
         checks,

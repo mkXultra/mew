@@ -45,6 +45,7 @@ GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
+DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
     "query",
@@ -934,6 +935,8 @@ def build_work_session_resume(session, task=None, limit=8):
                     "command": result.get("command") or parameters.get("command"),
                     "cwd": result.get("cwd") or parameters.get("cwd"),
                     "exit_code": result.get("exit_code"),
+                    "stdout": clip_tail(result.get("stdout") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
+                    "stderr": clip_tail(result.get("stderr") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
                 }
             )
         verification = result.get("verification") or {}
@@ -945,6 +948,8 @@ def build_work_session_resume(session, task=None, limit=8):
                     "command": verification.get("command"),
                     "cwd": verification.get("cwd"),
                     "exit_code": verification.get("exit_code"),
+                    "stdout": clip_tail(verification.get("stdout") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
+                    "stderr": clip_tail(verification.get("stderr") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
                 }
             )
 
@@ -1085,6 +1090,14 @@ def format_work_session_resume(resume):
                 f"#{command.get('tool_call_id')} {command.get('tool')} "
                 f"exit={command.get('exit_code')} {command.get('command') or ''}"
             )
+            if command.get("stdout"):
+                lines.append("  stdout:")
+                for output_line in command.get("stdout", "").splitlines() or [""]:
+                    lines.append(f"    {output_line}")
+            if command.get("stderr"):
+                lines.append("  stderr:")
+                for output_line in command.get("stderr", "").splitlines() or [""]:
+                    lines.append(f"    {output_line}")
     else:
         lines.append("(none)")
 
