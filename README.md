@@ -322,7 +322,8 @@ stable progress anchor. Read results stay summarized in the result pane and
 final step report so large files do not flood the cockpit. Add `--compact-live`
 when you want only thinking/action/result panes during a longer run and will
 open `mew work --session --resume` separately if you need the full reentry
-bundle.
+bundle; compact mode also keeps the final step report to command/cwd/exit
+summaries instead of replaying stdout/stderr after the result pane.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set

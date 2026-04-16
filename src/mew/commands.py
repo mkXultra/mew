@@ -635,7 +635,7 @@ def select_work_ai_task(state, task_id=None):
     return select_workbench_task(state)
 
 
-def format_work_ai_report(report):
+def format_work_ai_report(report, compact=False):
     lines = [
         f"mew work ai: {len(report.get('steps') or [])}/{report.get('max_steps')} step(s) "
         f"stop={report.get('stop_reason')}",
@@ -661,7 +661,10 @@ def format_work_ai_report(report):
         if step.get("inline_approval"):
             line += f" inline_approval={step.get('inline_approval')}"
         lines.append(line)
-        summary = compact_work_tool_summary(tool_call) if tool_call else step.get("summary") or ""
+        if tool_call:
+            summary = _format_live_tool_summary(tool_call) if compact else compact_work_tool_summary(tool_call)
+        else:
+            summary = step.get("summary") or ""
         if summary:
             lines.append(clip_output(summary, 1000))
     stop_request = report.get("stop_request") or {}
@@ -1441,7 +1444,7 @@ def cmd_work_ai(args):
         report["stop_reason"] = "missing_gates"
         if progress:
             progress("no work tool gates enabled; skipping model call")
-        print(format_work_ai_report(report))
+        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
         print(
             "No work tool gates are enabled. Rerun with `--allow-read .`, explicit write/verify gates, "
             "or use `mew do <task-id>` for the supervised default loop."
@@ -1874,7 +1877,7 @@ def cmd_work_ai(args):
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(format_work_ai_report(report))
+        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
         if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
             state = load_state()
             session = find_work_session(state, session_id)

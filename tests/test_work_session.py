@@ -3825,6 +3825,54 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_compact_report_omits_command_output_reprint(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = f"{sys.executable} -c \"import sys; print('compact stdout'); print('compact stderr', file=sys.stderr)\""
+                model_output = {
+                    "summary": "run command",
+                    "action": {"type": "run_command", "command": command, "reason": "inspect command output"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--compact-live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-shell",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                result_block = output.split("Work live step #1 result", 1)[1].split(
+                    "mew work ai: 1/1 step(s)",
+                    1,
+                )[0]
+                report_block = output.split("mew work ai: 1/1 step(s)", 1)[1]
+                self.assertIn("  compact stdout", result_block)
+                self.assertIn("  compact stderr", result_block)
+                self.assertNotIn("stdout:", report_block)
+                self.assertNotIn("stderr:", report_block)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prints_resume_after_finish(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
