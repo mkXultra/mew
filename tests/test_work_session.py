@@ -762,6 +762,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_show_without_active_lists_recent_sessions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--session"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("No active work session.", output)
+                self.assertIn("Recent work sessions", output)
+                self.assertIn("resume: mew work 1 --session --resume", output)
+                self.assertIn("mew work <task-id> --start-session", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_recovers_interrupted_read_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

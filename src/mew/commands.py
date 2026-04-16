@@ -1392,6 +1392,25 @@ def cmd_work_start_session(args):
     return 0
 
 
+def format_no_active_work_session(state, limit=5):
+    lines = ["No active work session."]
+    sessions = list(state.get("work_sessions") or [])
+    recent = list(reversed(sessions[-limit:]))
+    if recent:
+        lines.extend(["", "Recent work sessions"])
+        for session in recent:
+            task = work_session_task(state, session)
+            resume = build_work_session_resume(session, task=task, limit=3)
+            task_id = session.get("task_id")
+            lines.append(
+                f"- #{session.get('id')} [{session.get('status')}] task=#{task_id} "
+                f"phase={(resume or {}).get('phase') or 'unknown'} {session.get('title') or ''}"
+            )
+            lines.append(f"  resume: mew work {task_id} --session --resume")
+    lines.extend(["", "Start or resume", "- mew work <task-id> --start-session"])
+    return "\n".join(lines)
+
+
 def cmd_work_show_session(args):
     state = load_state()
     session = active_work_session(state)
@@ -1412,7 +1431,10 @@ def cmd_work_show_session(args):
     if args.json:
         print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
     else:
-        print(format_work_session(session, task=task, details=getattr(args, "details", False)))
+        if not session and not getattr(args, "task_id", None):
+            print(format_no_active_work_session(state))
+        else:
+            print(format_work_session(session, task=task, details=getattr(args, "details", False)))
     return 0
 
 

@@ -194,14 +194,15 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `497 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `56 passed`.
+- `uv run pytest -q` current: `498 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `57 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 13 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
+- `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.
 
 ## Current Roadmap Focus
 
