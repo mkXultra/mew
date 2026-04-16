@@ -590,7 +590,9 @@ def work_session_phase(session, calls, turns, pending_approvals):
         return "planning"
     latest_call = calls[-1] if calls else None
     latest_turn = turns[-1] if turns else None
-    if (latest_call or {}).get("status") == "interrupted" or (latest_turn or {}).get("status") == "interrupted":
+    latest_call_interrupted = (latest_call or {}).get("status") == "interrupted" and not (latest_call or {}).get("recovery_status")
+    latest_turn_interrupted = (latest_turn or {}).get("status") == "interrupted" and not (latest_turn or {}).get("recovery_status")
+    if latest_call_interrupted or latest_turn_interrupted:
         return "interrupted"
     if latest_call and (latest_call.get("status") == "failed" or work_tool_failure_record(latest_call)):
         return "failed"

@@ -781,7 +781,7 @@ class WorkSessionTests(unittest.TestCase):
                             "created_at": "then",
                             "updated_at": "then",
                             "last_tool_call_id": 1,
-                            "last_model_turn_id": None,
+                            "last_model_turn_id": 1,
                             "tool_calls": [
                                 {
                                     "id": 1,
@@ -797,7 +797,22 @@ class WorkSessionTests(unittest.TestCase):
                                     "finished_at": None,
                                 }
                             ],
-                            "model_turns": [],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "running",
+                                    "decision_plan": {},
+                                    "action_plan": {},
+                                    "action": {"type": "read_file", "path": "README.md"},
+                                    "tool_call_id": 1,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
                         }
                     )
                     save_state(state)
@@ -828,6 +843,8 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
                 self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+                self.assertEqual(session["model_turns"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["model_turns"][0]["recovered_by_tool_call_id"], 2)
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
                 self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "idle")

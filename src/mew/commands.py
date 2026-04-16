@@ -1543,6 +1543,12 @@ def cmd_work_recover_session(args):
             source_call["recovery_status"] = "superseded" if not error else "retry_failed"
             source_call["recovered_by_tool_call_id"] = tool_call_id
             source_call["recovered_at"] = now_iso()
+            for turn in session.get("model_turns") or []:
+                if turn.get("tool_call_id") != source_call.get("id"):
+                    continue
+                turn["recovery_status"] = source_call["recovery_status"]
+                turn["recovered_by_tool_call_id"] = tool_call_id
+                turn["recovered_at"] = source_call["recovered_at"]
         save_state(state)
     report = {
         "recovery": {
