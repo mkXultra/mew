@@ -1789,6 +1789,49 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
 
+    def test_passive_tick_does_not_question_ready_task_while_task_running(self):
+        state = default_state()
+        ready_task = add_planned_ready_task(state)
+        ready_task["command"] = ""
+        ready_task["agent_backend"] = ""
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 2,
+                "title": "Implement active task",
+                "description": "",
+                "status": "running",
+                "priority": "high",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+        waits = [decision for decision in plan["decisions"] if decision.get("type") == "wait_for_user"]
+        self.assertEqual(
+            waits[0]["reason"],
+            "Next: advance coding task #2: Implement active task",
+        )
+
     def test_complete_task_records_user_reported_passing_verification(self):
         state = default_state()
         event = add_event(state, "user_message", "test")

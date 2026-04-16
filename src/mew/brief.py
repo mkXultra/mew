@@ -463,10 +463,15 @@ def format_focus(data):
 def next_move(state):
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
     tasks = sorted(open_tasks(state), key=task_sort_key)
+    running_tasks = [task for task in tasks if task.get("status") == "running"]
+    running_task_ids = {str(task.get("id")) for task in running_tasks}
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     running_runs = running_agent_runs(state)
+    running_task_runs = [
+        run for run in running_runs if str(run.get("task_id")) in running_task_ids
+    ]
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
@@ -474,6 +479,13 @@ def next_move(state):
     plan_needed = tasks_needing_plan(tasks)
     recent_verifications = recent_verification_runs(state, limit=1)
 
+    if running_tasks:
+        for question in questions:
+            if str(question.get("related_task_id")) in running_task_ids:
+                return f"answer question #{question.get('id')} with `mew reply {question.get('id')} \"...\"`"
+        if running_task_runs:
+            return f"check agent run #{running_task_runs[0].get('id')} with `mew agent result {running_task_runs[0].get('id')}`"
+        return practical_next_step(running_tasks[0])
     if questions:
         return f"answer question #{questions[0].get('id')} with `mew reply {questions[0].get('id')} \"...\"`"
     if running_runs:

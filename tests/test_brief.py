@@ -10,13 +10,20 @@ from mew.programmer import (
 from mew.state import add_outbox_message, add_question, default_state, mark_question_deferred
 
 
-def add_task(state, status="todo", auto_execute=False):
+def add_task(
+    state,
+    status="todo",
+    auto_execute=False,
+    task_id=1,
+    title="Implement next move",
+    priority="normal",
+):
     task = {
-        "id": 1,
-        "title": "Implement next move",
+        "id": task_id,
+        "title": title,
         "description": "Make brief actionable.",
         "status": status,
-        "priority": "normal",
+        "priority": priority,
         "notes": "",
         "command": "",
         "cwd": ".",
@@ -45,6 +52,42 @@ class BriefTests(unittest.TestCase):
         add_question(state, "What should I do?", related_task_id=1)
 
         self.assertIn("mew reply", next_move(state))
+
+    def test_next_move_prefers_running_task_over_unrelated_question(self):
+        state = default_state()
+        add_task(state, status="ready", task_id=1, title="Implement later task")
+        add_task(
+            state,
+            status="running",
+            task_id=2,
+            title="Implement active task",
+            priority="high",
+        )
+        add_question(state, "What should I do with task #1?", related_task_id=1)
+
+        self.assertEqual(next_move(state), "advance coding task #2: Implement active task")
+
+    def test_next_move_answers_running_task_question_first(self):
+        state = default_state()
+        add_task(state, status="ready", task_id=1, title="Implement later task")
+        add_task(
+            state,
+            status="running",
+            task_id=2,
+            title="Implement active task",
+            priority="high",
+        )
+        add_question(state, "What should I do with task #1?", related_task_id=1)
+        running_question, _created = add_question(
+            state,
+            "What should I do with task #2?",
+            related_task_id=2,
+        )
+
+        self.assertEqual(
+            next_move(state),
+            f"answer question #{running_question.get('id')} with `mew reply {running_question.get('id')} \"...\"`",
+        )
 
     def test_next_move_ignores_deferred_question(self):
         state = default_state()

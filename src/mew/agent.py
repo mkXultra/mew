@@ -450,6 +450,9 @@ def append_passive_decisions(
                 )
             decisions.append(decision)
         return
+    running_tasks = [task for task in tasks if task.get("status") == "running"]
+    if running_tasks:
+        tasks = running_tasks
 
     execution_added = False
     question_added = False
