@@ -573,6 +573,11 @@ def run_work_session_scenario(workspace, env=None):
         timeout=15,
         input_text="/work-session details\n",
     )
+    chat_world_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session resume --allow-read .\n",
+    )
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -681,6 +686,15 @@ def run_work_session_scenario(workspace, env=None):
         and "Recent diffs" in (chat_result.get("stdout") or ""),
         observed=command_result_tail(chat_result),
         expected="chat /work-session details shows active session and recent diffs",
+    )
+    _scenario_check(
+        checks,
+        "chat_resume_surfaces_world_state",
+        chat_world_result.get("exit_code") == 0
+        and "World state" in (chat_world_result.get("stdout") or "")
+        and "README.md" in (chat_world_result.get("stdout") or ""),
+        observed=command_result_tail(chat_world_result),
+        expected="chat /work-session resume --allow-read . shows live file state",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 
