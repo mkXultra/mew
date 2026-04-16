@@ -274,6 +274,7 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic 
 ```
 
 Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session live 1 --allow-read . --max-steps 1`,
+`/continue --allow-read .` to advance the active work session by one live step,
 `/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
 `/work-session reject 7 not the right change`.
