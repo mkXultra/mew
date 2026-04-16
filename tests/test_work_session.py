@@ -961,6 +961,16 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_clip_tail_starts_truncated_output_on_line_boundary(self):
+        from mew.work_session import clip_tail
+
+        text = "alpha line\nbeta line\ngamma line\n"
+
+        clipped = clip_tail(text, max_chars=18)
+
+        self.assertEqual(clipped, "[...snip...]\ngamma line\n")
+        self.assertNotIn("ne\ngamma", clipped)
+
     def test_work_model_turn_guidance_surfaces_in_reentry_views(self):
         from mew.work_loop import build_work_model_context, work_model_turn_for_model
         from mew.work_session import (

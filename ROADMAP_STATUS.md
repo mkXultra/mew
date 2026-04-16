@@ -59,6 +59,7 @@ Evidence:
 - `mew work --session --tests` and `/work-session tests` expose a focused cockpit test/verification pane for recent run output.
 - `mew work --session --commands` and `/work-session commands` expose a focused cockpit command-output pane for recent command stdout/stderr.
 - Compact resume bundles now include clipped stdout/stderr previews for recent commands, so live/reentry output can show key test or shell output without switching panes.
+- Truncated command output previews now start on a line boundary, avoiding confusing partial-line fragments in the cockpit.
 - `mew work --session --timeline` and `/work-session timeline` show a compact chronological model/tool event timeline for cockpit reorientation.
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
@@ -268,9 +269,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `590 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `101 passed`.
-- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `132 passed`.
+- `uv run pytest -q` current: `591 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `102 passed`.
+- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `133 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.

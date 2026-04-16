@@ -277,6 +277,7 @@ Active `mew work --session --json` and `--resume --json` also include
 `next_cli_controls`, so machine readers get the same reentry commands.
 Recent commands in the resume include short stdout/stderr previews, so common
 test or shell output can be scanned without opening the focused commands pane.
+Truncated previews start at a line boundary to avoid partial-line fragments.
 The resume bundle also carries a compact `working_memory` section when resident
 THINK output or recent session evidence can provide it: current hypothesis,
 next intended step, open questions, and latest verification state. That same

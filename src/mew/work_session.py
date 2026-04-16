@@ -519,7 +519,11 @@ def clip_tail(text, max_chars=1200):
     text = text or ""
     if len(text) <= max_chars:
         return text
-    return "[...snip...]\n" + text[-max_chars:]
+    tail = text[-max_chars:]
+    line_break = tail.find("\n")
+    if line_break >= 0:
+        tail = tail[line_break + 1 :]
+    return "[...snip...]\n" + tail
 
 
 def format_command_failure_summary(record, max_chars=1200):
