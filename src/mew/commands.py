@@ -881,12 +881,16 @@ def resolved_work_act_mode(args):
     return "deterministic" if getattr(args, "live", False) else "model"
 
 
-def prompt_live_write_approval(tool_call):
+def prompt_live_write_approval(tool_call, verify_command=""):
     result = (tool_call or {}).get("result") or {}
     parameters = (tool_call or {}).get("parameters") or {}
     path = result.get("path") or parameters.get("path") or ""
     if result.get("diff"):
         print(format_diff_preview(result.get("diff") or "", max_chars=2000))
+    if verify_command:
+        print(f"Verify on approval: {verify_command}")
+    else:
+        print("Verify on approval: (none configured)")
     prompt = f"Apply dry-run work tool #{(tool_call or {}).get('id')} {(tool_call or {}).get('tool')} {path}? [y/N/q]: "
     print(prompt, end="", flush=True)
     answer = sys.stdin.readline()
@@ -1632,7 +1636,15 @@ def cmd_work_ai(args):
             print(format_work_session_resume(build_work_session_resume(session, task=task)))
         if pending_approval:
             if live_approval_prompt_enabled(args):
-                approval = prompt_live_write_approval(tool_call)
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                approval_verify_command = args.verify_command or latest_work_verify_command(
+                    (session or {}).get("tool_calls") or [],
+                    task=task,
+                )
+                approval = prompt_live_write_approval(tool_call, verify_command=approval_verify_command)
                 report["steps"][-1]["inline_approval"] = approval
                 if approval == "approve":
                     approve_args = SimpleNamespace(

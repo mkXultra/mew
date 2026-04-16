@@ -384,6 +384,8 @@ and `mew work --live` prompt inline before applying dry-run writes; use
 `--prompt-approval` to force that behavior in non-TTY runs, or
 `--no-prompt-approval` to leave approvals in the resume bundle. Use
 `--read-only` / `--no-verify` to remove the default write and verification gates.
+Inline approval prompts show the clipped diff preview and the verification
+command that will run on approval.
 
 Inside `mew chat`, use `/work-session details`, `/work-session timeline`, `/work-session resume --allow-read .`,
 `/work-session resume --allow-read . --auto-recover-safe`,

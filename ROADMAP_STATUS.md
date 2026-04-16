@@ -77,7 +77,7 @@ Evidence:
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
-- Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with `--prompt-approval` for non-TTY forcing and `--no-prompt-approval` for explicit opt-out.
+- Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with clipped diff preview, the approval verification command, `--prompt-approval` for non-TTY forcing, and `--no-prompt-approval` for explicit opt-out.
 - `/work-session live` inherits the same interactive inline approval behavior from chat, and focused work help now documents the default plus `--no-prompt-approval`.
 - Work-session resume output now reports context pressure (`tool_calls`, `model_turns`, recent chars, total chars, pressure), making large active-session growth visible to both humans and the model.
 - A real Codex Web API dogfood run on task #21 used `mew work --live --act-mode deterministic` for two read-only steps; it selected `inspect_dir` then `read_file`, printed action/reason/resume/context pressure for each step, and made no repository writes.

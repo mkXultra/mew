@@ -2805,6 +2805,7 @@ class WorkSessionTests(unittest.TestCase):
                         },
                     },
                 ]
+                verify_command = f"{sys.executable} -c \"print('verify ok')\""
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
                         with patch("sys.stdin", StringIO("n\n")):
@@ -2821,6 +2822,9 @@ class WorkSessionTests(unittest.TestCase):
                                             ".",
                                             "--allow-write",
                                             ".",
+                                            "--allow-verify",
+                                            "--verify-command",
+                                            verify_command,
                                             "--prompt-approval",
                                             "--max-steps",
                                             "1",
@@ -2835,6 +2839,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Diff preview (+1 -1)", output)
                 self.assertIn("-old text", output)
                 self.assertIn("+new text", output)
+                self.assertIn(f"Verify on approval: {verify_command}", output)
                 self.assertIn("Apply dry-run work tool #1 edit_file", output)
                 self.assertIn("README.md? [y/N/q]:", output)
                 self.assertIn("rejected work tool #1", output)
