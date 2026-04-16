@@ -101,6 +101,7 @@ from .state import (
     save_state,
     state_digest,
     state_lock,
+    update_runtime_effect,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
@@ -1493,13 +1494,39 @@ def repair_stale_task_questions(state):
         )
     return repairs
 
+def repair_incomplete_runtime_effects(state):
+    current_time = now_iso()
+    repairs = []
+    for effect in incomplete_runtime_effects(state):
+        old_status = effect.get("status")
+        update_runtime_effect(
+            state,
+            effect.get("id"),
+            current_time=current_time,
+            status="interrupted",
+            error="Runtime stopped before this effect reached a terminal state.",
+            finished_at=current_time,
+        )
+        repairs.append(
+            {
+                "type": "interrupted_runtime_effect",
+                "effect_id": effect.get("id"),
+                "event_id": effect.get("event_id"),
+                "old_status": old_status,
+                "new_status": "interrupted",
+            }
+        )
+    return repairs
+
 def build_repair_data():
     try:
         with state_lock():
             state = load_state()
             before_sha = state_digest(state)
             reconcile_next_ids(state)
-            repairs = repair_stale_task_questions(state)
+            repairs = []
+            repairs.extend(repair_stale_task_questions(state))
+            repairs.extend(repair_incomplete_runtime_effects(state))
             issues = validate_state(state)
             errors = validation_errors(issues)
             if errors:
@@ -1568,10 +1595,16 @@ def cmd_repair(args):
             if repairs:
                 print(f"repairs: {len(repairs)}")
                 for repair in repairs:
-                    print(
-                        f"- {repair.get('type')} question=#{repair.get('question_id')} "
-                        f"task=#{repair.get('task_id')}"
-                    )
+                    if repair.get("type") == "interrupted_runtime_effect":
+                        print(
+                            f"- {repair.get('type')} effect=#{repair.get('effect_id')} "
+                            f"event=#{repair.get('event_id')} {repair.get('old_status')}->{repair.get('new_status')}"
+                        )
+                    else:
+                        print(
+                            f"- {repair.get('type')} question=#{repair.get('question_id')} "
+                            f"task=#{repair.get('task_id')}"
+                        )
             print(format_validation_issues(data.get("validation_issues") or []))
         else:
             print("state_repair: failed")

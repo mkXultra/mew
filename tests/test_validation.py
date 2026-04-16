@@ -244,6 +244,29 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repair_marks_incomplete_runtime_effect_interrupted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                add_runtime_effect(state, event, "passive_tick", "planning", "then")
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair"])
+                repaired = load_state()
+
+                self.assertEqual(code, 0)
+                self.assertIn("interrupted_runtime_effect effect=#1 event=#1 planning->interrupted", stdout.getvalue())
+                self.assertEqual(repaired["runtime_effects"][0]["status"], "interrupted")
+                self.assertTrue(repaired["runtime_effects"][0]["finished_at"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_effects_command_reads_state_checkpoints(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
