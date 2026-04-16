@@ -34,6 +34,7 @@ DOGFOOD_SKIP_DIR_NAMES = {
 }
 DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
 DOGFOOD_READY_CODING_TASK_TITLE = "Dogfood programmer loop smoke task"
+DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search")
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -222,6 +223,216 @@ def run_command(command, workspace, timeout=30, env=None):
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+
+def _scenario_command(*args):
+    return [sys.executable, "-m", "mew", *args]
+
+
+def _json_stdout(command_result):
+    try:
+        return json.loads(command_result.get("stdout") or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def _scenario_check(checks, name, passed, observed=None, expected=None):
+    checks.append(
+        {
+            "name": name,
+            "passed": bool(passed),
+            "observed": observed,
+            "expected": expected,
+        }
+    )
+
+
+def _scenario_report(name, workspace, commands, checks):
+    passed = all(check.get("passed") for check in checks)
+    return {
+        "name": name,
+        "status": "pass" if passed else "fail",
+        "workspace": str(workspace),
+        "command_count": len(commands),
+        "commands": commands,
+        "checks": checks,
+    }
+
+
+def run_interrupted_focus_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    run(["task", "add", "Task B ready normal no-agent", "--kind", "coding", "--ready", "--priority", "normal"])
+    run(["run", "--once", "--execute-tasks", "--echo-outbox"], timeout=15)
+    run(["task", "add", "Task A interrupted high running", "--kind", "coding", "--ready", "--priority", "high"])
+    run(["task", "update", "2", "--status", "running", "--priority", "high"])
+
+    next_data = _json_stdout(run(["next", "--json"]))
+    focus_data = _json_stdout(run(["focus", "--json"]))
+    work_data = _json_stdout(run(["work", "--json"]))
+    explicit_b = _json_stdout(run(["work", "1", "--json"]))
+
+    _scenario_check(
+        checks,
+        "next_stays_on_running_task",
+        "#2" in (next_data.get("next_move") or ""),
+        observed=next_data.get("next_move"),
+        expected="next_move mentions task #2",
+    )
+    _scenario_check(
+        checks,
+        "focus_stays_on_running_task",
+        "#2" in (focus_data.get("next_move") or ""),
+        observed=focus_data.get("next_move"),
+        expected="focus.next_move mentions task #2",
+    )
+    _scenario_check(
+        checks,
+        "default_workbench_selects_running_task",
+        (work_data.get("task") or {}).get("id") == 2,
+        observed=(work_data.get("task") or {}).get("id"),
+        expected=2,
+    )
+    _scenario_check(
+        checks,
+        "explicit_workbench_can_select_background_question_task",
+        (explicit_b.get("task") or {}).get("id") == 1
+        and bool(explicit_b.get("open_questions")),
+        observed={
+            "task_id": (explicit_b.get("task") or {}).get("id"),
+            "open_questions": len(explicit_b.get("open_questions") or []),
+        },
+        expected={"task_id": 1, "open_questions": ">=1"},
+    )
+    return _scenario_report("interrupted-focus", workspace, commands, checks)
+
+
+def run_trace_smoke_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    run(["run", "--once", "--trace-model"], timeout=15)
+    trace_data = _json_stdout(run(["trace", "--json"]))
+    trace_prompt_data = _json_stdout(run(["trace", "--json", "--prompt"]))
+    traces = trace_data.get("traces") or []
+    prompt_traces = trace_prompt_data.get("traces") or []
+
+    _scenario_check(
+        checks,
+        "trace_records_created",
+        len(traces) >= 2,
+        observed=len(traces),
+        expected=">=2",
+    )
+    _scenario_check(
+        checks,
+        "trace_json_hides_prompts_by_default",
+        all("prompt" not in record for record in traces),
+        observed=[sorted(record.keys()) for record in traces[:2]],
+        expected="no prompt key unless --prompt is passed",
+    )
+    _scenario_check(
+        checks,
+        "skipped_trace_uses_reason_not_error",
+        all(record.get("reason") and not record.get("error") for record in traces),
+        observed=[{"status": record.get("status"), "reason": record.get("reason"), "error": record.get("error")} for record in traces[:2]],
+        expected="skipped deterministic records carry reason without error",
+    )
+    _scenario_check(
+        checks,
+        "trace_prompt_flag_is_accepted",
+        isinstance(prompt_traces, list) and len(prompt_traces) == len(traces),
+        observed=len(prompt_traces),
+        expected=len(traces),
+    )
+    return _scenario_report("trace-smoke", workspace, commands, checks)
+
+
+def run_memory_search_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = default_state()
+    state["memory"]["shallow"]["current_context"] = "Trace logs help runtime debugging."
+    state["memory"]["deep"]["project"].append("The model runtime should support searchable memory recall.")
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    text_result = run(["memory", "--search", "trace"])
+    json_result = run(["memory", "--search", "runtime", "--json"])
+    json_data = _json_stdout(json_result)
+    matches = json_data.get("matches") or []
+
+    _scenario_check(
+        checks,
+        "memory_search_text_finds_shallow_context",
+        text_result.get("exit_code") == 0 and "shallow.current_context" in (text_result.get("stdout") or ""),
+        observed=text_result.get("stdout"),
+        expected="text output includes shallow.current_context",
+    )
+    _scenario_check(
+        checks,
+        "memory_search_json_returns_matches",
+        json_result.get("exit_code") == 0 and bool(matches),
+        observed=matches,
+        expected="at least one JSON match",
+    )
+    _scenario_check(
+        checks,
+        "memory_search_json_finds_deep_project",
+        any(match.get("scope") == "deep" and match.get("key") == "project" for match in matches),
+        observed=matches,
+        expected="deep.project match",
+    )
+    return _scenario_report("memory-search", workspace, commands, checks)
+
+
+def run_dogfood_scenario(args):
+    workspace, created_temp = prepare_dogfood_workspace(args.workspace)
+    env = dogfood_subprocess_env()
+    requested = getattr(args, "scenario", "all") or "all"
+    names = list(DOGFOOD_SCENARIOS) if requested == "all" else [requested]
+    reports = []
+    for name in names:
+        scenario_workspace = workspace / name if len(names) > 1 else workspace
+        scenario_workspace.mkdir(parents=True, exist_ok=True)
+        if name == "interrupted-focus":
+            reports.append(run_interrupted_focus_scenario(scenario_workspace, env=env))
+        elif name == "trace-smoke":
+            reports.append(run_trace_smoke_scenario(scenario_workspace, env=env))
+        elif name == "memory-search":
+            reports.append(run_memory_search_scenario(scenario_workspace, env=env))
+        else:
+            raise ValueError(f"unknown dogfood scenario: {name}")
+
+    passed = all(report.get("status") == "pass" for report in reports)
+    report = {
+        "generated_at": now_iso(),
+        "workspace": str(workspace),
+        "kept": not (args.cleanup and created_temp),
+        "scenario": requested,
+        "status": "pass" if passed else "fail",
+        "scenarios": reports,
+    }
+    if args.cleanup and created_temp:
+        shutil.rmtree(workspace, ignore_errors=True)
+    return report
 
 def queued_message_event_id(output):
     match = re.search(r"queued message event #(\d+)", output or "")
@@ -906,6 +1117,27 @@ def format_dogfood_report(report):
 
     lines.append("")
     lines.append(f"Next useful move: {report.get('next_move')}")
+    return "\n".join(lines)
+
+
+def format_dogfood_scenario_report(report):
+    lines = [
+        f"Mew dogfood scenario report at {report.get('generated_at')}",
+        f"workspace: {report.get('workspace')}",
+        f"scenario: {report.get('scenario')} status={report.get('status')}",
+    ]
+    for scenario in report.get("scenarios") or []:
+        lines.append("")
+        lines.append(
+            f"{scenario.get('name')}: {scenario.get('status')} "
+            f"commands={scenario.get('command_count')}"
+        )
+        for check in scenario.get("checks") or []:
+            marker = "PASS" if check.get("passed") else "FAIL"
+            lines.append(f"- {marker} {check.get('name')}")
+            if not check.get("passed"):
+                lines.append(f"  observed: {check.get('observed')}")
+                lines.append(f"  expected: {check.get('expected')}")
     return "\n".join(lines)
 
 

@@ -500,6 +500,11 @@ def build_parser():
     step_parser.set_defaults(func=cmd_step)
 
     dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
+    dogfood_parser.add_argument(
+        "--scenario",
+        choices=("all", "interrupted-focus", "trace-smoke", "memory-search"),
+        help="run a deterministic CLI dogfood scenario instead of a timed runtime dogfood",
+    )
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")
     dogfood_parser.add_argument(
         "--source-workspace",

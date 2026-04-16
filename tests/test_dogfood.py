@@ -17,12 +17,14 @@ from mew.dogfood import (
     copy_source_workspace,
     format_dogfood_loop_report,
     format_dogfood_report,
+    format_dogfood_scenario_report,
     injected_message_status,
     prepopulate_project_snapshot,
     prepare_dogfood_workspace,
     queued_message_event_id,
     run_dogfood,
     run_dogfood_loop,
+    run_dogfood_scenario,
     run_post_wait_agent_reflex,
     seed_ready_coding_task,
     suppress_processed_injected_dropped_threads,
@@ -134,6 +136,34 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
         self.assertEqual(command[command.index("--review-model") + 1], "codex-ultra")
         self.assertIn("--trace-model", command)
+
+    def test_run_dogfood_trace_smoke_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="trace-smoke",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "trace-smoke")
+            self.assertIn("trace-smoke: pass", text)
+
+    def test_run_dogfood_memory_search_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="memory-search",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "memory-search")
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:

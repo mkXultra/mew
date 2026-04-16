@@ -36,7 +36,14 @@ from .brief import (
 from .codex_api import load_codex_oauth
 from .config import EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
-from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogfood, run_dogfood_loop
+from .dogfood import (
+    format_dogfood_loop_report,
+    format_dogfood_report,
+    format_dogfood_scenario_report,
+    run_dogfood,
+    run_dogfood_loop,
+    run_dogfood_scenario,
+)
 from .errors import MewError
 from .memory import compact_memory, search_memory
 from .model_backends import (
@@ -1721,7 +1728,9 @@ def cmd_dogfood(args):
         print("mew: --allow-verify requires --verify-command", file=sys.stderr)
         return 1
     try:
-        if getattr(args, "cycles", 1) and args.cycles > 1:
+        if getattr(args, "scenario", ""):
+            report = run_dogfood_scenario(args)
+        elif getattr(args, "cycles", 1) and args.cycles > 1:
             report = run_dogfood_loop(args)
         else:
             report = run_dogfood(args)
@@ -1729,6 +1738,15 @@ def cmd_dogfood(args):
         print(f"mew: {exc}", file=sys.stderr)
         return 1
 
+    if getattr(args, "scenario", ""):
+        report_path = write_report_if_requested(args, report)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_dogfood_scenario_report(report))
+            if report_path:
+                print(f"report_path: {report_path}")
+        return 0 if report.get("status") == "pass" else 1
     if getattr(args, "cycles", 1) and args.cycles > 1:
         report_path = write_report_if_requested(args, report)
         if args.json:
