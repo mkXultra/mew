@@ -416,6 +416,7 @@ def _work_action_schema_text():
         '    "text": "send_message text",\n'
         '    "note": "remember note",\n'
         '    "question": "ask_user question",\n'
+        '    "summary": "optional concrete result, recommendation, or stopping note",\n'
         '    "message_type": "assistant|info|warning",\n'
         '    "task_done": false,\n'
         '    "completion_summary": "optional task completion summary for finish",\n'
@@ -471,6 +472,7 @@ def build_work_think_prompt(context):
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. "
         "Use finish when the task is done or the next step is clear enough to stop. "
+        "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
