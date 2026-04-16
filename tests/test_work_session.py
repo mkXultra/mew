@@ -940,6 +940,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 self.assertEqual(report["recovery"]["action"], "retry_tool")
                 self.assertEqual(report["recovery"]["source_tool_call_id"], 1)
+                self.assertIn("world_state_before", report["recovery"])
                 self.assertEqual(report["tool_call"]["tool"], "read_file")
                 self.assertIn("recover me", report["tool_call"]["result"]["text"])
                 session = load_state()["work_sessions"][0]
@@ -1015,6 +1016,7 @@ class WorkSessionTests(unittest.TestCase):
                     )
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(payload["auto_recovery"]["recovery"]["action"], "retry_tool")
+                self.assertIn("world_state_before", payload["auto_recovery"]["recovery"])
                 self.assertEqual(payload["auto_recovery"]["tool_call"]["status"], "completed")
                 self.assertEqual(payload["resume"]["phase"], "idle")
                 self.assertIn("auto recover me", payload["auto_recovery"]["tool_call"]["result"]["text"])
@@ -1128,6 +1130,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Auto recovery", output)
                 self.assertIn("recovered work tool #1 -> #2 [completed] read_file", output)
                 self.assertIn("phase: idle", output)
+                self.assertIn("World state", output)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
                 self.assertEqual(session["tool_calls"][1]["status"], "completed")

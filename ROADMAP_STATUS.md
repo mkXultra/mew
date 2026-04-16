@@ -183,7 +183,7 @@ Evidence:
 - Runtime effects now record user-visible `outcome`.
 - `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
 - Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
-- `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; `mew work --session --resume --allow-read ... --auto-recover-safe` and `/work-session resume --allow-read ... --auto-recover-safe` can opt into the same safe read/git retry while showing the refreshed resume. Write/shell/verification recovery remains gated by human review.
+- `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; `mew work --session --resume --allow-read ... --auto-recover-safe` and `/work-session resume --allow-read ... --auto-recover-safe` can opt into the same safe read/git retry while showing the refreshed resume. Safe retries record `world_state_before`; write/shell/verification recovery remains gated by human review.
 - Interrupted work-session resumes now include a recovery plan that classifies retryable read/git tools, replannable model turns, and side-effecting work that needs human review.
 - Side-effecting interrupted command/write recovery items now include the original command or path, a review hint, and short review steps; `mew work --recover-session --json` reports the same review context instead of only refusing automatic retry.
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
@@ -194,7 +194,7 @@ Evidence:
 Missing proof:
 
 - No automatic resume/retry/abort/ask_user decision from interrupted runtime effects, and no automatic recovery for interrupted write/shell/verification work items.
-- No world-state revalidation before retry.
+- World-state revalidation before retry exists for safe read/git work-session recovery, but not yet for runtime effects or side-effecting work.
 - Safe work-session auto-recovery is still opt-in and limited to one interrupted read/git tool per resume.
 
 Next action:

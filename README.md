@@ -311,10 +311,11 @@ future controls do not keep recommending a stale failing command.
 Interrupted read-only tools can be retried with `mew work --recover-session
 --allow-read .`. A resume can also opt into safe automatic retry with
 `mew work --session --resume --allow-read . --auto-recover-safe`; this only
-retries interrupted read/git inspection after explicit read gates. Write, shell,
-and verification interruptions still require human review, and interrupted
-resumes include a `Recovery plan` that classifies retryable reads, replannable
-model turns, and side-effecting work that needs review. Older tool calls that
+retries interrupted read/git inspection after explicit read gates, and its
+recovery report includes the live world state checked before the retry. Write,
+shell, and verification interruptions still require human review, and
+interrupted resumes include a `Recovery plan` that classifies retryable reads,
+replannable model turns, and side-effecting work that needs review. Older tool calls that
 fall out of the full recent context window
 are carried forward as compact `session_knowledge` digests instead of raw file
 contents, and recent `read_file` results are clipped in model context with a

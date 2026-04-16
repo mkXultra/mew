@@ -796,6 +796,7 @@ def run_work_session_scenario(workspace, env=None):
         "work_resume_auto_recovers_safe_read",
         auto_recover_result.get("exit_code") == 0
         and (auto_recovery.get("recovery") or {}).get("action") == "retry_tool"
+        and bool((auto_recovery.get("recovery") or {}).get("world_state_before"))
         and auto_tool_call.get("status") == "completed"
         and ((auto_tool_call.get("result") or {}).get("text") or "").find("native hands") >= 0
         and (auto_recover_data.get("resume") or {}).get("phase") == "idle",

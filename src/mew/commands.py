@@ -1910,6 +1910,10 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                     "tool": tool,
                 }
             }
+        world_state_before = {}
+        if getattr(args, "allow_read", None):
+            resume = build_work_session_resume(session, task=work_session_task(state, session))
+            world_state_before = build_work_world_state(resume, args.allow_read)
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         tool_call = start_work_tool_call(state, session, tool, parameters)
@@ -1956,6 +1960,8 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         },
         "tool_call": tool_call,
     }
+    if world_state_before:
+        report["recovery"]["world_state_before"] = world_state_before
     if progress:
         progress(f"recover tool #{tool_call_id} {tool_call.get('status')}")
     return (0 if tool_call.get("status") == "completed" else 1), report
