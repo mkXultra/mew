@@ -34,6 +34,10 @@ def normalize_allowed_write_roots(allowed_roots):
 def resolve_allowed_write_path(path, allowed_roots, create=False):
     roots = normalize_allowed_write_roots(allowed_roots)
     if not roots:
+        if allowed_roots:
+            raise ValueError(
+                "no allowed write roots could be resolved; create the parent directory or pass an existing directory"
+            )
         raise ValueError("write is disabled; pass --allow-write PATH")
 
     candidate = Path(path or "").expanduser()
