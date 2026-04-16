@@ -141,10 +141,12 @@ from .work_session import (
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
+    build_work_session_command_entries,
     build_work_session_diff_entries,
     build_work_session_test_entries,
     format_diff_preview,
     format_work_action,
+    format_work_session_commands,
     format_work_session_diffs,
     format_work_session_resume,
     format_work_session,
@@ -2056,6 +2058,8 @@ def cmd_work_show_session(args):
                 payload["diffs"] = build_work_session_diff_entries(session, limit=getattr(args, "limit", 8))
             if getattr(args, "tests", False):
                 payload["tests"] = build_work_session_test_entries(session, limit=getattr(args, "limit", 8))
+            if getattr(args, "commands", False):
+                payload["commands"] = build_work_session_command_entries(session, limit=getattr(args, "limit", 8))
             payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -2069,6 +2073,9 @@ def cmd_work_show_session(args):
             print(format_work_cli_controls(session, args))
         elif getattr(args, "tests", False):
             print(format_work_session_tests(session, task=task, limit=getattr(args, "limit", 8)))
+            print(format_work_cli_controls(session, args))
+        elif getattr(args, "commands", False):
+            print(format_work_session_commands(session, task=task, limit=getattr(args, "limit", 8)))
             print(format_work_cli_controls(session, args))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
@@ -5602,6 +5609,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session details                 show active session with decisions, diffs, failures, and tool calls
 /work-session diffs                   show only recent write/edit diff previews
 /work-session tests                   show recent test and verification output
+/work-session commands                show recent command stdout/stderr
 /work-session timeline                show compact model/tool event timeline
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
@@ -6035,6 +6043,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     lines.append("- /work-session timeline")
     lines.append("- /work-session diffs")
     lines.append("- /work-session tests")
+    lines.append("- /work-session commands")
     lines.append("- /work-session details")
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session recover --allow-read .")
@@ -6065,6 +6074,7 @@ def chat_work_session(rest, chat_state=None):
         "timeline",
         "diffs",
         "tests",
+        "commands",
     }
     if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
         parts = [parts[1], parts[0], *parts[2:]]
@@ -6084,6 +6094,7 @@ def chat_work_session(rest, chat_state=None):
         "timeline",
         "diffs",
         "tests",
+        "commands",
         "approve",
         "reject",
     ):
@@ -6441,6 +6452,8 @@ def chat_work_session(rest, chat_state=None):
         print(format_work_session_diffs(session, task=work_session_task(state, session)))
     elif action == "tests":
         print(format_work_session_tests(session, task=work_session_task(state, session)))
+    elif action == "commands":
+        print(format_work_session_commands(session, task=work_session_task(state, session)))
     else:
         print(format_work_session(session, task=work_session_task(state, session), details=details))
     print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))

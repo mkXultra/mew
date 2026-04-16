@@ -905,6 +905,55 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_commands_pane_surfaces_command_output(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                f"{sys.executable} -c \"print('command ok')\"",
+                                "--allow-shell",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--commands"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Work commands #1 [active] task=#1", output)
+                self.assertIn("[completed] run_command exit=0", output)
+                self.assertIn("command ok", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--commands", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["commands"][0]["tool"], "run_command")
+                self.assertEqual(data["commands"][0]["exit_code"], 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session commands", {}), "continue")
+                chat_output = stdout.getvalue()
+                self.assertIn("Work commands #1 [active] task=#1", chat_output)
+                self.assertIn("command ok", chat_output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_model_turn_guidance_surfaces_in_reentry_views(self):
         from mew.work_loop import build_work_model_context, work_model_turn_for_model
         from mew.work_session import (

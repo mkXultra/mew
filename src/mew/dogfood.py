@@ -614,6 +614,18 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    command_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "run_command",
+            "--command",
+            f"{sys.executable} -c \"print('work command ok')\"",
+            "--allow-shell",
+            "--json",
+        ]
+    )
     edit_result = run(
         [
             "work",
@@ -739,6 +751,11 @@ def run_work_session_scenario(workspace, env=None):
         timeout=15,
         input_text="/work-session tests\n",
     )
+    chat_commands_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session commands\n",
+    )
     chat_world_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
@@ -813,6 +830,7 @@ def run_work_session_scenario(workspace, env=None):
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
+    command_data = _json_stdout(command_result)
     edit_data = _json_stdout(edit_result)
     line_read_data = _json_stdout(line_read_result)
     large_edit_data = _json_stdout(large_edit_result)
@@ -876,6 +894,14 @@ def run_work_session_scenario(workspace, env=None):
         and ((test_data.get("tool_call") or {}).get("result") or {}).get("exit_code") == 0,
         observed=test_data.get("tool_call"),
         expected="run_tests records exit_code=0",
+    )
+    _scenario_check(
+        checks,
+        "work_run_command_completes",
+        command_result.get("exit_code") == 0
+        and ((command_data.get("tool_call") or {}).get("result") or {}).get("exit_code") == 0,
+        observed=command_data.get("tool_call"),
+        expected="run_command records exit_code=0",
     )
     _scenario_check(
         checks,
@@ -960,12 +986,13 @@ def run_work_session_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 9
+        len(tool_calls) == 10
         and [call.get("tool") for call in tool_calls]
         == [
             "read_file",
             "glob",
             "run_tests",
+            "run_command",
             "edit_file",
             "read_file",
             "edit_file",
@@ -978,6 +1005,7 @@ def run_work_session_scenario(workspace, env=None):
             "read_file",
             "glob",
             "run_tests",
+            "run_command",
             "edit_file",
             "read_file",
             "edit_file",
@@ -1043,6 +1071,15 @@ def run_work_session_scenario(workspace, env=None):
         and "work test ok" in (chat_tests_result.get("stdout") or ""),
         observed=command_result_tail(chat_tests_result),
         expected="chat /work-session tests shows focused test output",
+    )
+    _scenario_check(
+        checks,
+        "chat_surfaces_work_session_commands",
+        chat_commands_result.get("exit_code") == 0
+        and "Work commands #1 [active] task=#1" in (chat_commands_result.get("stdout") or "")
+        and "work command ok" in (chat_commands_result.get("stdout") or ""),
+        observed=command_result_tail(chat_commands_result),
+        expected="chat /work-session commands shows focused command output",
     )
     _scenario_check(
         checks,

@@ -1383,6 +1383,60 @@ def format_work_session_tests(session, task=None, limit=8):
     return "\n".join(lines)
 
 
+def build_work_session_command_entries(session, limit=8, max_chars=1200):
+    entries = []
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") not in COMMAND_WORK_TOOLS:
+            continue
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        if result.get("command") is None and parameters.get("command") is None:
+            continue
+        entries.append(
+            {
+                "tool_call_id": call.get("id"),
+                "status": call.get("status") or "unknown",
+                "tool": call.get("tool") or "unknown",
+                "command": result.get("command") or parameters.get("command") or "",
+                "cwd": result.get("cwd") or parameters.get("cwd") or "",
+                "exit_code": result.get("exit_code"),
+                "stdout": clip_tail(result.get("stdout") or "", max_chars),
+                "stderr": clip_tail(result.get("stderr") or "", max_chars),
+                "finished_at": call.get("finished_at"),
+            }
+        )
+    return entries[-limit:]
+
+
+def format_work_session_commands(session, task=None, limit=8):
+    if not session:
+        return "No active work session."
+    lines = [
+        f"Work commands #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
+        f"title: {session.get('title') or (task or {}).get('title') or ''}",
+        "",
+        "Commands",
+    ]
+    entries = build_work_session_command_entries(session, limit=limit)
+    if not entries:
+        lines.append("(none)")
+        return "\n".join(lines)
+    for entry in entries:
+        lines.append(
+            f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
+            f"exit={entry.get('exit_code')} {entry.get('command') or ''}"
+        )
+        if entry.get("cwd"):
+            lines.append(f"cwd: {entry.get('cwd')}")
+        if entry.get("stdout"):
+            lines.append("stdout:")
+            lines.append(entry["stdout"])
+        if entry.get("stderr"):
+            lines.append("stderr:")
+            lines.append(entry["stderr"])
+    return "\n".join(lines)
+
+
 def format_work_session(session, task=None, limit=8, details=False):
     if not session:
         return "No active work session."
