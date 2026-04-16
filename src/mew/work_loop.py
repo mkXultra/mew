@@ -21,6 +21,8 @@ WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
 WORK_READ_FILE_CONTEXT_TEXT_LIMIT = 12000
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
+WORK_CONTEXT_BUDGET = 120000
+WORK_CONTEXT_WINDOW_CANDIDATES = ((12, 8), (8, 6), (6, 4), (4, 2), (2, 2))
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 
@@ -209,6 +211,77 @@ def build_session_knowledge(calls, recent_count=WORK_CONTEXT_RECENT_TOOL_CALLS):
     return entries
 
 
+def _json_size(value):
+    try:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    except (TypeError, ValueError):
+        return len(str(value))
+
+
+def build_work_session_context(
+    session,
+    task,
+    tool_calls,
+    model_turns,
+    resume,
+    world_state,
+    recent_tool_count=WORK_CONTEXT_RECENT_TOOL_CALLS,
+    recent_turn_count=8,
+    compacted=False,
+):
+    work_context = {
+        "id": session.get("id"),
+        "status": session.get("status"),
+        "goal": session.get("goal"),
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "resume": resume,
+        "world_state": world_state,
+        "session_knowledge": build_session_knowledge(tool_calls, recent_count=recent_tool_count),
+        "tool_calls": [
+            work_tool_call_for_model(call)
+            for call in tool_calls[-recent_tool_count:]
+        ],
+        "model_turns": [
+            work_model_turn_for_model(turn)
+            for turn in model_turns[-recent_turn_count:]
+        ],
+    }
+    if compacted:
+        work_context["context_compaction"] = {
+            "compacted": True,
+            "budget_chars": WORK_CONTEXT_BUDGET,
+            "recent_tool_calls": recent_tool_count,
+            "recent_model_turns": recent_turn_count,
+            "total_tool_calls": len(tool_calls),
+            "total_model_turns": len(model_turns),
+            "note": "Recent work context was compacted due to session size; use remember for durable observations.",
+        }
+    return work_context
+
+
+def build_budgeted_work_session_context(session, task, tool_calls, model_turns, resume, world_state):
+    chosen = None
+    for index, (recent_tool_count, recent_turn_count) in enumerate(WORK_CONTEXT_WINDOW_CANDIDATES):
+        candidate = build_work_session_context(
+            session,
+            task,
+            tool_calls,
+            model_turns,
+            resume,
+            world_state,
+            recent_tool_count=recent_tool_count,
+            recent_turn_count=recent_turn_count,
+            compacted=index > 0,
+        )
+        if _json_size(candidate) <= WORK_CONTEXT_BUDGET:
+            return candidate
+        chosen = candidate
+    if chosen is not None:
+        chosen["context_compaction"]["final_size_chars"] = _json_size(chosen)
+    return chosen or build_work_session_context(session, task, tool_calls, model_turns, resume, world_state)
+
+
 def build_work_model_context(
     state,
     session,
@@ -229,6 +302,14 @@ def build_work_model_context(
         allowed_read_roots or [],
         file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
     )
+    work_context = build_budgeted_work_session_context(
+        session,
+        task,
+        tool_calls,
+        model_turns,
+        resume,
+        world_state,
+    )
     return {
         "date": {"now": current_time},
         "task": {
@@ -240,24 +321,7 @@ def build_work_model_context(
             "notes": clip_output((task or {}).get("notes") or "", WORK_RESULT_TEXT_LIMIT),
             "cwd": (task or {}).get("cwd") or ".",
         },
-        "work_session": {
-            "id": session.get("id"),
-            "status": session.get("status"),
-            "goal": session.get("goal"),
-            "created_at": session.get("created_at"),
-            "updated_at": session.get("updated_at"),
-            "resume": resume,
-            "world_state": world_state,
-            "session_knowledge": build_session_knowledge(tool_calls),
-            "tool_calls": [
-                work_tool_call_for_model(call)
-                for call in tool_calls[-WORK_CONTEXT_RECENT_TOOL_CALLS:]
-            ],
-            "model_turns": [
-                work_model_turn_for_model(turn)
-                for turn in model_turns[-8:]
-            ],
-        },
+        "work_session": work_context,
         "capabilities": {
             "tools": sorted(WORK_TOOLS),
             "control_actions": sorted(WORK_CONTROL_ACTIONS),

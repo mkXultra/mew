@@ -128,11 +128,12 @@ Evidence:
 - Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
 - Work model context now includes a bounded live `world_state` summary when read access is allowed, so resumed work can compare durable history with current git/file metadata.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
+- Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 
 Missing proof:
 
 - Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
-- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic older-tool digests, and read-result clipping.
+- There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
@@ -192,8 +193,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `490 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `49 passed`.
+- `uv run pytest -q` current: `492 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `51 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.

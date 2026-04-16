@@ -268,7 +268,9 @@ Interrupted read-only tools can be retried with `mew work --recover-session
 human review. Older tool calls that fall out of the full recent context window
 are carried forward as compact `session_knowledge` digests instead of raw file
 contents, and recent `read_file` results are clipped in model context with a
-resume offset so the model can request the next page when needed. Passing
+resume offset so the model can request the next page when needed. If the
+work-session context still exceeds the budget, mew shrinks the recent
+tool/turn windows and leaves a `context_compaction` note for the model. Passing
 `--allow-read` to `mew work --session --resume` adds a live world-state check
 with current git status and touched-file stats; the same bounded summary is
 included in future work-model context when read access is allowed.

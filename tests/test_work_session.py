@@ -1719,6 +1719,73 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(result["next_offset"], 200 + WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
         self.assertLess(len(result["text"]), len(text))
 
+    def test_work_model_context_under_budget_keeps_recent_window(self):
+        from mew.work_loop import build_work_model_context
+
+        tool_calls = [
+            {
+                "id": index + 1,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": f"file{index}.py"},
+                "result": {"path": f"file{index}.py", "text": "small\n", "offset": 0},
+                "summary": f"read file{index}",
+            }
+            for index in range(10)
+        ]
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep normal context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Budget", "description": "Keep normal context.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+
+        self.assertNotIn("context_compaction", work_context)
+        self.assertEqual(len(work_context["tool_calls"]), 10)
+        self.assertEqual(work_context["tool_calls"][0]["id"], 1)
+
+    def test_work_model_context_over_budget_compacts_recent_window(self):
+        from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context
+
+        text = "x" * 50000
+        tool_calls = [
+            {
+                "id": index + 1,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": f"file{index}.py"},
+                "result": {"path": f"file{index}.py", "text": text, "offset": 0},
+                "summary": f"read file{index}",
+            }
+            for index in range(60)
+        ]
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Compact long context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Budget", "description": "Compact long context.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+
+        self.assertTrue(work_context["context_compaction"]["compacted"])
+        self.assertLess(len(work_context["tool_calls"]), 12)
+        self.assertEqual(work_context["tool_calls"][-1]["id"], 60)
+        self.assertIn("read_file file51.py", json.dumps(work_context["session_knowledge"], ensure_ascii=False))
+        self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_CONTEXT_BUDGET)
+
     def test_work_model_context_includes_bounded_world_state_when_read_allowed(self):
         from mew.work_loop import build_work_model_context
 
