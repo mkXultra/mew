@@ -753,13 +753,14 @@ def build_work_session_resume(session, task=None, limit=8):
             paths.append(path)
 
         result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
         if call.get("tool") in COMMAND_WORK_TOOLS:
             commands.append(
                 {
                     "tool_call_id": call.get("id"),
                     "tool": call.get("tool"),
-                    "command": result.get("command"),
-                    "cwd": result.get("cwd"),
+                    "command": result.get("command") or parameters.get("command"),
+                    "cwd": result.get("cwd") or parameters.get("cwd"),
                     "exit_code": result.get("exit_code"),
                 }
             )
@@ -868,6 +869,14 @@ def build_work_session_resume(session, task=None, limit=8):
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "context": build_work_context_metrics(calls, turns),
+        "stop_request": (
+            {
+                "requested_at": session.get("stop_requested_at"),
+                "reason": session.get("stop_reason") or "stop requested",
+            }
+            if session.get("stop_requested_at")
+            else {}
+        ),
         "last_stop_request": session.get("last_stop_request") or {},
         "recovery_plan": recovery_plan,
         "next_action": next_action,
@@ -945,6 +954,11 @@ def format_work_session_resume(resume):
             )
     else:
         lines.append("(none)")
+
+    stop_request = resume.get("stop_request") or {}
+    if stop_request:
+        lines.extend(["", "Stop request"])
+        lines.append(f"{stop_request.get('requested_at') or ''} {stop_request.get('reason') or ''}".strip())
 
     last_stop = resume.get("last_stop_request") or {}
     if last_stop:

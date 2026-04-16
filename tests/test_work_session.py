@@ -722,7 +722,9 @@ class WorkSessionTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
-                self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "stop_requested")
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(resume["phase"], "stop_requested")
+                self.assertEqual(resume["stop_request"]["reason"], "pause after this boundary")
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries") as call_model:
@@ -1056,6 +1058,8 @@ class WorkSessionTests(unittest.TestCase):
         resume = build_work_session_resume(session)
         items = resume["recovery_plan"]["items"]
 
+        self.assertEqual(resume["commands"][0]["command"], "python mutate.py")
+        self.assertEqual(resume["commands"][0]["cwd"], ".")
         self.assertEqual(items[0]["action"], "needs_user_review")
         self.assertEqual(items[0]["safety"], "command")
         self.assertEqual(items[0]["command"], "python mutate.py")
@@ -1112,6 +1116,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(review["command"], "python mutate.py")
                 self.assertIn("--session --resume --allow-read", review["review_hint"])
                 self.assertIn("idempotent", " ".join(review["review_steps"]))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--recover-session"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("command: python mutate.py", text)
+                self.assertIn("review: mew work 1 --session --resume --allow-read <path>", text)
             finally:
                 os.chdir(old_cwd)
 
@@ -2062,6 +2072,7 @@ class WorkSessionTests(unittest.TestCase):
         from mew.work_loop import build_work_think_prompt
 
         prompt = build_work_think_prompt({"work_session": {"tool_calls": []}})
+        self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)

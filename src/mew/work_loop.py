@@ -433,6 +433,7 @@ def build_work_think_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Choose exactly one next action for this active coding work session.\n"
+        "Treat the capabilities object as current and authoritative; if a read/write/verify root or command is allowed there, do not ask the user to pass the same flag again. "
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
         "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "

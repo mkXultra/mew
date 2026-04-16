@@ -1799,6 +1799,10 @@ def cmd_work_recover_session(args):
                 print(json.dumps(report, ensure_ascii=False, indent=2))
             else:
                 print(f"Interrupted {tool} needs user review before retry.")
+                if review_item.get("path"):
+                    print(f"path: {review_item.get('path')}")
+                if review_item.get("command"):
+                    print(f"command: {review_item.get('command')}")
                 if review_item.get("review_hint"):
                     print(f"review: {review_item.get('review_hint')}")
                 for step in review_item.get("review_steps") or []:
