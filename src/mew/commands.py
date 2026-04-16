@@ -782,6 +782,10 @@ def format_work_planning(planned):
     return "\n".join(lines) or "(no planning summary)"
 
 
+def format_work_live_progress(index, max_steps, session_id, task_id):
+    return f"progress: step={index}/{max_steps} session=#{session_id} task=#{task_id}"
+
+
 def _work_control_options(args, session=None):
     defaults = (session or {}).get("default_options") or {}
 
@@ -1569,6 +1573,7 @@ def cmd_work_ai(args):
         if getattr(args, "live", False):
             print("")
             print(f"Work live step #{index} thinking")
+            print(format_work_live_progress(index, max_steps, session_id, task_id))
             print(format_work_planning(planned))
         if action_type == "batch":
             if getattr(args, "live", False):

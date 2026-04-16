@@ -91,6 +91,7 @@ Evidence:
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
+- Live thinking panes now include a stable progress anchor (`step/max`, session id, and task id), improving orientation during multi-step resident work.
 - `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
 - Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
 - Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
