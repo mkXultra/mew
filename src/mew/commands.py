@@ -490,7 +490,7 @@ def format_work_ai_report(report):
 
 
 def work_ai_progress(args):
-    if not (getattr(args, "progress", False) or not getattr(args, "json", False)):
+    if not (getattr(args, "progress", False) or getattr(args, "live", False) or not getattr(args, "json", False)):
         return None
 
     def emit(line):
@@ -527,6 +527,8 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
 
 
 def cmd_work(args):
+    if getattr(args, "live", False):
+        args.ai = True
     if getattr(args, "ai", False):
         if getattr(args, "tool", None):
             print("mew: --ai and --tool cannot be combined", file=sys.stderr)
@@ -564,6 +566,9 @@ def cmd_work(args):
 
 
 def cmd_work_ai(args):
+    if getattr(args, "live", False) and getattr(args, "json", False):
+        print("mew: --live cannot be combined with --json", file=sys.stderr)
+        return 1
     try:
         model_backend = normalize_model_backend(args.model_backend)
     except MewError as exc:
@@ -749,6 +754,14 @@ def cmd_work_ai(args):
                 "summary": tool_call.get("summary") or "",
             }
         )
+        if getattr(args, "live", False):
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session)
+            print("")
+            print(f"Work live step #{index} resume")
+            print(format_work_session_resume(build_work_session_resume(session, task=task)))
         if error:
             report["stop_reason"] = "tool_failed"
             break
@@ -4194,6 +4207,7 @@ def _parse_chat_work_ai_args(parts):
         "act_mode": "model",
         "work_guidance": "",
         "progress": False,
+        "live": False,
         "allow_read": [],
         "allow_write": [],
         "allow_shell": False,
@@ -4260,6 +4274,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--progress":
             args["progress"] = True
+            index += 1
+            continue
+        if token == "--live":
+            args["live"] = True
             index += 1
             continue
         return None, f"mew: unsupported ai option: {token}"

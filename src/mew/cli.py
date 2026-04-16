@@ -648,6 +648,7 @@ def build_parser():
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")
     work_parser.add_argument("task_id", nargs="?")
     work_parser.add_argument("--ai", action="store_true", help="let the resident model choose and run work-session tools")
+    work_parser.add_argument("--live", action="store_true", help="run --ai with progress and print a resume after each step")
     work_parser.add_argument("--auth", default="auth.json", help="model auth file for --ai")
     work_parser.add_argument("--model-backend", default="codex", help="model backend for --ai")
     work_parser.add_argument("--model", help="model name for --ai")

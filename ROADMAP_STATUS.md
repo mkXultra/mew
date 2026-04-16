@@ -68,6 +68,7 @@ Evidence:
 - `mew work --ai --act-mode deterministic` can skip the second model ACT call and normalize THINK output locally; the default remains model ACT to preserve the original THINK/ACT architecture.
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
+- `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 
 Missing proof:
 
@@ -148,9 +149,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `461 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `23 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `24 passed`.
+- `uv run pytest -q` current: `462 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `24 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `25 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

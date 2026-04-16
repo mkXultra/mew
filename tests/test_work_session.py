@@ -1050,6 +1050,47 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_prints_resume_after_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("live content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 resume", output)
+                self.assertIn("Work resume #1 [active] task=#1", output)
+                self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
+                self.assertIn("ACT deterministic action=read_file", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_feeds_tool_result_into_next_model_turn(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
