@@ -48,6 +48,12 @@ class BriefTests(unittest.TestCase):
     def test_next_move_waits_when_idle(self):
         self.assertEqual(next_move(default_state()), "wait for the next user request")
 
+    def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
+        self.assertEqual(
+            next_move(default_state(), kind="coding"),
+            'start a native self-improvement session with `mew self-improve --start-session --focus "Pick the next small mew improvement"`',
+        )
+
     def test_next_move_prefers_open_question(self):
         state = default_state()
         add_task(state)

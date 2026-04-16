@@ -132,6 +132,7 @@ Evidence:
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
 - `mew self-improve --native`, `mew self-improve --start-session`, and chat `/self native ...` / `/self start ...` create/reuse a self-improvement coding task without forcing the older programmer-plan path, then print or start the native work-session path.
+- When the coding queue is empty, `mew next --kind coding` / `mew focus --kind coding` now suggest starting a native self-improvement session rather than going silent.
 
 Missing proof:
 
@@ -232,9 +233,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `545 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `546 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `205 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_brief.py` current: `30 passed`.
+- `uv run pytest -q tests/test_brief.py` current: `31 passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `13 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

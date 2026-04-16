@@ -38,7 +38,9 @@ open questions, and the top tasks without the full operational brief. Tasks can
 be tagged with `--kind coding|research|personal|admin|unknown`; only coding
 tasks are routed into the programmer plan queue by `mew next` and autonomous
 propose mode. Use `mew next --kind coding` or `mew focus --kind coding` when
-older research/personal questions should not hide the next coding-shell move.
+older research/personal questions should not hide the next coding-shell move;
+when there are no coding tasks, that view suggests a native self-improvement
+session instead of going silent.
 `digest` summarizes activity since the last user interaction without entering
 the chat REPL.
 

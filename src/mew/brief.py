@@ -653,6 +653,11 @@ def next_move(state, kind=None):
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
         return practical_next_step(tasks[0])
+    if kind == "coding":
+        return (
+            "start a native self-improvement session with "
+            '`mew self-improve --start-session --focus "Pick the next small mew improvement"`'
+        )
     return "wait for the next user request"
 
 
