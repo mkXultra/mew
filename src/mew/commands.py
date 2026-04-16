@@ -6371,6 +6371,11 @@ def print_chat_digest():
     print(f"next: {next_move(state)}")
 
 
+def cmd_digest(args):
+    print_chat_digest()
+    return 0
+
+
 def chat_set_paused(paused, reason=""):
     current_time = now_iso()
     with state_lock():

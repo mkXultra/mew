@@ -26,6 +26,7 @@ uv run mew event github_webhook --source local --payload '{"ref":"main"}' --wait
 printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
 uv run mew focus
 uv run mew daily
+uv run mew digest
 uv run mew brief
 uv run mew next
 ```
@@ -35,6 +36,8 @@ open questions, and the top tasks without the full operational brief. Tasks can
 be tagged with `--kind coding|research|personal|admin|unknown`; only coding
 tasks are routed into the programmer plan queue by `mew next` and autonomous
 propose mode.
+`digest` summarizes activity since the last user interaction without entering
+the chat REPL.
 
 ## Programmer Loop
 

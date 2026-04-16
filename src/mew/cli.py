@@ -21,6 +21,7 @@ from .commands import (
     cmd_buddy,
     cmd_chat,
     cmd_context,
+    cmd_digest,
     cmd_do,
     cmd_desires_init,
     cmd_desires_show,
@@ -417,6 +418,9 @@ def build_parser():
     daily_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
     daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daily_parser.set_defaults(func=cmd_focus)
+
+    digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
+    digest_parser.set_defaults(func=cmd_digest)
 
     buddy_parser = subparsers.add_parser("buddy", help="advance one coding task through the programmer loop")
     buddy_parser.add_argument("--task", dest="task_id", help="task id; defaults to the next open coding task")

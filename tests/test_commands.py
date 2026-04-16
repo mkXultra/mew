@@ -2315,6 +2315,19 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_digest_command_prints_chat_digest(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["digest"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Digest since", output)
+                self.assertIn("next:", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_trace_command_reads_model_trace_records(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
