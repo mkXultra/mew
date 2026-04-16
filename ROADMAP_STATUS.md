@@ -76,6 +76,7 @@ Evidence:
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
 - Work-session resume bundles now include compact `working_memory` when available, giving humans and future model turns a short hypothesis, next step, open questions, and latest verification state.
+- Work-session working memory now also surfaces the latest tool observation and marks itself stale when a tool result landed after the memory was written, preventing pre-tool `next_step` text from looking current after a live step.
 - `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and the same bounded world-state summary is injected into future work-model context when read access is allowed.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
@@ -83,6 +84,8 @@ Evidence:
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
 - `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
+- Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
+- Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
 - Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with clipped diff preview, the approval verification command, `--prompt-approval` for non-TTY forcing, and `--no-prompt-approval` for explicit opt-out.
@@ -138,6 +141,7 @@ Evidence:
 - `dogfood --scenario work-session` now also covers user session notes appearing in resume output.
 - Model-selected `read_file` now defaults to a smaller 12,000-character page, and model-selected `git_diff` defaults to diffstat unless full diff is explicitly requested, reducing the chance that a broad read-only batch bloats a resident session.
 - Work-mode prompts now tell the resident model that current capability gates are authoritative, reducing stale permission-failure loops where it asks for a flag already present.
+- Work-mode prompts now tell the resident model that `run_command` is shlex-parsed without a shell, reducing failed probes that use `&&`, pipes, or redirection.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.

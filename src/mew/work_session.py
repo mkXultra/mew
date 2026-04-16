@@ -565,6 +565,31 @@ def summarize_work_tool_result(tool, result):
     return format_command_record(result or {})
 
 
+def _work_tool_exit_code(call):
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    if "exit_code" in verification:
+        return verification.get("exit_code")
+    if "exit_code" in result:
+        return result.get("exit_code")
+    return None
+
+
+def format_work_tool_observation_state(call):
+    if not call:
+        return ""
+    tool = call.get("tool") or "unknown"
+    status = call.get("status") or "unknown"
+    text = f"latest tool #{call.get('id')} {status} {tool}"
+    exit_code = _work_tool_exit_code(call)
+    if exit_code is not None:
+        text += f" exit={exit_code}"
+    summary = compact_work_tool_summary(call)
+    if summary:
+        text += f": {' '.join(str(summary).split())}"
+    return clip_output(text, 600)
+
+
 def compact_work_tool_summary(call):
     tool = call.get("tool")
     result = call.get("result") or {}
@@ -718,8 +743,53 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
     return memory
 
 
+def _turn_tool_call_ids(turn):
+    if not turn:
+        return []
+    ids = []
+    if turn.get("tool_call_id") is not None:
+        ids.append(turn.get("tool_call_id"))
+    for value in turn.get("tool_call_ids") or []:
+        if value is not None:
+            ids.append(value)
+    return ids
+
+
+def _latest_tool_call_after_memory(turn, calls):
+    if not turn or not calls:
+        return None
+    turn_tool_call_ids = _turn_tool_call_ids(turn)
+    if not turn_tool_call_ids:
+        return None
+    # A turn's working_memory is written before its selected tool executes, so
+    # same-turn tool results can already make the recorded next_step stale.
+    max_turn_tool_call_id = max(turn_tool_call_ids)
+    for call in reversed(calls):
+        call_id = call.get("id")
+        if call_id in turn_tool_call_ids:
+            return call
+        if call_id is not None and call_id > max_turn_tool_call_id:
+            return call
+    return None
+
+
+def _annotate_working_memory_with_latest_tool(memory, turn, calls):
+    if not memory:
+        return memory
+    latest_call = calls[-1] if calls else None
+    if latest_call:
+        memory["latest_tool_call_id"] = latest_call.get("id")
+        memory["latest_tool_state"] = format_work_tool_observation_state(latest_call)
+    stale_call = _latest_tool_call_after_memory(turn, calls)
+    if stale_call:
+        memory["stale_after_tool_call_id"] = stale_call.get("id")
+        memory["stale_after_tool"] = stale_call.get("tool") or "unknown"
+    return memory
+
+
 def build_working_memory(turns, calls, task=None):
     turns = list(turns or [])
+    calls = list(calls or [])
     verification_state = latest_work_verification_state(calls, task=task)
     for reversed_index, turn in enumerate(reversed(turns)):
         decision_plan = turn.get("decision_plan") or {}
@@ -736,7 +806,7 @@ def build_working_memory(turns, calls, task=None):
                     memory["stale_after_model_turn_id"] = turn.get("id")
                     memory["latest_model_turn_id"] = turns[-1].get("id")
                     memory["stale_turns"] = reversed_index
-                return memory
+                return _annotate_working_memory_with_latest_tool(memory, turn, calls)
 
     latest_turn = turns[-1] if turns else {}
     if not latest_turn and not verification_state:
@@ -752,7 +822,8 @@ def build_working_memory(turns, calls, task=None):
         "next_step": action.get("reason") or action.get("summary") or "",
         "open_questions": [action.get("question")] if action.get("type") == "ask_user" and action.get("question") else [],
     }
-    return _normalize_working_memory(raw, turn=latest_turn or None, verification_state=verification_state, source="fallback")
+    memory = _normalize_working_memory(raw, turn=latest_turn or None, verification_state=verification_state, source="fallback")
+    return _annotate_working_memory_with_latest_tool(memory, latest_turn or None, calls)
 
 
 def _json_size(value):
@@ -1154,6 +1225,8 @@ def format_work_session_resume(resume):
             lines.extend(f"- {question}" for question in questions)
         if memory.get("last_verified_state"):
             lines.append(f"last_verified_state: {memory.get('last_verified_state')}")
+        if memory.get("latest_tool_state"):
+            lines.append(f"latest_tool_state: {memory.get('latest_tool_state')}")
         source = memory.get("source") or ""
         turn_id = memory.get("model_turn_id")
         if source or turn_id:
@@ -1166,6 +1239,11 @@ def format_work_session_resume(resume):
                 f"stale_after_model_turn: #{memory.get('stale_after_model_turn_id')} "
                 f"({memory.get('stale_turns')} later turn(s) without working_memory; "
                 f"latest=#{memory.get('latest_model_turn_id')})"
+            )
+        if memory.get("stale_after_tool_call_id"):
+            lines.append(
+                f"stale_after_tool_call: #{memory.get('stale_after_tool_call_id')} "
+                f"({memory.get('stale_after_tool')} ran after this memory; refresh before relying on next_step)"
             )
 
     lines.extend(["", "Recent decisions"])

@@ -2705,12 +2705,17 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(memory["next_step"], "Read README.md before editing.")
                 self.assertEqual(memory["open_questions"], ["Does README mention the target behavior?"])
                 self.assertEqual(memory["source"], "think")
+                self.assertEqual(memory["latest_tool_call_id"], 1)
+                self.assertIn("latest tool #1 completed read_file", memory["latest_tool_state"])
+                self.assertEqual(memory["stale_after_tool_call_id"], 1)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("Working memory", text)
                 self.assertIn("hypothesis: README is the next evidence source.", text)
+                self.assertIn("latest_tool_state: latest tool #1 completed read_file", text)
+                self.assertIn("stale_after_tool_call: #1", text)
             finally:
                 os.chdir(old_cwd)
 
@@ -3327,6 +3332,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
+        self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn('"working_memory": {"hypothesis"', prompt)
@@ -3700,6 +3706,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("path: README.md", output)
                 self.assertIn("Work live step #1 result", output)
                 self.assertIn("tool #1 [completed] read_file", output)
+                result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
+                self.assertIn("summary: Read file", result_block)
+                self.assertNotIn("live content", result_block)
                 self.assertIn("phase: idle", output)
                 self.assertIn("context: pressure=low", output)
                 self.assertIn("Work live step #1 resume", output)
@@ -3828,10 +3837,12 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Work live step #1 result", output)
                 self.assertIn("tool #1 [completed] run_command exit=0", output)
-                self.assertIn("stdout:", output)
-                self.assertIn("live stdout", output)
-                self.assertIn("stderr:", output)
-                self.assertIn("live stderr", output)
+                result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
+                self.assertEqual(result_block.count("summary: command:"), 1)
+                self.assertIn("stdout:", result_block)
+                self.assertEqual(result_block.count("  live stdout"), 1)
+                self.assertIn("stderr:", result_block)
+                self.assertEqual(result_block.count("  live stderr"), 1)
             finally:
                 os.chdir(old_cwd)
 

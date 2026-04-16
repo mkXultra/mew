@@ -471,7 +471,7 @@ def build_work_think_prompt(context):
         "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "Use run_tests for the configured verification command or a narrow test command. "
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
-        "Use run_command only when shell is explicitly allowed. "
+        "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
         "Use finish when the task is done or the next step is clear enough to stop. "
         "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
         "Include a compact working_memory object that restates your current hypothesis, next intended step, open questions, and latest verified state for future reentry; keep it short and do not copy raw logs. "

@@ -134,6 +134,7 @@ from .work_session import (
     add_work_session_note,
     build_work_session_resume,
     close_work_session,
+    compact_work_tool_summary,
     consume_work_session_stop,
     create_work_session,
     execute_work_tool,
@@ -678,6 +679,19 @@ def _format_live_output_preview(label, text, max_chars=500):
     return lines
 
 
+def _format_live_tool_summary(call):
+    result = call.get("result") or {}
+    if result.get("command"):
+        return "\n".join(
+            [
+                f"command: {result.get('command')}",
+                f"cwd: {result.get('cwd')}",
+                f"exit_code: {result.get('exit_code')}",
+            ]
+        )
+    return compact_work_tool_summary(call)
+
+
 def _format_live_tool_call_result(call):
     tool = call.get("tool") or "unknown"
     result = call.get("result") or {}
@@ -689,8 +703,9 @@ def _format_live_tool_call_result(call):
     exit_text = "" if exit_code is None else f" exit={exit_code}"
     target_text = f" {target}" if target else ""
     lines = [f"tool #{call.get('id')} [{call.get('status')}] {tool}{exit_text}{target_text}"]
-    if call.get("summary"):
-        lines.append(f"summary: {clip_output(call.get('summary') or '', 500)}")
+    summary = _format_live_tool_summary(call)
+    if summary:
+        lines.append(f"summary: {clip_output(summary, 500)}")
     if result.get("stdout"):
         lines.extend(_format_live_output_preview("stdout", result.get("stdout")))
     if result.get("stderr"):
@@ -705,16 +720,21 @@ def _format_live_tool_call_result(call):
 def format_work_live_step_result(step, resume=None):
     action = step.get("action") or {}
     status = step.get("status") or "unknown"
+    tool_calls = list(step.get("tool_calls") or [])
+    if step.get("tool_call"):
+        tool_calls.append(step.get("tool_call"))
     lines = [
         f"status: {status}",
         f"action: {action.get('type') or action.get('tool') or 'unknown'}",
     ]
     summary = step.get("summary") or step.get("error") or action.get("reason") or action.get("summary") or ""
-    if summary:
+    tool_summaries = set()
+    for call in tool_calls:
+        call = call or {}
+        tool_summaries.add(str(call.get("summary") or "").strip())
+        tool_summaries.add(str(_format_live_tool_summary(call) or "").strip())
+    if summary and str(summary).strip() not in tool_summaries:
         lines.append(f"summary: {clip_output(summary, 700)}")
-    tool_calls = list(step.get("tool_calls") or [])
-    if step.get("tool_call"):
-        tool_calls.append(step.get("tool_call"))
     for call in tool_calls:
         lines.extend(_format_live_tool_call_result(call or {}))
     if resume:

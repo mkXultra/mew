@@ -96,6 +96,11 @@ uv run mew task update <task-id> --command "python -m pytest" --status ready --a
 uv run mew run --execute-tasks
 ```
 
+Native work-session `run_command` calls are parsed with `shlex` and executed
+without an interactive shell. Avoid shell operators such as pipes, redirection,
+`&&`, `||`, and `;`; wrap complex probes in an interpreter command such as
+`python -c` when needed.
+
 Passive verification is a narrower gate for letting the runtime check the repo
 without executing arbitrary task commands:
 
@@ -288,6 +293,9 @@ digest is injected into future work-model context, so reentry starts from a
 short contract instead of reconstructing intent from raw logs. Observed
 verification results override model-written verification claims, and older
 working memory is marked stale when later model turns did not refresh it.
+The same memory also records the latest tool observation and is marked stale
+when the selected tool ran after that memory was written, so a resume does not
+quietly treat a pre-tool `next_step` as current.
 World-state git summaries hide mew's own `.mew/` state noise, keeping the
 reentry signal focused on project files.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
@@ -305,8 +313,10 @@ single-step path. Multi-step work stops at pending dry-run write approvals
 instead of continuing past a human review boundary. Add `--prompt-approval` to a
 live run when you want mew to ask inline before applying or rejecting a dry-run
 write.
-`mew work --live` prints the selected action before execution and a resume after
-each completed tool step. When the model finishes, the work session is closed
+`mew work --live` prints the selected action before execution, a compact result
+pane after each step, and a resume after each completed tool step. Read results
+stay summarized in the result pane so large files do not flood the cockpit.
+When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set
 `task_done: true` to mark the task done; otherwise it only closes the work
@@ -356,7 +366,8 @@ timeline, and details views can show why the resident model chose the next
 action without making that old guidance current again. THINK prompts ask the
 resident model to write a compact `working_memory` object for future reentry;
 older sessions fall back to the latest turn summary and verification state, and
-stale memory is marked when newer turns omit the digest.
+stale memory is marked when newer turns omit the digest or when a tool result
+landed after the memory was written.
 
 ```sh
 uv run mew work 1 --start-session
