@@ -267,7 +267,7 @@ World-state git summaries hide mew's own `.mew/` state noise, keeping the
 reentry signal focused on project files.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
 used, so quiet chat still preserves the reentry affordance.
-When a live work command uses read/write/verify/model options, the active
+When a live work command uses read/write/verify/model/approval options, the active
 session remembers those defaults and reuses them in later CLI and chat controls.
 Starting a session with those options also seeds the same defaults before the
 first live step. Later partial commands add explicit new options without
