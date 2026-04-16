@@ -127,6 +127,7 @@ uv run mew activity
 uv run mew context
 uv run mew step --dry-run
 uv run mew step --ai --auth auth.json --allow-read . --max-steps 3
+uv run mew step --ai --auth auth.json --allow-read . --max-reflex-rounds 1 --focus "Read README.md, then decide"
 uv run mew step --ai --auth auth.json --allow-read . --focus "Review the current mew implementation work"
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
@@ -148,19 +149,24 @@ uv run mew run --notify-command "scripts/notify-mew" --notify-bell
 uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew outbox
+uv run mew outbox --json
 uv run mew ack --routine
 uv run mew ack --all
 uv run mew questions
+uv run mew questions --json
 uv run mew questions --defer <question-id> --reason "not now"
 uv run mew questions --reopen <question-id>
 uv run mew reply <question-id> "answer"
 uv run mew attention
+uv run mew attention --json
 uv run mew attention --resolve-all
 uv run mew archive
 uv run mew archive --apply
 uv run mew run --auto-archive
 uv run mew run --ai --model-backend codex --auth auth.json
 uv run mew memory --compact
+uv run mew memory --search "project summary"
+uv run mew trace --json
 ```
 
 Read-only inspections also maintain a compact `project_snapshot` under deep
@@ -211,6 +217,10 @@ history, but they start as read and are skipped by live echo, notification,
 listen, attach, and chat streams so the user's unread queue stays focused on
 actual replies, questions, and warnings. Use `mew ack --routine` to clear older
 routine unread `info` messages without acknowledging questions or warnings.
+Add `--max-reflex-rounds 1` when the resident model should do a narrow
+read-only observation, immediately rethink with that observation, and only then
+emit ACT actions. Step reports and model traces show the reflex read so the
+reasoning path is inspectable without opening prompts by default.
 After repeated inspection produces a concrete direction, the resident model can
 use `refine_task` to turn a self-proposed generic task into a specific coding
 task and refresh its programmer plan.
