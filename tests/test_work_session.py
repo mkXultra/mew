@@ -1026,6 +1026,95 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("hint", items[0])
         self.assertIn("recover-session", items[1]["hint"])
 
+    def test_work_recovery_plan_includes_side_effect_review_context(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover side effects.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "interrupted",
+                    "parameters": {"command": "python mutate.py", "cwd": "."},
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "interrupted",
+                    "parameters": {"path": "README.md"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        items = resume["recovery_plan"]["items"]
+
+        self.assertEqual(items[0]["action"], "needs_user_review")
+        self.assertEqual(items[0]["safety"], "command")
+        self.assertEqual(items[0]["command"], "python mutate.py")
+        self.assertIn("--session --resume --allow-read", items[0]["review_hint"])
+        self.assertIn("idempotent", " ".join(items[0]["review_steps"]))
+        self.assertEqual(items[1]["safety"], "write")
+        self.assertEqual(items[1]["path"], "README.md")
+        self.assertIn("git status/diff", " ".join(items[1]["review_steps"]))
+
+        text = format_work_session_resume(resume)
+        self.assertIn("review: mew work 1 --session --resume --allow-read <path>", text)
+        self.assertIn("command: python mutate.py", text)
+        self.assertIn("path: README.md", text)
+
+    def test_work_recover_session_reports_review_context_for_side_effects(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover command.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "run_tests",
+                                    "status": "interrupted",
+                                    "parameters": {"command": "python mutate.py"},
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--recover-session", "--json"]), 0)
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "needs_user")
+                review = report["recovery"]["review_item"]
+                self.assertEqual(review["tool_call_id"], 1)
+                self.assertEqual(review["command"], "python mutate.py")
+                self.assertIn("--session --resume --allow-read", review["review_hint"])
+                self.assertIn("idempotent", " ".join(review["review_steps"]))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_report_includes_stop_request_reason(self):
         from mew.commands import format_work_ai_report
 
@@ -1974,9 +2063,31 @@ class WorkSessionTests(unittest.TestCase):
 
         prompt = build_work_think_prompt({"work_session": {"tool_calls": []}})
         self.assertIn("prefer one batch action", prompt)
+        self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
         self.assertIn('"max_chars": "optional read_file cap"', prompt)
         self.assertIn('"stat": "optional git_diff diffstat', prompt)
+
+    def test_work_model_rejects_resident_loop_as_verification_command(self):
+        from mew.work_loop import normalize_work_model_action
+
+        for command in (
+            "mew do 1 --read-only",
+            "./mew chat",
+            "python -m mew run",
+            "uv run mew work 1 --live",
+        ):
+            action = normalize_work_model_action(
+                {"summary": "verify", "action": {"type": "run_tests", "command": command}}
+            )
+            self.assertEqual(action["type"], "wait", command)
+            self.assertIn("resident mew loop", action["reason"])
+
+        action = normalize_work_model_action(
+            {"summary": "verify", "action": {"type": "run_tests", "command": "uv run pytest -q"}}
+        )
+        self.assertEqual(action["type"], "run_tests")
+        self.assertEqual(action["command"], "uv run pytest -q")
 
     def test_work_model_actions_default_to_small_reads_and_diffstat(self):
         from mew.work_loop import work_tool_parameters_from_action

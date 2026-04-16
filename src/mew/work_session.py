@@ -640,6 +640,7 @@ def work_session_phase(session, calls, turns, pending_approvals):
 def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
+    task_arg = f" {task_id}" if task_id is not None else ""
     interrupted_tool_ids = {
         call.get("id")
         for call in calls
@@ -655,22 +656,38 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         if call.get("status") != "interrupted" or call.get("recovery_status"):
             continue
         tool = call.get("tool") or "unknown"
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        path = work_call_path(call)
+        command = result.get("command") or parameters.get("command") or ""
         if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
             action = "retry_tool"
             safety = "read_only"
             reason = "interrupted read/git inspection can be retried after verifying read roots"
+            review_steps = []
         elif tool in WRITE_WORK_TOOLS:
             action = "needs_user_review"
             safety = "write"
             reason = "interrupted write must be reviewed before retry or rollback"
+            review_steps = [
+                "open the resume with live world state",
+                "inspect git status/diff and the touched path before retrying",
+                "retry or re-apply only after the verifier is known",
+            ]
         elif tool in COMMAND_WORK_TOOLS:
             action = "needs_user_review"
             safety = "command"
             reason = "interrupted command or verification may have side effects"
+            review_steps = [
+                "open the resume with live world state",
+                "read captured stdout/stderr if present",
+                "rerun only if the command is idempotent or the user approves",
+            ]
         else:
             action = "needs_user_review"
             safety = "unknown"
             reason = "interrupted tool type is not automatically recoverable"
+            review_steps = ["open the resume with live world state before retrying"]
         item = {
             "kind": "tool_call",
             "tool_call_id": call.get("id"),
@@ -680,7 +697,14 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "reason": reason,
         }
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
-            item["hint"] = f"mew work {task_id} --recover-session --allow-read <path>"
+            item["hint"] = f"mew work{task_arg} --recover-session --allow-read <path>"
+        if action == "needs_user_review":
+            item["review_hint"] = f"mew work{task_arg} --session --resume --allow-read <path>"
+            item["review_steps"] = review_steps
+            if path:
+                item["path"] = path
+            if command:
+                item["command"] = command
         items.append(item)
 
     for turn in turns:
@@ -695,7 +719,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 "action": "replan",
                 "safety": "no_tool_started",
                 "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
-                "hint": f"mew work {task_id} --live --allow-read <path>",
+                "hint": f"mew work{task_arg} --live --allow-read <path>",
             }
         )
 
@@ -938,6 +962,14 @@ def format_work_session_resume(resume):
             )
             if item.get("hint"):
                 lines.append(f"  hint: {item.get('hint')}")
+            if item.get("path"):
+                lines.append(f"  path: {item.get('path')}")
+            if item.get("command"):
+                lines.append(f"  command: {item.get('command')}")
+            if item.get("review_hint"):
+                lines.append(f"  review: {item.get('review_hint')}")
+            for step in item.get("review_steps") or []:
+                lines.append(f"  review_step: {step}")
 
     world = resume.get("world_state") or {}
     if world:

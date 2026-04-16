@@ -1,4 +1,6 @@
 import json
+import os
+import shlex
 
 from .agent import call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
@@ -398,6 +400,34 @@ def _work_action_schema_text():
     )
 
 
+def _mew_subcommand_positions(parts):
+    positions = []
+    for index, token in enumerate(parts[:-1]):
+        executable = os.path.basename(token)
+        if executable == "mew":
+            positions.append((index, index + 1))
+        if token == "-m" and index + 1 < len(parts) and parts[index + 1] == "mew":
+            positions.append((index, index + 2))
+    return positions
+
+
+def is_resident_loop_command(command):
+    try:
+        parts = shlex.split(command or "")
+    except ValueError:
+        return False
+    resident_subcommands = {"attach", "chat", "do", "run", "session"}
+    for _, subcommand_index in _mew_subcommand_positions(parts):
+        subcommand = parts[subcommand_index] if subcommand_index < len(parts) else ""
+        if subcommand in resident_subcommands:
+            return True
+        if subcommand == "work":
+            trailing = parts[subcommand_index + 1 :]
+            if "--ai" in trailing or "--live" in trailing:
+                return True
+    return False
+
+
 def build_work_think_prompt(context):
     return (
         "You are the THINK phase for mew work mode.\n"
@@ -406,7 +436,9 @@ def build_work_think_prompt(context):
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
         "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
-        "Use run_tests for the configured verification command or a narrow test command. Use run_command only when shell is explicitly allowed. "
+        "Use run_tests for the configured verification command or a narrow test command. "
+        "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
+        "Use run_command only when shell is explicitly allowed. "
         "Use finish when the task is done or the next step is clear enough to stop. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
@@ -496,8 +528,14 @@ def normalize_work_model_action(action_plan, verify_command=""):
     if action_type in WRITE_WORK_TOOLS:
         dry_run = action.get("dry_run")
         normalized["apply"] = bool(action.get("apply")) or dry_run is False
-    if action_type == "run_tests" and not normalized.get("command") and verify_command:
-        normalized["command"] = verify_command
+    if action_type == "run_tests":
+        if not normalized.get("command") and verify_command:
+            normalized["command"] = verify_command
+        if is_resident_loop_command(normalized.get("command") or ""):
+            return {
+                "type": "wait",
+                "reason": "run_tests cannot invoke a resident mew loop; use the configured verifier, finish, remember, or ask_user",
+            }
     return normalized
 
 

@@ -1780,18 +1780,29 @@ def cmd_work_recover_session(args):
             return 0
         tool = source_call.get("tool")
         if tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+            resume = build_work_session_resume(session, task=work_session_task(state, session))
+            review_item = {}
+            for item in (resume.get("recovery_plan") or {}).get("items") or []:
+                if str(item.get("tool_call_id")) == str(source_call.get("id")):
+                    review_item = item
+                    break
             report = {
                 "recovery": {
                     "action": "needs_user",
                     "reason": f"interrupted {tool} is not safe to retry automatically",
                     "source_tool_call_id": source_call.get("id"),
                     "tool": tool,
+                    "review_item": review_item,
                 }
             }
             if args.json:
                 print(json.dumps(report, ensure_ascii=False, indent=2))
             else:
                 print(f"Interrupted {tool} needs user review before retry.")
+                if review_item.get("review_hint"):
+                    print(f"review: {review_item.get('review_hint')}")
+                for step in review_item.get("review_steps") or []:
+                    print(f"review_step: {step}")
             return 0
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
