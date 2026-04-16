@@ -249,7 +249,12 @@ def summarize_read_result(action_type, result):
         return f"Inspected directory {result.get('path')}: {names}{suffix}"
     if action_type == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
-        return f"Read file {result.get('path')} size={result.get('size')} chars{suffix}\n{result.get('text') or ''}"
+        offset = result.get("offset") or 0
+        next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
+        return (
+            f"Read file {result.get('path')} size={result.get('size')} chars "
+            f"offset={offset}{next_text}{suffix}\n{result.get('text') or ''}"
+        )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
         matches = "\n".join(result.get("matches", []))
