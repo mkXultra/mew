@@ -71,10 +71,11 @@ Evidence:
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
+- Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 
 Missing proof:
 
-- No streaming model token output.
+- Model delta streaming is wired for Codex SSE, but live UX still prints raw JSON deltas rather than a polished reasoning view.
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Work mode still executes one tool per model step.
 - Large active sessions can now carry more context, so prompt size still needs monitoring while work is in progress.
@@ -151,9 +152,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `462 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `24 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `25 passed`.
+- `uv run pytest -q` current: `464 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `26 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `39 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

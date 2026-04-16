@@ -639,6 +639,7 @@ def cmd_work_ai(args):
                 guidance=args.work_guidance or "",
                 progress=progress,
                 act_mode=getattr(args, "act_mode", "model") or "model",
+                stream_model=bool(getattr(args, "stream_model", False) or getattr(args, "live", False)),
             )
         except MewError as exc:
             error = str(exc)
@@ -4209,6 +4210,7 @@ def _parse_chat_work_ai_args(parts):
         "work_guidance": "",
         "progress": False,
         "live": False,
+        "stream_model": False,
         "allow_read": [],
         "allow_write": [],
         "allow_shell": False,
@@ -4279,6 +4281,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--live":
             args["live"] = True
+            index += 1
+            continue
+        if token == "--stream-model":
+            args["stream_model"] = True
             index += 1
             continue
         return None, f"mew: unsupported ai option: {token}"

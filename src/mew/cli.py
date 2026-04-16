@@ -663,6 +663,7 @@ def build_parser():
     )
     work_parser.add_argument("--work-guidance", help="extra guidance for --ai work mode")
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")
+    work_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas to progress output when supported")
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
     work_parser.add_argument("--session", action="store_true", help="show the active native work session")
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")

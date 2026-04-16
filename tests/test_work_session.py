@@ -1031,6 +1031,48 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_can_stream_model_deltas_to_progress(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("stream model content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, on_text_delta=None):
+                    if on_text_delta:
+                        on_text_delta("model delta")
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--stream-model",
+                                        "--progress",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                progress = stderr.getvalue()
+                self.assertIn("THINK delta model delta", progress)
+                self.assertIn("ACT delta model delta", progress)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_progress_streams_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

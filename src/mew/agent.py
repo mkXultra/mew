@@ -357,12 +357,31 @@ def transient_model_error(exc):
         )
     )
 
-def call_model_json_with_retries(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None):
+def call_model_json_with_retries(
+    model_backend,
+    model_auth,
+    prompt,
+    model,
+    base_url,
+    timeout,
+    log_prefix=None,
+    on_text_delta=None,
+):
     last_error = None
     for attempt, delay in enumerate((0.0, *MODEL_RETRY_DELAYS), start=1):
         if delay:
             time.sleep(delay)
         try:
+            if on_text_delta:
+                return call_model_json(
+                    model_backend,
+                    model_auth,
+                    prompt,
+                    model,
+                    base_url,
+                    timeout,
+                    on_text_delta=on_text_delta,
+                )
             return call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         except ModelBackendError as exc:
             last_error = exc

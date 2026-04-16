@@ -108,7 +108,7 @@ def call_anthropic_messages_api(auth, prompt, model, base_url, timeout):
     return text
 
 
-def call_anthropic_json(auth, prompt, model, base_url, timeout):
+def call_anthropic_json(auth, prompt, model, base_url, timeout, on_text_delta=None):
     text = call_anthropic_messages_api(auth, prompt, model, base_url, timeout)
     try:
         return extract_json_object(text)

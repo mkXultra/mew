@@ -21,7 +21,7 @@ class ModelBackend(Protocol):
     def load_auth(self, auth_path=None):
         pass
 
-    def call_json(self, auth, prompt, model, base_url, timeout):
+    def call_json(self, auth, prompt, model, base_url, timeout, on_text_delta=None):
         pass
 
 
@@ -56,14 +56,11 @@ class CodexModelBackend:
     def load_auth(self, auth_path=None):
         return load_codex_oauth(auth_path)
 
-    def call_json(self, auth, prompt, model, base_url, timeout):
-        return call_codex_json(
-            auth,
-            prompt,
-            model or self.default_model,
-            base_url or self.default_base_url,
-            timeout,
-        )
+    def call_json(self, auth, prompt, model, base_url, timeout, on_text_delta=None):
+        args = (auth, prompt, model or self.default_model, base_url or self.default_base_url, timeout)
+        if on_text_delta:
+            return call_codex_json(*args, on_text_delta=on_text_delta)
+        return call_codex_json(*args)
 
 
 class ClaudeModelBackend:
@@ -76,14 +73,11 @@ class ClaudeModelBackend:
     def load_auth(self, auth_path=None):
         return load_anthropic_auth(auth_path)
 
-    def call_json(self, auth, prompt, model, base_url, timeout):
-        return call_anthropic_json(
-            auth,
-            prompt,
-            model or self.default_model,
-            base_url or self.default_base_url,
-            timeout,
-        )
+    def call_json(self, auth, prompt, model, base_url, timeout, on_text_delta=None):
+        args = (auth, prompt, model or self.default_model, base_url or self.default_base_url, timeout)
+        if on_text_delta:
+            return call_anthropic_json(*args, on_text_delta=on_text_delta)
+        return call_anthropic_json(*args)
 
 
 register_model_backend(CodexModelBackend())
@@ -121,9 +115,12 @@ def load_model_auth(backend, auth_path=None):
     return get_model_backend(backend).load_auth(auth_path)
 
 
-def call_model_json(backend, auth, prompt, model, base_url, timeout):
+def call_model_json(backend, auth, prompt, model, base_url, timeout, on_text_delta=None):
     try:
-        return get_model_backend(backend).call_json(auth, prompt, model, base_url, timeout)
+        model_backend = get_model_backend(backend)
+        if on_text_delta:
+            return model_backend.call_json(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)
+        return model_backend.call_json(auth, prompt, model, base_url, timeout)
     except ModelBackendError:
         raise
     except MewError:

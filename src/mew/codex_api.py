@@ -85,17 +85,8 @@ def extract_sse_text(raw_text):
     completed_response = None
 
     for line in raw_text.splitlines():
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-
-        payload = line[5:].strip()
-        if not payload or payload == "[DONE]":
-            continue
-
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
+        data = decode_sse_data_line(line)
+        if not data:
             continue
 
         event_type = data.get("type")
@@ -114,7 +105,30 @@ def extract_sse_text(raw_text):
         return extract_response_text(completed_response)
     return ""
 
-def call_codex_web_api(auth, prompt, model, base_url, timeout):
+
+def decode_sse_data_line(line):
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    payload = line[5:].strip()
+    if not payload or payload == "[DONE]":
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+
+def sse_text_delta(data):
+    if not isinstance(data, dict):
+        return ""
+    if data.get("type") in ("response.output_text.delta", "response.refusal.delta"):
+        delta = data.get("delta")
+        return delta if isinstance(delta, str) else ""
+    return ""
+
+
+def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=None):
     url = base_url.rstrip("/") + "/responses"
     body = {
         "model": model,
@@ -146,8 +160,19 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout):
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8", errors="replace")
             content_type = response.headers.get("content-type", "")
+            if "text/event-stream" in content_type:
+                chunks = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace")
+                    chunks.append(line)
+                    if on_text_delta:
+                        delta = sse_text_delta(decode_sse_data_line(line))
+                        if delta:
+                            on_text_delta(delta)
+                raw = "".join(chunks)
+            else:
+                raw = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
         detail = body_text[:800].replace("\n", " ")
@@ -191,8 +216,8 @@ def extract_json_object(text):
 
     return json.loads(stripped[start : end + 1])
 
-def call_codex_json(auth, prompt, model, base_url, timeout):
-    text = call_codex_web_api(auth, prompt, model, base_url, timeout)
+def call_codex_json(auth, prompt, model, base_url, timeout, on_text_delta=None):
+    text = call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)
     try:
         return extract_json_object(text)
     except (json.JSONDecodeError, CodexApiError) as exc:
