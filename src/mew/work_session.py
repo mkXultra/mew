@@ -1110,6 +1110,77 @@ def run_work_tool(state, session, tool, parameters, allowed_read_roots):
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), error=str(exc))
 
 
+def build_work_session_timeline(session, limit=20):
+    events = []
+    if not session:
+        return []
+    order = 0
+    for turn in session.get("model_turns") or []:
+        order += 1
+        action = turn.get("action") or {}
+        action_type = action.get("type") or action.get("tool") or "unknown"
+        tool_call_id = turn.get("tool_call_id")
+        tool_call_ids = turn.get("tool_call_ids") or []
+        if tool_call_ids:
+            linked = " tool_calls=" + ",".join(f"#{value}" for value in tool_call_ids)
+        else:
+            linked = f" tool_call=#{tool_call_id}" if tool_call_id else ""
+        events.append(
+            {
+                "kind": "model_turn",
+                "id": turn.get("id"),
+                "status": turn.get("status") or "unknown",
+                "label": action_type,
+                "summary": clip_output(turn.get("finished_note") or turn.get("summary") or turn.get("error") or "", 500),
+                "started_at": turn.get("started_at") or "",
+                "finished_at": turn.get("finished_at") or "",
+                "linked": linked,
+                "order": order,
+            }
+        )
+    for call in session.get("tool_calls") or []:
+        order += 1
+        events.append(
+            {
+                "kind": "tool_call",
+                "id": call.get("id"),
+                "status": call.get("status") or "unknown",
+                "label": call.get("tool") or "unknown",
+                "summary": clip_output(compact_work_tool_summary(call), 500),
+                "started_at": call.get("started_at") or "",
+                "finished_at": call.get("finished_at") or "",
+                "linked": "",
+                "order": order,
+            }
+        )
+    events.sort(key=lambda event: (event.get("started_at") or "", event.get("order") or 0))
+    return events[-max(0, int(limit or 20)) :]
+
+
+def format_work_session_timeline(session, task=None, limit=20):
+    if not session:
+        return "No active work session."
+    lines = [
+        f"Work timeline #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
+        f"title: {session.get('title') or (task or {}).get('title') or ''}",
+        "",
+        "Events",
+    ]
+    events = build_work_session_timeline(session, limit=limit)
+    if not events:
+        lines.append("(none)")
+        return "\n".join(lines)
+    for event in events:
+        prefix = "model" if event.get("kind") == "model_turn" else "tool"
+        linked = event.get("linked") or ""
+        summary = f" {event.get('summary')}" if event.get("summary") else ""
+        lines.append(
+            f"- {event.get('started_at') or ''} {prefix}#{event.get('id')} "
+            f"[{event.get('status')}] {event.get('label')}{linked}{summary}".strip()
+        )
+    return "\n".join(lines)
+
+
 def format_work_session(session, task=None, limit=8, details=False):
     if not session:
         return "No active work session."

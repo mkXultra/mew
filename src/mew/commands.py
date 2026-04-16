@@ -139,6 +139,8 @@ from .work_session import (
     format_work_action,
     format_work_session_resume,
     format_work_session,
+    format_work_session_timeline,
+    build_work_session_timeline,
     latest_work_verify_command,
     mark_running_work_interrupted,
     request_work_session_stop,
@@ -1796,11 +1798,16 @@ def cmd_work_show_session(args):
             payload["recent_work_sessions"] = recent_work_session_summaries(state)
             payload["start_commands"] = ["mew work <task-id> --start-session", "/work-session start <task-id>"]
         elif session:
+            if getattr(args, "timeline", False):
+                payload["timeline"] = build_work_session_timeline(session, limit=getattr(args, "limit", 20))
             payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if not session and not getattr(args, "task_id", None):
             print(format_no_active_work_session(state))
+        elif getattr(args, "timeline", False):
+            print(format_work_session_timeline(session, task=task, limit=getattr(args, "limit", 20)))
+            print(format_work_cli_controls(session, args))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
             print(format_work_cli_controls(session, args))
@@ -5132,7 +5139,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
@@ -5178,6 +5185,7 @@ Any non-slash line is sent to mew as a user message."""
 CHAT_WORK_HELP = """Work session quick help:
 /work-session                         show active session, or recent sessions if none is active
 /work-session details                 show active session with decisions, diffs, failures, and tool calls
+/work-session timeline                show compact model/tool event timeline
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
 /work-session resume --allow-read .   add live git/file world state to the reentry bundle
@@ -5533,6 +5541,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
     lines.append("- /work-session resume --allow-read .")
+    lines.append("- /work-session timeline")
     lines.append("- /work-session details")
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session recover --allow-read .")
@@ -5549,7 +5558,7 @@ def chat_work_session(rest, chat_state=None):
         return
     details = "details" in {part.casefold() for part in parts}
     parts = [part for part in parts if part.casefold() != "details"]
-    task_first_actions = {"show", "start", "close", "stop", "note", "recover", "ai", "step", "live", "resume"}
+    task_first_actions = {"show", "start", "close", "stop", "note", "recover", "ai", "step", "live", "resume", "timeline"}
     if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
         parts = [parts[1], parts[0], *parts[2:]]
     action = parts[0].casefold() if parts else "show"
@@ -5565,6 +5574,7 @@ def chat_work_session(rest, chat_state=None):
         "step",
         "live",
         "resume",
+        "timeline",
         "approve",
         "reject",
     ):
@@ -5687,6 +5697,20 @@ def chat_work_session(rest, chat_state=None):
             print("")
         print(format_work_session_resume(resume))
         if resume:
+            print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
+        return
+
+    if action == "timeline":
+        state = load_state()
+        session = active_work_session(state)
+        if task_id:
+            session = _latest_work_session_for_task(state, task_id)
+        task = work_session_task(state, session)
+        if not session and not task_id:
+            print(format_no_active_work_session(state))
+            return
+        print(format_work_session_timeline(session, task=task))
+        if session:
             print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 

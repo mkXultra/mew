@@ -568,6 +568,7 @@ def run_work_session_scenario(workspace, env=None):
     note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
     resume_result = run(["work", "1", "--session", "--resume", "--json"])
     work_result = run(["work", "1", "--json"])
+    timeline_result = run(["work", "1", "--session", "--timeline", "--json"])
     chat_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
@@ -652,12 +653,14 @@ def run_work_session_scenario(workspace, env=None):
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
     resume_data = _json_stdout(resume_result)
+    timeline_data = _json_stdout(timeline_result)
     interrupted_resume_data = _json_stdout(interrupted_resume_result)
     interrupted_recover_data = _json_stdout(interrupted_recover_result)
     auto_recover_data = _json_stdout(auto_recover_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
+    timeline = timeline_data.get("timeline") or []
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
     interrupted_review = interrupted_recovery.get("review_item") or {}
@@ -749,6 +752,15 @@ def run_work_session_scenario(workspace, env=None):
         == ["read_file", "glob", "run_tests", "edit_file", "write_file"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
         expected=["read_file", "glob", "run_tests", "edit_file", "write_file"],
+    )
+    _scenario_check(
+        checks,
+        "work_timeline_surfaces_tool_events",
+        timeline_result.get("exit_code") == 0
+        and len(timeline) >= 5
+        and any(event.get("kind") == "tool_call" and event.get("label") == "read_file" for event in timeline),
+        observed=timeline[:5],
+        expected="timeline includes compact work-session tool events",
     )
     _scenario_check(
         checks,

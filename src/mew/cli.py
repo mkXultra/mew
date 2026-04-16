@@ -751,6 +751,7 @@ def build_parser():
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")
     work_parser.add_argument("--resume", action="store_true", help="show a compact work-session resume bundle")
+    work_parser.add_argument("--timeline", action="store_true", help="show a compact chronological work-session timeline")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 

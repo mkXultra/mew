@@ -2979,6 +2979,62 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_timeline_surfaces_model_and_tool_events(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("timeline content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read timeline file", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--timeline"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Work timeline #1 [active] task=#1", output)
+                self.assertIn("model#1 [completed] read_file tool_call=#1", output)
+                self.assertIn("tool#1 [completed] read_file", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--timeline", "--json"]), 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["timeline"][0]["kind"], "model_turn")
+                self.assertEqual(payload["timeline"][1]["kind"], "tool_call")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session timeline", {}), "continue")
+                self.assertIn("Work timeline #1 [active] task=#1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_show_without_active_lists_recent_sessions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
