@@ -255,6 +255,8 @@ The same recent-session summaries are available in `mew work --session --json`
 for scripts and model-facing tools.
 When a session is active, both `mew work --session` and `/work-session` include
 the next controls for continuing, stopping, resuming, or opening chat.
+`mew chat` prints active-session controls on startup even when `--no-brief` is
+used, so quiet chat still preserves the reentry affordance.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`

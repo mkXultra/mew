@@ -6547,9 +6547,9 @@ def cmd_chat(args):
     state = load_state()
     if not args.no_brief:
         print(build_brief(state, limit=args.limit), flush=True)
-        session = active_work_session(state)
-        if session:
-            print(format_work_cockpit_controls(state=state, session=session), flush=True)
+    session = active_work_session(state)
+    if session:
+        print(format_work_cockpit_controls(state=state, session=session), flush=True)
 
     seen_ids = emit_initial_outbox(
         history=False,

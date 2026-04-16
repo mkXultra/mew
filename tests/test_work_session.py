@@ -2528,6 +2528,29 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_startup_surfaces_active_controls_even_without_brief(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                stdin = StringIO("/exit\n")
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["chat", "--no-brief", "--no-unread", "--no-activity"]), 0)
+                output = stdout.getvalue()
+
+                self.assertNotIn("Mew focus", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/continue --allow-read .", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_run_ai_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
