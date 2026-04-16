@@ -19,6 +19,7 @@ WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "remember", "wait"
 WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
 WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
+WORK_READ_FILE_CONTEXT_TEXT_LIMIT = 12000
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -35,12 +36,23 @@ def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):
 def _compact_tool_result(tool, result):
     result = result or {}
     if tool == "read_file":
+        offset = result.get("offset") or 0
+        text = result.get("text") or ""
+        context_truncated = len(text) > WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+        visible_chars = min(len(text), WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
+        next_offset = result.get("next_offset")
+        if context_truncated:
+            next_offset = offset + visible_chars
         return {
             "path": result.get("path"),
-            "offset": result.get("offset"),
-            "next_offset": result.get("next_offset"),
-            "text": clip_output(result.get("text") or "", WORK_RESULT_TEXT_LIMIT),
-            "truncated": bool(result.get("truncated")),
+            "offset": offset,
+            "next_offset": next_offset,
+            "text": clip_output(text, WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+            "visible_chars": visible_chars,
+            "source_text_chars": len(text),
+            "context_truncated": context_truncated,
+            "source_truncated": bool(result.get("truncated")),
+            "truncated": bool(result.get("truncated")) or context_truncated,
         }
     if tool in ("inspect_dir", "glob", "search_text"):
         return {

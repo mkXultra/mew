@@ -265,10 +265,11 @@ Interrupted read-only tools can be retried with `mew work --recover-session
 --allow-read .`; write, shell, and verification interruptions still require
 human review. Older tool calls that fall out of the full recent context window
 are carried forward as compact `session_knowledge` digests instead of raw file
-contents. Passing `--allow-read` to `mew work --session --resume` adds a live
-world-state check with current git status and touched-file stats; the same
-bounded summary is included in future work-model context when read access is
-allowed.
+contents, and recent `read_file` results are clipped in model context with a
+resume offset so the model can request the next page when needed. Passing
+`--allow-read` to `mew work --session --resume` adds a live world-state check
+with current git status and touched-file stats; the same bounded summary is
+included in future work-model context when read access is allowed.
 
 ```sh
 uv run mew work 1 --start-session

@@ -1570,6 +1570,42 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("secret content 1", knowledge_text)
         self.assertLess(len(knowledge_text), 3000)
 
+    def test_work_model_context_clips_recent_read_file_text_with_resume_offset(self):
+        from mew.work_loop import WORK_READ_FILE_CONTEXT_TEXT_LIMIT, build_work_model_context
+
+        text = "x" * (WORK_READ_FILE_CONTEXT_TEXT_LIMIT + 100)
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Clip recent read context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "big.py", "offset": 200},
+                    "result": {"path": "big.py", "text": text, "offset": 200, "truncated": False},
+                    "summary": "read big file",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Clip", "description": "Clip recent read context.", "status": "todo", "kind": "coding"}
+
+        context = build_work_model_context({}, session, task, "now")
+        result = context["work_session"]["tool_calls"][0]["result"]
+
+        self.assertTrue(result["context_truncated"])
+        self.assertFalse(result["source_truncated"])
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["visible_chars"], WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
+        self.assertEqual(result["source_text_chars"], WORK_READ_FILE_CONTEXT_TEXT_LIMIT + 100)
+        self.assertEqual(result["next_offset"], 200 + WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
+        self.assertLess(len(result["text"]), len(text))
+
     def test_work_model_context_includes_bounded_world_state_when_read_allowed(self):
         from mew.work_loop import build_work_model_context
 
