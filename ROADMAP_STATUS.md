@@ -141,14 +141,18 @@ Evidence:
 - Human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers all behave as intended without tracked file edits.
 - `mew chat --kind ...` now scopes the startup brief, unread outbox, and slash-command views; `/scope` can switch or clear the active chat kind, and `mew listen --kind ...` scopes passive outbox observation.
 - Chat `/work` now respects the active kind scope when selecting a default task, so a `mew chat --kind coding` cockpit no longer silently opens unrelated research work.
+- Chat startup, `/work-session`, `/work-session live`, `/work-session resume`, `/work-session timeline`, approvals, rejections, stop, and notes now respect the active chat kind scope when no explicit task id is supplied.
 - Chat `/continue` now accepts stored options followed by plain guidance, preserving reusable gates like `--auth` / `--allow-read` while treating the trailing text as one-shot work guidance.
 - `mew work --live` now defaults to deterministic ACT, so the common live path uses one model call per step; model JSON/text deltas are quiet by default and remain available with explicit `--stream-model`.
 - `read_file` now supports `line_start` / `line_count` through both CLI tools and resident model actions, letting the model jump from `search_text` line numbers to the relevant source region instead of rereading file offset 0.
 - Invalid line-based `read_file` requests now fail clearly (`line_start must be >= 1`), while out-of-range line reads return structured EOF metadata and summaries like `lines=99-EOF`.
+- Line-window reads now distinguish `has_more_lines` from `truncated`, so a fully returned requested window can expose `next_line` without falsely saying the returned text was truncated.
+- Compact work-session timelines now preserve failed/interrupted tool errors instead of formatting failed `read_file` calls as empty offset reads.
+- Generated cockpit commands now prefer `./mew ...` when the current checkout has an executable local wrapper, making next controls copy-paste runnable in source worktrees where `mew` is not installed on `PATH`.
 - `edit_file` now permits small exact replacements in large files by limiting replacement/delta size instead of rejecting based on total edited file size.
 - `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
 - `dogfood --scenario work-session` now covers line-based `read_file` and large-file dry-run `edit_file`, bringing the recurring scenario to 27 commands.
-- `dogfood --scenario chat-cockpit` now exercises a scripted `mew chat --kind coding` session with `/scope`, `/tasks`, and `/work`, making the scoped cockpit path part of deterministic recurring dogfood.
+- `dogfood --scenario chat-cockpit` now exercises a scripted `mew chat --kind coding` session with `/scope`, `/tasks`, `/work`, scoped startup controls, and scoped `/work-session`, making the scoped cockpit path part of deterministic recurring dogfood.
 
 Missing proof:
 
@@ -253,13 +257,13 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `576 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `578 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `156 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, and scoped `/work`.
+- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, and scoped `/work-session`.
 - `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 27 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
 - `./mew doctor` current: state/runtime/auth ok.
@@ -272,6 +276,7 @@ Next action:
 - `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
+- Isolated `codex-ultra` agent-as-human E2E in `/tmp/mew-agent-human-role-20260417-013828` ran `chat-cockpit`, `work-session`, `all`, manual `chat --kind coding`, work-session reentry, line reads, and a live read-only resident model step. It judged mew usable for narrow task-coding shell work and found three papercuts: source-checkout command prefixes, timeline failure summaries, and line-window truncation wording; all three were fixed in commit `4e8ecf1`.
 - `mew chat --kind coding`, `mew next --kind coding`, and `mew status --kind coding` were dogfooded locally after the scoped-chat changes; startup and slash-view scoping stayed quiet and task/coding-focused.
 - `mew work --live` task #44 dogfood verified the quieter deterministic live path, then used line-based reads and large-file edit support to reach and approve a real cockpit improvement.
 - `claude-ultra` reviews found no ship-blockers after fixes for work-session global ledgers and status/brief kind scoping.
