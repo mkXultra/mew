@@ -674,6 +674,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("reject: /work-session reject 3", text)
                 self.assertIn("Context pressure", text)
                 self.assertIn("pressure=low tool_calls=3", text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]), 0)
+                world_resume = json.loads(stdout.getvalue())["resume"]
+                self.assertIn("exit_code", world_resume["world_state"]["git_status"])
+                self.assertTrue(world_resume["world_state"]["files"][0]["exists"])
             finally:
                 os.chdir(old_cwd)
 

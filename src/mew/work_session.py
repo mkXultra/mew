@@ -792,6 +792,20 @@ def format_work_session_resume(resume):
         lines.extend(["", "Last stop request"])
         lines.append(f"{last_stop.get('requested_at') or ''} {last_stop.get('reason') or ''}".strip())
 
+    world = resume.get("world_state") or {}
+    if world:
+        lines.extend(["", "World state"])
+        git_status = world.get("git_status") or {}
+        lines.append(f"git_status exit={git_status.get('exit_code')} {git_status.get('stdout') or '(clean)'}")
+        files = world.get("files") or []
+        if files:
+            for item in files[:8]:
+                state = "exists" if item.get("exists") else "missing" if item.get("exists") is False else "unknown"
+                detail = item.get("error") or f"{item.get('type') or ''} size={item.get('size')}"
+                lines.append(f"- {state} {item.get('path')}: {detail}")
+        else:
+            lines.append("(no files)")
+
     context = resume.get("context") or {}
     lines.extend(["", "Context pressure"])
     if context:

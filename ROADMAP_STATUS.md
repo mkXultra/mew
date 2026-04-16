@@ -149,6 +149,7 @@ Evidence:
 - `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
 - Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
 - `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; write/shell/verification recovery remains gated by human review.
+- `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 
 Missing proof:
 
