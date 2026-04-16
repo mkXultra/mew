@@ -729,6 +729,162 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_listen_kind_filter_scopes_unread_messages(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Research unrelated topic",
+                                "description": "",
+                                "kind": "research",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Implement focused listener",
+                                "description": "",
+                                "kind": "coding",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    add_outbox_message(state, "info", "research listener message", related_task_id=1)
+                    add_outbox_message(state, "info", "coding listener message", related_task_id=2)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    code = main(["listen", "--kind", "coding", "--unread", "--timeout", "0"])
+
+                output = stdout.getvalue()
+                self.assertEqual(code, 0)
+                self.assertIn("coding listener message", output)
+                self.assertNotIn("research listener message", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_kind_scope_applies_to_slash_views(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Research unrelated topic",
+                                "description": "Keep this outside coding scope.",
+                                "kind": "research",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Implement scoped slash views",
+                                "description": "Keep chat commands focused.",
+                                "kind": "coding",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    add_question(state, "Research question should stay hidden", related_task_id=1)
+                    add_question(state, "Coding question should be visible", related_task_id=2)
+                    save_state(state)
+
+                chat_state = {"kind": "coding"}
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/brief", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/status", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/tasks", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/questions", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/attention", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/outbox", chat_state), "continue")
+
+                output = stdout.getvalue()
+                self.assertIn("Mew brief (coding)", output)
+                self.assertIn("scope: coding", output)
+                self.assertIn("Implement scoped slash views", output)
+                self.assertIn("Coding question should be visible", output)
+                self.assertNotIn("Research unrelated topic", output)
+                self.assertNotIn("Research question should stay hidden", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/scope research", chat_state), "continue")
+                    self.assertEqual(run_chat_slash_command("/scope off", chat_state), "continue")
+
+                self.assertIsNone(chat_state["kind"])
+                self.assertIn("scope: research", stdout.getvalue())
+                self.assertIn("scope: off", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_handles_status_outbox_ack_and_message(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

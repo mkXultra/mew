@@ -5375,13 +5375,14 @@ def cmd_listen(args):
 
 CHAT_HELP = """Commands:
 /help [work]          show this help, or focused work-session help
+/scope [kind|off]     show or change the chat kind scope
 /focus [kind]         show the quiet next-action view
 /daily [kind]         alias for /focus
-/brief                show the current operational brief
+/brief [kind]         show the current operational brief
 /next [kind]          show the next useful move
 /doctor              show state/runtime health
 /repair [--force]    reconcile state if the runtime is stopped
-/status               show compact runtime status
+/status [kind]        show compact runtime status
 /perception           show passive workspace observations
 /add <title> [| desc] create a task from chat
 /tasks [all]          list open tasks, or all tasks
@@ -5431,9 +5432,9 @@ CHAT_HELP = """Commands:
 Any non-slash line is sent to mew as a user message."""
 
 
-def chat_kind_filter(rest):
+def chat_kind_filter(rest, default_kind=None, usage="usage: /focus [kind] or /focus --kind <kind>"):
     if not rest:
-        return None, ""
+        return default_kind, ""
     try:
         tokens = shlex.split(rest)
     except ValueError as exc:
@@ -5444,7 +5445,7 @@ def chat_kind_filter(rest):
     elif len(tokens) == 2 and tokens[0] == "--kind":
         candidate = tokens[1]
     else:
-        return None, "usage: /focus [kind] or /focus --kind <kind>"
+        return None, usage
     kind = normalize_task_kind(candidate)
     if not kind:
         return None, "kind must be one of: coding, research, personal, admin, unknown"
@@ -5474,14 +5475,21 @@ CHAT_WORK_HELP = """Work session quick help:
 CHAT_EOF = object()
 
 
-def print_chat_status():
+def print_chat_status(kind=None):
     state = load_state()
     lock = read_lock()
     lock_state = "none"
     if lock:
         lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
+    tasks = filter_tasks_by_kind(open_tasks(state), kind=kind)
+    task_ids = {str(task.get("id")) for task in tasks}
+    questions = filter_questions_for_tasks(open_questions(state), tasks, kind=kind)
+    attention = filter_attention_for_tasks(open_attention_items(state), tasks, kind=kind)
     unread = [message for message in state["outbox"] if not message.get("read_at")]
+    unread = messages_for_kind_scope(state, unread, kind=kind)
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    if kind:
+        running_agents = [run for run in running_agents if str(run.get("task_id")) in task_ids]
     print(f"runtime: {state['runtime_status'].get('state')} lock={lock_state} pid={state['runtime_status'].get('pid')}")
     print(f"agent: {state['agent_status'].get('mode')} focus={state['agent_status'].get('current_focus') or '(none)'}")
     autonomy = state.get("autonomy", {})
@@ -5489,20 +5497,23 @@ def print_chat_status():
         f"autonomy: enabled={autonomy.get('enabled')} level={autonomy.get('level')} "
         f"paused={autonomy.get('paused')} override={autonomy.get('level_override') or '(none)'}"
     )
+    if kind:
+        print(f"scope: {kind}")
     print(
-        f"counts: tasks={len(open_tasks(state))} questions={len(open_questions(state))} "
-        f"attention={len(open_attention_items(state))} unread={len(unread)} running_agents={len(running_agents)}"
+        f"counts: tasks={len(tasks)} questions={len(questions)} "
+        f"attention={len(attention)} unread={len(unread)} running_agents={len(running_agents)}"
     )
-    print(f"next: {next_move(state)}")
+    print(f"next: {next_move(state, kind=kind)}")
 
 
 def print_chat_perception():
     print(format_perception(perceive_workspace(allowed_read_roots=["."], cwd=".")))
 
 
-def print_chat_tasks(show_all=False):
+def print_chat_tasks(show_all=False, kind=None):
     state = load_state()
     tasks = state["tasks"] if show_all else open_tasks(state)
+    tasks = filter_tasks_by_kind(tasks, kind=kind)
     tasks = sorted(tasks, key=task_sort_key)
     if not tasks:
         print("No tasks.")
@@ -6217,9 +6228,11 @@ def chat_classify_tasks(rest):
     cmd_task_classify(args)
 
 
-def print_chat_questions(show_all=False):
+def print_chat_questions(show_all=False, kind=None):
     state = load_state()
     questions = state["questions"] if show_all else open_questions(state)
+    tasks = filter_tasks_by_kind(state.get("tasks", []), kind=kind)
+    questions = filter_questions_for_tasks(questions, tasks, kind=kind)
     if not questions:
         print("No questions.")
         return
@@ -6268,9 +6281,11 @@ def chat_reopen_question(rest):
     print(f"reopened question #{question_id}")
 
 
-def print_chat_attention(show_all=False):
+def print_chat_attention(show_all=False, kind=None):
     state = load_state()
     items = state["attention"]["items"] if show_all else open_attention_items(state)
+    tasks = filter_tasks_by_kind(state.get("tasks", []), kind=kind)
+    items = filter_attention_for_tasks(items, tasks, kind=kind)
     if not items:
         print("No attention items.")
         return
@@ -6315,9 +6330,10 @@ def chat_resolve_attention(rest):
     print(f"resolved {len(items)} attention item(s)")
 
 
-def print_chat_outbox(show_all=False):
+def print_chat_outbox(show_all=False, kind=None):
     state = load_state()
     messages = state["outbox"] if show_all else [message for message in state["outbox"] if not message.get("read_at")]
+    messages = messages_for_kind_scope(state, messages, kind=kind)
     if not messages:
         print("No messages.")
         return
@@ -7053,18 +7069,45 @@ def run_chat_slash_command(line, chat_state):
         else:
             print(CHAT_HELP)
         return "continue"
+    if command == "scope":
+        if not rest:
+            scope = chat_state.get("kind") or "off"
+            print(f"scope: {scope}")
+            return "continue"
+        if rest.casefold() in ("off", "none", "global", "all"):
+            chat_state["kind"] = None
+            print("scope: off")
+            return "continue"
+        kind, error = chat_kind_filter(
+            rest,
+            usage="usage: /scope [coding|research|personal|admin|unknown|off]",
+        )
+        if error:
+            print(error)
+        else:
+            chat_state["kind"] = kind
+            print(f"scope: {kind}")
+        return "continue"
     if command in ("focus", "daily"):
-        kind, error = chat_kind_filter(rest)
+        kind, error = chat_kind_filter(rest, default_kind=chat_state.get("kind"))
         if error:
             print(error)
         else:
             print(format_focus(build_focus_data(load_state(), limit=3, kind=kind)))
         return "continue"
     if command == "brief":
-        print(build_brief(load_state()))
+        kind, error = chat_kind_filter(
+            rest,
+            default_kind=chat_state.get("kind"),
+            usage="usage: /brief [kind] or /brief --kind <kind>",
+        )
+        if error:
+            print(error)
+        else:
+            print(build_brief(load_state(), kind=kind))
         return "continue"
     if command == "next":
-        kind, error = chat_kind_filter(rest)
+        kind, error = chat_kind_filter(rest, default_kind=chat_state.get("kind"))
         if error:
             print(error)
         else:
@@ -7085,7 +7128,15 @@ def run_chat_slash_command(line, chat_state):
             cmd_repair(args)
         return "continue"
     if command == "status":
-        print_chat_status()
+        kind, error = chat_kind_filter(
+            rest,
+            default_kind=chat_state.get("kind"),
+            usage="usage: /status [kind] or /status --kind <kind>",
+        )
+        if error:
+            print(error)
+        else:
+            print_chat_status(kind=kind)
         return "continue"
     if command in ("perception", "perceive"):
         print_chat_perception()
@@ -7094,7 +7145,7 @@ def run_chat_slash_command(line, chat_state):
         chat_add_task(rest)
         return "continue"
     if command in ("tasks", "task"):
-        print_chat_tasks(show_all=rest.casefold() == "all")
+        print_chat_tasks(show_all=rest.casefold() == "all", kind=chat_state.get("kind"))
         return "continue"
     if command == "show":
         if not rest:
@@ -7121,7 +7172,7 @@ def run_chat_slash_command(line, chat_state):
         chat_classify_tasks(rest)
         return "continue"
     if command in ("questions", "question"):
-        print_chat_questions(show_all=rest.casefold() == "all")
+        print_chat_questions(show_all=rest.casefold() == "all", kind=chat_state.get("kind"))
         return "continue"
     if command == "defer":
         chat_defer_question(rest)
@@ -7130,13 +7181,13 @@ def run_chat_slash_command(line, chat_state):
         chat_reopen_question(rest)
         return "continue"
     if command == "attention":
-        print_chat_attention(show_all=rest.casefold() == "all")
+        print_chat_attention(show_all=rest.casefold() == "all", kind=chat_state.get("kind"))
         return "continue"
     if command == "resolve":
         chat_resolve_attention(rest)
         return "continue"
     if command == "outbox":
-        print_chat_outbox(show_all=rest.casefold() == "all")
+        print_chat_outbox(show_all=rest.casefold() == "all", kind=chat_state.get("kind"))
         return "continue"
     if command in ("agents", "agent", "runs"):
         print_chat_agents(show_all=rest.casefold() == "all")
@@ -7318,6 +7369,8 @@ def read_chat_line(poll_interval, prompt_state):
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
+    if kind:
+        print(f"scope: {kind}", flush=True)
     state = load_state()
     if not args.no_brief:
         print(build_brief(state, limit=args.limit, kind=kind), flush=True)
@@ -7334,6 +7387,7 @@ def cmd_chat(args):
     chat_state = {
         "activity": bool(args.activity),
         "activity_offset": current_log_offset() if args.activity else None,
+        "kind": kind,
     }
     prompt_state = {"needed": True}
     deadline = time.monotonic() + max(0.0, args.timeout) if args.timeout is not None else None

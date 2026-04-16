@@ -990,6 +990,11 @@ def build_parser():
     )
     listen_parser.add_argument("--unread", action="store_true", help="print unread existing messages first")
     listen_parser.add_argument("--history", action="store_true", help="print all existing messages first")
+    listen_parser.add_argument(
+        "--kind",
+        choices=["coding", "research", "personal", "admin", "unknown"],
+        help="scope streamed outbox messages by task kind",
+    )
     listen_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
     listen_parser.add_argument("--activity", action="store_true", help="also stream runtime activity lines")
     listen_parser.add_argument("--timeout", type=float, help="stop listening after this many seconds")
@@ -1011,6 +1016,11 @@ def build_parser():
     )
     attach_parser.add_argument("--unread", action="store_true", help="print unread existing messages first")
     attach_parser.add_argument("--history", action="store_true", help="print all existing messages first")
+    attach_parser.add_argument(
+        "--kind",
+        choices=["coding", "research", "personal", "admin", "unknown"],
+        help="scope streamed outbox messages by task kind",
+    )
     attach_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
     attach_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     attach_parser.add_argument("--no-input", action="store_true", help="do not read interactive terminal input")
