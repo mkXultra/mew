@@ -835,7 +835,8 @@ class WorkSessionTests(unittest.TestCase):
 
                 self.assertIn("Work session #1 [active] task=#1", output)
                 self.assertIn("Next CLI controls", output)
-                self.assertIn("mew work 1 --live --auth auth.json --model-backend codex --allow-read .", output)
+                self.assertIn("mew work 1 --live --model-backend codex --allow-read .", output)
+                self.assertNotIn("--auth auth.json", output)
                 self.assertIn("--max-steps 3", output)
                 self.assertIn("mew chat", output)
 

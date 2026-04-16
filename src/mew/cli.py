@@ -21,6 +21,7 @@ from .commands import (
     cmd_buddy,
     cmd_chat,
     cmd_context,
+    cmd_do,
     cmd_desires_init,
     cmd_desires_show,
     cmd_dogfood,
@@ -646,11 +647,30 @@ def build_parser():
     next_parser.add_argument("--json", action="store_true", help="print structured JSON")
     next_parser.set_defaults(func=cmd_next)
 
+    do_parser = subparsers.add_parser("do", help="run the common supervised resident coding loop")
+    do_parser.add_argument("task_id", nargs="?")
+    do_parser.add_argument("--auth", help="model auth file; defaults to ./auth.json then ~/.codex/auth.json")
+    do_parser.add_argument("--model-backend", default=DEFAULT_MODEL_BACKEND, choices=SUPPORTED_MODEL_BACKENDS)
+    do_parser.add_argument("--model", help="model name")
+    do_parser.add_argument("--base-url", help="model API base URL")
+    do_parser.add_argument("--model-timeout", type=float, default=60.0)
+    do_parser.add_argument("--max-steps", type=int, default=3)
+    do_parser.add_argument("--act-mode", choices=("model", "deterministic"), default="deterministic")
+    do_parser.add_argument("--work-guidance", help="extra guidance for the resident work loop")
+    do_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas when supported")
+    do_parser.add_argument("--allow-read", action="append", default=[], help="read root; defaults to .")
+    do_parser.add_argument("--allow-write", action="append", default=[], help="write root; defaults to .")
+    do_parser.add_argument("--read-only", action="store_true", help="do not grant write roots")
+    do_parser.add_argument("--verify-command", help="verification command; auto-detected for common projects")
+    do_parser.add_argument("--no-verify", action="store_true", help="do not grant run_tests verification")
+    do_parser.add_argument("--verify-timeout", type=int, default=300)
+    do_parser.set_defaults(func=cmd_do)
+
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")
     work_parser.add_argument("task_id", nargs="?")
     work_parser.add_argument("--ai", action="store_true", help="let the resident model choose and run work-session tools")
     work_parser.add_argument("--live", action="store_true", help="run --ai with progress and print a resume after each step")
-    work_parser.add_argument("--auth", default="auth.json", help="model auth file for --ai")
+    work_parser.add_argument("--auth", help="model auth file for --ai; defaults to ./auth.json then ~/.codex/auth.json")
     work_parser.add_argument("--model-backend", default="codex", help="model backend for --ai")
     work_parser.add_argument("--model", help="model name for --ai")
     work_parser.add_argument("--base-url", help="model API base URL for --ai")

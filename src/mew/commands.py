@@ -965,6 +965,56 @@ def cmd_work(args):
     return 0
 
 
+def detect_default_verify_command():
+    if Path("pyproject.toml").exists() and Path("tests").exists():
+        return "uv run pytest -q"
+    if Path("pytest.ini").exists() or Path("tests").exists():
+        return "python -m pytest -q"
+    if Path("package.json").exists():
+        return "npm test"
+    return ""
+
+
+def cmd_do(args):
+    verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+    allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
+    work_args = SimpleNamespace(
+        task_id=getattr(args, "task_id", None),
+        ai=True,
+        live=True,
+        json=False,
+        tool=None,
+        auth=getattr(args, "auth", None),
+        model_backend=getattr(args, "model_backend", None) or DEFAULT_MODEL_BACKEND,
+        model=getattr(args, "model", None),
+        base_url=getattr(args, "base_url", None),
+        model_timeout=getattr(args, "model_timeout", 60.0),
+        max_steps=max(1, int(getattr(args, "max_steps", 3) or 3)),
+        act_mode=getattr(args, "act_mode", None) or "deterministic",
+        work_guidance=getattr(args, "work_guidance", None),
+        progress=True,
+        stream_model=bool(getattr(args, "stream_model", False)),
+        allow_read=getattr(args, "allow_read", None) or ["."],
+        allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or ["."]),
+        allow_shell=False,
+        allow_verify=allow_verify,
+        verify_command=verify_command if allow_verify else "",
+        verify_cwd=".",
+        verify_timeout=getattr(args, "verify_timeout", 300),
+        start_session=False,
+        session=False,
+        close_session=False,
+        stop_session=False,
+        stop_reason=None,
+        session_note=None,
+        recover_session=False,
+        approve_tool=None,
+        reject_tool=None,
+        reject_reason=None,
+    )
+    return cmd_work_ai(work_args)
+
+
 def cmd_work_ai(args):
     if getattr(args, "live", False) and getattr(args, "json", False):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
@@ -5057,7 +5107,7 @@ def _parse_chat_work_ai_args(parts):
     value_option_prefixes = tuple(f"{option}=" for option in value_options)
     args = {
         "task_id": None,
-        "auth": "auth.json",
+        "auth": None,
         "model_backend": DEFAULT_MODEL_BACKEND,
         "model": None,
         "base_url": None,

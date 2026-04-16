@@ -21,6 +21,40 @@ from mew.errors import MewError
 
 
 class CommandTests(unittest.TestCase):
+    def test_do_uses_supervised_work_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+                Path("tests").mkdir()
+                captured = []
+
+                def fake_work_ai(args):
+                    captured.append(args)
+                    return 0
+
+                with patch("mew.commands.cmd_work_ai", side_effect=fake_work_ai):
+                    with redirect_stdout(StringIO()):
+                        code = main(["do", "7", "--work-guidance", "ship the small fix", "--max-steps", "4"])
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        args = captured[0]
+        self.assertEqual(args.task_id, "7")
+        self.assertIsNone(args.auth)
+        self.assertTrue(args.ai)
+        self.assertTrue(args.live)
+        self.assertTrue(args.progress)
+        self.assertEqual(args.max_steps, 4)
+        self.assertEqual(args.act_mode, "deterministic")
+        self.assertEqual(args.allow_read, ["."])
+        self.assertEqual(args.allow_write, ["."])
+        self.assertTrue(args.allow_verify)
+        self.assertEqual(args.verify_command, "uv run pytest -q")
+        self.assertEqual(args.work_guidance, "ship the small fix")
+
     def test_step_focus_is_injected_into_guidance(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
