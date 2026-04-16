@@ -1685,6 +1685,24 @@ def _select_active_work_session_for_args(state, args):
     return session
 
 
+def _work_session_matches_kind(state, session, kind=None):
+    if not session:
+        return False
+    if not kind:
+        return True
+    task = work_session_task(state, session)
+    return bool(task and task_kind(task) == kind)
+
+
+def active_work_session_for_kind(state, kind=None):
+    if not kind:
+        return active_work_session(state)
+    for session in reversed(state.get("work_sessions", [])):
+        if session.get("status") == "active" and _work_session_matches_kind(state, session, kind=kind):
+            return session
+    return None
+
+
 def _latest_work_session_for_task(state, task_id):
     latest = None
     for candidate in reversed(state.get("work_sessions", [])):
@@ -1835,10 +1853,16 @@ def cmd_work_start_session(args):
     return 0
 
 
-def recent_work_session_summaries(state, limit=5):
+def recent_work_session_summaries(state, limit=5, kind=None):
     sessions = list(state.get("work_sessions") or [])
-    recent = list(reversed(sessions[-limit:]))
     summaries = []
+    recent = []
+    for session in reversed(sessions):
+        if kind and not _work_session_matches_kind(state, session, kind=kind):
+            continue
+        recent.append(session)
+        if len(recent) >= limit:
+            break
     for session in recent:
         task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task, limit=3)
@@ -1859,9 +1883,9 @@ def recent_work_session_summaries(state, limit=5):
     return summaries
 
 
-def format_no_active_work_session(state, limit=5):
-    lines = ["No active work session."]
-    recent = recent_work_session_summaries(state, limit=limit)
+def format_no_active_work_session(state, limit=5, kind=None):
+    lines = [f"No active {kind} work session." if kind else "No active work session."]
+    recent = recent_work_session_summaries(state, limit=limit, kind=kind)
     if recent:
         lines.extend(["", "Recent work sessions"])
         for session in recent:
@@ -5934,13 +5958,19 @@ def chat_work_session(rest, chat_state=None):
     ):
         task_id = parts[0] if parts else None
         action = "show"
+    scope_kind = (chat_state or {}).get("kind")
 
     if action == "start":
         with state_lock():
             state = load_state()
-            task = select_workbench_task(state, task_id)
+            task = select_workbench_task(state, task_id, kind=scope_kind)
             if not task:
-                print(f"mew: task not found: {task_id}" if task_id else "No tasks.")
+                if task_id:
+                    print(f"mew: task not found: {task_id}")
+                elif scope_kind:
+                    print(f"No {scope_kind} tasks.")
+                else:
+                    print("No tasks.")
                 return
             session, created = create_work_session(state, task)
             save_state(state)
@@ -5951,7 +5981,7 @@ def chat_work_session(rest, chat_state=None):
     if action == "close":
         with state_lock():
             state = load_state()
-            session = active_work_session(state)
+            session = active_work_session_for_kind(state, scope_kind)
             if task_id:
                 session = None
                 for candidate in reversed(state.get("work_sessions", [])):
@@ -5967,15 +5997,47 @@ def chat_work_session(rest, chat_state=None):
         return
 
     if action == "stop":
-        args = SimpleNamespace(task_id=None, stop_reason=" ".join(parts[1:]), json=False)
+        scoped_task_id = None
+        if scope_kind:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            scoped_task_id = session.get("task_id")
+        args = SimpleNamespace(task_id=scoped_task_id, stop_reason=" ".join(parts[1:]), json=False)
         cmd_work_stop_session(args)
-        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
         return
 
     if action == "note":
-        args = SimpleNamespace(task_id=None, session_note=" ".join(parts[1:]), json=False)
+        scoped_task_id = None
+        if scope_kind:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            scoped_task_id = session.get("task_id")
+        args = SimpleNamespace(task_id=scoped_task_id, session_note=" ".join(parts[1:]), json=False)
         cmd_work_session_note(args)
-        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
         return
 
     if action == "recover":
@@ -5984,10 +6046,25 @@ def chat_work_session(rest, chat_state=None):
         if error:
             print(error)
             return
+        if scope_kind and not args.task_id:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            args.task_id = session.get("task_id")
         args.recover_session = True
         args.json = False
         cmd_work_recover_session(args)
-        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
         return
 
     if action in ("ai", "step", "live"):
@@ -6001,6 +6078,12 @@ def chat_work_session(rest, chat_state=None):
             args.suppress_cli_controls = True
             _remember_work_continue_options(parts, chat_state)
             state = load_state()
+            if scope_kind and not args.task_id:
+                session = active_work_session_for_kind(state, scope_kind)
+                if not session:
+                    print(format_no_active_work_session(state, kind=scope_kind))
+                    return
+                args.task_id = session.get("task_id")
             session = _select_active_work_session_for_args(state, args)
             live_session_id = session.get("id") if session else None
         cmd_work_ai(args)
@@ -6024,7 +6107,7 @@ def chat_work_session(rest, chat_state=None):
             print(error)
             return
         state = load_state()
-        session = active_work_session(state)
+        session = active_work_session_for_kind(state, scope_kind)
         if task_id:
             session = _latest_work_session_for_task(state, task_id)
         auto_recovery = None
@@ -6032,7 +6115,7 @@ def chat_work_session(rest, chat_state=None):
             recover_args = SimpleNamespace(task_id=task_id, allow_read=allow_read, progress=False, json=False)
             _, auto_recovery = _work_recover_session_once(recover_args, safe_only=True)
             state = load_state()
-            session = active_work_session(state)
+            session = active_work_session_for_kind(state, scope_kind)
             if task_id:
                 session = _latest_work_session_for_task(state, task_id)
         resume = build_work_session_resume(session, task=work_session_task(state, session))
@@ -6043,7 +6126,7 @@ def chat_work_session(rest, chat_state=None):
                 print("Auto recovery")
                 print_work_recovery_report(auto_recovery)
                 print("")
-            print(format_no_active_work_session(state))
+            print(format_no_active_work_session(state, kind=scope_kind))
             return
         if auto_recovery is not None:
             print("Auto recovery")
@@ -6056,12 +6139,12 @@ def chat_work_session(rest, chat_state=None):
 
     if action == "timeline":
         state = load_state()
-        session = active_work_session(state)
+        session = active_work_session_for_kind(state, scope_kind)
         if task_id:
             session = _latest_work_session_for_task(state, task_id)
         task = work_session_task(state, session)
         if not session and not task_id:
-            print(format_no_active_work_session(state))
+            print(format_no_active_work_session(state, kind=scope_kind))
             return
         print(format_work_session_timeline(session, task=task))
         if session:
@@ -6141,6 +6224,13 @@ def chat_work_session(rest, chat_state=None):
         if not allow_write:
             print("mew: approve requires --allow-write")
             return
+        if scope_kind and not approve_task_id:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            approve_task_id = session.get("task_id")
         args = SimpleNamespace(
             task_id=approve_task_id,
             approve_tool=tool_call_id,
@@ -6153,7 +6243,15 @@ def chat_work_session(rest, chat_state=None):
             json=False,
         )
         cmd_work_approve_tool(args)
-        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
         return
 
     if action == "reject":
@@ -6176,6 +6274,13 @@ def chat_work_session(rest, chat_state=None):
                 continue
             reason_parts.append(token)
             index += 1
+        if scope_kind and not reject_task_id:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            reject_task_id = session.get("task_id")
         args = SimpleNamespace(
             task_id=reject_task_id,
             reject_tool=tool_call_id,
@@ -6183,15 +6288,23 @@ def chat_work_session(rest, chat_state=None):
             json=False,
         )
         cmd_work_reject_tool(args)
-        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
         return
 
     state = load_state()
-    session = active_work_session(state)
+    session = active_work_session_for_kind(state, scope_kind)
     if task_id:
         session = _latest_work_session_for_task(state, task_id)
     elif not session:
-        print(format_no_active_work_session(state))
+        print(format_no_active_work_session(state, kind=scope_kind))
         return
     print(format_work_session(session, task=work_session_task(state, session), details=details))
     print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
@@ -7449,7 +7562,7 @@ def cmd_chat(args):
     state = load_state()
     if not args.no_brief:
         print(build_brief(state, limit=args.limit, kind=kind), flush=True)
-    session = active_work_session(state)
+    session = active_work_session_for_kind(state, kind=kind)
     if session:
         print(format_work_cockpit_controls(state=state, session=session), flush=True)
 

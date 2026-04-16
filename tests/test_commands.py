@@ -952,6 +952,84 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_uses_kind_scoped_active_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    coding_task = {
+                        "id": 1,
+                        "title": "Implement scoped session",
+                        "description": "",
+                        "kind": "coding",
+                        "status": "ready",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    research_task = {
+                        "id": 2,
+                        "title": "Research active session",
+                        "description": "",
+                        "kind": "research",
+                        "status": "ready",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    state["tasks"].extend([coding_task, research_task])
+                    coding_session, _ = create_work_session(state, coding_task)
+                    coding_session["default_options"] = {"allow_read": ["coding-root"]}
+                    research_session, _ = create_work_session(state, research_task)
+                    research_session["default_options"] = {"allow_read": ["research-root"]}
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["chat", "--kind", "coding", "--no-brief", "--no-unread", "--timeout", "0"]),
+                        0,
+                    )
+                startup = stdout.getvalue()
+                self.assertIn("--allow-read coding-root", startup)
+                self.assertNotIn("--allow-read research-root", startup)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session", {"kind": "coding"}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("Work session #1 [active] task=#1", output)
+                self.assertIn("Implement scoped session", output)
+                self.assertNotIn("Research active session", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_handles_status_outbox_ack_and_message(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
