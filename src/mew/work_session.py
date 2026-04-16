@@ -758,7 +758,11 @@ def format_work_session(session, task=None, limit=8, details=False):
                 action = turn.get("action") or {}
                 action_type = action.get("type") or action.get("tool") or "unknown"
                 tool_call_id = turn.get("tool_call_id")
-                tool_text = f" tool_call=#{tool_call_id}" if tool_call_id else ""
+                tool_call_ids = turn.get("tool_call_ids") or []
+                if tool_call_ids:
+                    tool_text = " tool_calls=" + ",".join(f"#{value}" for value in tool_call_ids)
+                else:
+                    tool_text = f" tool_call=#{tool_call_id}" if tool_call_id else ""
                 lines.append(
                     f"#{turn.get('id')} [{turn.get('status')}] {action_type}{tool_text} "
                     f"{turn.get('summary') or turn.get('error') or ''}"

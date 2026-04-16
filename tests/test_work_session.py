@@ -1269,6 +1269,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(len(session["model_turns"]), 1)
                 self.assertEqual(session["model_turns"][0]["tool_call_ids"], [1, 2])
                 self.assertEqual([call["tool"] for call in session["tool_calls"]], ["inspect_dir", "read_file"])
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
+                self.assertIn("batch tool_calls=#1,#2", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 
