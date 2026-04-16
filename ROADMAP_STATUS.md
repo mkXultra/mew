@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
 
 This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conservative.
 
@@ -9,8 +9,8 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, context pressure diagnostics, and live world-state resume; the remaining gap is a polished REPL-style cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, and live world-state context now exist; day-scale reentry and passive watcher advantage are not yet proven. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, context pressure diagnostics, work-session/global ledgers, and scoped status/brief cockpit views; the remaining gap is a polished REPL-style coding cockpit. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -133,6 +133,12 @@ Evidence:
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
 - `mew self-improve --native`, `mew self-improve --start-session`, and chat `/self native ...` / `/self start ...` create/reuse a self-improvement coding task without forcing the older programmer-plan path, then print or start the native work-session path.
 - When the coding queue is empty, `mew next --kind coding` / `mew focus --kind coding` now suggest starting a native self-improvement session rather than going silent.
+- `mew work --approve-tool` now accepts exact new-file write roots when the parent directory exists, so resume-suggested file-level approvals apply correctly without broadening the write gate to `.`.
+- Unresolvable write roots now explain that the parent directory must exist instead of reporting a misleading `write is disabled` error when `--allow-write` was supplied.
+- `mew work <task-id>` now surfaces the latest work-session write and verification ledgers, including closed sessions, so the task workbench no longer says `Verification (none)` / `Writes (none)` after verified native work.
+- `mew verification` and `mew writes` now include work-session tool calls with stable `source`, `id`, `ledger_id`, and session-qualified labels such as `work25#113.verify`, making native work audit trails visible outside the full session view.
+- `mew status --kind ...` and `mew brief --kind ...` now scope counts, unread task-linked messages, questions, attention, task queues, next moves, and brief ledgers by task kind; kind-scoped briefs suppress unrelated global activity/thought/step history.
+- Human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers all behave as intended without tracked file edits.
 
 Missing proof:
 
@@ -140,7 +146,7 @@ Missing proof:
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, and next controls, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
+- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, next controls, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
 
 Next action:
 
@@ -164,10 +170,12 @@ Evidence:
 - Work model context now includes a bounded live `world_state` summary when read access is allowed, so resumed work can compare durable history with current git/file metadata.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
+- Work-session write and verification records now appear in global `mew writes` / `mew verification` ledgers with stable identifiers, so task-local work history is discoverable without reopening raw session JSON.
+- Kind-scoped `mew status --kind coding` and `mew brief --kind coding` provide a calmer task/coding reentry view that is not dominated by unrelated research questions or unread outbox.
 
 Missing proof:
 
-- Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
+- Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
@@ -234,20 +242,23 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `555 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `205 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_brief.py` current: `32 passed`.
+- `uv run pytest -q` current: `567 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `209 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_brief.py` current: `33 passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 21 commands.
-- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 21 commands.
-- `./mew doctor --auth auth.json` current: state/runtime/auth ok.
+- `./mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 25 commands.
+- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 25 commands.
+- `./mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
 - `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 - `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.
 - `codex-ultra` reentry retest after cockpit changes: strict chat resume order and missing chat resume hints are mostly fixed; remaining UX gaps are broader cockpit polish and quiet-chat affordances.
+- `codex-ultra` human-role E2E round 2 verified exact `/tmp` new-file approval, sibling write rejection, work-session/global ledgers, and `uv run pytest tests/test_work_session.py -q` with `88 passed`.
+- `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
+- `claude-ultra` reviews found no ship-blockers after fixes for work-session global ledgers and status/brief kind scoping.
 - Mew dogfood task #27 used `mew work --live` with Codex Web API in this repository; it found high context pressure from broad batch reads, which led to smaller model read defaults and diffstat-first model `git_diff`.
 - Mew dogfood task #28 used `mew work --live` with Codex Web API as a read-only self-improvement buddy; it reentered docs, chose `finish`, and exposed the need to distinguish session finish from task completion.
 - `codex-ultra` distracted-user dogfood found that generated live/continue controls failed when only `~/.codex/auth.json` existed; work/do/chat defaults now preserve normal auth fallback instead of baking in `--auth auth.json`.
