@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has progress events, streamed command output, detailed cockpit output, chat approval controls, and compact verification failure summaries; true model token streaming is still missing. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has model/command streaming, live action/resume output, chat approval/live controls, and context pressure diagnostics; the remaining gap is a polished REPL-style cockpit. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Self-improvement and dogfood entry points exist; closed-loop self-improvement is not yet reliable. |
@@ -72,18 +72,22 @@ Evidence:
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
+- `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
+- `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
+- Work-session resume output now reports context pressure (`tool_calls`, `model_turns`, recent chars, total chars, pressure), making large active-session growth visible to both humans and the model.
+- A real Codex Web API dogfood run on task #21 used `mew work --live --act-mode deterministic` for two read-only steps; it selected `inspect_dir` then `read_file`, printed action/reason/resume/context pressure for each step, and made no repository writes.
 
 Missing proof:
 
 - Model delta streaming is wired for Codex SSE, but live UX still prints raw JSON deltas rather than a polished reasoning view.
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Work mode still executes one tool per model step.
-- Large active sessions can now carry more context, so prompt size still needs monitoring while work is in progress.
-- Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit.
+- Large active-session growth is now visible, but there is no prompt budget enforcement or automatic compaction of noisy work-session history.
+- Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit with pause/continue/approve/reject guidance as a continuous loop.
 
 Next action:
 
-- Build the first live work cockpit slice: visible model progress, current/pending tool action, and a clear continuation loop from chat.
+- Build the next live cockpit slice: a continuous chat/work loop that can pause after each action, accept continue/approve/reject/stop guidance, and preserve a concise final finding or next-action note on the task.
 
 ## Milestone 3: Persistent Advantage
 
@@ -94,16 +98,19 @@ Evidence:
 - Durable state tracks tasks, questions, inbox/outbox, agent runs, step runs, thoughts, and runtime effects.
 - Context builder includes recent runtime effects and clipped summaries.
 - Project snapshot and memory systems exist.
+- Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, recent decisions, next action, and context pressure.
+- The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 
 Missing proof:
 
-- No task-local resume bundle that reconstructs files touched, commands run, failures, decisions, and open risks.
+- Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
+- There is no automatic compaction or pruning strategy for noisy long-running work-session history beyond archive retention.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
 
-- Define task-local work memory and feed it into the native work session context.
+- Use task-local resume as the basis for day-scale reentry: compact noisy history, keep open risks, and verify that returning after interruption is faster than starting a fresh CLI session.
 
 ## Milestone 4: True Recovery
 
@@ -152,9 +159,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `464 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `466 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `26 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `39 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `41 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
@@ -164,4 +171,4 @@ Next action:
 
 Milestone 2: Interactive Parity.
 
-The next implementation should make `mew work --ai` feel closer to a live coding shell: readable diffs, streaming/progress surfaces, and cockpit commands that expose the current model turn, tool result, files touched, verification state, and next action.
+The next implementation should turn `mew work --live` and `/work-session live` into a real resident coding cockpit: a continuous loop with visible action selection, controlled continuation, approval handling, and a durable final note that explains what changed or what should happen next.
