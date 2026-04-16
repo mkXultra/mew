@@ -99,6 +99,7 @@ Evidence:
 - Active `mew work --session`, active `/work-session`, and normal `mew chat` startup now surface next controls for continuing, stopping, resuming, or entering chat.
 - Text resume surfaces (`mew work --session --resume` and `/work-session resume`) now print controls after the compact resume bundle.
 - Quiet `mew chat --no-brief` startup still surfaces active work-session controls, so suppressing the brief does not remove the reentry affordance.
+- `mew focus` / `mew daily` now surface active work sessions with phase, next action, resume command, and one-step continue command, making task reentry visible from the quiet daily view.
 - Active sessions remember start/live read/write/verify/model options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Partial reentry-option updates now preserve existing read/write/verify/model defaults and add new explicit roots, so a later read-only command does not erase previously useful write or verification gates.
 - Starting a new work session for a task with only closed sessions now clones the latest closed session defaults, preserving cockpit gates across closed-session restart.
@@ -218,7 +219,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `520 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `521 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

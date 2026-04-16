@@ -3,6 +3,7 @@ from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import now_iso
+from .work_session import build_work_session_resume, work_session_task
 
 
 def _first_nonempty(*values):
@@ -437,6 +438,7 @@ def build_focus_data(state, limit=3):
         "routine_unread_info_count": len(routine_unread),
         "open_questions": [_question_item(question) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
+        "active_work_sessions": active_work_session_items(state, limit=limit),
         "tasks": [
             {
                 **_task_item(task),
@@ -446,6 +448,31 @@ def build_focus_data(state, limit=3):
         ],
         "open_task_count": len(tasks),
     }
+
+
+def active_work_session_items(state, limit=3):
+    items = []
+    for session in reversed(state.get("work_sessions") or []):
+        if session.get("status") != "active":
+            continue
+        task = work_session_task(state, session)
+        resume = build_work_session_resume(session, task=task, limit=3) or {}
+        task_id = session.get("task_id")
+        task_arg = f" {task_id}" if task_id is not None else ""
+        items.append(
+            {
+                "id": session.get("id"),
+                "task_id": task_id,
+                "title": session.get("title") or (task or {}).get("title") or "",
+                "phase": resume.get("phase") or "unknown",
+                "next_action": resume.get("next_action") or "",
+                "resume_command": f"mew work{task_arg} --session --resume --allow-read .",
+                "continue_command": f"mew work{task_arg} --live --allow-read . --max-steps 1",
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
 
 
 def format_focus(data):
@@ -471,6 +498,20 @@ def format_focus(data):
         lines.append("Attention")
         for item in attention:
             lines.append(f"- #{item.get('id')} [{item.get('priority')}] {item.get('title')}")
+
+    work_sessions = data.get("active_work_sessions") or []
+    if work_sessions:
+        lines.append("")
+        lines.append("Active work sessions")
+        for session in work_sessions:
+            lines.append(
+                f"- #{session.get('id')} task=#{session.get('task_id')} "
+                f"phase={session.get('phase')} {session.get('title') or ''}"
+            )
+            if session.get("next_action"):
+                lines.append(f"  next: {session.get('next_action')}")
+            lines.append(f"  resume: {session.get('resume_command')}")
+            lines.append(f"  continue: {session.get('continue_command')}")
 
     tasks = data.get("tasks") or []
     if tasks:
@@ -507,6 +548,7 @@ def next_move(state):
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     recent_verifications = recent_verification_runs(state, limit=1)
+    active_work = active_work_session_items(state, limit=1)
 
     if running_tasks:
         for question in questions:
@@ -521,6 +563,12 @@ def next_move(state):
         return f"check agent run #{running_runs[0].get('id')} with `mew agent result {running_runs[0].get('id')}`"
     if recent_verifications and verification_outcome(recent_verifications[0]) == "failed":
         return f"inspect verification run #{recent_verifications[0].get('id')} with `mew verification`"
+    if active_work:
+        session = active_work[0]
+        return (
+            f"continue active work session #{session.get('id')} for task #{session.get('task_id')} "
+            f"with `{session.get('continue_command')}`"
+        )
     if followup_waiting:
         return f"process review run #{followup_waiting[0].get('id')} with `mew agent followup {followup_waiting[0].get('id')}`"
     if review_waiting:

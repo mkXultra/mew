@@ -432,6 +432,37 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["routine_unread_info_count"], 1)
         self.assertIn("Routine info: 1 clear with `mew ack --routine`", focus)
 
+    def test_focus_surfaces_active_work_session_reentry(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Implement cockpit polish")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Implement cockpit polish",
+                "goal": "Make reentry obvious.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        data = build_focus_data(state, limit=3)
+        focus = format_focus(data)
+
+        self.assertEqual(data["active_work_sessions"][0]["id"], 3)
+        self.assertEqual(data["active_work_sessions"][0]["phase"], "idle")
+        self.assertEqual(
+            data["next_move"],
+            "continue active work session #3 for task #7 with `mew work 7 --live --allow-read . --max-steps 1`",
+        )
+        self.assertIn("Active work sessions", focus)
+        self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
+        self.assertIn("resume: mew work 7 --session --resume --allow-read .", focus)
+        self.assertIn("continue: mew work 7 --live --allow-read . --max-steps 1", focus)
+
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()
         state["verification_runs"].append(
