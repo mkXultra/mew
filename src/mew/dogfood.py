@@ -506,7 +506,11 @@ def run_work_session_scenario(workspace, env=None):
 
     (workspace / "README.md").write_text("# Dogfood\nnative hands\n", encoding="utf-8")
     (workspace / "src").mkdir(exist_ok=True)
-    (workspace / "src" / "sample.py").write_text("print('native hands')\n", encoding="utf-8")
+    (workspace / "src" / "sample.py").write_text(
+        "print('native hands')\nprint('line two')\nprint('line three')\n",
+        encoding="utf-8",
+    )
+    (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
 
     run(["task", "add", "Native work task", "--kind", "coding"])
     start_result = run(["work", "1", "--start-session", "--json"])
@@ -540,6 +544,40 @@ def run_work_session_scenario(workspace, env=None):
             "native hands",
             "--new",
             "native work sessions",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    line_read_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "read_file",
+            "--path",
+            "src/sample.py",
+            "--allow-read",
+            ".",
+            "--line-start",
+            "2",
+            "--line-count",
+            "1",
+            "--json",
+        ]
+    )
+    large_edit_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "edit_file",
+            "--path",
+            "large.py",
+            "--old",
+            "old_call()",
+            "--new",
+            "new_call()",
             "--allow-write",
             ".",
             "--json",
@@ -684,6 +722,8 @@ def run_work_session_scenario(workspace, env=None):
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
     edit_data = _json_stdout(edit_result)
+    line_read_data = _json_stdout(line_read_result)
+    large_edit_data = _json_stdout(large_edit_result)
     approve_data = _json_stdout(approve_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
@@ -752,6 +792,24 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_read_file_line_start_completes",
+        line_read_result.get("exit_code") == 0
+        and ((line_read_data.get("tool_call") or {}).get("result") or {}).get("line_start") == 2
+        and ((line_read_data.get("tool_call") or {}).get("result") or {}).get("text") == "print('line two')\n",
+        observed=line_read_data.get("tool_call"),
+        expected="read_file can read by 1-based line_start/line_count",
+    )
+    _scenario_check(
+        checks,
+        "work_edit_file_large_dry_run_completes",
+        large_edit_result.get("exit_code") == 0
+        and ((large_edit_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and "old_call()" in (workspace / "large.py").read_text(encoding="utf-8"),
+        observed=large_edit_data.get("tool_call"),
+        expected="edit_file previews small replacements in large files",
+    )
+    _scenario_check(
+        checks,
         "work_approve_exact_new_file_write_root",
         approve_dry_run_result.get("exit_code") == 0
         and approve_result.get("exit_code") == 0
@@ -798,11 +856,31 @@ def run_work_session_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 7
+        len(tool_calls) == 9
         and [call.get("tool") for call in tool_calls]
-        == ["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
+        == [
+            "read_file",
+            "glob",
+            "run_tests",
+            "edit_file",
+            "read_file",
+            "edit_file",
+            "write_file",
+            "write_file",
+            "write_file",
+        ],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
-        expected=["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
+        expected=[
+            "read_file",
+            "glob",
+            "run_tests",
+            "edit_file",
+            "read_file",
+            "edit_file",
+            "write_file",
+            "write_file",
+            "write_file",
+        ],
     )
     _scenario_check(
         checks,
