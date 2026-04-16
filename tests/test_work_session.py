@@ -193,6 +193,57 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_read_file_can_target_lines_from_search_results(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("app.py").write_text(
+                    "line one\nline two\nline three\nline four\nline five\n",
+                    encoding="utf-8",
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "app.py",
+                                "--allow-read",
+                                ".",
+                                "--line-start",
+                                "3",
+                                "--line-count",
+                                "2",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                result = json.loads(stdout.getvalue())["tool_call"]["result"]
+                self.assertEqual(result["line_start"], 3)
+                self.assertEqual(result["line_end"], 4)
+                self.assertEqual(result["next_line"], 5)
+                self.assertEqual(result["text"], "line three\nline four\n")
+                self.assertNotIn("line two", result["text"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                self.assertIn("lines=3-4 next_line=5", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_requires_active_session_and_read_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2692,6 +2743,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
         self.assertIn('"max_chars": "optional read_file cap"', prompt)
+        self.assertIn('"line_start": "optional 1-based read_file starting line', prompt)
         self.assertIn('"stat": "optional git_diff diffstat', prompt)
 
     def test_work_model_rejects_resident_loop_as_verification_command(self):
@@ -2716,7 +2768,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["command"], "uv run pytest -q")
 
     def test_work_model_actions_default_to_small_reads_and_diffstat(self):
-        from mew.work_loop import work_tool_parameters_from_action
+        from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
 
         read_parameters = work_tool_parameters_from_action({"type": "read_file", "path": "README.md"})
         self.assertEqual(read_parameters["max_chars"], 12000)
@@ -2725,6 +2777,13 @@ class WorkSessionTests(unittest.TestCase):
             {"type": "read_file", "path": "README.md", "max_chars": 24000}
         )
         self.assertEqual(explicit_read_parameters["max_chars"], 24000)
+
+        line_action = normalize_work_model_action(
+            {"action": {"type": "read_file", "path": "README.md", "start_line": "42", "line_count": "12"}}
+        )
+        line_parameters = work_tool_parameters_from_action(line_action)
+        self.assertEqual(line_parameters["line_start"], 42)
+        self.assertEqual(line_parameters["line_count"], 12)
 
         diff_parameters = work_tool_parameters_from_action({"type": "git_diff"})
         self.assertTrue(diff_parameters["stat"])

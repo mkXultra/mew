@@ -61,6 +61,17 @@ class WriteToolsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "edited content is too large"):
                 edit_file(str(path), "hello", "x" * 20, [tmp], max_chars=10)
 
+    def test_edit_allows_small_replacement_in_large_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large.py"
+            path.write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
+
+            result = edit_file(str(path), "old_call()", "new_call()", [tmp], max_chars=100)
+
+            self.assertTrue(result["written"])
+            self.assertIn("new_call()", path.read_text(encoding="utf-8"))
+            self.assertNotIn("old_call()", path.read_text(encoding="utf-8"))
+
     def test_snapshot_restore_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "notes.md"

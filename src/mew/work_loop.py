@@ -59,6 +59,21 @@ def _compact_context_items(items):
 def _compact_tool_result(tool, result):
     result = result or {}
     if tool == "read_file":
+        if result.get("line_start") is not None:
+            text = result.get("text") or ""
+            context_truncated = len(text) > WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+            return {
+                "path": result.get("path"),
+                "line_start": result.get("line_start"),
+                "line_end": result.get("line_end"),
+                "next_line": result.get("next_line"),
+                "text": clip_output(text, WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+                "visible_chars": min(len(text), WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+                "source_text_chars": len(text),
+                "context_truncated": context_truncated,
+                "source_truncated": bool(result.get("truncated")),
+                "truncated": bool(result.get("truncated")) or context_truncated,
+            }
         offset = result.get("offset") or 0
         text = result.get("text") or ""
         context_truncated = len(text) > WORK_READ_FILE_CONTEXT_TEXT_LIMIT
@@ -192,11 +207,18 @@ def digest_tool_call(call):
     if tool == "read_file":
         text = result.get("text") or ""
         line_count = len(text.splitlines())
-        summary = (
-            f"read_file {path or '(unknown)'} "
-            f"lines={line_count} offset={result.get('offset', parameters.get('offset', 0))} "
-            f"truncated={bool(result.get('truncated'))}"
-        )
+        if result.get("line_start") is not None:
+            summary = (
+                f"read_file {path or '(unknown)'} "
+                f"lines={result.get('line_start')}-{result.get('line_end')} visible_lines={line_count} "
+                f"truncated={bool(result.get('truncated'))}"
+            )
+        else:
+            summary = (
+                f"read_file {path or '(unknown)'} "
+                f"lines={line_count} offset={result.get('offset', parameters.get('offset', 0))} "
+                f"truncated={bool(result.get('truncated'))}"
+            )
     elif tool == "inspect_dir":
         summary = f"inspect_dir {path or '.'} entries={_count_items(result, 'entries')}"
     elif tool == "search_text":
@@ -377,11 +399,15 @@ def _work_action_schema_text():
         '"path": "required for read_file/glob/search_text", '
         '"query": "required for search_text", '
         '"pattern": "required for glob", '
-        '"max_chars": "optional read_file cap"}],\n'
+        '"max_chars": "optional read_file cap", '
+        '"line_start": "optional 1-based read_file starting line from search_text results", '
+        '"line_count": "optional read_file line count"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
         '    "pattern": "glob pattern",\n'
         '    "max_chars": "optional read_file cap",\n'
+        '    "line_start": "optional 1-based read_file starting line from search_text results",\n'
+        '    "line_count": "optional read_file line count",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
         '    "content": "write_file content",\n'
@@ -511,6 +537,8 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "base",
         "limit",
         "offset",
+        "line_start",
+        "line_count",
         "content",
         "old",
         "new",
@@ -527,6 +555,11 @@ def normalize_work_model_action(action_plan, verify_command=""):
     for key in ("create", "replace_all", "staged", "stat", "task_done"):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
+    if action_type == "read_file" and normalized.get("line_start") is None:
+        for alias in ("start_line", "line"):
+            if action.get(alias) is not None:
+                normalized["line_start"] = action.get(alias)
+                break
 
     if not normalized.get("summary") and action_plan.get("summary"):
         normalized["summary"] = action_plan.get("summary")
@@ -581,6 +614,13 @@ def work_tool_parameters_from_action(
             )
         except (TypeError, ValueError):
             parameters["max_chars"] = WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS
+        for key, maximum in (("line_start", 1_000_000), ("line_count", 1000)):
+            if parameters.get(key) is None:
+                continue
+            try:
+                parameters[key] = max(1, min(int(parameters.get(key)), maximum))
+            except (TypeError, ValueError):
+                parameters.pop(key, None)
     if action_type == "git_diff" and "stat" not in parameters:
         parameters["stat"] = True
     return parameters

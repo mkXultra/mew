@@ -191,8 +191,9 @@ def edit_file(
         raise ValueError(f"old text matched {count} times; pass --replace-all to replace all matches")
 
     after = before.replace(old, new) if replace_all else before.replace(old, new, 1)
-    if len(after) > max_chars:
-        raise ValueError(f"edited content is too large: {len(after)} chars; max={max_chars}")
+    edit_size = max(len(new), abs(len(after) - len(before)))
+    if edit_size > max_chars:
+        raise ValueError(f"edited content is too large: {edit_size} chars; max={max_chars}")
     started_at = now_iso()
     if before != after and not dry_run:
         _atomic_write_text(resolved, after)

@@ -52,6 +52,8 @@ WORK_ACTION_DISPLAY_FIELDS = (
     "base",
     "limit",
     "offset",
+    "line_start",
+    "line_count",
     "apply",
     "create",
     "replace_all",
@@ -347,6 +349,8 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             allowed_read_roots,
             max_chars=parameters.get("max_chars", DEFAULT_READ_MAX_CHARS),
             offset=parameters.get("offset", 0),
+            line_start=parameters.get("line_start"),
+            line_count=parameters.get("line_count"),
         )
     if tool == "search_text":
         return search_text(
@@ -537,6 +541,13 @@ def compact_work_tool_summary(call):
     summary = call.get("summary") or call.get("error") or ""
     if tool == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
+        if result.get("line_start") is not None:
+            line_end = result.get("line_end") if result.get("line_end") is not None else result.get("line_start")
+            next_text = f" next_line={result.get('next_line')}" if result.get("next_line") is not None else ""
+            return (
+                f"Read file {result.get('path') or (call.get('parameters') or {}).get('path')} "
+                f"size={result.get('size')} chars lines={result.get('line_start')}-{line_end}{next_text}{suffix}"
+            )
         offset = result.get("offset") or 0
         next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
         return (

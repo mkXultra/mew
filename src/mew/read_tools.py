@@ -102,14 +102,60 @@ def inspect_dir(path, allowed_roots, limit=50):
     }
 
 
-def read_file(path, allowed_roots, max_chars=DEFAULT_READ_MAX_CHARS, offset=0):
+def _optional_positive_int(value, default, maximum):
+    if value in (None, ""):
+        return default
+    return max(1, min(int(value), maximum))
+
+
+def read_file(
+    path,
+    allowed_roots,
+    max_chars=DEFAULT_READ_MAX_CHARS,
+    offset=0,
+    line_start=None,
+    line_count=None,
+):
     max_chars = max(1, min(int(max_chars), 50000))
-    offset = max(0, min(int(offset or 0), 1_000_000))
     resolved = resolve_allowed_path(path, allowed_roots)
     ensure_not_sensitive(resolved)
     if not resolved.is_file():
         raise ValueError(f"path is not a file: {resolved}")
 
+    if line_start not in (None, ""):
+        start = _optional_positive_int(line_start, default=1, maximum=1_000_000)
+        count = _optional_positive_int(line_count, default=120, maximum=1000)
+        selected = []
+        more_lines = False
+        with resolved.open("r", encoding="utf-8", errors="replace") as handle:
+            for line_number, line in enumerate(handle, 1):
+                if line_number < start:
+                    continue
+                if line_number >= start + count:
+                    more_lines = True
+                    break
+                selected.append(line)
+        raw_text = "".join(selected)
+        text = raw_text[:max_chars]
+        char_truncated = len(raw_text) > max_chars
+        try:
+            size = resolved.stat().st_size
+        except OSError:
+            size = len(raw_text.encode("utf-8", errors="replace"))
+        end_line = start + len(selected) - 1 if selected else None
+        return {
+            "path": str(resolved),
+            "type": "file",
+            "size": size,
+            "line_start": start,
+            "line_count": count,
+            "line_end": end_line,
+            "next_line": (end_line + 1) if end_line is not None and more_lines else None,
+            "text": text,
+            "truncated": more_lines or char_truncated,
+        }
+
+    offset = max(0, min(int(offset or 0), 1_000_000))
     byte_limit = (offset + max_chars) * 4 + 1
     with resolved.open("rb") as handle:
         data = handle.read(byte_limit)
@@ -249,6 +295,14 @@ def summarize_read_result(action_type, result):
         return f"Inspected directory {result.get('path')}: {names}{suffix}"
     if action_type == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
+        if result.get("line_start") is not None:
+            next_text = f" next_line={result.get('next_line')}" if result.get("next_line") is not None else ""
+            line_end = result.get("line_end") if result.get("line_end") is not None else result.get("line_start")
+            return (
+                f"Read file {result.get('path')} size={result.get('size')} chars "
+                f"lines={result.get('line_start')}-{line_end}{next_text}{suffix}\n"
+                f"{result.get('text') or ''}"
+            )
         offset = result.get("offset") or 0
         next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
         return (
