@@ -1301,6 +1301,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["model_turns"][-1]["finished_note"], "read result observed")
                 self.assertEqual([call["tool"] for call in session["tool_calls"]], ["read_file"])
                 self.assertIn("Work session finished: read result observed", state["tasks"][0]["notes"])
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                resume_text = stdout.getvalue()
+                self.assertIn("Work resume #1 [closed] task=#1", resume_text)
+                self.assertIn("read result observed", resume_text)
             finally:
                 os.chdir(old_cwd)
 

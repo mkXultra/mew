@@ -859,6 +859,18 @@ def _select_active_work_session_for_args(state, args):
     return session
 
 
+def _latest_work_session_for_task(state, task_id):
+    latest = None
+    for candidate in reversed(state.get("work_sessions", [])):
+        if str(candidate.get("task_id")) != str(task_id):
+            continue
+        if candidate.get("status") == "active":
+            return candidate
+        if latest is None:
+            latest = candidate
+    return latest
+
+
 def _approval_parameters_from_call(call, args):
     parameters = dict(call.get("parameters") or {})
     for key in ("allowed_write_roots", "allow_shell", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
@@ -994,11 +1006,7 @@ def cmd_work_show_session(args):
     session = active_work_session(state)
     if getattr(args, "task_id", None):
         task = find_task(state, args.task_id)
-        session = None
-        for candidate in reversed(state.get("work_sessions", [])):
-            if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
-                session = candidate
-                break
+        session = _latest_work_session_for_task(state, args.task_id)
     else:
         task = work_session_task(state, session)
     if getattr(args, "resume", False):
@@ -4424,11 +4432,7 @@ def chat_work_session(rest):
         state = load_state()
         session = active_work_session(state)
         if task_id:
-            session = None
-            for candidate in reversed(state.get("work_sessions", [])):
-                if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
-                    session = candidate
-                    break
+            session = _latest_work_session_for_task(state, task_id)
         print(format_work_session_resume(build_work_session_resume(session, task=work_session_task(state, session))))
         return
 
@@ -4551,11 +4555,7 @@ def chat_work_session(rest):
     state = load_state()
     session = active_work_session(state)
     if task_id:
-        session = None
-        for candidate in reversed(state.get("work_sessions", [])):
-            if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
-                session = candidate
-                break
+        session = _latest_work_session_for_task(state, task_id)
     print(format_work_session(session, task=work_session_task(state, session), details=details))
 
 

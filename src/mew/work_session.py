@@ -533,7 +533,7 @@ def build_work_session_resume(session, task=None, limit=8):
                 "model_turn_id": turn.get("id"),
                 "status": turn.get("status"),
                 "action": action.get("type") or action.get("tool") or "unknown",
-                "summary": turn.get("summary") or turn.get("error") or "",
+                "summary": turn.get("finished_note") or turn.get("summary") or turn.get("error") or "",
                 "tool_call_id": turn.get("tool_call_id"),
             }
         )
