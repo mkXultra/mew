@@ -651,16 +651,35 @@ def build_parser():
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
     work_parser.add_argument(
         "--tool",
-        choices=("inspect_dir", "read_file", "search_text", "glob", "run_command", "run_tests"),
+        choices=(
+            "inspect_dir",
+            "read_file",
+            "search_text",
+            "glob",
+            "run_command",
+            "run_tests",
+            "write_file",
+            "edit_file",
+        ),
         help="run a native work-session tool",
     )
     work_parser.add_argument("--allow-read", action="append", default=[], help="read root for native work tools")
+    work_parser.add_argument("--allow-write", action="append", default=[], help="write root for native work tools")
     work_parser.add_argument("--allow-shell", action="store_true", help="allow run_command work-session tool")
     work_parser.add_argument("--allow-verify", action="store_true", help="allow run_tests work-session tool")
     work_parser.add_argument("--path", default=".", help="path for a native work tool")
     work_parser.add_argument("--query", help="query for search_text")
     work_parser.add_argument("--pattern", help="pattern for glob")
     work_parser.add_argument("--command", help="command for run_command or run_tests")
+    work_parser.add_argument("--content", help="content for write_file")
+    work_parser.add_argument("--old", help="old text for edit_file")
+    work_parser.add_argument("--new", help="new text for edit_file")
+    work_parser.add_argument("--create", action="store_true", help="allow write_file to create a file")
+    work_parser.add_argument("--replace-all", action="store_true", help="replace all edit_file matches")
+    work_parser.add_argument("--apply", action="store_true", help="apply write_file/edit_file instead of dry-run")
+    work_parser.add_argument("--verify-command", help="verification command required for applied writes")
+    work_parser.add_argument("--verify-cwd", default=".", help="verification command cwd")
+    work_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout")
     work_parser.add_argument("--cwd", default=".", help="cwd for run_command or run_tests")
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")

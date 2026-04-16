@@ -238,8 +238,10 @@ shows the current plan, recent agent runs, verification, writes, open questions,
 and exactly one recommended next action.
 Native work sessions are the first Milestone 1 path toward giving the resident
 model its own hands. Start one with `mew work <task-id> --start-session`, inspect
-it with `mew work --session` or `/work-session` in chat, and run read-only
-session tools with explicit read gates:
+it with `mew work --session` or `/work-session` in chat, and run tools with
+explicit gates. Write tools default to dry-run. Applied writes require
+`--allow-verify` and `--verify-command`; failed verification rolls the change
+back and records the failed tool result.
 
 ```sh
 uv run mew work 1 --start-session
@@ -248,6 +250,9 @@ uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
 uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify
+uv run mew work 1 --tool write_file --path notes.md --content "hello" --create --allow-write .
+uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write .
+uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
 ```
 
 ## Resident Model

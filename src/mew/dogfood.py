@@ -526,12 +526,51 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    edit_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "edit_file",
+            "--path",
+            "README.md",
+            "--old",
+            "native hands",
+            "--new",
+            "native work sessions",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    write_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "write_file",
+            "--path",
+            "generated.md",
+            "--content",
+            "generated dogfood\n",
+            "--create",
+            "--allow-write",
+            ".",
+            "--apply",
+            "--allow-verify",
+            "--verify-command",
+            f"{sys.executable} -c \"from pathlib import Path; assert Path('generated.md').exists()\"",
+            "--json",
+        ]
+    )
     work_result = run(["work", "1", "--json"])
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
+    edit_data = _json_stdout(edit_result)
+    write_data = _json_stdout(write_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
@@ -572,10 +611,30 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_edit_file_dry_run_completes",
+        edit_result.get("exit_code") == 0
+        and ((edit_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and (workspace / "README.md").read_text(encoding="utf-8").find("native hands") >= 0,
+        observed=edit_data.get("tool_call"),
+        expected="edit_file previews a change without mutating README",
+    )
+    _scenario_check(
+        checks,
+        "work_write_file_applies_with_verification",
+        write_result.get("exit_code") == 0
+        and ((write_data.get("tool_call") or {}).get("result") or {}).get("verification_exit_code") == 0
+        and (workspace / "generated.md").read_text(encoding="utf-8") == "generated dogfood\n",
+        observed=write_data.get("tool_call"),
+        expected="write_file writes generated.md after verification",
+    )
+    _scenario_check(
+        checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 3 and [call.get("tool") for call in tool_calls] == ["read_file", "glob", "run_tests"],
+        len(tool_calls) == 5
+        and [call.get("tool") for call in tool_calls]
+        == ["read_file", "glob", "run_tests", "edit_file", "write_file"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
-        expected=["read_file", "glob", "run_tests"],
+        expected=["read_file", "glob", "run_tests", "edit_file", "write_file"],
     )
     return _scenario_report("work-session", workspace, commands, checks)
 

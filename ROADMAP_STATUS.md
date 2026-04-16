@@ -8,7 +8,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 | Milestone | Status | Short Assessment |
 |---|---|---|
-| 1. Native Hands | `in_progress` | Native work sessions can run and journal read/search/glob/test/shell tools; write/edit/model tool loop is still missing. |
+| 1. Native Hands | `in_progress` | Native work sessions can run and journal read/search/glob/test/shell/write/edit tools; the resident model tool loop is still missing. |
 | 2. Interactive Parity | `foundation` | `mew chat` exists and gained cockpit commands, but it is not yet a Claude Code-quality live coding UI. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
@@ -29,18 +29,19 @@ Evidence:
 - `mew work --tool read_file|search_text|glob|inspect_dir --allow-read ...` runs read-only native tools and journals outcomes.
 - `mew work --tool run_tests --allow-verify ...` runs verification commands and journals command results.
 - `mew work --tool run_command --allow-shell ...` runs explicitly gated shell commands and journals command results.
+- `mew work --tool write_file|edit_file --allow-write ...` previews writes by default.
+- Applied `write_file`/`edit_file` requires `--allow-verify` and `--verify-command`; failed verification rolls the write back and records the failed tool result.
 - `/work-session` in chat can start, show, and close native work sessions.
-- `dogfood --scenario work-session` exercises session creation, `read_file`, `glob`, `run_tests`, and workbench journal visibility.
+- `dogfood --scenario work-session` exercises session creation, `read_file`, `glob`, `run_tests`, dry-run `edit_file`, verified `write_file`, and workbench journal visibility.
 
 Missing proof:
 
 - No model tool loop where read/edit/test results flow back into the same model work session.
-- No native edit/write tools inside work sessions yet.
 - Real coding still leans on external agent dispatch for serious work.
 
 Next action:
 
-- Add edit/write-capable work-session tools behind explicit gates, then feed tool results into a resident model work loop.
+- Feed native tool results into a resident model work loop so the model can inspect, edit, test, and iterate inside one resumable session.
 
 ## Milestone 2: Interactive Parity
 
@@ -129,7 +130,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `444 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `448 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `11 passed`.
+- `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.

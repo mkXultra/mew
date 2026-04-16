@@ -3,12 +3,29 @@ from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record
+from .write_tools import (
+    edit_file,
+    restore_write_snapshot,
+    snapshot_write_path,
+    summarize_write_result,
+    write_file,
+)
 
 
 WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed"}
-WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob", "run_command", "run_tests"}
+WORK_TOOLS = {
+    "inspect_dir",
+    "read_file",
+    "search_text",
+    "glob",
+    "run_command",
+    "run_tests",
+    "write_file",
+    "edit_file",
+}
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
+WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 
 
 def active_work_session(state):
@@ -123,6 +140,8 @@ def execute_work_tool(tool, parameters, allowed_read_roots):
             allowed_read_roots,
             max_matches=parameters.get("max_matches", 100),
         )
+    if tool in WRITE_WORK_TOOLS:
+        return execute_work_write_tool(tool, parameters)
     if tool == "run_tests":
         if not parameters.get("allow_verify"):
             raise ValueError("verification is disabled; pass --allow-verify")
@@ -142,9 +161,97 @@ def execute_work_tool(tool, parameters, allowed_read_roots):
     )
 
 
+def execute_work_write_tool(tool, parameters):
+    allowed_write_roots = parameters.get("allowed_write_roots") or []
+    if not allowed_write_roots:
+        raise ValueError("write is disabled; pass --allow-write PATH")
+
+    apply = bool(parameters.get("apply"))
+    if apply and (not parameters.get("allow_verify") or not parameters.get("verify_command")):
+        raise ValueError("applied writes require --allow-verify and --verify-command")
+    if tool == "write_file" and "content" not in parameters:
+        raise ValueError("write_file requires --content")
+    if tool == "edit_file" and "old" not in parameters:
+        raise ValueError("edit_file requires --old")
+    if tool == "edit_file" and "new" not in parameters:
+        raise ValueError("edit_file requires --new")
+
+    path = parameters.get("path") or ""
+    snapshot = None
+    if apply:
+        snapshot = snapshot_write_path(
+            path,
+            allowed_write_roots,
+            create=tool == "write_file" and bool(parameters.get("create")),
+        )
+
+    if tool == "write_file":
+        result = write_file(
+            path,
+            parameters.get("content", ""),
+            allowed_write_roots,
+            create=bool(parameters.get("create")),
+            dry_run=not apply,
+        )
+    else:
+        result = edit_file(
+            path,
+            parameters.get("old") or "",
+            parameters.get("new") or "",
+            allowed_write_roots,
+            replace_all=bool(parameters.get("replace_all")),
+            dry_run=not apply,
+        )
+
+    result["applied"] = bool(apply)
+    if apply and result.get("written"):
+        verification = run_command_record(
+            parameters.get("verify_command") or "",
+            cwd=parameters.get("verify_cwd") or ".",
+            timeout=parameters.get("verify_timeout", 300),
+        )
+        result["verification"] = verification
+        result["verification_exit_code"] = verification.get("exit_code")
+        if verification.get("exit_code") != 0 and snapshot:
+            try:
+                result["rollback"] = restore_write_snapshot(snapshot)
+                result["rolled_back"] = True
+            except (OSError, ValueError) as exc:
+                result["rollback_error"] = str(exc)
+                result["rolled_back"] = False
+        else:
+            result["rolled_back"] = False
+    return result
+
+
+def work_tool_result_error(tool, result):
+    result = result or {}
+    if tool in WRITE_WORK_TOOLS:
+        if "verification_exit_code" in result and result.get("verification_exit_code") != 0:
+            exit_code = result.get("verification_exit_code")
+            if result.get("rolled_back"):
+                suffix = "; rolled back"
+            elif result.get("rollback_error"):
+                suffix = f"; rollback failed: {result.get('rollback_error')}"
+            else:
+                suffix = ""
+            return f"verification failed with exit_code={exit_code}{suffix}"
+    return ""
+
+
 def summarize_work_tool_result(tool, result):
     if tool in READ_ONLY_WORK_TOOLS:
         return summarize_read_result(tool, result or {})
+    if tool in WRITE_WORK_TOOLS:
+        summary = summarize_write_result(result or {})
+        verification = (result or {}).get("verification")
+        if verification:
+            summary += "\nverification:\n" + format_command_record(verification)
+        if (result or {}).get("rolled_back"):
+            summary += "\nrolled_back: True"
+        if (result or {}).get("rollback_error"):
+            summary += f"\nrollback_error: {(result or {}).get('rollback_error')}"
+        return summary
     return format_command_record(result or {})
 
 
@@ -154,13 +261,18 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
     if not tool_call:
         return None
     finished_at = now_iso()
+    if result is not None:
+        tool_call["result"] = result
     if error:
         tool_call["status"] = "failed"
         tool_call["error"] = str(error)
         tool_call["summary"] = f"{tool_call.get('tool')} failed: {error}"
+        if result is not None:
+            summary = summarize_work_tool_result(tool_call.get("tool"), result or {})
+            if summary:
+                tool_call["summary"] = clip_output(tool_call["summary"] + "\n" + summary, 4000)
     else:
         tool_call["status"] = "completed"
-        tool_call["result"] = result
         tool_call["summary"] = clip_output(summarize_work_tool_result(tool_call.get("tool"), result or {}), 4000)
     tool_call["finished_at"] = finished_at
     if session:

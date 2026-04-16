@@ -130,6 +130,7 @@ from .work_session import (
     execute_work_tool,
     finish_work_tool_call,
     format_work_session,
+    work_tool_result_error,
     start_work_tool_call,
     work_session_task,
 )
@@ -551,10 +552,20 @@ def _work_tool_parameters(args):
         "query": getattr(args, "query", None),
         "pattern": getattr(args, "pattern", None),
         "command": getattr(args, "command", None),
+        "content": getattr(args, "content", None),
+        "old": getattr(args, "old", None),
+        "new": getattr(args, "new", None),
+        "create": getattr(args, "create", False),
+        "replace_all": getattr(args, "replace_all", False),
+        "apply": getattr(args, "apply", False),
         "cwd": getattr(args, "cwd", None),
         "timeout": getattr(args, "timeout", None),
+        "allowed_write_roots": getattr(args, "allow_write", None) or [],
         "allow_shell": getattr(args, "allow_shell", False),
         "allow_verify": getattr(args, "allow_verify", False),
+        "verify_command": getattr(args, "verify_command", None),
+        "verify_cwd": getattr(args, "verify_cwd", None),
+        "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
         "max_chars": getattr(args, "max_chars", None),
         "max_matches": getattr(args, "max_matches", None),
@@ -583,7 +594,7 @@ def cmd_work_tool(args):
 
     try:
         result = execute_work_tool(args.tool, parameters, getattr(args, "allow_read", None) or [])
-        error = ""
+        error = work_tool_result_error(args.tool, result)
     except (OSError, ValueError) as exc:
         result = None
         error = str(exc)

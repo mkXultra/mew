@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -262,6 +263,258 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["tool_call"]["status"], "completed")
                 self.assertIn("shell ok", data["tool_call"]["result"]["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_write_tools_default_to_dry_run_and_can_apply_with_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                dry_run = json.loads(stdout.getvalue())
+                self.assertTrue(dry_run["tool_call"]["result"]["dry_run"])
+                self.assertFalse(dry_run["tool_call"]["result"]["written"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "old text\n")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                refused = json.loads(stdout.getvalue())
+                self.assertEqual(refused["tool_call"]["status"], "failed")
+                self.assertIn("applied writes require", refused["tool_call"]["error"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "old text\n")
+
+                command = f"{sys.executable} -c \"print('verify ok')\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                applied = json.loads(stdout.getvalue())
+                self.assertFalse(applied["tool_call"]["result"]["dry_run"])
+                self.assertTrue(applied["tool_call"]["result"]["written"])
+                self.assertEqual(applied["tool_call"]["result"]["verification_exit_code"], 0)
+                self.assertEqual(target.read_text(encoding="utf-8"), "new text\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_rolls_back_failed_applied_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{sys.executable} -c \"import sys; sys.exit(1)\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                data = json.loads(stdout.getvalue())
+                call = data["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("verification failed", call["error"])
+                self.assertTrue(call["result"]["written"])
+                self.assertTrue(call["result"]["rolled_back"])
+                self.assertEqual(call["result"]["verification_exit_code"], 1)
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_records_rollback_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{sys.executable} -c \"import sys; sys.exit(1)\""
+                with patch("mew.work_session.restore_write_snapshot", side_effect=OSError("rollback boom")):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "edit_file",
+                                    "--path",
+                                    "notes.md",
+                                    "--old",
+                                    "before",
+                                    "--new",
+                                    "after",
+                                    "--allow-write",
+                                    ".",
+                                    "--apply",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    command,
+                                    "--json",
+                                ]
+                            ),
+                            1,
+                        )
+                data = json.loads(stdout.getvalue())
+                call = data["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("rollback failed", call["error"])
+                self.assertFalse(call["result"]["rolled_back"])
+                self.assertEqual(call["result"]["rollback_error"], "rollback boom")
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_treats_missing_verifier_as_failed(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--allow-verify",
+                                "--verify-command",
+                                "mew-missing-verifier-command",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                data = json.loads(stdout.getvalue())
+                call = data["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("exit_code=None", call["error"])
+                self.assertIsNone(call["result"]["verification_exit_code"])
+                self.assertTrue(call["result"]["rolled_back"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
             finally:
                 os.chdir(old_cwd)
 
