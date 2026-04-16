@@ -81,6 +81,7 @@ Evidence:
 - `mew chat` now has `/continue ...` as a short one-step live command for the active work session, reducing the repeated `/work-session live ...` command burden.
 - Work mode now supports a read-only `batch` action with up to five inspection tools in one model turn, journaling each tool call separately while keeping writes and shell commands outside batch mode.
 - Codex Web API dogfood for batch exposed a missing `read_file.path` failure, after which batch normalization was hardened to skip invalid read subtools; retrying the same dogfood task completed `inspect_dir` and `read_file README.md` in one model turn without writes.
+- Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
 
 Missing proof:
 
@@ -164,7 +165,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `473 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `474 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `32 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `47 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

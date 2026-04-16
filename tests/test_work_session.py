@@ -673,6 +673,34 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_resume_next_action_uses_latest_tool_status(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("ok\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", ".", "--allow-read", "."]), 1)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "inspect_dir", "--path", ".", "--allow-read", "."]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(len(resume["failures"]), 1)
+                self.assertEqual(
+                    resume["next_action"],
+                    "continue the work session with mew work --ai or /work-session ai",
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_can_approve_and_reject_dry_run_write_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
