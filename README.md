@@ -402,6 +402,9 @@ and `mew work --live` prompt inline before applying dry-run writes; use
 `--read-only` / `--no-verify` to remove the default write and verification gates.
 Live runs print a compact `thinking` pane before each action, so the selected
 step is visible before any tool runs.
+They also print a compact `result` pane after each step, combining action
+status, key tool output, phase, context pressure, pending approvals, and the
+next action before the full resume block.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

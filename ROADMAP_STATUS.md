@@ -82,6 +82,7 @@ Evidence:
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
+- `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
 - Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with clipped diff preview, the approval verification command, `--prompt-approval` for non-TTY forcing, and `--no-prompt-approval` for explicit opt-out.
@@ -270,9 +271,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `591 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `102 passed`.
-- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `133 passed`.
+- `uv run pytest -q` current: `592 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `103 passed`.
+- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.

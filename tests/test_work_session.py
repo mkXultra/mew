@@ -3698,9 +3698,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("tool_call: #1", output)
                 self.assertIn("reason: read README", output)
                 self.assertIn("path: README.md", output)
+                self.assertIn("Work live step #1 result", output)
+                self.assertIn("tool #1 [completed] read_file", output)
+                self.assertIn("phase: idle", output)
+                self.assertIn("context: pressure=low", output)
                 self.assertIn("Work live step #1 resume", output)
                 self.assertLess(output.index("Work live step #1 thinking"), output.index("Work live step #1 action"))
-                self.assertLess(output.index("Work live step #1 action"), output.index("Work live step #1 resume"))
+                self.assertLess(output.index("Work live step #1 action"), output.index("Work live step #1 result"))
+                self.assertLess(output.index("Work live step #1 result"), output.index("Work live step #1 resume"))
                 self.assertIn("Work resume #1 [active] task=#1", output)
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
                 self.assertIn("Next CLI controls", output)
@@ -3773,6 +3778,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("planned_action: finish", output)
                 self.assertIn("Work live step #1 action", output)
                 self.assertIn("action: finish", output)
+                self.assertIn("Work live step #1 result", output)
+                self.assertIn("status: completed", output)
+                self.assertIn("phase: closed", output)
                 self.assertIn("Work live step #1 resume", output)
                 self.assertIn("Work resume #1 [closed] task=#1", output)
                 self.assertIn("phase: closed", output)
@@ -3780,6 +3788,50 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew work 1 --session --resume", output)
                 self.assertIn("Work session finished: finished live", load_state()["tasks"][0]["notes"])
                 self.assertEqual(load_state()["tasks"][0]["status"], "todo")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_live_result_pane_shows_command_output(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = f"{sys.executable} -c \"import sys; print('live stdout'); print('live stderr', file=sys.stderr)\""
+                model_output = {
+                    "summary": "run command",
+                    "action": {"type": "run_command", "command": command, "reason": "inspect command output"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-shell",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 result", output)
+                self.assertIn("tool #1 [completed] run_command exit=0", output)
+                self.assertIn("stdout:", output)
+                self.assertIn("live stdout", output)
+                self.assertIn("stderr:", output)
+                self.assertIn("live stderr", output)
             finally:
                 os.chdir(old_cwd)
 
@@ -4659,7 +4711,9 @@ class WorkSessionTests(unittest.TestCase):
                             )
                 output = stdout.getvalue()
                 self.assertIn("Work live step #1 action", output)
+                self.assertIn("Work live step #1 result", output)
                 self.assertIn("Work live step #1 resume", output)
+                self.assertIn("tool #1 [completed] read_file", output)
                 self.assertIn("action: read_file", output)
                 self.assertIn("Next controls", output)
                 self.assertIn("/continue <guidance>", output)
@@ -4699,6 +4753,7 @@ class WorkSessionTests(unittest.TestCase):
                             )
                 output = stdout.getvalue()
                 self.assertIn("Work live step #1 action", output)
+                self.assertIn("Work live step #1 result", output)
                 self.assertIn("action: read_file", output)
                 self.assertIn("Next controls", output)
                 self.assertIn("continue content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])

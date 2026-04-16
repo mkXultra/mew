@@ -669,6 +669,70 @@ def format_work_ai_report(report):
     return "\n".join(lines)
 
 
+def _format_live_output_preview(label, text, max_chars=500):
+    text = clip_output(text or "", max_chars)
+    if not text:
+        return []
+    lines = [f"{label}:"]
+    lines.extend(f"  {line}" for line in text.splitlines())
+    return lines
+
+
+def _format_live_tool_call_result(call):
+    tool = call.get("tool") or "unknown"
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    command = result.get("command") or parameters.get("command") or ""
+    path = result.get("path") or parameters.get("path") or ""
+    target = command or path
+    exit_code = result.get("exit_code", result.get("verification_exit_code"))
+    exit_text = "" if exit_code is None else f" exit={exit_code}"
+    target_text = f" {target}" if target else ""
+    lines = [f"tool #{call.get('id')} [{call.get('status')}] {tool}{exit_text}{target_text}"]
+    if call.get("summary"):
+        lines.append(f"summary: {clip_output(call.get('summary') or '', 500)}")
+    if result.get("stdout"):
+        lines.extend(_format_live_output_preview("stdout", result.get("stdout")))
+    if result.get("stderr"):
+        lines.extend(_format_live_output_preview("stderr", result.get("stderr")))
+    if result.get("diff"):
+        lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))
+    if call.get("tool") in WRITE_WORK_TOOLS and result.get("dry_run") and result.get("changed") and not call.get("approval_status"):
+        lines.append("pending_approval: yes")
+    return lines
+
+
+def format_work_live_step_result(step, resume=None):
+    action = step.get("action") or {}
+    status = step.get("status") or "unknown"
+    lines = [
+        f"status: {status}",
+        f"action: {action.get('type') or action.get('tool') or 'unknown'}",
+    ]
+    summary = step.get("summary") or step.get("error") or action.get("reason") or action.get("summary") or ""
+    if summary:
+        lines.append(f"summary: {clip_output(summary, 700)}")
+    tool_calls = list(step.get("tool_calls") or [])
+    if step.get("tool_call"):
+        tool_calls.append(step.get("tool_call"))
+    for call in tool_calls:
+        lines.extend(_format_live_tool_call_result(call or {}))
+    if resume:
+        context = resume.get("context") or {}
+        lines.append(f"phase: {resume.get('phase') or 'unknown'}")
+        if context:
+            lines.append(
+                f"context: pressure={context.get('pressure')} "
+                f"tool_calls={context.get('tool_calls')} model_turns={context.get('model_turns')}"
+            )
+        if resume.get("pending_approvals"):
+            ids = ", ".join(f"#{item.get('tool_call_id')}" for item in resume.get("pending_approvals") or [])
+            lines.append(f"pending_approvals: {ids}")
+        if resume.get("next_action"):
+            lines.append(f"next: {resume.get('next_action')}")
+    return "\n".join(lines)
+
+
 def _planning_value_text(value):
     if value is None or value == "":
         return ""
@@ -1507,9 +1571,13 @@ def cmd_work_ai(args):
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task)
+                print("")
+                print(f"Work live step #{index} result")
+                print(format_work_live_step_result(batch_step, resume=resume))
                 print("")
                 print(f"Work live step #{index} resume")
-                print(format_work_session_resume(build_work_session_resume(session, task=task)))
+                print(format_work_session_resume(resume))
             if batch_step.get("error"):
                 report["stop_reason"] = "tool_failed"
                 break
@@ -1551,9 +1619,29 @@ def cmd_work_ai(args):
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session) or find_task(state, task_id)
+                control_step = {
+                    "index": index,
+                    "status": "completed",
+                    "action": action,
+                    **control_effect,
+                    "summary": (
+                        (action.get("text") if action_type == "send_message" else "")
+                        or (action.get("question") if action_type == "ask_user" else "")
+                        or (action.get("note") if action_type == "remember" else "")
+                        or action.get("summary")
+                        or action.get("reason")
+                        or action.get("text")
+                        or action.get("question")
+                        or ""
+                    ),
+                }
+                resume = build_work_session_resume(session, task=task)
+                print("")
+                print(f"Work live step #{index} result")
+                print(format_work_live_step_result(control_step, resume=resume))
                 print("")
                 print(f"Work live step #{index} resume")
-                print(format_work_session_resume(build_work_session_resume(session, task=task)))
+                print(format_work_session_resume(resume))
             report["steps"].append(
                 {
                     "index": index,
@@ -1692,9 +1780,13 @@ def cmd_work_ai(args):
                 state = load_state()
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session)
+            resume = build_work_session_resume(session, task=task)
+            print("")
+            print(f"Work live step #{index} result")
+            print(format_work_live_step_result(report["steps"][-1], resume=resume))
             print("")
             print(f"Work live step #{index} resume")
-            print(format_work_session_resume(build_work_session_resume(session, task=task)))
+            print(format_work_session_resume(resume))
         if pending_approval:
             if live_approval_prompt_enabled(args):
                 with state_lock():
