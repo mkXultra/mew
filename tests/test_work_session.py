@@ -3379,7 +3379,7 @@ class WorkSessionTests(unittest.TestCase):
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
                             self.assertEqual(
                                 run_chat_slash_command(
-                                    "/continue --auth auth.json --allow-read . --act-mode deterministic",
+                                    "/continue --auth auth.json --allow-read . --act-mode deterministic --prompt-approval",
                                     chat_state,
                                 ),
                                 "continue",
@@ -3394,11 +3394,12 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertEqual(
                     chat_state["work_continue_options"],
-                    "--auth auth.json --allow-read . --act-mode deterministic",
+                    "--auth auth.json --allow-read . --act-mode deterministic --prompt-approval",
                 )
                 self.assertIn("focus on the README summary", prompts[-1])
                 self.assertIn("Next controls", output)
                 self.assertIn("/continue <guidance>", output)
+                self.assertIn("--prompt-approval", output)
                 self.assertIn("/work-session resume 1", output)
                 self.assertIn("Work session finished: guidance followed", load_state()["tasks"][0]["notes"])
             finally:
