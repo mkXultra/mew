@@ -723,6 +723,32 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_note_records_user_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session-note", "prefer small verified steps", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["work_note"]["source"], "user")
+                self.assertEqual(data["work_note"]["text"], "prefer small verified steps")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Work notes", text)
+                self.assertIn("[user] prefer small verified steps", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_report_includes_stop_request_reason(self):
         from mew.commands import format_work_ai_report
 
@@ -1281,6 +1307,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["steps"][0]["work_note"]["text"], "config lookup is the likely risk")
                 state = load_state()
                 session = state["work_sessions"][0]
+                self.assertEqual(session["notes"][0]["source"], "model")
                 self.assertEqual(session["notes"][0]["text"], "config lookup is the likely risk")
                 self.assertEqual(session["model_turns"][0]["work_note"]["text"], "config lookup is the likely risk")
                 with redirect_stdout(StringIO()) as stdout:
@@ -1877,6 +1904,29 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next controls", output)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["stop_reason"], "pause soon")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_can_record_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session note keep edits tiny", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("recorded work session note #1: keep edits tiny", output)
+                self.assertIn("Next controls", output)
+                self.assertEqual(load_state()["work_sessions"][0]["notes"][0]["text"], "keep edits tiny")
             finally:
                 os.chdir(old_cwd)
 

@@ -132,6 +132,20 @@ def request_work_session_stop(session, reason="", current_time=None):
     return session
 
 
+def add_work_session_note(session, text, source="user", current_time=None):
+    current_time = current_time or now_iso()
+    note = {
+        "created_at": current_time,
+        "source": source or "user",
+        "text": text or "",
+    }
+    notes = session.setdefault("notes", [])
+    notes.append(note)
+    del notes[:-50]
+    session["updated_at"] = current_time
+    return note
+
+
 def consume_work_session_stop(session, current_time=None):
     if not session or not session.get("stop_requested_at"):
         return None
@@ -756,7 +770,8 @@ def format_work_session_resume(resume):
     notes = resume.get("notes") or []
     if notes:
         for note in notes:
-            lines.append(f"- {note.get('created_at') or ''} {note.get('text') or ''}".strip())
+            source = note.get("source") or "note"
+            lines.append(f"- {note.get('created_at') or ''} [{source}] {note.get('text') or ''}".strip())
     else:
         lines.append("(none)")
 

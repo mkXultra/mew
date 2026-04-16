@@ -126,6 +126,7 @@ from .validation import format_validation_issues, validate_state, validation_err
 from .write_tools import edit_file, summarize_write_result, write_file
 from .work_session import (
     active_work_session,
+    add_work_session_note,
     build_work_session_resume,
     close_work_session,
     consume_work_session_stop,
@@ -604,15 +605,14 @@ def apply_work_control_action(state, session, task, action):
         )
         return {"question": question}
     if action_type == "remember":
-        note = {
-            "created_at": now_iso(),
-            "text": _work_control_text(action, "Remembered work note."),
-        }
         if session is not None:
-            notes = session.setdefault("notes", [])
-            notes.append(note)
-            del notes[:-50]
-            session["updated_at"] = note["created_at"]
+            note = add_work_session_note(
+                session,
+                _work_control_text(action, "Remembered work note."),
+                source="model",
+            )
+        else:
+            note = {"created_at": now_iso(), "source": "model", "text": _work_control_text(action, "Remembered work note.")}
         return {"work_note": note}
     return {}
 
@@ -768,6 +768,8 @@ def cmd_work(args):
         return cmd_work_close_session(args)
     if getattr(args, "stop_session", False):
         return cmd_work_stop_session(args)
+    if getattr(args, "session_note", None):
+        return cmd_work_session_note(args)
 
     state = load_state()
     task_id = getattr(args, "task_id", None)
@@ -1279,6 +1281,26 @@ def cmd_work_stop_session(args):
     else:
         reason = session.get("stop_reason") or "stop requested"
         print(f"requested stop for work session #{session['id']}: {reason}")
+    return 0
+
+
+def cmd_work_session_note(args):
+    text = (getattr(args, "session_note", None) or "").strip()
+    if not text:
+        print("mew: --session-note requires text", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        note = add_work_session_note(session, text, source="user")
+        save_state(state)
+    if args.json:
+        print(json.dumps({"work_note": note, "work_session": session}, ensure_ascii=False, indent=2))
+    else:
+        print(f"recorded work session note #{session['id']}: {note['text']}")
     return 0
 
 
@@ -4400,7 +4422,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/ai/live/resume/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/ai/live/resume/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
@@ -4717,6 +4739,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
     lines.append("- /work-session details")
+    lines.append("- /work-session note <remember this>")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     return "\n".join(lines)
@@ -4732,7 +4755,7 @@ def chat_work_session(rest, chat_state=None):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "stop", "ai", "step", "live", "resume", "approve", "reject"):
+    if action not in ("show", "start", "close", "stop", "note", "ai", "step", "live", "resume", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4770,6 +4793,12 @@ def chat_work_session(rest, chat_state=None):
     if action == "stop":
         args = SimpleNamespace(task_id=None, stop_reason=" ".join(parts[1:]), json=False)
         cmd_work_stop_session(args)
+        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        return
+
+    if action == "note":
+        args = SimpleNamespace(task_id=None, session_note=" ".join(parts[1:]), json=False)
+        cmd_work_session_note(args)
         print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 
