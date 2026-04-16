@@ -545,6 +545,7 @@ def _work_control_options(args, session=None):
         "allow_verify": bool(option("allow_verify", False)),
         "verify_command": option("verify_command", ""),
         "act_mode": option("act_mode"),
+        "prompt_approval": bool(option("prompt_approval", False)),
     }
 
 
@@ -562,6 +563,7 @@ def remember_work_session_default_options(session, args):
             options.get("model"),
             options.get("base_url"),
             options.get("act_mode") and options.get("act_mode") != "model",
+            options.get("prompt_approval"),
         )
     )
     if not has_meaningful_defaults:
@@ -595,6 +597,7 @@ def remember_work_session_default_options(session, args):
         "allow_verify": bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": merged_scalar("verify_command"),
         "act_mode": merged_scalar("act_mode"),
+        "prompt_approval": bool(current.get("prompt_approval") or options.get("prompt_approval")),
     }
 
 
@@ -637,6 +640,8 @@ def work_chat_continue_options(session):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("prompt_approval"):
+        parts.append("--prompt-approval")
     return shlex.join(parts)
 
 
@@ -666,6 +671,8 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("prompt_approval"):
+        parts.append("--prompt-approval")
     parts.extend(["--max-steps", str(max_steps)])
     return shlex.join(parts)
 

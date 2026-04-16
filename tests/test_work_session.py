@@ -3046,6 +3046,7 @@ class WorkSessionTests(unittest.TestCase):
                                 "uv run pytest -q",
                                 "--act-mode",
                                 "deterministic",
+                                "--prompt-approval",
                             ]
                         ),
                         0,
@@ -3064,6 +3065,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(defaults["allow_verify"])
                 self.assertEqual(defaults["verify_command"], "uv run pytest -q")
                 self.assertEqual(defaults["act_mode"], "deterministic")
+                self.assertTrue(defaults["prompt_approval"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session"]), 0)
@@ -3076,6 +3078,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("--allow-write .", output)
                 self.assertIn("--verify-command 'uv run pytest -q'", output)
                 self.assertIn("--act-mode deterministic", output)
+                self.assertIn("--prompt-approval", output)
             finally:
                 os.chdir(old_cwd)
 
