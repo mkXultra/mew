@@ -611,6 +611,37 @@ def run_work_session_scenario(workspace, env=None):
 
     interrupted_resume_result = run(["work", "2", "--session", "--resume", "--json"])
     interrupted_recover_result = run(["work", "2", "--recover-session", "--json"])
+    run(["task", "add", "Interrupted read task", "--kind", "coding"])
+    run(["work", "3", "--start-session", "--json"])
+
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    interrupted_read_session = None
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("task_id")) == "3":
+            interrupted_read_session = candidate
+            break
+    if interrupted_read_session:
+        tool_call_id = next_id(state, "work_tool_call")
+        interrupted_read = {
+            "id": tool_call_id,
+            "session_id": interrupted_read_session.get("id"),
+            "task_id": 3,
+            "tool": "read_file",
+            "status": "interrupted",
+            "parameters": {"path": "README.md"},
+            "result": None,
+            "summary": "interrupted dogfood read",
+            "error": "Interrupted before the file read completed.",
+            "started_at": now_iso(),
+            "finished_at": now_iso(),
+        }
+        interrupted_read_session.setdefault("tool_calls", []).append(interrupted_read)
+        interrupted_read_session["last_tool_call_id"] = tool_call_id
+        interrupted_read_session["updated_at"] = now_iso()
+        write_json_file(state_path, state)
+
+    auto_recover_result = run(["work", "3", "--session", "--resume", "--allow-read", ".", "--auto-recover-safe", "--json"])
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -623,12 +654,15 @@ def run_work_session_scenario(workspace, env=None):
     resume_data = _json_stdout(resume_result)
     interrupted_resume_data = _json_stdout(interrupted_resume_result)
     interrupted_recover_data = _json_stdout(interrupted_recover_result)
+    auto_recover_data = _json_stdout(auto_recover_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
     interrupted_review = interrupted_recovery.get("review_item") or {}
+    auto_recovery = auto_recover_data.get("auto_recovery") or {}
+    auto_tool_call = auto_recovery.get("tool_call") or {}
 
     _scenario_check(
         checks,
@@ -756,6 +790,17 @@ def run_work_session_scenario(workspace, env=None):
         and interrupted_review.get("review_steps"),
         observed=interrupted_recovery,
         expected="recover-session reports review context for side-effecting interruption",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_auto_recovers_safe_read",
+        auto_recover_result.get("exit_code") == 0
+        and (auto_recovery.get("recovery") or {}).get("action") == "retry_tool"
+        and auto_tool_call.get("status") == "completed"
+        and ((auto_tool_call.get("result") or {}).get("text") or "").find("native hands") >= 0
+        and (auto_recover_data.get("resume") or {}).get("phase") == "idle",
+        observed=auto_recovery,
+        expected="resume --auto-recover-safe retries interrupted read_file after read gate",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 

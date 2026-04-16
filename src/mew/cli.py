@@ -698,6 +698,11 @@ def build_parser():
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument("--session-note", help="record a durable note on the active native work session")
     work_parser.add_argument("--recover-session", action="store_true", help="recover a safely retryable interrupted work-session tool")
+    work_parser.add_argument(
+        "--auto-recover-safe",
+        action="store_true",
+        help="with --session --resume, retry one interrupted read/git tool after explicit read gates",
+    )
     work_parser.add_argument("--approve-tool", type=int, help="approve and apply a dry-run write/edit tool call")
     work_parser.add_argument("--reject-tool", type=int, help="reject a dry-run write/edit tool call")
     work_parser.add_argument("--reject-reason", help="reason recorded with --reject-tool")

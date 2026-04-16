@@ -928,6 +928,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(interrupted_resume["phase"], "interrupted")
                 self.assertEqual(interrupted_resume["recovery_plan"]["items"][0]["action"], "retry_tool")
                 self.assertIn("recover-session", interrupted_resume["recovery_plan"]["items"][0]["hint"])
+                self.assertIn("--auto-recover-safe", stdout.getvalue())
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
@@ -949,6 +950,131 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
                 self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "idle")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_auto_recovers_safe_read_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("auto recover me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Auto recover read.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": 1,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                }
+                            ],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "interrupted",
+                                    "decision_plan": {},
+                                    "action_plan": {},
+                                    "action": {"type": "read_file", "path": "README.md"},
+                                    "tool_call_id": 1,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                }
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--resume", "--allow-read", ".", "--auto-recover-safe", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["auto_recovery"]["recovery"]["action"], "retry_tool")
+                self.assertEqual(payload["auto_recovery"]["tool_call"]["status"], "completed")
+                self.assertEqual(payload["resume"]["phase"], "idle")
+                self.assertIn("auto recover me", payload["auto_recovery"]["tool_call"]["result"]["text"])
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+                self.assertEqual(session["model_turns"][0]["recovery_status"], "superseded")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", "."]), 0)
+                self.assertNotIn("Recovery plan", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_auto_recovery_requires_read_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("auto recover me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Auto recover read.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--auto-recover-safe", "--json"]), 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["auto_recovery"]["recovery"]["action"], "needs_read_gate")
+                self.assertEqual(payload["resume"]["phase"], "interrupted")
+                self.assertEqual(len(load_state()["work_sessions"][0]["tool_calls"]), 1)
             finally:
                 os.chdir(old_cwd)
 

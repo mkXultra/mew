@@ -694,13 +694,22 @@ def work_cli_control_commands(session, args):
     task_id = session.get("task_id")
     if session.get("status") != "active":
         return [_work_resume_command(args, task_id, session=session), f"mew work {task_id} --start-session"]
-    return [
-        _work_live_continue_command(args, task_id, session=session),
-        _work_live_continue_command(args, task_id, session=session, max_steps=3),
-        f"mew work {task_id} --stop-session --stop-reason pause",
-        _work_resume_command(args, task_id, session=session),
-        "mew chat",
-    ]
+    controls = []
+    resume = build_work_session_resume(session)
+    recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
+    if any(item.get("action") == "retry_tool" for item in recovery_items):
+        task_part = f" {task_id}" if task_id is not None else ""
+        controls.append(f"mew work{task_part} --session --resume --allow-read . --auto-recover-safe")
+    controls.extend(
+        [
+            _work_live_continue_command(args, task_id, session=session),
+            _work_live_continue_command(args, task_id, session=session, max_steps=3),
+            f"mew work {task_id} --stop-session --stop-reason pause",
+            _work_resume_command(args, task_id, session=session),
+            "mew chat",
+        ]
+    )
+    return controls
 
 
 def format_work_cli_controls(session, args):
@@ -1733,41 +1742,54 @@ def cmd_work_show_session(args):
     else:
         task = work_session_task(state, session)
     if getattr(args, "resume", False):
+        auto_recovery = None
+        auto_recovery_code = 0
+        if getattr(args, "auto_recover_safe", False):
+            auto_recovery_code, auto_recovery = _work_recover_session_once(args, safe_only=True)
+            state = load_state()
+            if getattr(args, "task_id", None):
+                task = find_task(state, args.task_id)
+                session = _latest_work_session_for_task(state, args.task_id)
+            else:
+                session = active_work_session(state)
+                task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task)
         if resume and getattr(args, "allow_read", None):
             resume["world_state"] = build_work_world_state(resume, args.allow_read)
         if not resume and not getattr(args, "task_id", None):
             if args.json:
-                print(
-                    json.dumps(
-                        {
-                            "resume": None,
-                            "recent_work_sessions": recent_work_session_summaries(state),
-                            "start_commands": ["mew work <task-id> --start-session", "/work-session start <task-id>"],
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                )
+                payload = {
+                    "resume": None,
+                    "recent_work_sessions": recent_work_session_summaries(state),
+                    "start_commands": ["mew work <task-id> --start-session", "/work-session start <task-id>"],
+                }
+                if auto_recovery is not None:
+                    payload["auto_recovery"] = auto_recovery
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
+                if auto_recovery is not None:
+                    print("Auto recovery")
+                    print_work_recovery_report(auto_recovery)
+                    print("")
                 print(format_no_active_work_session(state))
-            return 0
+            return auto_recovery_code
         if args.json:
-            print(
-                json.dumps(
-                    {
-                        "resume": resume,
-                        "next_cli_controls": work_cli_control_commands(session, args) if resume else [],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            payload = {
+                "resume": resume,
+                "next_cli_controls": work_cli_control_commands(session, args) if resume else [],
+            }
+            if auto_recovery is not None:
+                payload["auto_recovery"] = auto_recovery
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
+            if auto_recovery is not None:
+                print("Auto recovery")
+                print_work_recovery_report(auto_recovery)
+                print("")
             print(format_work_session_resume(resume))
             if resume:
                 print(format_work_cli_controls(session, args))
-        return 0
+        return auto_recovery_code
     if args.json:
         payload = {"work_session": session}
         if not session and not getattr(args, "task_id", None):
@@ -1851,22 +1873,16 @@ def latest_recoverable_interrupted_call(session):
     return None
 
 
-def cmd_work_recover_session(args):
-    progress = work_tool_progress(args)
+def _work_recover_session_once(args, progress=None, safe_only=False):
+    progress = progress if progress is not None else work_tool_progress(args)
     with state_lock():
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
-            print("No active work session.")
-            return 0
+            return 0, {"recovery": {"action": "none", "reason": "no active work session"}}
         source_call = latest_recoverable_interrupted_call(session)
         if not source_call:
-            report = {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
-            if args.json:
-                print(json.dumps(report, ensure_ascii=False, indent=2))
-            else:
-                print("No interrupted work tool to recover.")
-            return 0
+            return 0, {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
         tool = source_call.get("tool")
         if tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
             resume = build_work_session_resume(session, task=work_session_task(state, session))
@@ -1884,19 +1900,16 @@ def cmd_work_recover_session(args):
                     "review_item": review_item,
                 }
             }
-            if args.json:
-                print(json.dumps(report, ensure_ascii=False, indent=2))
-            else:
-                print(f"Interrupted {tool} needs user review before retry.")
-                if review_item.get("path"):
-                    print(f"path: {review_item.get('path')}")
-                if review_item.get("command"):
-                    print(f"command: {review_item.get('command')}")
-                if review_item.get("review_hint"):
-                    print(f"review: {review_item.get('review_hint')}")
-                for step in review_item.get("review_steps") or []:
-                    print(f"review_step: {step}")
-            return 0
+            return 0, report
+        if safe_only and not getattr(args, "allow_read", None):
+            return 0, {
+                "recovery": {
+                    "action": "needs_read_gate",
+                    "reason": "safe recovery needs explicit --allow-read roots",
+                    "source_tool_call_id": source_call.get("id"),
+                    "tool": tool,
+                }
+            }
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         tool_call = start_work_tool_call(state, session, tool, parameters)
@@ -1943,17 +1956,54 @@ def cmd_work_recover_session(args):
         },
         "tool_call": tool_call,
     }
+    if progress:
+        progress(f"recover tool #{tool_call_id} {tool_call.get('status')}")
+    return (0 if tool_call.get("status") == "completed" else 1), report
+
+
+def print_work_recovery_report(report):
+    recovery = (report or {}).get("recovery") or {}
+    action = recovery.get("action")
+    if action == "none":
+        reason = recovery.get("reason") or "No interrupted work tool to recover."
+        if reason == "no active work session":
+            reason = "No active work session."
+        print(reason)
+        return
+    if action == "needs_user":
+        tool = recovery.get("tool") or "tool"
+        print(f"Interrupted {tool} needs user review before retry.")
+        review_item = recovery.get("review_item") or {}
+        if review_item.get("path"):
+            print(f"path: {review_item.get('path')}")
+        if review_item.get("command"):
+            print(f"command: {review_item.get('command')}")
+        if review_item.get("review_hint"):
+            print(f"review: {review_item.get('review_hint')}")
+        for step in review_item.get("review_steps") or []:
+            print(f"review_step: {step}")
+        return
+    if action == "needs_read_gate":
+        print(recovery.get("reason") or "Safe recovery needs explicit --allow-read roots.")
+        return
+    if action == "retry_tool":
+        tool_call = (report or {}).get("tool_call") or {}
+        print(
+            f"recovered work tool #{recovery.get('source_tool_call_id')} "
+            f"-> #{tool_call.get('id')} [{tool_call.get('status')}] {recovery.get('tool')}"
+        )
+        print(tool_call.get("summary") or tool_call.get("error") or "")
+        return
+    print(json.dumps(report or {}, ensure_ascii=False, indent=2))
+
+
+def cmd_work_recover_session(args):
+    code, report = _work_recover_session_once(args)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(
-            f"recovered work tool #{parameters.get('recovered_from_tool_call_id')} "
-            f"-> #{tool_call_id} [{tool_call.get('status')}] {tool}"
-        )
-        print(tool_call.get("summary") or tool_call.get("error") or "")
-    if progress:
-        progress(f"recover tool #{tool_call_id} {tool_call.get('status')}")
-    return 0 if tool_call.get("status") == "completed" else 1
+        print_work_recovery_report(report)
+    return code
 
 
 def _work_tool_parameters(args):

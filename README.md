@@ -309,10 +309,13 @@ recent `run_tests` or task command already defines it. A successful `run_tests`
 or write verification refreshes the session's default verification command, so
 future controls do not keep recommending a stale failing command.
 Interrupted read-only tools can be retried with `mew work --recover-session
---allow-read .`; write, shell, and verification interruptions still require
-human review, and interrupted resumes include a `Recovery plan` that classifies
-retryable reads, replannable model turns, and side-effecting work that needs
-review. Older tool calls that fall out of the full recent context window
+--allow-read .`. A resume can also opt into safe automatic retry with
+`mew work --session --resume --allow-read . --auto-recover-safe`; this only
+retries interrupted read/git inspection after explicit read gates. Write, shell,
+and verification interruptions still require human review, and interrupted
+resumes include a `Recovery plan` that classifies retryable reads, replannable
+model turns, and side-effecting work that needs review. Older tool calls that
+fall out of the full recent context window
 are carried forward as compact `session_knowledge` digests instead of raw file
 contents, and recent `read_file` results are clipped in model context with a
 resume offset so the model can request the next page when needed. If the
@@ -333,6 +336,7 @@ uv run mew work --session --resume
 uv run mew work --session --resume --allow-read .
 uv run mew work --session-note "prefer small verified steps"
 uv run mew work 1 --recover-session --allow-read .
+uv run mew work 1 --session --resume --allow-read . --auto-recover-safe
 uv run mew work --stop-session --stop-reason "pause after this step"
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool read_file --path src/mew/commands.py --allow-read . --offset 50000 --max-chars 12000
