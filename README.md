@@ -243,6 +243,8 @@ explicit gates. Write tools default to dry-run. Applied writes require
 `--allow-verify` and `--verify-command`; failed verification rolls the change
 back and records the failed tool result. Nonzero `run_tests` exits are treated
 as failed tool calls and summarized in `mew work --session --details`.
+When no work session is active, `mew work --session` lists recent sessions with
+resume commands instead of leaving reentry discovery to memory.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
