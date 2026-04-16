@@ -87,6 +87,7 @@ Evidence:
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
+- `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
 
 Missing proof:
 
@@ -173,9 +174,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `476 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `35 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `50 passed`.
+- `uv run pytest -q` current: `477 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `36 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `51 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

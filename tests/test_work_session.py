@@ -1367,6 +1367,46 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_prints_resume_after_finish(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "done", "action": {"type": "finish", "reason": "finished live"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("action: finish", output)
+                self.assertIn("Work live step #1 resume", output)
+                self.assertIn("Work resume #1 [closed] task=#1", output)
+                self.assertIn("phase: closed", output)
+                self.assertIn("Work session finished: finished live", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_feeds_tool_result_into_next_model_turn(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

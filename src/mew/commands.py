@@ -872,6 +872,14 @@ def cmd_work_ai(args):
                 if control_effect.get("finished_note"):
                     turn["finished_note"] = control_effect["finished_note"]
                 save_state(state)
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session) or find_task(state, task_id)
+                print("")
+                print(f"Work live step #{index} resume")
+                print(format_work_session_resume(build_work_session_resume(session, task=task)))
             report["steps"].append(
                 {
                     "index": index,
