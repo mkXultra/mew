@@ -222,7 +222,7 @@ Next action:
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
+- `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, side-effect recovery review context, and 17 commands.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 13 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.

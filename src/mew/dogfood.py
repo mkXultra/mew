@@ -578,6 +578,39 @@ def run_work_session_scenario(workspace, env=None):
         timeout=15,
         input_text="/work-session resume --allow-read .\n",
     )
+    run(["task", "add", "Interrupted side-effect task", "--kind", "coding"])
+    run(["work", "2", "--start-session", "--json"])
+
+    state_path = workspace / STATE_FILE
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    interrupted_session = None
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("task_id")) == "2":
+            interrupted_session = candidate
+            break
+    if interrupted_session:
+        tool_call_id = next_id(state, "work_tool_call")
+        interrupted_call = {
+            "id": tool_call_id,
+            "session_id": interrupted_session.get("id"),
+            "task_id": 2,
+            "tool": "run_tests",
+            "status": "interrupted",
+            "parameters": {"command": f"{sys.executable} mutate.py", "cwd": "."},
+            "result": None,
+            "summary": "interrupted dogfood side-effecting command",
+            "error": "Interrupted before the command completed.",
+            "started_at": now_iso(),
+            "finished_at": now_iso(),
+        }
+        interrupted_session.setdefault("tool_calls", []).append(interrupted_call)
+        interrupted_session["last_tool_call_id"] = tool_call_id
+        interrupted_session["updated_at"] = now_iso()
+        write_json_file(state_path, state)
+
+    interrupted_resume_result = run(["work", "2", "--session", "--resume", "--json"])
+    interrupted_recover_result = run(["work", "2", "--recover-session", "--json"])
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -588,9 +621,14 @@ def run_work_session_scenario(workspace, env=None):
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
     resume_data = _json_stdout(resume_result)
+    interrupted_resume_data = _json_stdout(interrupted_resume_result)
+    interrupted_recover_data = _json_stdout(interrupted_recover_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
+    interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
+    interrupted_recovery = interrupted_recover_data.get("recovery") or {}
+    interrupted_review = interrupted_recovery.get("review_item") or {}
 
     _scenario_check(
         checks,
@@ -695,6 +733,29 @@ def run_work_session_scenario(workspace, env=None):
         and "README.md" in (chat_world_result.get("stdout") or ""),
         observed=command_result_tail(chat_world_result),
         expected="chat /work-session resume --allow-read . shows live file state",
+    )
+    _scenario_check(
+        checks,
+        "work_recovery_resume_surfaces_side_effect_review",
+        interrupted_resume_result.get("exit_code") == 0
+        and bool(interrupted_items)
+        and interrupted_items[0].get("action") == "needs_user_review"
+        and interrupted_items[0].get("command")
+        and interrupted_items[0].get("review_hint")
+        and interrupted_items[0].get("review_steps"),
+        observed=interrupted_items[:1],
+        expected="resume recovery plan includes side-effect review context",
+    )
+    _scenario_check(
+        checks,
+        "work_recover_reports_side_effect_review_context",
+        interrupted_recover_result.get("exit_code") == 0
+        and interrupted_recovery.get("action") == "needs_user"
+        and interrupted_review.get("command")
+        and interrupted_review.get("review_hint")
+        and interrupted_review.get("review_steps"),
+        observed=interrupted_recovery,
+        expected="recover-session reports review context for side-effecting interruption",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 
