@@ -2299,6 +2299,85 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_status_and_brief_kind_filter_scope_next_move(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Research grants",
+                                "description": "",
+                                "status": "todo",
+                                "priority": "normal",
+                                "kind": "research",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Improve cockpit",
+                                "description": "",
+                                "status": "todo",
+                                "priority": "normal",
+                                "kind": "coding",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    add_question(state, "Which city?", related_task_id=1)
+                    add_outbox_message(state, "info", "coding note", related_task_id=2)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["status", "--kind", "coding", "--json"]), 0)
+                status = json.loads(stdout.getvalue())
+                self.assertEqual(status["kind"], "coding")
+                self.assertEqual(status["counts"]["open_tasks"], 1)
+                self.assertEqual(status["counts"]["open_questions"], 0)
+                self.assertEqual(status["counts"]["unread_outbox"], 1)
+                self.assertIn("task #2", status["next_move"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["brief", "--kind", "coding"]), 0)
+                brief = stdout.getvalue()
+                self.assertIn("Mew brief (coding)", brief)
+                self.assertIn("Improve cockpit", brief)
+                self.assertIn("coding note", brief)
+                self.assertNotIn("Research grants", brief)
+                self.assertNotIn("Which city?", brief)
+            finally:
+                os.chdir(old_cwd)
+
     def test_activity_command_prints_text(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

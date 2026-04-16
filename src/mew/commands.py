@@ -28,6 +28,10 @@ from .brief import (
     build_brief,
     build_brief_data,
     build_focus_data,
+    filter_attention_for_tasks,
+    filter_messages_for_tasks,
+    filter_questions_for_tasks,
+    filter_tasks_by_kind,
     format_activity,
     format_focus,
     next_move,
@@ -2922,6 +2926,7 @@ def cmd_ack(args):
 
 def cmd_status(args):
     state = load_state()
+    kind = getattr(args, "kind", None) or None
     lock = read_lock()
     lock_state = "none"
     if lock:
@@ -2931,15 +2936,21 @@ def cmd_status(args):
     agent = state["agent_status"]
     user = state["user_status"]
     autonomy = state.get("autonomy", {})
+    tasks = filter_tasks_by_kind(open_tasks(state), kind=kind)
+    task_ids = {str(task.get("id")) for task in tasks}
     unread = [message for message in state["outbox"] if not message.get("read_at")]
+    unread = filter_messages_for_tasks(unread, tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
-    questions = open_questions(state)
-    attention = open_attention_items(state)
+    questions = filter_questions_for_tasks(open_questions(state), tasks, kind=kind)
+    attention = filter_attention_for_tasks(open_attention_items(state), tasks, kind=kind)
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
+    if kind:
+        running_agents = [run for run in running_agents if str(run.get("task_id")) in task_ids]
     if args.json:
         print(
             json.dumps(
                 {
+                    "kind": kind or "",
                     "runtime_status": runtime,
                     "agent_status": agent,
                     "user_status": user,
@@ -2950,7 +2961,7 @@ def cmd_status(args):
                         "started_at": (lock or {}).get("started_at") if lock else None,
                     },
                     "counts": {
-                        "open_tasks": len(open_tasks(state)),
+                        "open_tasks": len(tasks),
                         "open_questions": len(questions),
                         "open_attention": len(attention),
                         "running_agent_runs": len(running_agents),
@@ -2962,7 +2973,7 @@ def cmd_status(args):
                         state.get("memory", {}).get("shallow", {}).get("current_context")
                         or state["knowledge"]["shallow"].get("latest_task_summary")
                     ),
-                    "next_move": next_move(state),
+                    "next_move": next_move(state, kind=kind),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -2999,7 +3010,9 @@ def cmd_status(args):
     print(f"user_mode: {user.get('mode')}")
     print(f"user_focus: {user.get('current_focus')}")
     print(f"user_last_request: {user.get('last_request')}")
-    print(f"open_tasks: {len(open_tasks(state))}")
+    if kind:
+        print(f"kind_filter: {kind}")
+    print(f"open_tasks: {len(tasks)}")
     print(f"open_questions: {len(questions)}")
     print(f"open_attention: {len(attention)}")
     print(f"running_agent_runs: {len(running_agents)}")
@@ -3013,7 +3026,7 @@ def cmd_status(args):
     memory = state.get("memory", {}).get("shallow", {})
     latest_summary = memory.get("current_context") or state["knowledge"]["shallow"].get("latest_task_summary")
     print(f"latest_summary: {latest_summary}")
-    print(f"next_move: {next_move(state)}")
+    print(f"next_move: {next_move(state, kind=kind)}")
     return 0
 
 def cmd_start(args):
@@ -3454,10 +3467,11 @@ def cmd_repair(args):
 
 def cmd_brief(args):
     state = load_state()
+    kind = getattr(args, "kind", None) or None
     if args.json:
-        print(json.dumps(build_brief_data(state, limit=args.limit), ensure_ascii=False, indent=2))
+        print(json.dumps(build_brief_data(state, limit=args.limit, kind=kind), ensure_ascii=False, indent=2))
         return 0
-    print(build_brief(state, limit=args.limit))
+    print(build_brief(state, limit=args.limit, kind=kind))
     return 0
 
 def cmd_focus(args):

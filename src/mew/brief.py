@@ -150,6 +150,17 @@ def recent_step_runs(state, limit=3):
     return list(reversed(runs[-limit:]))
 
 
+def filter_records_for_tasks(records, tasks, kind=None):
+    if not kind:
+        return list(records)
+    task_ids = {str(task.get("id")) for task in tasks}
+    return [record for record in records if str(record.get("task_id")) in task_ids]
+
+
+def recent_records(records, limit=5):
+    return list(reversed(list(records)[-limit:]))
+
+
 def _message_item(message):
     return {
         "id": message.get("id"),
@@ -373,7 +384,7 @@ def format_activity(state, limit=10):
     return "\n".join(lines)
 
 
-def build_brief_data(state, limit=5):
+def build_brief_data(state, limit=5, kind=None):
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
     deep = memory.get("deep", {})
@@ -381,23 +392,48 @@ def build_brief_data(state, limit=5):
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
-    tasks = sorted(open_tasks(state), key=task_sort_key)
-    unread = open_unread_messages(state)
+    tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    questions = filter_questions_for_tasks(questions, tasks, kind=kind)
+    attention = filter_attention_for_tasks(attention, tasks, kind=kind)
+    unread = filter_messages_for_tasks(open_unread_messages(state), tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     running_runs = running_agent_runs(state)
+    if kind:
+        task_ids = {str(task.get("id")) for task in tasks}
+        running_runs = [run for run in running_runs if str(run.get("task_id")) in task_ids]
+    verifications = recent_records(
+        filter_records_for_tasks(state.get("verification_runs", []), tasks, kind=kind),
+        limit=limit,
+    )
+    writes = recent_records(
+        filter_records_for_tasks(state.get("write_runs", []), tasks, kind=kind),
+        limit=limit,
+    )
+    runtime_effects = recent_records(
+        filter_records_for_tasks(state.get("runtime_effects", []), tasks, kind=kind),
+        limit=limit,
+    )
     review_waiting = implementation_runs_needing_review(state)
     followup_waiting = review_runs_needing_followup(state)
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
+    activity = [] if kind else recent_activity(state, limit=limit)
+    thoughts = [] if kind else recent_thoughts_for_context(state, limit=limit)
+    steps = [] if kind else recent_step_runs(state, limit=limit)
+    if kind:
+        task_ids = {str(task.get("id")) for task in tasks}
+        review_waiting = [run for run in review_waiting if str(run.get("task_id")) in task_ids]
+        followup_waiting = [run for run in followup_waiting if str(run.get("task_id")) in task_ids]
 
     return {
         "generated_at": now_iso(),
+        "kind": kind or "",
         "runtime": state.get("runtime_status", {}),
         "agent": state.get("agent_status", {}),
         "autonomy": state.get("autonomy", {}),
         "user": state.get("user_status", {}),
-        "unread_outbox": [_message_item(message) for message in recent_unread_messages(state, limit=limit)],
+        "unread_outbox": [_message_item(message) for message in list(reversed(unread[-limit:]))],
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
         "memory": {
@@ -405,21 +441,21 @@ def build_brief_data(state, limit=5):
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
             "project_snapshot": _project_snapshot_item(deep.get("project_snapshot")),
         },
-        "recent_activity": recent_activity(state, limit=limit),
-        "thought_journal": [_thought_item(thought) for thought in recent_thoughts_for_context(state, limit=limit)],
+        "recent_activity": activity,
+        "thought_journal": [_thought_item(thought) for thought in thoughts],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "open_questions": [_question_item(question) for question in questions[:limit]],
         "open_tasks": [_task_item(task) for task in tasks[:limit]],
         "open_task_count": len(tasks),
         "running_agents": [_agent_run_item(run) for run in running_runs[:limit]],
         "recent_verification": [
-            _verification_item(run) for run in recent_verification_runs(state, limit=limit)
+            _verification_item(run) for run in verifications
         ],
         "recent_writes": [
-            _write_item(run) for run in recent_write_runs(state, limit=limit)
+            _write_item(run) for run in writes
         ],
-        "recent_runtime_effects": recent_runtime_effects(state, limit=limit),
-        "recent_steps": recent_step_runs(state, limit=limit),
+        "recent_runtime_effects": runtime_effects,
+        "recent_steps": steps,
         "programmer_queue": {
             "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
             "followup_needed": [_agent_run_item(run) for run in followup_waiting[:limit]],
@@ -430,7 +466,7 @@ def build_brief_data(state, limit=5):
             ],
             "plan_needed": [_task_item(task) for task in plan_needed[:limit]],
         },
-        "next_move": next_move(state),
+        "next_move": next_move(state, kind=kind),
     }
 
 def filter_tasks_by_kind(tasks, kind=None):
@@ -461,6 +497,17 @@ def filter_attention_for_tasks(attention, tasks, kind=None):
     ]
 
 
+def filter_messages_for_tasks(messages, tasks, kind=None):
+    if not kind:
+        return list(messages)
+    task_ids = {str(task.get("id")) for task in tasks}
+    return [
+        message
+        for message in messages
+        if str(message.get("related_task_id")) in task_ids
+    ]
+
+
 def build_focus_data(state, limit=3, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     questions = filter_questions_for_tasks(
@@ -472,7 +519,7 @@ def build_focus_data(state, limit=3, kind=None):
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     attention = filter_attention_for_tasks(attention, tasks, kind=kind)
-    unread = open_unread_messages(state)
+    unread = filter_messages_for_tasks(open_unread_messages(state), tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     return {
         "next_move": next_move(state, kind=kind),
@@ -665,7 +712,7 @@ def next_move(state, kind=None):
     return "wait for the next user request"
 
 
-def build_brief(state, limit=5):
+def build_brief(state, limit=5, kind=None):
     runtime = state.get("runtime_status", {})
     agent = state.get("agent_status", {})
     user = state.get("user_status", {})
@@ -677,8 +724,10 @@ def build_brief(state, limit=5):
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
-    tasks = sorted(open_tasks(state), key=task_sort_key)
-    unread = open_unread_messages(state)
+    tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    questions = filter_questions_for_tasks(questions, tasks, kind=kind)
+    attention = filter_attention_for_tasks(attention, tasks, kind=kind)
+    unread = filter_messages_for_tasks(open_unread_messages(state), tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     running_runs = running_agent_runs(state)
     review_waiting = implementation_runs_needing_review(state)
@@ -686,16 +735,33 @@ def build_brief(state, limit=5):
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
-    verifications = recent_verification_runs(state, limit=limit)
-    writes = recent_write_runs(state, limit=limit)
-    runtime_effects = recent_runtime_effects(state, limit=limit)
-    step_runs = recent_step_runs(state, limit=limit)
-    thoughts = recent_thoughts_for_context(state, limit=limit)
-    activity = recent_activity(state, limit=limit)
-    recent_unread = recent_unread_messages(state, limit=limit)
+    verifications = recent_records(
+        filter_records_for_tasks(state.get("verification_runs", []), tasks, kind=kind),
+        limit=limit,
+    )
+    writes = recent_records(
+        filter_records_for_tasks(state.get("write_runs", []), tasks, kind=kind),
+        limit=limit,
+    )
+    runtime_effects = recent_records(
+        filter_records_for_tasks(state.get("runtime_effects", []), tasks, kind=kind),
+        limit=limit,
+    )
+    step_runs = [] if kind else recent_step_runs(state, limit=limit)
+    thoughts = [] if kind else recent_thoughts_for_context(state, limit=limit)
+    activity = [] if kind else recent_activity(state, limit=limit)
+    recent_unread = list(reversed(unread[-limit:]))
+    if kind:
+        task_ids = {str(task.get("id")) for task in tasks}
+        running_runs = [run for run in running_runs if str(run.get("task_id")) in task_ids]
+        review_waiting = [run for run in review_waiting if str(run.get("task_id")) in task_ids]
+        followup_waiting = [run for run in followup_waiting if str(run.get("task_id")) in task_ids]
 
+    title = "Mew brief"
+    if kind:
+        title += f" ({kind})"
     lines = [
-        f"Mew brief at {now_iso()}",
+        f"{title} at {now_iso()}",
         f"runtime: {runtime.get('state')} pid={runtime.get('pid')}",
         f"agent: {agent.get('mode')} focus={agent.get('current_focus') or '(none)'}",
         f"autonomy: {'on' if autonomy.get('enabled') else 'off'} level={autonomy.get('level') or 'off'} cycles={autonomy.get('cycles') or 0}",
@@ -872,6 +938,6 @@ def build_brief(state, limit=5):
             lines.append(f"- plan needed: task #{task.get('id')} {task.get('title')}")
         lines.append("")
 
-    lines.append(f"Next useful move: {next_move(state)}.")
+    lines.append(f"Next useful move: {next_move(state, kind=kind)}.")
 
     return "\n".join(lines).rstrip()

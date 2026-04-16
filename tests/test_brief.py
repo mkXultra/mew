@@ -114,6 +114,65 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", next_move(state))
         self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `mew work 2 --start-session`")
 
+    def test_brief_kind_filter_scopes_tasks_questions_and_messages(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Research grants", kind="research")
+        add_task(state, task_id=2, title="Improve work cockpit", kind="coding")
+        add_question(state, "Which city should I research?", related_task_id=1)
+        for index in range(6):
+            add_outbox_message(state, "info", f"research message {index}", related_task_id=1)
+        add_outbox_message(state, "info", "coding message", related_task_id=2)
+        state["verification_runs"].extend(
+            [
+                {"id": 1, "task_id": 1, "command": "research verify", "exit_code": 0},
+                {"id": 2, "task_id": 2, "command": "coding verify", "exit_code": 0},
+            ]
+        )
+        state["write_runs"].extend(
+            [
+                {"id": 1, "task_id": 1, "operation": "write_file", "path": "research.md"},
+                {"id": 2, "task_id": 2, "operation": "write_file", "path": "coding.md"},
+            ]
+        )
+        state["runtime_effects"].extend(
+            [
+                {"id": 1, "task_id": 1, "status": "verified", "reason": "research"},
+                {"id": 2, "task_id": 2, "status": "verified", "reason": "coding"},
+            ]
+        )
+
+        brief = build_brief(state, kind="coding")
+        data = build_brief_data(state, kind="coding")
+        focus = build_focus_data(state, kind="coding")
+
+        self.assertIn("Mew brief (coding)", brief)
+        self.assertIn("Improve work cockpit", brief)
+        self.assertIn("coding message", brief)
+        self.assertNotIn("Research grants", brief)
+        self.assertNotIn("Which city should I research?", brief)
+        self.assertNotIn("research message", brief)
+        self.assertIn("coding verify", brief)
+        self.assertIn("coding.md", brief)
+        self.assertIn("reason=coding", brief)
+        self.assertNotIn("research verify", brief)
+        self.assertNotIn("research.md", brief)
+        self.assertNotIn("reason=research", brief)
+        self.assertEqual(data["kind"], "coding")
+        self.assertEqual(data["open_task_count"], 1)
+        self.assertEqual(data["unread_outbox_count"], 1)
+        self.assertEqual(data["unread_outbox"][0]["text"], "coding message")
+        self.assertEqual(data["recent_verification"][0]["command"], "coding verify")
+        self.assertEqual(data["recent_writes"][0]["path"], "coding.md")
+        self.assertEqual(data["recent_runtime_effects"][0]["reason"], "coding")
+        self.assertEqual(data["recent_activity"], [])
+        self.assertEqual(data["thought_journal"], [])
+        self.assertEqual(data["recent_steps"], [])
+        self.assertEqual(
+            data["next_move"],
+            "start native work session for task #2 with `mew work 2 --start-session`",
+        )
+        self.assertEqual(focus["unread_outbox_count"], 1)
+
     def test_next_move_recommends_review_for_completed_implementation(self):
         state = default_state()
         task = add_task(state)

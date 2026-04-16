@@ -332,6 +332,7 @@ def build_parser():
     start_parser.set_defaults(func=cmd_start)
 
     status_parser = subparsers.add_parser("status", help="show runtime status")
+    status_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="scope task/question/attention counts and next move by kind")
     status_parser.add_argument("--json", action="store_true", help="print structured JSON")
     status_parser.set_defaults(func=cmd_status)
 
@@ -406,6 +407,7 @@ def build_parser():
 
     brief_parser = subparsers.add_parser("brief", help="show a compact operational brief")
     brief_parser.add_argument("--limit", type=int, default=5, help="maximum items per section")
+    brief_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="scope tasks, related questions, attention, and next move by kind")
     brief_parser.add_argument("--json", action="store_true", help="print structured JSON")
     brief_parser.set_defaults(func=cmd_brief)
 
