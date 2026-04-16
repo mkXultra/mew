@@ -71,6 +71,7 @@ from .self_improve import create_self_improve_task, ensure_self_improve_plan
 from .state import (
     add_attention_item,
     add_outbox_message,
+    add_question,
     add_event,
     ensure_desires,
     ensure_guidance,
@@ -481,6 +482,10 @@ def format_work_ai_report(report):
         line = f"#{step.get('index')} [{status}] {action_type}"
         if tool_call:
             line += f" tool_call=#{tool_call.get('id')}"
+        if step.get("outbox_message"):
+            line += f" message=#{step['outbox_message'].get('id')}"
+        if step.get("question"):
+            line += f" question=#{step['question'].get('id')}"
         if step.get("error"):
             line += f" error={step.get('error')}"
         lines.append(line)
@@ -488,6 +493,40 @@ def format_work_ai_report(report):
         if summary:
             lines.append(clip_output(summary, 1000))
     return "\n".join(lines)
+
+
+def _work_control_text(action, fallback):
+    for key in ("text", "question", "reason", "summary"):
+        value = (action or {}).get(key)
+        if value:
+            return str(value)
+    return fallback
+
+
+def apply_work_control_action(state, task, action):
+    action = action or {}
+    action_type = action.get("type") or ""
+    task_id = task.get("id") if task else None
+    if action_type == "send_message":
+        message_type = action.get("message_type") or "assistant"
+        if message_type not in ("assistant", "info", "warning"):
+            message_type = "assistant"
+        message = add_outbox_message(
+            state,
+            message_type,
+            _work_control_text(action, "Work session has an update."),
+            related_task_id=task_id,
+        )
+        return {"outbox_message": message}
+    if action_type == "ask_user":
+        question, _created = add_question(
+            state,
+            _work_control_text(action, "Need user input before continuing this work session."),
+            related_task_id=task_id,
+            blocks=[f"task:{task_id}"] if task_id else [],
+        )
+        return {"question": question}
+    return {}
 
 
 def work_ai_progress(args):
@@ -647,6 +686,7 @@ def cmd_work_ai(args):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
+                task = work_session_task(state, session)
                 turn = start_work_model_turn(
                     state,
                     session,
@@ -688,6 +728,11 @@ def cmd_work_ai(args):
                     action,
                 )
                 turn = finish_work_model_turn(state, session_id, turn.get("id"))
+                control_effect = apply_work_control_action(state, task, action)
+                if control_effect.get("outbox_message"):
+                    turn["outbox_message_id"] = control_effect["outbox_message"].get("id")
+                if control_effect.get("question"):
+                    turn["question_id"] = control_effect["question"].get("id")
                 save_state(state)
             report["steps"].append(
                 {
@@ -695,7 +740,16 @@ def cmd_work_ai(args):
                     "status": "completed",
                     "action": action,
                     "model_turn": turn,
-                    "summary": action.get("summary") or action.get("reason") or action.get("text") or "",
+                    **control_effect,
+                    "summary": (
+                        (action.get("text") if action_type == "send_message" else "")
+                        or (action.get("question") if action_type == "ask_user" else "")
+                        or action.get("summary")
+                        or action.get("reason")
+                        or action.get("text")
+                        or action.get("question")
+                        or ""
+                    ),
                 }
             )
             report["stop_reason"] = action_type or "control"

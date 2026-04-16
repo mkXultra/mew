@@ -167,6 +167,9 @@ def _work_action_schema_text():
         '    "content": "write_file content",\n'
         '    "old": "edit_file old text",\n'
         '    "new": "edit_file new text",\n'
+        '    "text": "send_message text",\n'
+        '    "question": "ask_user question",\n'
+        '    "message_type": "assistant|info|warning",\n'
         '    "create": false,\n'
         '    "replace_all": false,\n'
         '    "dry_run": true,\n'
@@ -238,6 +241,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "text",
         "summary",
         "question",
+        "message_type",
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)

@@ -1082,6 +1082,82 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_send_message_action_adds_outbox_message(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "report finding",
+                        "action": {
+                            "type": "send_message",
+                            "message_type": "assistant",
+                            "text": "I found the next step.",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "send_message")
+                self.assertEqual(data["steps"][0]["summary"], "I found the next step.")
+                self.assertEqual(data["steps"][0]["outbox_message"]["text"], "I found the next step.")
+                self.assertEqual(data["steps"][0]["outbox_message"]["related_task_id"], 1)
+                state = load_state()
+                self.assertEqual(state["outbox"][0]["type"], "assistant")
+                self.assertEqual(state["work_sessions"][0]["model_turns"][0]["outbox_message_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_ask_user_action_adds_question(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "need direction",
+                        "action": {
+                            "type": "ask_user",
+                            "question": "Which file should I change?",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "ask_user")
+                self.assertEqual(data["steps"][0]["summary"], "Which file should I change?")
+                self.assertEqual(data["steps"][0]["question"]["text"], "Which file should I change?")
+                self.assertEqual(data["steps"][0]["question"]["related_task_id"], 1)
+                state = load_state()
+                self.assertEqual(state["questions"][0]["status"], "open")
+                self.assertEqual(state["outbox"][0]["type"], "question")
+                self.assertEqual(state["work_sessions"][0]["model_turns"][0]["question_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_progress_streams_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
