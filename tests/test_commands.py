@@ -2939,7 +2939,17 @@ class CommandTests(unittest.TestCase):
         self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
+        self.assertIn("/work-session live --prompt-approval", output)
         self.assertNotIn("/agents [all]", output)
+
+    def test_chat_work_ai_args_accept_prompt_approval(self):
+        from mew.commands import _parse_chat_work_ai_args
+
+        args, error = _parse_chat_work_ai_args(["live", "--allow-read", ".", "--prompt-approval"])
+
+        self.assertEqual(error, "")
+        self.assertEqual(args.allow_read, ["."])
+        self.assertTrue(args.prompt_approval)
 
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):
         from mew.commands import run_chat_slash_command

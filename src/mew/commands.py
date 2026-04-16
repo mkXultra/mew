@@ -5123,6 +5123,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /continue --allow-read .              run one live resident-model step
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop
+/work-session live --prompt-approval  prompt inline before applying dry-run writes
 /continue <guidance>                  reuse prior live options with new guidance
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
@@ -5237,6 +5238,7 @@ def _parse_chat_work_ai_args(parts):
         "progress": False,
         "live": False,
         "stream_model": False,
+        "prompt_approval": False,
         "allow_read": [],
         "allow_write": [],
         "allow_shell": False,
@@ -5311,6 +5313,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--stream-model":
             args["stream_model"] = True
+            index += 1
+            continue
+        if token == "--prompt-approval":
+            args["prompt_approval"] = True
             index += 1
             continue
         return None, f"mew: unsupported ai option: {token}"
