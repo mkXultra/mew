@@ -563,6 +563,7 @@ def active_work_session_items(state, limit=3, kind=None):
                 "title": session.get("title") or (task or {}).get("title") or "",
                 "phase": resume.get("phase") or "unknown",
                 "next_action": resume.get("next_action") or "",
+                "working_memory": resume.get("working_memory") or {},
                 "resume_command": mew_command(
                     "work", *task_parts, "--session", "--resume", "--allow-read", "."
                 ),
@@ -614,6 +615,11 @@ def format_focus(data):
             )
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
+            memory = session.get("working_memory") or {}
+            if memory.get("hypothesis"):
+                lines.append(f"  memory: {memory.get('hypothesis')}")
+            if memory.get("next_step"):
+                lines.append(f"  memory_next: {memory.get('next_step')}")
             lines.append(f"  resume: {session.get('resume_command')}")
             lines.append(f"  continue: {session.get('continue_command')}")
 

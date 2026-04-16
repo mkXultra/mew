@@ -43,6 +43,9 @@ when there are no coding tasks, that view suggests a native self-improvement
 session instead of going silent.
 `digest` summarizes activity since the last user interaction without entering
 the chat REPL.
+When an active work session has working memory, `focus` includes the current
+hypothesis and memory next step so reentry context is visible before opening the
+full resume.
 
 ## Programmer Loop
 

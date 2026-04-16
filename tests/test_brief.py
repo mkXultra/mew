@@ -521,7 +521,21 @@ class BriefTests(unittest.TestCase):
                 "created_at": "then",
                 "updated_at": "now",
                 "tool_calls": [],
-                "model_turns": [],
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "decision_plan": {
+                            "working_memory": {
+                                "hypothesis": "Cockpit polish needs one readable reentry cue.",
+                                "next_step": "Surface memory in focus.",
+                            }
+                        },
+                        "action_plan": {},
+                        "action": {"type": "finish", "reason": "focus next"},
+                        "summary": "focus next",
+                    }
+                ],
             }
         )
 
@@ -531,11 +545,17 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"][0]["id"], 3)
         self.assertEqual(data["active_work_sessions"][0]["phase"], "idle")
         self.assertEqual(
+            data["active_work_sessions"][0]["working_memory"]["hypothesis"],
+            "Cockpit polish needs one readable reentry cue.",
+        )
+        self.assertEqual(
             data["next_move"],
             "continue active work session #3 for task #7 with `./mew work 7 --live --allow-read . --max-steps 1`",
         )
         self.assertIn("Active work sessions", focus)
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
+        self.assertIn("memory: Cockpit polish needs one readable reentry cue.", focus)
+        self.assertIn("memory_next: Surface memory in focus.", focus)
         self.assertIn("resume: ./mew work 7 --session --resume --allow-read .", focus)
         self.assertIn("continue: ./mew work 7 --live --allow-read . --max-steps 1", focus)
 
