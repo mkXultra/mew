@@ -17,6 +17,27 @@ TASK_KINDS = {"", "coding", "research", "personal", "admin", "unknown"}
 AGENT_RUN_STATUSES = {"created", "dry_run", "running", "completed", "failed"}
 QUESTION_STATUSES = {"open", "answered", "deferred"}
 ATTENTION_STATUSES = {"open", "resolved"}
+RUNTIME_EFFECT_STATUSES = {
+    "planning",
+    "planned",
+    "precomputing",
+    "precomputed",
+    "committing",
+    "applied",
+    "verified",
+    "recovered",
+    "failed",
+    "skipped",
+    "deferred",
+    "interrupted",
+}
+INCOMPLETE_RUNTIME_EFFECT_STATUSES = {
+    "planning",
+    "planned",
+    "precomputing",
+    "precomputed",
+    "committing",
+}
 
 
 def issue(level, path, message):
@@ -116,6 +137,16 @@ def _verification_runs_by_id(state):
     return runs
 
 
+def _write_runs_by_id(state):
+    runs = {}
+    for run in state.get("write_runs", []):
+        if isinstance(run, dict):
+            item_id = _int_id(run.get("id"))
+            if item_id is not None:
+                runs[item_id] = run
+    return runs
+
+
 def validate_state(state):
     issues = []
     if not isinstance(state, dict):
@@ -192,6 +223,7 @@ def validate_state(state):
     valid_task_ids = _task_ids(state)
     valid_run_ids = _agent_run_ids(state)
     verification_runs_by_id = _verification_runs_by_id(state)
+    write_runs_by_id = _write_runs_by_id(state)
     for index, run in enumerate(state.get("agent_runs", [])):
         if not isinstance(run, dict):
             continue
@@ -259,6 +291,53 @@ def validate_state(state):
                         "warning",
                         f"{run_path}.verification_exit_code",
                         f"does not match verification run {verification_run_id} exit_code {verification_exit_code}",
+                    )
+                )
+
+    for index, effect in enumerate(state.get("runtime_effects", [])):
+        if not isinstance(effect, dict):
+            continue
+        effect_path = f"runtime_effects[{index}]"
+        status = effect.get("status")
+        if status not in RUNTIME_EFFECT_STATUSES:
+            issues.append(issue("warning", f"{effect_path}.status", f"unknown status {status!r}"))
+        if status in INCOMPLETE_RUNTIME_EFFECT_STATUSES and effect.get("finished_at"):
+            issues.append(
+                issue(
+                    "warning",
+                    f"{effect_path}.finished_at",
+                    f"incomplete status {status!r} should not be finished",
+                )
+            )
+        if (
+            status in RUNTIME_EFFECT_STATUSES - INCOMPLETE_RUNTIME_EFFECT_STATUSES
+            and not effect.get("finished_at")
+        ):
+            issues.append(
+                issue(
+                    "warning",
+                    f"{effect_path}.finished_at",
+                    f"terminal status {status!r} should have finished_at",
+                )
+            )
+        for link_index, verification_run_id in enumerate(effect.get("verification_run_ids") or []):
+            item_id = _int_id(verification_run_id)
+            if item_id is None or item_id not in verification_runs_by_id:
+                issues.append(
+                    issue(
+                        "warning",
+                        f"{effect_path}.verification_run_ids[{link_index}]",
+                        f"references missing verification run {verification_run_id}",
+                    )
+                )
+        for link_index, write_run_id in enumerate(effect.get("write_run_ids") or []):
+            item_id = _int_id(write_run_id)
+            if item_id is None or item_id not in write_runs_by_id:
+                issues.append(
+                    issue(
+                        "warning",
+                        f"{effect_path}.write_run_ids[{link_index}]",
+                        f"references missing write run {write_run_id}",
                     )
                 )
 
