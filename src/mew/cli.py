@@ -304,6 +304,12 @@ def build_parser():
         action="store_true",
         help="record full THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl; may contain private state",
     )
+    run_parser.add_argument(
+        "--max-reflex-rounds",
+        type=int,
+        default=0,
+        help="extra bounded THINK rounds after read-only observation decisions; default 0, max 3",
+    )
     run_parser.set_defaults(func=run_runtime)
 
     start_parser = subparsers.add_parser("start", help="start the runtime in the background")
@@ -496,6 +502,12 @@ def build_parser():
         action="store_true",
         help="record full THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl; may contain private state",
     )
+    step_parser.add_argument(
+        "--max-reflex-rounds",
+        type=int,
+        default=0,
+        help="extra bounded THINK rounds after read-only observation decisions; default 0, max 3",
+    )
     step_parser.add_argument("--json", action="store_true", help="print structured JSON")
     step_parser.set_defaults(func=cmd_step)
 
@@ -552,6 +564,12 @@ def build_parser():
         "--trace-model",
         action="store_true",
         help="pass --trace-model to the dogfood runtime; trace files may contain private state",
+    )
+    dogfood_parser.add_argument(
+        "--max-reflex-rounds",
+        type=int,
+        default=0,
+        help="pass bounded THINK observation rounds to the dogfood runtime",
     )
     dogfood_parser.add_argument(
         "--autonomy-level",

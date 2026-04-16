@@ -327,6 +327,7 @@ def run_step_loop(
     verify_command="",
     verify_timeout=300,
     trace_model=False,
+    max_reflex_rounds=0,
     progress=None,
 ):
     steps = []
@@ -383,6 +384,7 @@ def run_step_loop(
             allowed_write_roots=[],
             log_phases=not dry_run,
             trace_model=bool(trace_model and not dry_run),
+            max_reflex_rounds=max_reflex_rounds,
         )
         if progress:
             progress(

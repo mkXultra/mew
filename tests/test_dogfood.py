@@ -125,6 +125,7 @@ class DogfoodTests(unittest.TestCase):
             verify_command="",
             verify_interval_minutes=0.05,
             trace_model=True,
+            max_reflex_rounds=2,
         )
 
         command = build_runtime_command(args, Path("/tmp/work"))
@@ -136,6 +137,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
         self.assertEqual(command[command.index("--review-model") + 1], "codex-ultra")
         self.assertIn("--trace-model", command)
+        self.assertEqual(command[command.index("--max-reflex-rounds") + 1], "2")
 
     def test_run_dogfood_trace_smoke_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

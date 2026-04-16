@@ -186,6 +186,8 @@ def build_runtime_command(args, workspace):
         command.extend(["--review-model", args.review_model])
     if getattr(args, "trace_model", False):
         command.append("--trace-model")
+    if getattr(args, "max_reflex_rounds", 0):
+        command.extend(["--max-reflex-rounds", str(args.max_reflex_rounds)])
     return command
 
 

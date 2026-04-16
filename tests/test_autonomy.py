@@ -15,6 +15,7 @@ from mew.agent import (
     deterministic_decision_plan,
     normalize_action_plan,
     normalize_decision_plan,
+    plan_event,
     process_events,
     think_phase,
 )
@@ -1628,6 +1629,69 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(processed, 1)
         self.assertEqual(build.call_count, 1)
+
+    def test_plan_event_can_reflexively_observe_before_acting(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello from reflex observation\n", encoding="utf-8")
+                state = default_state()
+                event = add_event(state, "user_message", "test", {"text": "inspect first"})
+                responses = [
+                    {
+                        "summary": "Need to read first.",
+                        "decisions": [{"type": "read_file", "path": "README.md", "max_chars": 200}],
+                    },
+                    {
+                        "summary": "Saw the reflex observation.",
+                        "decisions": [
+                            {
+                                "type": "send_message",
+                                "message_type": "assistant",
+                                "text": "README mentions reflex observation.",
+                            }
+                        ],
+                    },
+                    {
+                        "summary": "Reply with observation.",
+                        "actions": [
+                            {
+                                "type": "send_message",
+                                "message_type": "assistant",
+                                "text": "README mentions reflex observation.",
+                            }
+                        ],
+                    },
+                ]
+
+                with patch("mew.agent.call_model_json", side_effect=responses) as call:
+                    decision_plan, action_plan = plan_event(
+                        state,
+                        event,
+                        now_iso(),
+                        model_auth={"access_token": "token"},
+                        model="test-model",
+                        base_url="https://example.invalid",
+                        timeout=5,
+                        ai_ticks=False,
+                        allowed_read_roots=[tmp],
+                        model_backend="codex",
+                        max_reflex_rounds=1,
+                    )
+
+                second_think_prompt = call.call_args_list[1].args[2]
+                act_prompt = call.call_args_list[2].args[2]
+                self.assertEqual(call.call_count, 3)
+                self.assertEqual(decision_plan["summary"], "Saw the reflex observation.")
+                self.assertEqual(decision_plan["reflex_rounds"], 1)
+                self.assertIn("hello from reflex observation", decision_plan["reflex_observations"][0]["result"])
+                self.assertIn("reflex_observations", second_think_prompt)
+                self.assertIn("hello from reflex observation", second_think_prompt)
+                self.assertIn("hello from reflex observation", act_prompt)
+                self.assertEqual(action_plan["actions"][0]["type"], "send_message")
+            finally:
+                os.chdir(old_cwd)
 
     def test_self_review_can_propose_task_at_propose_level(self):
         state = default_state()

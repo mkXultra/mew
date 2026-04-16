@@ -1690,6 +1690,7 @@ def cmd_step(args):
         verify_command=args.verify_command or "",
         verify_timeout=args.verify_timeout,
         trace_model=getattr(args, "trace_model", False),
+        max_reflex_rounds=getattr(args, "max_reflex_rounds", 0),
         progress=progress,
     )
     if args.json:

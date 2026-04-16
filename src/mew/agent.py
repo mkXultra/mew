@@ -79,6 +79,17 @@ from .write_tools import (
 )
 
 MODEL_RETRY_DELAYS = (0.25, 1.0)
+MAX_REFLEX_ROUNDS = 3
+MAX_REFLEX_OBSERVATIONS_PER_ROUND = 3
+MAX_REFLEX_OBSERVATION_CHARS = 3000
+
+
+def bounded_reflex_rounds(value):
+    try:
+        rounds = int(value or 0)
+    except (TypeError, ValueError):
+        rounds = 0
+    return max(0, min(rounds, MAX_REFLEX_ROUNDS))
 
 def build_codex_prompt(state, event, current_time):
     context = build_context(state, event, current_time)
@@ -141,6 +152,8 @@ def build_think_prompt(
         "When autonomous mode is false, do not do self-directed work unless it directly answers the user.\n"
         "When autonomous mode is true and there is no user input, use Self and Desires to choose useful small work.\n"
         "Use perception as passive read-only workspace observations; do not treat it as permission to read more.\n"
+        "If State JSON contains reflex_observations, use those just-collected read-only results to revise your decision. "
+        "Ask for more read-only observations only when the next observation is clearly useful.\n"
         "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task for coding tasks only; "
         "act can also use allowed read-only inspection and programmer-loop actions. "
         "Starting agent runs requires allow_agent_run in local state, even at act level. "
@@ -255,6 +268,7 @@ def build_act_prompt(
         "Respect the autonomy level: observe may record_memory and self_review only; propose may propose_task/plan_task for coding tasks only; "
         "act may use allowed read-only inspection and programmer-loop actions. "
         "Use perception as passive read-only workspace observations; it does not expand allowed_read_roots. "
+        "If State JSON contains reflex_observations, normalize actions using those just-collected read-only results. "
         "Starting agent runs requires allow_agent_run in local state. "
         "Local task command execution still requires allow_task_execution. "
         "Verification command execution requires run_verification plus allow_verify and a configured verify command.\n"
@@ -1531,6 +1545,79 @@ def apply_read_action(state, event, action, current_time, allowed_read_roots):
         message["read_at"] = current_time
     return 1
 
+
+def compact_reflex_action(action):
+    compact = {"type": action.get("type") or "unknown"}
+    for key in ("path", "query", "task_id", "max_chars", "max_matches", "limit"):
+        value = action.get(key)
+        if value is not None:
+            compact[key] = value
+    return compact
+
+
+def run_reflex_observation(action, allowed_read_roots, read_allowed, round_index):
+    action_type = action.get("type")
+    observation = {
+        "round": round_index,
+        "action": compact_reflex_action(action),
+    }
+    if not read_allowed:
+        observation.update(
+            {
+                "status": "skipped",
+                "error": "read-only inspection is not allowed for this event and autonomy level",
+            }
+        )
+        return observation
+
+    try:
+        if action_type == "inspect_dir":
+            result = inspect_dir(action.get("path") or ".", allowed_read_roots, limit=action.get("limit", 50))
+        elif action_type == "read_file":
+            result = read_file(
+                action.get("path") or "",
+                allowed_read_roots,
+                max_chars=action.get("max_chars", 6000),
+            )
+        elif action_type == "search_text":
+            result = search_text(
+                action.get("query") or "",
+                action.get("path") or ".",
+                allowed_read_roots,
+                max_matches=action.get("max_matches", 50),
+            )
+        else:
+            observation.update({"status": "skipped", "error": f"unsupported observation action: {action_type}"})
+            return observation
+    except ValueError as exc:
+        observation.update({"status": "refused", "error": str(exc)})
+        return observation
+
+    observation.update(
+        {
+            "status": "ok",
+            "result": clip_output(
+                summarize_read_result(action_type, result),
+                limit=MAX_REFLEX_OBSERVATION_CHARS,
+            ),
+        }
+    )
+    return observation
+
+
+def collect_reflex_observations(decision_plan, allowed_read_roots, read_allowed, seen_keys, round_index):
+    observations = []
+    for decision in decision_plan.get("decisions", []):
+        key = read_action_key(decision)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        observations.append(run_reflex_observation(decision, allowed_read_roots, read_allowed, round_index))
+        if len(observations) >= MAX_REFLEX_OBSERVATIONS_PER_ROUND:
+            break
+    return observations
+
+
 def add_proposed_task(state, title, description, priority, notes, current_time):
     title = (title or "").strip()
     if not title:
@@ -2583,6 +2670,7 @@ def plan_event(
     allowed_write_roots=None,
     log_phases=True,
     trace_model=False,
+    max_reflex_rounds=0,
 ):
     prompt_context = build_context(
         state,
@@ -2627,6 +2715,72 @@ def plan_event(
         log_phases=log_phases,
         trace_model=trace_model,
     )
+    reflex_rounds = bounded_reflex_rounds(max_reflex_rounds)
+    reflex_observations = []
+    reflex_seen = set()
+    read_allowed = event["type"] == "user_message" or (autonomous and autonomy_level == "act")
+    if reflex_rounds and model_auth and should_use_ai_for_event(event, event["type"], ai_ticks):
+        for round_index in range(1, reflex_rounds + 1):
+            round_observations = collect_reflex_observations(
+                decision_plan,
+                allowed_read_roots or [],
+                read_allowed,
+                reflex_seen,
+                round_index,
+            )
+            if not round_observations:
+                break
+            reflex_observations.extend(round_observations)
+            prompt_context = {
+                **prompt_context,
+                "reflex_observations": list(reflex_observations),
+            }
+            reflex_guidance = "\n\n".join(
+                part
+                for part in (
+                    guidance.strip(),
+                    (
+                        "Reflex observation round:\n"
+                        "State JSON includes reflex_observations collected from your read-only decisions. "
+                        "Revise the decision plan using those observations. "
+                        "Only request another read-only observation if it is clearly the next useful step; "
+                        "otherwise decide the next action."
+                    ),
+                )
+                if part
+            )
+            decision_plan = think_phase(
+                state,
+                event,
+                current_time,
+                model_auth,
+                model,
+                base_url=base_url,
+                timeout=timeout,
+                ai_ticks=ai_ticks,
+                allow_task_execution=allow_task_execution,
+                guidance=reflex_guidance,
+                policy=policy,
+                self_text=self_text,
+                desires=desires,
+                autonomous=autonomous,
+                autonomy_level=autonomy_level,
+                allow_agent_run=allow_agent_run,
+                allow_verify=allow_verify,
+                verify_command=verify_command,
+                verify_interval_seconds=verify_interval_seconds,
+                allow_write=allow_write,
+                allowed_read_roots=allowed_read_roots,
+                allowed_write_roots=allowed_write_roots,
+                model_backend=model_backend,
+                prompt_context=prompt_context,
+                log_phases=log_phases,
+                trace_model=trace_model,
+            )
+        if reflex_observations:
+            decision_plan = dict(decision_plan)
+            decision_plan["reflex_rounds"] = len({item.get("round") for item in reflex_observations})
+            decision_plan["reflex_observations"] = reflex_observations
     action_plan = act_phase(
         state,
         event,
@@ -2778,6 +2932,7 @@ def process_events(
     allow_write=False,
     allowed_read_roots=None,
     allowed_write_roots=None,
+    max_reflex_rounds=0,
 ):
     current_time = now_iso()
     if create_internal_event:
@@ -2815,6 +2970,7 @@ def process_events(
             allowed_read_roots=allowed_read_roots,
             allowed_write_roots=allowed_write_roots,
             model_backend=model_backend,
+            max_reflex_rounds=max_reflex_rounds,
         )
         counts = apply_event_plans(
             state,

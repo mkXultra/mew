@@ -150,6 +150,7 @@ def plan_runtime_event(
         allowed_read_roots=args.allow_read,
         allowed_write_roots=args.allow_write,
         trace_model=bool(getattr(args, "trace_model", False)),
+        max_reflex_rounds=getattr(args, "max_reflex_rounds", 0),
     )
 
 def apply_runtime_event_plans(
