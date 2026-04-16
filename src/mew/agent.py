@@ -1590,7 +1590,7 @@ def run_reflex_observation(action, allowed_read_roots, read_allowed, round_index
         else:
             observation.update({"status": "skipped", "error": f"unsupported observation action: {action_type}"})
             return observation
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         observation.update({"status": "refused", "error": str(exc)})
         return observation
 
@@ -1606,13 +1606,28 @@ def run_reflex_observation(action, allowed_read_roots, read_allowed, round_index
     return observation
 
 
-def collect_reflex_observations(decision_plan, allowed_read_roots, read_allowed, seen_keys, round_index):
+def collect_reflex_observations(state, event, decision_plan, allowed_read_roots, read_allowed, seen_keys, round_index):
     observations = []
     for decision in decision_plan.get("decisions", []):
         key = read_action_key(decision)
         if not key or key in seen_keys:
             continue
         seen_keys.add(key)
+        if event.get("type") != "user_message" and recently_repeated_read_action(state, decision):
+            observations.append(
+                {
+                    "round": round_index,
+                    "action": compact_reflex_action(decision),
+                    "status": "skipped",
+                    "error": (
+                        "recent context already contains that read-only inspection; "
+                        "choose a different target or synthesize the next step"
+                    ),
+                }
+            )
+            if len(observations) >= MAX_REFLEX_OBSERVATIONS_PER_ROUND:
+                break
+            continue
         observations.append(run_reflex_observation(decision, allowed_read_roots, read_allowed, round_index))
         if len(observations) >= MAX_REFLEX_OBSERVATIONS_PER_ROUND:
             break
@@ -2723,6 +2738,8 @@ def plan_event(
     if reflex_rounds and model_auth and should_use_ai_for_event(event, event["type"], ai_ticks):
         for round_index in range(1, reflex_rounds + 1):
             round_observations = collect_reflex_observations(
+                state,
+                event,
                 decision_plan,
                 allowed_read_roots or [],
                 read_allowed,
@@ -2739,7 +2756,7 @@ def plan_event(
             reflex_guidance = "\n\n".join(
                 part
                 for part in (
-                    guidance.strip(),
+                    str(guidance or "").strip(),
                     (
                         "Reflex observation round:\n"
                         "State JSON includes reflex_observations collected from your read-only decisions. "

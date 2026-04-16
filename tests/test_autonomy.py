@@ -1693,6 +1693,97 @@ class AutonomyTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_reflex_observation_uses_repeat_read_guard(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("should not be re-read\n", encoding="utf-8")
+                state = default_state()
+                state["step_runs"].append(
+                    {
+                        "id": 1,
+                        "actions": [{"type": "read_file", "path": "README.md"}],
+                    }
+                )
+                event = add_event(state, "passive_tick", "test")
+                responses = [
+                    {
+                        "summary": "Try repeated read.",
+                        "decisions": [{"type": "read_file", "path": "README.md"}],
+                    },
+                    {
+                        "summary": "Saw repeated-read skip.",
+                        "decisions": [{"type": "remember", "summary": "Use existing context."}],
+                    },
+                    {
+                        "summary": "Act after skip.",
+                        "actions": [{"type": "record_memory", "summary": "Act after skip."}],
+                    },
+                ]
+
+                with patch("mew.agent.call_model_json", side_effect=responses):
+                    decision_plan, _action_plan = plan_event(
+                        state,
+                        event,
+                        now_iso(),
+                        model_auth={"access_token": "token"},
+                        model="test-model",
+                        base_url="https://example.invalid",
+                        timeout=5,
+                        autonomous=True,
+                        autonomy_level="act",
+                        allowed_read_roots=[tmp],
+                        model_backend="codex",
+                        max_reflex_rounds=1,
+                    )
+            finally:
+                os.chdir(old_cwd)
+
+        observation = decision_plan["reflex_observations"][0]
+        self.assertEqual(observation["status"], "skipped")
+        self.assertIn("recent context", observation["error"])
+        self.assertNotIn("result", observation)
+
+    def test_reflex_observation_treats_os_errors_as_refusals(self):
+        state = default_state()
+        event = add_event(state, "user_message", "test", {"text": "inspect"})
+        responses = [
+            {
+                "summary": "Read file.",
+                "decisions": [{"type": "read_file", "path": "README.md"}],
+            },
+            {
+                "summary": "Read was refused.",
+                "decisions": [{"type": "remember", "summary": "Read was refused."}],
+            },
+            {
+                "summary": "Act after refusal.",
+                "actions": [{"type": "record_memory", "summary": "Act after refusal."}],
+            },
+        ]
+
+        with (
+            patch("mew.agent.call_model_json", side_effect=responses),
+            patch("mew.agent.read_file", side_effect=PermissionError("permission denied")),
+        ):
+            decision_plan, _action_plan = plan_event(
+                state,
+                event,
+                now_iso(),
+                model_auth={"access_token": "token"},
+                model="test-model",
+                base_url="https://example.invalid",
+                timeout=5,
+                allowed_read_roots=["."],
+                model_backend="codex",
+                max_reflex_rounds=1,
+            )
+
+        observation = decision_plan["reflex_observations"][0]
+        self.assertEqual(observation["status"], "refused")
+        self.assertIn("permission denied", observation["error"])
+
     def test_self_review_can_propose_task_at_propose_level(self):
         state = default_state()
         event = add_event(state, "passive_tick", "test")
