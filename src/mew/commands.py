@@ -2277,6 +2277,21 @@ def cmd_outbox(args):
             print("mew: --limit must be positive", file=sys.stderr)
             return 1
         messages = messages[-limit:]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "messages": messages,
+                    "count": len(messages),
+                    "total": total,
+                    "all": bool(args.all),
+                    "limit": limit,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if not messages:
         print("No messages.")
         return 0
@@ -2318,11 +2333,29 @@ def cmd_questions(args):
             action = "deferred"
         elif args.reopen and not args.defer:
             action = "reopened"
+        if args.json:
+            print(
+                json.dumps(
+                    {"action": action, "count": len(changed), "questions": changed},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
         print(f"{action} {len(changed)} question(s)")
         return 0
 
     state = load_state()
     questions = state["questions"] if args.all else open_questions(state)
+    if args.json:
+        print(
+            json.dumps(
+                {"questions": questions, "count": len(questions), "all": bool(args.all)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if not questions:
         print("No questions.")
         return 0
@@ -2357,11 +2390,29 @@ def cmd_attention(args):
                 item["resolved_at"] = current_time
                 item["updated_at"] = current_time
             save_state(state)
+        if args.json:
+            print(
+                json.dumps(
+                    {"action": "resolved", "count": len(items), "attention": items},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
         print(f"resolved {len(items)} attention item(s)")
         return 0
 
     state = load_state()
     items = state["attention"]["items"] if args.all else open_attention_items(state)
+    if args.json:
+        print(
+            json.dumps(
+                {"attention": items, "count": len(items), "all": bool(args.all)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if not items:
         print("No attention items.")
         return 0

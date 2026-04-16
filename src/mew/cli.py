@@ -760,6 +760,7 @@ def build_parser():
     outbox_parser = subparsers.add_parser("outbox", help="show runtime messages")
     outbox_parser.add_argument("--all", action="store_true", help="show read and unread messages")
     outbox_parser.add_argument("--limit", type=int, help="show only the most recent N matching messages")
+    outbox_parser.add_argument("--json", action="store_true", help="print structured JSON")
     outbox_parser.set_defaults(func=cmd_outbox)
 
     questions_parser = subparsers.add_parser("questions", help="show open questions")
@@ -767,12 +768,14 @@ def build_parser():
     questions_parser.add_argument("--defer", action="append", default=[], help="defer an open question id")
     questions_parser.add_argument("--reopen", action="append", default=[], help="reopen a deferred question id")
     questions_parser.add_argument("--reason", help="short reason stored when deferring")
+    questions_parser.add_argument("--json", action="store_true", help="print structured JSON")
     questions_parser.set_defaults(func=cmd_questions)
 
     attention_parser = subparsers.add_parser("attention", help="show attention items")
     attention_parser.add_argument("--all", action="store_true", help="include resolved attention items")
     attention_parser.add_argument("--resolve", action="append", default=[], help="resolve an open attention item")
     attention_parser.add_argument("--resolve-all", action="store_true", help="resolve all open attention items")
+    attention_parser.add_argument("--json", action="store_true", help="print structured JSON")
     attention_parser.set_defaults(func=cmd_attention)
 
     archive_parser = subparsers.add_parser("archive", help="archive old runtime records and effect log entries")

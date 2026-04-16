@@ -704,6 +704,44 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_core_queues_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    add_question(state, "What should happen next?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions", "--json"]), 0)
+                questions_data = json.loads(stdout.getvalue())
+                self.assertEqual(questions_data["count"], 1)
+                self.assertEqual(questions_data["questions"][0]["text"], "What should happen next?")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["outbox", "--json"]), 0)
+                outbox_data = json.loads(stdout.getvalue())
+                self.assertEqual(outbox_data["count"], 1)
+                self.assertEqual(outbox_data["messages"][0]["type"], "question")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["attention", "--json"]), 0)
+                attention_data = json.loads(stdout.getvalue())
+                self.assertEqual(attention_data["count"], 1)
+                self.assertEqual(attention_data["attention"][0]["kind"], "question")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions", "--defer", "1", "--reason", "later", "--json"]), 0)
+                defer_data = json.loads(stdout.getvalue())
+                self.assertEqual(defer_data["action"], "deferred")
+                self.assertEqual(defer_data["questions"][0]["status"], "deferred")
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_list_can_filter_by_kind(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
