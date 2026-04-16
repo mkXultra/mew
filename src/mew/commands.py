@@ -665,6 +665,35 @@ def format_work_ai_report(report):
     return "\n".join(lines)
 
 
+def _planning_value_text(value):
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def format_work_planning(planned):
+    decision_plan = (planned or {}).get("decision_plan") or {}
+    action_plan = (planned or {}).get("action_plan") or {}
+    action = (planned or {}).get("action") or {}
+    lines = []
+    summary = decision_plan.get("summary") or action_plan.get("summary") or action.get("summary") or action.get("reason")
+    if summary:
+        lines.append(f"summary: {clip_output(str(summary), 500)}")
+    action_type = action.get("type") or action.get("tool")
+    if action_type:
+        lines.append(f"planned_action: {action_type}")
+    reason = action.get("reason") or (action_plan.get("action") or {}).get("reason")
+    if reason and reason != summary:
+        lines.append(f"reason: {clip_output(str(reason), 500)}")
+    for key in ("observations", "risks", "plan", "next_steps"):
+        text = _planning_value_text(decision_plan.get(key))
+        if text:
+            lines.append(f"{key}: {clip_output(text, 500)}")
+    return "\n".join(lines) or "(no planning summary)"
+
+
 def _work_control_options(args, session=None):
     defaults = (session or {}).get("default_options") or {}
 
@@ -1449,6 +1478,10 @@ def cmd_work_ai(args):
             if progress:
                 progress(f"step #{index}: stop requested after planning")
             break
+        if getattr(args, "live", False):
+            print("")
+            print(f"Work live step #{index} thinking")
+            print(format_work_planning(planned))
         if action_type == "batch":
             if getattr(args, "live", False):
                 print("")
