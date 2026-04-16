@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import mew.commands as commands_module
 from mew.cli import main
 from mew.errors import MewError
 
@@ -2112,7 +2113,8 @@ class CommandTests(unittest.TestCase):
                 command = popen.call_args.args[0]
                 self.assertEqual(command[-2:], ["run", "--autonomous"])
                 env = popen.call_args.kwargs["env"]
-                self.assertIn(str(Path(__file__).resolve().parents[1] / "src"), env["PYTHONPATH"])
+                source_root = Path(commands_module.__file__).resolve().parents[1]
+                self.assertIn(str(source_root), env["PYTHONPATH"])
                 self.assertTrue((Path(".mew") / "runtime.out").exists())
             finally:
                 os.chdir(old_cwd)
