@@ -551,6 +551,16 @@ def _work_live_continue_command(args, task_id):
     return shlex.join(parts)
 
 
+def _work_resume_command(args, task_id):
+    parts = ["mew", "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.extend(["--session", "--resume"])
+    for root in getattr(args, "allow_read", None) or []:
+        parts.extend(["--allow-read", root])
+    return shlex.join(parts)
+
+
 def format_work_cli_controls(session, args):
     lines = ["", "Next CLI controls"]
     if not session:
@@ -558,12 +568,12 @@ def format_work_cli_controls(session, args):
         return "\n".join(lines)
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        lines.append(f"mew work {task_id} --session --resume")
+        lines.append(_work_resume_command(args, task_id))
         lines.append(f"mew work {task_id} --start-session")
         return "\n".join(lines)
     lines.append(_work_live_continue_command(args, task_id))
     lines.append(f"mew work {task_id} --stop-session --stop-reason pause")
-    lines.append(f"mew work {task_id} --session --resume")
+    lines.append(_work_resume_command(args, task_id))
     lines.append("mew chat")
     return "\n".join(lines)
 

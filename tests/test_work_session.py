@@ -2105,6 +2105,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --live", output)
+                self.assertIn("mew work 1 --session --resume --allow-read .", output)
                 self.assertIn("ACT deterministic action=read_file", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
