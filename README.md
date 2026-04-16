@@ -263,6 +263,8 @@ The default session view keeps read-tool entries compact, so a large
 controls after the compact resume bundle.
 Active `mew work --session --json` and `--resume --json` also include
 `next_cli_controls`, so machine readers get the same reentry commands.
+World-state git summaries hide mew's own `.mew/` state noise, keeping the
+reentry signal focused on project files.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
 used, so quiet chat still preserves the reentry affordance.
 When a live work command uses read/write/verify/model options, the active

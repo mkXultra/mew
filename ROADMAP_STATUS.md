@@ -106,6 +106,7 @@ Evidence:
 - Fresh `mew chat` `/continue <guidance>` now falls back to the active work session's stored defaults when the current chat state has no cached options, preserving read/auth/model gates after reentry.
 - Default `mew work --session` and `/work-session` tool-call views compact read/search/glob results, keeping reentry quiet even when prior `read_file` calls captured large text.
 - Work-session world-state formatting no longer labels nonzero `git_status` as `(clean)`; it surfaces stderr/stdout so non-git workspaces are not misrepresented.
+- Work-session world-state git summaries filter `.mew/` internal state noise, so reentry does not make mew's own persistence look like project dirt.
 - `mew next` and passive next-move messages now route unplanned coding tasks to `mew work <task-id> --start-session`, matching native hands as the first execution path.
 - Chat work-session parsing accepts task-first resume order such as `/work-session 26 resume --allow-read .`, reducing command-order friction during reentry.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
@@ -215,8 +216,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `516 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `185 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `517 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `186 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.

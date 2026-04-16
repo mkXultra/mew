@@ -6,6 +6,16 @@ from .toolbox import run_git_tool
 DEFAULT_WORLD_STATE_FILE_LIMIT = 8
 
 
+def filter_internal_git_status(stdout):
+    lines = []
+    for line in (stdout or "").splitlines():
+        path = line[3:] if len(line) > 3 else line
+        if path == ".mew" or path.startswith(".mew/"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def build_work_world_state(resume, allowed_read_roots, file_limit=None):
     if not allowed_read_roots:
         return {}
@@ -14,7 +24,7 @@ def build_work_world_state(resume, allowed_read_roots, file_limit=None):
     git_status = run_git_tool("status", cwd=".")
     world["git_status"] = {
         "exit_code": git_status.get("exit_code"),
-        "stdout": clip_output(git_status.get("stdout") or "", 2000),
+        "stdout": clip_output(filter_internal_git_status(git_status.get("stdout") or ""), 2000),
         "stderr": clip_output(git_status.get("stderr") or "", 1000),
     }
 

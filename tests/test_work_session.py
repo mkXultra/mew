@@ -2922,6 +2922,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_world_state_hides_mew_internal_git_noise(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                subprocess.run(["git", "init"], check=True, capture_output=True, text=True)
+                Path("README.md").write_text("world state\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", "."]), 0)
+                output = stdout.getvalue()
+                self.assertIn("git_status exit=0", output)
+                self.assertIn("README.md", output)
+                self.assertNotIn(".mew", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_successful_run_tests_refreshes_session_verify_default(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
