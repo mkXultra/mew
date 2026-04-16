@@ -1161,7 +1161,10 @@ def build_work_session_timeline(session, limit=20):
             }
         )
     events.sort(key=lambda event: (event.get("started_at") or "", event.get("order") or 0))
-    return events[-max(0, int(limit or 20)) :]
+    count = 20 if limit is None else max(0, int(limit))
+    if count == 0:
+        return []
+    return events[-count:]
 
 
 def format_work_session_timeline(session, task=None, limit=20):
