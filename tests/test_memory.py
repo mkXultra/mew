@@ -57,6 +57,39 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(focus_results[0]["scope"], "deep")
         self.assertEqual(focus_results[0]["key"], "decisions")
 
+    def test_search_memory_returns_focused_project_snapshot_leaf(self):
+        state = default_state()
+        state["memory"]["deep"]["project_snapshot"] = {
+            "updated_at": "now",
+            "files": [
+                {
+                    "path": "README.md",
+                    "kind": "readme",
+                    "summary": "Nebula anchor runtime notes for model continuity.",
+                }
+            ],
+        }
+
+        summary_results = search_memory(state, "nebula anchor")
+
+        self.assertEqual(summary_results[0]["scope"], "deep")
+        self.assertEqual(summary_results[0]["key"], "project_snapshot.files[0].summary")
+        self.assertEqual(summary_results[0]["text"], "Nebula anchor runtime notes for model continuity.")
+        self.assertEqual(summary_results[0]["source_path"], "README.md")
+        self.assertNotIn("{", summary_results[0]["text"])
+
+    def test_search_memory_matches_project_snapshot_paths(self):
+        state = default_state()
+        state["memory"]["deep"]["project_snapshot"] = {
+            "updated_at": "now",
+            "files": [{"path": "docs/continuity.md", "summary": "Long-running session notes."}],
+        }
+
+        path_results = search_memory(state, "docs/continuity.md")
+
+        self.assertEqual(path_results[0]["key"], "project_snapshot.files[0].path")
+        self.assertEqual(path_results[0]["text"], "docs/continuity.md")
+
     def test_add_deep_memory_records_timestamped_entry(self):
         state = default_state()
 

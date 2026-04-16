@@ -26,6 +26,23 @@ def _matches_query(text, query):
     return bool(terms) and all(term in haystack for term in terms)
 
 
+def _snapshot_search_items(value, key="project_snapshot", source_path=None):
+    if isinstance(value, dict):
+        current_source_path = value.get("path") if isinstance(value.get("path"), str) else source_path
+        for child_key, child in value.items():
+            yield from _snapshot_search_items(child, f"{key}.{child_key}", current_source_path)
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _snapshot_search_items(child, f"{key}[{index}]", source_path)
+        return
+    if value is None:
+        return
+    text = str(value)
+    if text:
+        yield key, text, source_path
+
+
 def search_memory(state, query, limit=20):
     limit = max(0, int(limit or 0))
     if limit <= 0:
@@ -35,8 +52,8 @@ def search_memory(state, query, limit=20):
     deep = memory.get("deep", {})
     results = []
 
-    def add_match(scope, key, text, **extra):
-        if not _matches_query(text, query):
+    def add_match(scope, key, text, match_text=None, **extra):
+        if not _matches_query(text if match_text is None else match_text, query):
             return
         item = {
             "scope": scope,
@@ -64,7 +81,11 @@ def search_memory(state, query, limit=20):
 
     snapshot = deep.get("project_snapshot")
     if snapshot:
-        add_match("deep", "project_snapshot", snapshot)
+        for key, text, source_path in _snapshot_search_items(snapshot):
+            extra = {}
+            if source_path:
+                extra["source_path"] = source_path
+            add_match("deep", key, text, match_text=f"{key} {text}", **extra)
 
     return results[-limit:]
 

@@ -367,6 +367,16 @@ def run_memory_search_scenario(workspace, env=None):
     state = default_state()
     state["memory"]["shallow"]["current_context"] = "Trace logs help runtime debugging."
     state["memory"]["deep"]["project"].append("The model runtime should support searchable memory recall.")
+    state["memory"]["deep"]["project_snapshot"] = {
+        "updated_at": "now",
+        "files": [
+            {
+                "path": "README.md",
+                "kind": "readme",
+                "summary": "Dogfood anchor notes for focused project snapshot recall.",
+            }
+        ],
+    }
     write_json_file(workspace / STATE_FILE, state)
 
     def run(args, timeout=30):
@@ -376,8 +386,11 @@ def run_memory_search_scenario(workspace, env=None):
 
     text_result = run(["memory", "--search", "trace"])
     json_result = run(["memory", "--search", "runtime", "--json"])
+    snapshot_result = run(["memory", "--search", "dogfood anchor", "--json"])
     json_data = _json_stdout(json_result)
     matches = json_data.get("matches") or []
+    snapshot_data = _json_stdout(snapshot_result)
+    snapshot_matches = snapshot_data.get("matches") or []
 
     _scenario_check(
         checks,
@@ -399,6 +412,18 @@ def run_memory_search_scenario(workspace, env=None):
         any(match.get("scope") == "deep" and match.get("key") == "project" for match in matches),
         observed=matches,
         expected="deep.project match",
+    )
+    _scenario_check(
+        checks,
+        "memory_search_json_finds_project_snapshot_leaf",
+        any(
+            match.get("scope") == "deep"
+            and match.get("key") == "project_snapshot.files[0].summary"
+            and "{" not in (match.get("text") or "")
+            for match in snapshot_matches
+        ),
+        observed=snapshot_matches,
+        expected="focused project_snapshot.files[0].summary match",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
 
