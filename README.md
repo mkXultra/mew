@@ -270,6 +270,8 @@ state without leaving the session:
 /focus
 /brief
 /next
+/doctor
+/repair
 /perception
 /tasks
 /questions

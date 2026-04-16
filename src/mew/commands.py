@@ -3443,6 +3443,8 @@ CHAT_HELP = """Commands:
 /daily                alias for /focus
 /brief                show the current operational brief
 /next                 show the next useful move
+/doctor              show state/runtime health
+/repair [--force]    reconcile state if the runtime is stopped
 /status               show compact runtime status
 /perception           show passive workspace observations
 /add <title> [| desc] create a task from chat
@@ -4472,6 +4474,20 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "next":
         print(next_move(load_state()))
+        return "continue"
+    if command == "doctor":
+        if rest:
+            print("usage: /doctor")
+        else:
+            args = SimpleNamespace(auth=None, require_auth=False)
+            print(format_doctor_data(build_doctor_data(args)))
+        return "continue"
+    if command == "repair":
+        if rest and rest.casefold() not in ("--force", "force"):
+            print("usage: /repair [--force]")
+        else:
+            args = SimpleNamespace(force=rest.casefold() in ("--force", "force"), json=False)
+            cmd_repair(args)
         return "continue"
     if command == "status":
         print_chat_status()

@@ -2850,6 +2850,25 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_health_slash_commands_delegate_to_existing_commands(self):
+        from mew.commands import run_chat_slash_command
+
+        with (
+            patch("mew.commands.build_doctor_data", return_value={"ok": True}) as build_doctor,
+            patch("mew.commands.format_doctor_data", return_value="doctor output"),
+            redirect_stdout(StringIO()) as stdout,
+        ):
+            self.assertEqual(run_chat_slash_command("/doctor", {}), "continue")
+        self.assertIn("doctor output", stdout.getvalue())
+        self.assertIsNone(build_doctor.call_args.args[0].auth)
+
+        with (
+            patch("mew.commands.cmd_repair", return_value=0) as repair,
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(run_chat_slash_command("/repair --force", {}), "continue")
+        self.assertTrue(repair.call_args.args[0].force)
+
     def test_chat_cockpit_commands_update_state(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

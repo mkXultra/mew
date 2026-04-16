@@ -2,6 +2,12 @@ import json
 import os
 import time
 
+from .action_application import (
+    new_action_counts,
+    public_action_plan,
+    should_skip_outbox_send,
+    suppress_done_task_wait_actions,
+)
 from .brief import next_move
 from .config import (
     DEFAULT_CODEX_MODEL,
@@ -845,34 +851,6 @@ def passive_wait_reason(state):
     if move and move not in ("ask the user what to track next", "wait for the next user request"):
         return f"Next: {move}"
     return "No actionable task."
-
-def should_skip_outbox_send(state, message_type, text, event_id):
-    for message in state.get("outbox", []):
-        if message.get("type") != message_type or message.get("text") != text:
-            continue
-        if event_id is not None and message.get("event_id") == event_id:
-            return True
-        if message_type == "warning" and not message.get("read_at"):
-            return True
-    return False
-
-def action_targets_done_task(state, action):
-    if action.get("type") not in ("ask_user", "wait_for_user"):
-        return False
-    task_id = action.get("task_id")
-    if task_id is None:
-        return False
-    task = task_by_id(state, task_id)
-    return bool(task and task.get("status") == "done")
-
-def suppress_done_task_wait_actions(state, action_plan):
-    actions = action_plan.get("actions", [])
-    filtered = [action for action in actions if not action_targets_done_task(state, action)]
-    if len(filtered) == len(actions):
-        return action_plan
-    sanitized = dict(action_plan)
-    sanitized["actions"] = filtered
-    return sanitized
 
 def normalize_decision_plan(plan, fallback_summary):
     schema_issues = []
@@ -2434,7 +2412,7 @@ def apply_action_plan(
     cycle_reason="",
     agent_result_timeout=None,
 ):
-    counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
+    counts = new_action_counts()
     action_plan = suppress_done_task_wait_actions(state, action_plan)
     memory_summary = action_plan.get("summary") or decision_plan.get("summary") or build_recall_summary(state, event, current_time)
     auto_verified_write = False
@@ -2859,20 +2837,6 @@ def find_event(state, event_id):
         if str(event.get("id")) == wanted:
             return event
     return None
-
-def public_action_plan(action_plan):
-    if not isinstance(action_plan, dict):
-        return action_plan
-    clean = dict(action_plan)
-    clean["actions"] = [
-        {
-            key: value
-            for key, value in action.items()
-            if not str(key).startswith("_")
-        }
-        for action in action_plan.get("actions", [])
-    ]
-    return clean
 
 def apply_event_plans(
     state,
