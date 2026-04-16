@@ -167,6 +167,21 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "memory-search")
 
+    def test_run_dogfood_runtime_focus_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="runtime-focus",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "runtime-focus")
+            self.assertIn("runtime-focus: pass", text)
+
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:
             source = Path(source_tmp)

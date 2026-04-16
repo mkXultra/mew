@@ -34,7 +34,7 @@ DOGFOOD_SKIP_DIR_NAMES = {
 }
 DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
 DOGFOOD_READY_CODING_TASK_TITLE = "Dogfood programmer loop smoke task"
-DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search")
+DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search", "runtime-focus")
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -430,6 +430,53 @@ def run_memory_search_scenario(workspace, env=None):
     return _scenario_report("memory-search", workspace, commands, checks)
 
 
+def run_runtime_focus_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    result = run(
+        [
+            "run",
+            "--once",
+            "--focus",
+            "Take one focused dogfood runtime step",
+            "--poll-interval",
+            "0.01",
+        ],
+        timeout=15,
+    )
+    brief_result = run(["brief"], timeout=15)
+
+    _scenario_check(
+        checks,
+        "runtime_focus_flag_is_accepted",
+        result.get("exit_code") == 0
+        and "runtime focus: Take one focused dogfood runtime step" in (result.get("stdout") or ""),
+        observed=command_result_tail(result),
+        expected="run --once accepts and prints runtime focus",
+    )
+    _scenario_check(
+        checks,
+        "runtime_focus_cycle_completes",
+        "processed 1 event(s) reason=startup" in (result.get("stdout") or ""),
+        observed=command_result_tail(result),
+        expected="startup event processed",
+    )
+    _scenario_check(
+        checks,
+        "brief_still_works_after_runtime_focus",
+        brief_result.get("exit_code") == 0 and "Mew brief" in (brief_result.get("stdout") or ""),
+        observed=command_result_tail(brief_result),
+        expected="brief command succeeds after focused runtime",
+    )
+    return _scenario_report("runtime-focus", workspace, commands, checks)
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -445,6 +492,8 @@ def run_dogfood_scenario(args):
             reports.append(run_trace_smoke_scenario(scenario_workspace, env=env))
         elif name == "memory-search":
             reports.append(run_memory_search_scenario(scenario_workspace, env=env))
+        elif name == "runtime-focus":
+            reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
         else:
             raise ValueError(f"unknown dogfood scenario: {name}")
 
