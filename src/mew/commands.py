@@ -565,7 +565,6 @@ def remember_work_session_default_options(session, args):
         )
     )
     if not has_meaningful_defaults:
-        session.pop("default_options", None)
         return
     session["default_options"] = {
         "auth": options.get("auth") or "",

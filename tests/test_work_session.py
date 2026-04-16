@@ -2727,6 +2727,15 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("--allow-write .", output)
                 self.assertIn("--allow-verify", output)
                 self.assertIn("--verify-command 'uv run pytest -q'", output)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
             finally:
                 os.chdir(old_cwd)
 
