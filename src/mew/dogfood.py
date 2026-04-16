@@ -565,6 +565,7 @@ def run_work_session_scenario(workspace, env=None):
         ]
     )
     stop_result = run(["work", "1", "--stop-session", "--stop-reason", "dogfood pause", "--json"])
+    note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
     resume_result = run(["work", "1", "--session", "--resume", "--json"])
     work_result = run(["work", "1", "--json"])
     chat_result = run(
@@ -580,6 +581,7 @@ def run_work_session_scenario(workspace, env=None):
     edit_data = _json_stdout(edit_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
+    note_data = _json_stdout(note_result)
     resume_data = _json_stdout(resume_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
@@ -652,6 +654,15 @@ def run_work_session_scenario(workspace, env=None):
         and (resume_data.get("resume") or {}).get("phase") == "stop_requested",
         observed=resume_data.get("resume"),
         expected="resume reports phase=stop_requested",
+    )
+    _scenario_check(
+        checks,
+        "work_session_note_surfaces_in_resume",
+        note_result.get("exit_code") == 0
+        and (note_data.get("work_note") or {}).get("text") == "dogfood note"
+        and any((note or {}).get("text") == "dogfood note" for note in (resume_data.get("resume") or {}).get("notes") or []),
+        observed={"note": note_data.get("work_note"), "resume_notes": (resume_data.get("resume") or {}).get("notes")},
+        expected="session note is recorded and surfaced in resume",
     )
     _scenario_check(
         checks,

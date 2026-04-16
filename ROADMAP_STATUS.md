@@ -93,6 +93,7 @@ Evidence:
 - Stop requests leave their reason in the work report and resume bundle after they are consumed, preserving why a live loop paused.
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 - `dogfood --scenario work-session` now covers stop request recording and `phase=stop_requested` resume output.
+- `dogfood --scenario work-session` now also covers user session notes appearing in resume output.
 
 Missing proof:
 
