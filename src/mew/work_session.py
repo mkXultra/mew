@@ -75,6 +75,14 @@ def work_session_for_task(state, task_id):
     return None
 
 
+def latest_work_session_for_task(state, task_id):
+    wanted = str(task_id)
+    for session in reversed(state.get("work_sessions", [])):
+        if str(session.get("task_id")) == wanted:
+            return session
+    return None
+
+
 def find_work_session(state, session_id):
     if session_id is None:
         return None
@@ -100,6 +108,7 @@ def create_work_session(state, task, current_time=None):
         existing["updated_at"] = current_time
         return existing, False
 
+    latest = latest_work_session_for_task(state, task.get("id"))
     session = {
         "id": next_id(state, "work_session"),
         "task_id": task.get("id"),
@@ -113,6 +122,8 @@ def create_work_session(state, task, current_time=None):
         "tool_calls": [],
         "model_turns": [],
     }
+    if latest and latest.get("default_options"):
+        session["default_options"] = json.loads(json.dumps(latest.get("default_options") or {}))
     state.setdefault("work_sessions", []).append(session)
     return session, True
 

@@ -2870,6 +2870,58 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_restart_from_closed_session_preserves_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "uv run pytest -q",
+                                "--act-mode",
+                                "deterministic",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                state = load_state()
+                self.assertEqual(len(state["work_sessions"]), 2)
+                self.assertEqual(state["work_sessions"][0]["status"], "closed")
+                defaults = state["work_sessions"][1]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["."])
+                self.assertEqual(defaults["allow_write"], ["."])
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "uv run pytest -q")
+                self.assertEqual(defaults["act_mode"], "deterministic")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
+                self.assertIn("--act-mode deterministic", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_continue_uses_persisted_session_options_after_reentry(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
