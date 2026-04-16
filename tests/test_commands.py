@@ -832,6 +832,78 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_defaults_to_running_task_over_stale_question_focus(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["agent_status"]["active_task_id"] = 1
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Implement later task",
+                                "kind": "coding",
+                                "description": "",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Implement active task",
+                                "kind": "coding",
+                                "description": "",
+                                "status": "running",
+                                "priority": "high",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    add_question(state, "Should I handle task #1?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["id"], 2)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["open_questions"][0]["related_task_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_workbench_without_tasks_is_not_an_error(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

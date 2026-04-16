@@ -403,11 +403,14 @@ def select_workbench_task(state, task_id=None):
     task = find_task(state, task_id) if task_id else None
     if task or task_id:
         return task
+    candidates = sorted(open_tasks(state), key=task_sort_key)
+    running_tasks = [task for task in candidates if task.get("status") == "running"]
+    if running_tasks:
+        return running_tasks[0]
     active_task_id = state.get("agent_status", {}).get("active_task_id")
     task = find_task(state, active_task_id) if active_task_id else None
     if task:
         return task
-    candidates = sorted(open_tasks(state), key=task_sort_key)
     return candidates[0] if candidates else None
 
 
