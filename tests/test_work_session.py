@@ -2315,10 +2315,22 @@ class WorkSessionTests(unittest.TestCase):
                     add_coding_task(state)
                     save_state(state)
 
-                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, on_text_delta=None):
+                def fake_model(
+                    model_backend,
+                    model_auth,
+                    prompt,
+                    model,
+                    base_url,
+                    timeout,
+                    log_prefix=None,
+                    on_text_delta=None,
+                ):
                     if on_text_delta:
                         on_text_delta("model delta")
-                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+                    return {
+                        "summary": "read README",
+                        "action": {"type": "read_file", "path": "README.md"},
+                    }
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
@@ -2990,11 +3002,28 @@ class WorkSessionTests(unittest.TestCase):
                     add_coding_task(state)
                     save_state(state)
 
-                model_outputs = [
-                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
-                ]
+                model_calls = []
+
+                def fake_model(
+                    model_backend,
+                    model_auth,
+                    prompt,
+                    model,
+                    base_url,
+                    timeout,
+                    log_prefix=None,
+                    on_text_delta=None,
+                ):
+                    model_calls.append(prompt)
+                    if on_text_delta:
+                        on_text_delta("raw model json delta")
+                    return {
+                        "summary": "read README",
+                        "action": {"type": "read_file", "path": "README.md"},
+                    }
+
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 main(
@@ -3006,8 +3035,6 @@ class WorkSessionTests(unittest.TestCase):
                                         "auth.json",
                                         "--allow-read",
                                         ".",
-                                        "--act-mode",
-                                        "deterministic",
                                     ]
                                 ),
                                 0,
@@ -3025,7 +3052,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --live", output)
                 self.assertIn("mew work 1 --session --resume --allow-read .", output)
+                self.assertEqual(len(model_calls), 1)
                 self.assertIn("ACT deterministic action=read_file", stderr.getvalue())
+                self.assertNotIn("raw model json delta", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

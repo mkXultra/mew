@@ -689,8 +689,8 @@ def build_parser():
     work_parser.add_argument(
         "--act-mode",
         choices=("model", "deterministic"),
-        default="model",
-        help="ACT phase mode for --ai; default keeps model THINK and model ACT",
+        default=None,
+        help="ACT phase mode for --ai; default is deterministic in --live and model otherwise",
     )
     work_parser.add_argument("--work-guidance", help="extra guidance for --ai work mode")
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")

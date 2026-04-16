@@ -866,6 +866,13 @@ def live_approval_prompt_enabled(args):
     )
 
 
+def resolved_work_act_mode(args):
+    explicit = getattr(args, "act_mode", None)
+    if explicit:
+        return explicit
+    return "deterministic" if getattr(args, "live", False) else "model"
+
+
 def prompt_live_write_approval(tool_call):
     result = (tool_call or {}).get("result") or {}
     parameters = (tool_call or {}).get("parameters") or {}
@@ -1219,6 +1226,7 @@ def cmd_work_ai(args):
     if getattr(args, "live", False) and getattr(args, "json", False):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
         return 1
+    args.act_mode = resolved_work_act_mode(args)
     try:
         model_backend = normalize_model_backend(args.model_backend)
     except MewError as exc:
@@ -1331,7 +1339,7 @@ def cmd_work_ai(args):
                 guidance=args.work_guidance or "",
                 progress=progress,
                 act_mode=getattr(args, "act_mode", "model") or "model",
-                stream_model=bool(getattr(args, "stream_model", False) or getattr(args, "live", False)),
+                stream_model=bool(getattr(args, "stream_model", False)),
             )
         except MewError as exc:
             error = str(exc)
@@ -5585,7 +5593,7 @@ def _parse_chat_work_ai_args(parts):
         "base_url": None,
         "model_timeout": 60.0,
         "max_steps": 1,
-        "act_mode": "model",
+        "act_mode": None,
         "work_guidance": "",
         "progress": False,
         "live": False,
