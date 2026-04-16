@@ -749,6 +749,67 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_recovers_interrupted_read_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("recover me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover read.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": None,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "running",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["repair", "--force", "--json"]), 0)
+                self.assertEqual(load_state()["work_sessions"][0]["tool_calls"][0]["status"], "interrupted")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)
+                report = json.loads(stdout.getvalue())
+
+                self.assertEqual(report["recovery"]["action"], "retry_tool")
+                self.assertEqual(report["recovery"]["source_tool_call_id"], 1)
+                self.assertEqual(report["tool_call"]["tool"], "read_file")
+                self.assertIn("recover me", report["tool_call"]["result"]["text"])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "idle")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_report_includes_stop_request_reason(self):
         from mew.commands import format_work_ai_report
 

@@ -261,6 +261,9 @@ humans can add the same kind of note with `mew work --session-note` or
 `/work-session note`. Approving a dry-run write can reuse the latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it.
+Interrupted read-only tools can be retried with `mew work --recover-session
+--allow-read .`; write, shell, and verification interruptions still require
+human review.
 
 ```sh
 uv run mew work 1 --start-session
@@ -268,6 +271,7 @@ uv run mew work --session
 uv run mew work --session --details
 uv run mew work --session --resume
 uv run mew work --session-note "prefer small verified steps"
+uv run mew work 1 --recover-session --allow-read .
 uv run mew work --stop-session --stop-reason "pause after this step"
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool read_file --path src/mew/commands.py --allow-read . --offset 50000 --max-chars 12000

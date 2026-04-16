@@ -771,6 +771,8 @@ def cmd_work(args):
         return cmd_work_stop_session(args)
     if getattr(args, "session_note", None):
         return cmd_work_session_note(args)
+    if getattr(args, "recover_session", False):
+        return cmd_work_recover_session(args)
 
     state = load_state()
     task_id = getattr(args, "task_id", None)
@@ -1309,6 +1311,97 @@ def cmd_work_session_note(args):
     else:
         print(f"recorded work session note #{session['id']}: {note['text']}")
     return 0
+
+
+def latest_recoverable_interrupted_call(session):
+    for call in reversed(session.get("tool_calls") or []):
+        if call.get("status") == "interrupted" and not call.get("recovery_status"):
+            return call
+    return None
+
+
+def cmd_work_recover_session(args):
+    progress = work_tool_progress(args)
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        source_call = latest_recoverable_interrupted_call(session)
+        if not source_call:
+            report = {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
+            if args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                print("No interrupted work tool to recover.")
+            return 0
+        tool = source_call.get("tool")
+        if tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+            report = {
+                "recovery": {
+                    "action": "needs_user",
+                    "reason": f"interrupted {tool} is not safe to retry automatically",
+                    "source_tool_call_id": source_call.get("id"),
+                    "tool": tool,
+                }
+            }
+            if args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                print(f"Interrupted {tool} needs user review before retry.")
+            return 0
+        parameters = dict(source_call.get("parameters") or {})
+        parameters["recovered_from_tool_call_id"] = source_call.get("id")
+        tool_call = start_work_tool_call(state, session, tool, parameters)
+        session_id = session.get("id")
+        tool_call_id = tool_call.get("id")
+        save_state(state)
+
+    if progress:
+        progress(f"recover tool #{source_call.get('id')} -> #{tool_call_id} {tool} start")
+    try:
+        result = execute_work_tool_with_output(
+            tool,
+            parameters,
+            getattr(args, "allow_read", None) or [],
+            work_tool_output_progress(progress, tool_call_id),
+        )
+        error = work_tool_result_error(tool, result)
+    except (OSError, ValueError) as exc:
+        result = None
+        error = str(exc)
+
+    with state_lock():
+        state = load_state()
+        tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        session = find_work_session(state, session_id)
+        source_call = find_work_tool_call(session, parameters.get("recovered_from_tool_call_id"))
+        if source_call:
+            source_call["recovery_status"] = "superseded" if not error else "retry_failed"
+            source_call["recovered_by_tool_call_id"] = tool_call_id
+            source_call["recovered_at"] = now_iso()
+        save_state(state)
+    report = {
+        "recovery": {
+            "action": "retry_tool",
+            "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
+            "tool": tool,
+            "status": tool_call.get("status"),
+        },
+        "tool_call": tool_call,
+    }
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"recovered work tool #{parameters.get('recovered_from_tool_call_id')} "
+            f"-> #{tool_call_id} [{tool_call.get('status')}] {tool}"
+        )
+        print(tool_call.get("summary") or tool_call.get("error") or "")
+    if progress:
+        progress(f"recover tool #{tool_call_id} {tool_call.get('status')}")
+    return 0 if tool_call.get("status") == "completed" else 1
 
 
 def _work_tool_parameters(args):
@@ -4429,7 +4522,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/note/ai/live/resume/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
@@ -4747,6 +4840,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     lines.append("- /work-session resume")
     lines.append("- /work-session details")
     lines.append("- /work-session note <remember this>")
+    lines.append("- /work-session recover --allow-read .")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     return "\n".join(lines)
@@ -4762,7 +4856,20 @@ def chat_work_session(rest, chat_state=None):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "stop", "note", "ai", "step", "live", "resume", "approve", "reject"):
+    if action not in (
+        "show",
+        "start",
+        "close",
+        "stop",
+        "note",
+        "recover",
+        "ai",
+        "step",
+        "live",
+        "resume",
+        "approve",
+        "reject",
+    ):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4806,6 +4913,18 @@ def chat_work_session(rest, chat_state=None):
     if action == "note":
         args = SimpleNamespace(task_id=None, session_note=" ".join(parts[1:]), json=False)
         cmd_work_session_note(args)
+        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
+        return
+
+    if action == "recover":
+        recover_parts = ["recover", *parts[1:]]
+        args, error = _parse_chat_work_ai_args(recover_parts)
+        if error:
+            print(error)
+            return
+        args.recover_session = True
+        args.json = False
+        cmd_work_recover_session(args)
         print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 

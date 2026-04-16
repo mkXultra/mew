@@ -147,10 +147,11 @@ Evidence:
 - Runtime effects now record user-visible `outcome`.
 - `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
 - Interrupted work-session items surface as `phase=interrupted` in the resume bundle with a conservative next action.
+- `mew work --recover-session --allow-read ...` can retry interrupted read-only work tools and mark the original interrupted call as superseded; write/shell/verification recovery remains gated by human review.
 
 Missing proof:
 
-- No automatic resume/retry/abort/ask_user decision from interrupted effects or interrupted work-session items.
+- No automatic resume/retry/abort/ask_user decision from interrupted runtime effects, and no automatic recovery for interrupted write/shell/verification work items.
 - No world-state revalidation before retry.
 - No recovery report after automatic resume.
 
@@ -183,9 +184,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `484 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `43 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `58 passed`.
+- `uv run pytest -q` current: `485 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `44 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `59 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
