@@ -201,6 +201,7 @@ Next action:
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 13 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
+- `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 
 ## Current Roadmap Focus
 
