@@ -8,7 +8,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 | Milestone | Status | Short Assessment |
 |---|---|---|
-| 1. Native Hands | `in_progress` | Native work sessions can run and journal read/search/glob/test/shell/write/edit tools; the resident model tool loop is still missing. |
+| 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `foundation` | `mew chat` exists and gained cockpit commands, but it is not yet a Claude Code-quality live coding UI. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Milestone 1: Native Hands
 
-Status: `in_progress`
+Status: `done`
 
 Evidence:
 
@@ -31,17 +31,20 @@ Evidence:
 - `mew work --tool run_command --allow-shell ...` runs explicitly gated shell commands and journals command results.
 - `mew work --tool write_file|edit_file --allow-write ...` previews writes by default.
 - Applied `write_file`/`edit_file` requires `--allow-verify` and `--verify-command`; failed verification rolls the write back and records the failed tool result.
+- `mew work <task-id> --ai` calls the resident model in THINK/ACT phases, records `model_turns`, executes one selected work-session tool per step, and feeds prior tool results into the next model prompt.
+- Unit coverage proves a model-selected `read_file` is journaled and that the second model turn can see the first tool result.
+- Unit coverage proves `mew work --ai` reuses an existing active session across separate invocations and can resume with prior tool output.
+- Live Codex Web API dogfood in a temporary workspace fixed `calc.add`: read `calc.py`, applied an `edit_file` changing subtraction to addition, ran the configured verification command with exit code 0, then finished.
 - `/work-session` in chat can start, show, and close native work sessions.
 - `dogfood --scenario work-session` exercises session creation, `read_file`, `glob`, `run_tests`, dry-run `edit_file`, verified `write_file`, and workbench journal visibility.
 
 Missing proof:
 
-- No model tool loop where read/edit/test results flow back into the same model work session.
-- Real coding still leans on external agent dispatch for serious work.
+- Larger real-world coding tasks may still expose UX and context limits, but the Milestone 1 done criteria are satisfied.
 
 Next action:
 
-- Feed native tool results into a resident model work loop so the model can inspect, edit, test, and iterate inside one resumable session.
+- Move roadmap focus to Milestone 2: streaming/live coding parity, especially readable diff display, command output, and chat cockpit control for active work sessions.
 
 ## Milestone 2: Interactive Parity
 
@@ -130,7 +133,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `448 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `451 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `13 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `11 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
@@ -139,6 +143,6 @@ Next action:
 
 ## Current Roadmap Focus
 
-Milestone 1: Native Hands.
+Milestone 2: Interactive Parity.
 
-The next implementation should not add more roadmap or memory surface unless it directly helps build or validate the first native work loop.
+The next implementation should make `mew work --ai` feel closer to a live coding shell: readable diffs, streaming/progress surfaces, and cockpit commands that expose the current model turn, tool result, files touched, verification state, and next action.

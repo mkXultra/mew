@@ -14,6 +14,7 @@ from .write_tools import (
 
 WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed"}
+WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed"}
 WORK_TOOLS = {
     "inspect_dir",
     "read_file",
@@ -77,7 +78,9 @@ def create_work_session(state, task, current_time=None):
         "created_at": current_time,
         "updated_at": current_time,
         "last_tool_call_id": None,
+        "last_model_turn_id": None,
         "tool_calls": [],
+        "model_turns": [],
     }
     state.setdefault("work_sessions", []).append(session)
     return session, True
@@ -109,6 +112,59 @@ def start_work_tool_call(state, session, tool, parameters):
     session["last_tool_call_id"] = tool_call["id"]
     session["updated_at"] = current_time
     return tool_call
+
+
+def find_work_model_turn(session, turn_id):
+    if not session or turn_id is None:
+        return None
+    for turn in session.get("model_turns") or []:
+        if str(turn.get("id")) == str(turn_id):
+            return turn
+    return None
+
+
+def start_work_model_turn(state, session, decision_plan, action_plan, action):
+    current_time = now_iso()
+    turn = {
+        "id": next_id(state, "work_model_turn"),
+        "session_id": session.get("id"),
+        "task_id": session.get("task_id"),
+        "status": "running",
+        "decision_plan": dict(decision_plan or {}),
+        "action_plan": dict(action_plan or {}),
+        "action": dict(action or {}),
+        "tool_call_id": None,
+        "summary": (action_plan or {}).get("summary") or (decision_plan or {}).get("summary") or "",
+        "error": "",
+        "started_at": current_time,
+        "finished_at": None,
+    }
+    session.setdefault("model_turns", []).append(turn)
+    session["last_model_turn_id"] = turn["id"]
+    session["updated_at"] = current_time
+    return turn
+
+
+def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=""):
+    session = find_work_session(state, session_id)
+    turn = find_work_model_turn(session, turn_id)
+    if not turn:
+        return None
+    finished_at = now_iso()
+    turn["tool_call_id"] = tool_call_id
+    if error:
+        turn["status"] = "failed"
+        turn["error"] = str(error)
+        turn["summary"] = clip_output(f"model turn failed: {error}", 4000)
+    else:
+        turn["status"] = "completed"
+        action = turn.get("action") or {}
+        action_type = action.get("type") or action.get("tool") or "unknown"
+        turn["summary"] = clip_output(turn.get("summary") or f"selected {action_type}", 4000)
+    turn["finished_at"] = finished_at
+    if session:
+        session["updated_at"] = finished_at
+    return turn
 
 
 def execute_work_tool(tool, parameters, allowed_read_roots):
@@ -299,6 +355,7 @@ def format_work_session(session, task=None, limit=8):
         f"goal: {session.get('goal') or ''}",
         f"created_at: {session.get('created_at')}",
         f"updated_at: {session.get('updated_at')}",
+        f"model_turns={len(session.get('model_turns') or [])} tool_calls={len(session.get('tool_calls') or [])}",
         "",
         "Tool calls",
     ]

@@ -128,12 +128,17 @@ from .work_session import (
     close_work_session,
     create_work_session,
     execute_work_tool,
+    find_work_session,
+    finish_work_model_turn,
     finish_work_tool_call,
     format_work_session,
+    start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
+    WORK_TOOLS,
     work_session_task,
 )
+from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
 
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
@@ -420,9 +425,11 @@ def format_workbench(data):
     if data.get("work_session"):
         session = data["work_session"]
         tool_calls = session.get("tool_calls") or []
+        model_turns = session.get("model_turns") or []
         lines.append(
             f"#{session.get('id')} [{session.get('status')}] "
-            f"tool_calls={len(tool_calls)} last_tool=#{session.get('last_tool_call_id') or ''}"
+            f"model_turns={len(model_turns)} tool_calls={len(tool_calls)} "
+            f"last_tool=#{session.get('last_tool_call_id') or ''}"
         )
     else:
         lines.append("(none)")
@@ -456,7 +463,35 @@ def select_workbench_task(state, task_id=None):
     return candidates[0] if candidates else None
 
 
+def format_work_ai_report(report):
+    lines = [
+        f"mew work ai: {len(report.get('steps') or [])}/{report.get('max_steps')} step(s) "
+        f"stop={report.get('stop_reason')}",
+        f"session=#{report.get('session_id')} task=#{report.get('task_id')}",
+    ]
+    for step in report.get("steps") or []:
+        action = step.get("action") or {}
+        tool_call = step.get("tool_call") or {}
+        status = step.get("status") or tool_call.get("status") or "unknown"
+        action_type = action.get("type") or "unknown"
+        line = f"#{step.get('index')} [{status}] {action_type}"
+        if tool_call:
+            line += f" tool_call=#{tool_call.get('id')}"
+        if step.get("error"):
+            line += f" error={step.get('error')}"
+        lines.append(line)
+        summary = step.get("summary") or tool_call.get("summary") or ""
+        if summary:
+            lines.append(clip_output(summary, 1000))
+    return "\n".join(lines)
+
+
 def cmd_work(args):
+    if getattr(args, "ai", False):
+        if getattr(args, "tool", None):
+            print("mew: --ai and --tool cannot be combined", file=sys.stderr)
+            return 1
+        return cmd_work_ai(args)
     if getattr(args, "tool", None):
         return cmd_work_tool(args)
     if getattr(args, "start_session", False):
@@ -482,6 +517,183 @@ def cmd_work(args):
         return 0
     print(format_workbench(data))
     return 0
+
+
+def cmd_work_ai(args):
+    try:
+        model_backend = normalize_model_backend(args.model_backend)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
+    model = args.model or model_backend_default_model(model_backend)
+    base_url = args.base_url or model_backend_default_base_url(model_backend)
+    try:
+        model_auth = load_model_auth(model_backend, args.auth)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
+    max_steps = max(1, int(getattr(args, "max_steps", 1) or 1))
+    with state_lock():
+        state = load_state()
+        task = select_workbench_task(state, getattr(args, "task_id", None))
+        if not task:
+            if getattr(args, "task_id", None):
+                print(f"mew: task not found: {args.task_id}", file=sys.stderr)
+                return 1
+            print("No tasks.", file=sys.stderr)
+            return 1
+        session, created = create_work_session(state, task)
+        session_id = session.get("id")
+        task_id = task.get("id")
+        save_state(state)
+
+    report = {
+        "session_id": session_id,
+        "task_id": task_id,
+        "created": created,
+        "max_steps": max_steps,
+        "stop_reason": "max_steps",
+        "steps": [],
+    }
+
+    for index in range(1, max_steps + 1):
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            task = work_session_task(state, session)
+        if not session or session.get("status") != "active":
+            report["stop_reason"] = "no_active_session"
+            break
+
+        try:
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                model_auth,
+                model=model,
+                base_url=base_url,
+                model_backend=model_backend,
+                timeout=args.model_timeout,
+                allowed_read_roots=args.allow_read or [],
+                allowed_write_roots=args.allow_write or [],
+                allow_shell=args.allow_shell,
+                allow_verify=args.allow_verify,
+                verify_command=args.verify_command or "",
+                guidance=args.work_guidance or "",
+            )
+        except MewError as exc:
+            error = str(exc)
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                turn = start_work_model_turn(
+                    state,
+                    session,
+                    {"summary": "model planning failed"},
+                    {"summary": "model planning failed"},
+                    {"type": "wait", "reason": error},
+                )
+                turn = finish_work_model_turn(state, session_id, turn.get("id"), error=error)
+                save_state(state)
+            report["steps"].append(
+                {
+                    "index": index,
+                    "status": "failed",
+                    "action": {"type": "wait", "reason": error},
+                    "model_turn": turn,
+                    "error": error,
+                }
+            )
+            report["stop_reason"] = "model_error"
+            break
+
+        action = planned.get("action") or {"type": "wait", "reason": "missing action"}
+        action_type = action.get("type")
+        if action_type not in WORK_TOOLS:
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                turn = start_work_model_turn(
+                    state,
+                    session,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    action,
+                )
+                turn = finish_work_model_turn(state, session_id, turn.get("id"))
+                save_state(state)
+            report["steps"].append(
+                {
+                    "index": index,
+                    "status": "completed",
+                    "action": action,
+                    "model_turn": turn,
+                    "summary": action.get("summary") or action.get("reason") or action.get("text") or "",
+                }
+            )
+            report["stop_reason"] = action_type or "control"
+            break
+
+        parameters = work_tool_parameters_from_action(
+            action,
+            allowed_write_roots=args.allow_write or [],
+            allow_shell=args.allow_shell,
+            allow_verify=args.allow_verify,
+            verify_command=args.verify_command or "",
+            verify_timeout=args.verify_timeout,
+        )
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            turn = start_work_model_turn(
+                state,
+                session,
+                planned.get("decision_plan") or {},
+                planned.get("action_plan") or {},
+                action,
+            )
+            tool_call = start_work_tool_call(state, session, action_type, parameters)
+            turn["tool_call_id"] = tool_call.get("id")
+            turn_id = turn.get("id")
+            tool_call_id = tool_call.get("id")
+            save_state(state)
+
+        try:
+            result = execute_work_tool(action_type, parameters, args.allow_read or [])
+            error = work_tool_result_error(action_type, result)
+        except (OSError, ValueError) as exc:
+            result = None
+            error = str(exc)
+
+        with state_lock():
+            state = load_state()
+            tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+            turn = finish_work_model_turn(state, session_id, turn_id, tool_call_id=tool_call_id, error=error)
+            save_state(state)
+
+        report["steps"].append(
+            {
+                "index": index,
+                "status": tool_call.get("status"),
+                "action": action,
+                "model_turn": turn,
+                "tool_call": tool_call,
+                "error": error,
+                "summary": tool_call.get("summary") or "",
+            }
+        )
+        if error:
+            report["stop_reason"] = "tool_failed"
+            break
+
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_ai_report(report))
+    return 0 if report.get("stop_reason") not in ("model_error", "tool_failed", "no_active_session") else 1
 
 
 def cmd_work_start_session(args):

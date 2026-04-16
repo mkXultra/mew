@@ -253,6 +253,7 @@ uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_s
 uv run mew work 1 --tool write_file --path notes.md --content "hello" --create --allow-write .
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write .
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
+uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 ```
 
 ## Resident Model

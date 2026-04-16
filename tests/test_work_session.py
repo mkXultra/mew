@@ -518,6 +518,146 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_runs_model_selected_tool_and_journals_turn(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello model hands\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--allow-read", ".", "--json"]),
+                                0,
+                            )
+
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(data["steps"][0]["action"]["type"], "read_file")
+                self.assertEqual(data["steps"][0]["tool_call"]["status"], "completed")
+                self.assertIn("hello model hands", data["steps"][0]["tool_call"]["result"]["text"])
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["model_turns"][0]["status"], "completed")
+                self.assertEqual(session["model_turns"][0]["tool_call_id"], session["tool_calls"][0]["id"])
+                self.assertEqual(session["tool_calls"][0]["tool"], "read_file")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_feeds_tool_result_into_next_model_turn(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello second turn\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None):
+                    prompts.append(prompt)
+                    if len(prompts) <= 2:
+                        return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+                    return {"summary": "enough context", "action": {"type": "finish", "reason": "read result observed"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "finish")
+                self.assertEqual(len(data["steps"]), 2)
+                self.assertIn("hello second turn", prompts[2])
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual([turn["status"] for turn in session["model_turns"]], ["completed", "completed"])
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["read_file"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_resumes_existing_session_across_invocations(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("resume content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                first_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=first_outputs):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--allow-read", ".", "--json"]),
+                                0,
+                            )
+
+                resumed_prompts = []
+
+                def fake_resume(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None):
+                    resumed_prompts.append(prompt)
+                    return {
+                        "summary": "resume complete",
+                        "action": {"type": "finish", "reason": "previous read is visible"},
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_resume):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--allow-read", ".", "--json"]),
+                                0,
+                            )
+
+                data = json.loads(stdout.getvalue())
+                self.assertFalse(data["created"])
+                self.assertEqual(data["stop_reason"], "finish")
+                self.assertIn("resume content", resumed_prompts[0])
+                state = load_state()
+                self.assertEqual(len(state["work_sessions"]), 1)
+                session = state["work_sessions"][0]
+                self.assertEqual(len(session["model_turns"]), 2)
+                self.assertEqual(len(session["tool_calls"]), 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_start_and_show_session(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

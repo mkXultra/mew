@@ -194,6 +194,7 @@ def validate_state(state):
         _check_next_id(state, name, max_ids.get(container, 0), issues)
 
     max_work_tool_call_id = 0
+    max_work_model_turn_id = 0
     for session_index, session in enumerate(state.get("work_sessions", [])):
         if not isinstance(session, dict):
             continue
@@ -212,7 +213,21 @@ def validate_state(state):
                 continue
             call_path = f"{session_path}.tool_calls[{call_index}]"
             _check_status(call, WORK_TOOL_CALL_STATUSES, f"{call_path}.status", issues, level="warning")
+        turns = session.get("model_turns", [])
+        if not isinstance(turns, list):
+            issues.append(issue("error", f"{session_path}.model_turns", "must be a list"))
+            continue
+        max_work_model_turn_id = max(
+            max_work_model_turn_id,
+            _check_unique_ids(turns, f"{session_path}.model_turns", issues),
+        )
+        for turn_index, turn in enumerate(turns):
+            if not isinstance(turn, dict):
+                continue
+            turn_path = f"{session_path}.model_turns[{turn_index}]"
+            _check_status(turn, WORK_TOOL_CALL_STATUSES, f"{turn_path}.status", issues, level="warning")
     _check_next_id(state, "work_tool_call", max_work_tool_call_id, issues)
+    _check_next_id(state, "work_model_turn", max_work_model_turn_id, issues)
 
     plan_max_id = 0
     seen_plan_ids = set()

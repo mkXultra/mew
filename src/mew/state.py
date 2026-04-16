@@ -145,6 +145,7 @@ def default_state():
             "runtime_effect": 1,
             "work_session": 1,
             "work_tool_call": 1,
+            "work_model_turn": 1,
             "step_run": 1,
             "thought": 1,
         },
@@ -196,6 +197,11 @@ def reconcile_next_ids(state):
         if isinstance(session, dict):
             work_tool_calls.extend(session.get("tool_calls") or [])
     _ensure_next_id_after_existing(next_ids, "work_tool_call", work_tool_calls)
+    work_model_turns = []
+    for session in state.get("work_sessions", []):
+        if isinstance(session, dict):
+            work_model_turns.extend(session.get("model_turns") or [])
+    _ensure_next_id_after_existing(next_ids, "work_model_turn", work_model_turns)
     _ensure_next_id_after_existing(next_ids, "step_run", state.get("step_runs", []))
     _ensure_next_id_after_existing(next_ids, "thought", state.get("thought_journal", []))
 
@@ -348,6 +354,7 @@ def migrate_state(state):
         "runtime_effect",
         "work_session",
         "work_tool_call",
+        "work_model_turn",
         "step_run",
         "thought",
     ):
