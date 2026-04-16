@@ -346,24 +346,58 @@ def run_work_tool(state, session, tool, parameters, allowed_read_roots):
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), error=str(exc))
 
 
-def format_work_session(session, task=None, limit=8):
+def format_work_session(session, task=None, limit=8, details=False):
     if not session:
         return "No active work session."
+    calls = list(session.get("tool_calls") or [])
+    turns = list(session.get("model_turns") or [])
     lines = [
         f"Work session #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
         f"title: {session.get('title') or (task or {}).get('title') or ''}",
         f"goal: {session.get('goal') or ''}",
         f"created_at: {session.get('created_at')}",
         f"updated_at: {session.get('updated_at')}",
-        f"model_turns={len(session.get('model_turns') or [])} tool_calls={len(session.get('tool_calls') or [])}",
-        "",
-        "Tool calls",
+        f"model_turns={len(turns)} tool_calls={len(calls)}",
     ]
-    calls = list(session.get("tool_calls") or [])[-limit:]
-    if not calls:
+    if details:
+        paths = []
+        for call in calls:
+            result = call.get("result") or {}
+            parameters = call.get("parameters") or {}
+            path = result.get("path") or parameters.get("path")
+            if path and path not in paths:
+                paths.append(path)
+        lines.extend(["", "Files"])
+        if paths:
+            lines.extend(f"- {path}" for path in paths[-limit:])
+        else:
+            lines.append("(none)")
+
+        lines.extend(["", "Model turns"])
+        if turns:
+            for turn in turns[-limit:]:
+                action = turn.get("action") or {}
+                action_type = action.get("type") or action.get("tool") or "unknown"
+                tool_call_id = turn.get("tool_call_id")
+                tool_text = f" tool_call=#{tool_call_id}" if tool_call_id else ""
+                lines.append(
+                    f"#{turn.get('id')} [{turn.get('status')}] {action_type}{tool_text} "
+                    f"{turn.get('summary') or turn.get('error') or ''}"
+                )
+        else:
+            lines.append("(none)")
+
+    lines.extend(
+        [
+            "",
+            "Tool calls",
+        ]
+    )
+    recent_calls = calls[-limit:]
+    if not recent_calls:
         lines.append("(none)")
     else:
-        for call in calls:
+        for call in recent_calls:
             lines.append(
                 f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
                 f"{call.get('summary') or call.get('error') or ''}"

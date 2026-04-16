@@ -693,6 +693,7 @@ def build_parser():
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=6000, help="maximum read_file characters")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
+    work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 

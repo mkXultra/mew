@@ -552,6 +552,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["model_turns"][0]["status"], "completed")
                 self.assertEqual(session["model_turns"][0]["tool_call_id"], session["tool_calls"][0]["id"])
                 self.assertEqual(session["tool_calls"][0]["tool"], "read_file")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Files", text)
+                self.assertIn("Model turns", text)
+                self.assertIn("README.md", text)
+                self.assertIn("read_file tool_call=#1", text)
             finally:
                 os.chdir(old_cwd)
 

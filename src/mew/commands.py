@@ -732,7 +732,7 @@ def cmd_work_show_session(args):
     if args.json:
         print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
     else:
-        print(format_work_session(session, task=task))
+        print(format_work_session(session, task=task, details=getattr(args, "details", False)))
     return 0
 
 
@@ -3842,7 +3842,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close native work session
+/work-session [cmd]   show/start/close native work session; add details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -3957,6 +3957,8 @@ def print_chat_workbench(task_id):
 
 def chat_work_session(rest):
     parts = rest.split()
+    details = "details" in {part.casefold() for part in parts}
+    parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
     if action not in ("show", "start", "close"):
@@ -4002,7 +4004,7 @@ def chat_work_session(rest):
             if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
                 session = candidate
                 break
-    print(format_work_session(session, task=work_session_task(state, session)))
+    print(format_work_session(session, task=work_session_task(state, session), details=details))
 
 
 def chat_add_task(rest):

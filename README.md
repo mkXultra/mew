@@ -246,6 +246,7 @@ back and records the failed tool result.
 ```sh
 uv run mew work 1 --start-session
 uv run mew work --session
+uv run mew work --session --details
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .

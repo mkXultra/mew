@@ -54,13 +54,14 @@ Evidence:
 
 - `mew chat` exists.
 - Chat can inspect focus, status, workbench, agents, verification, writes, thoughts, runtime effects, doctor, and repair.
+- `mew work --session --details` and `/work-session details` expose touched files, model turns, and tool-call summaries for the active work session.
 
 Missing proof:
 
 - No streaming model output.
 - No streaming command output.
 - No integrated diff approval flow.
-- No live coding work session UX.
+- Live coding work session UX is improving, but it is still report-style rather than an interactive cockpit.
 
 Next action:
 
