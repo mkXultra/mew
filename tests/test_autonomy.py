@@ -1209,6 +1209,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(think_prompt.count("GUIDANCE_START"), 1)
         self.assertNotIn("GUIDANCE_END", think_prompt)
         self.assertIn("record_memory, update_memory, self_review, or propose_task", act_prompt)
+        self.assertIn("prefer closing the loop with send_message", think_prompt)
+        self.assertIn("Do not turn a report request into an open-ended passive investigation.", act_prompt)
         self.assertIn('"type": "refine_task"', think_prompt)
         self.assertIn('"type": "refine_task"', act_prompt)
         self.assertNotIn("memory/self_review", act_prompt)
