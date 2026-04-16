@@ -75,6 +75,7 @@ Evidence:
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
+- `mew work --live --prompt-approval` and `mew do --prompt-approval` can now ask for inline `[y/N/q]` approval on dry-run writes, rejecting or applying without requiring the user to compose a separate command.
 - Work-session resume output now reports context pressure (`tool_calls`, `model_turns`, recent chars, total chars, pressure), making large active-session growth visible to both humans and the model.
 - A real Codex Web API dogfood run on task #21 used `mew work --live --act-mode deterministic` for two read-only steps; it selected `inspect_dir` then `read_file`, printed action/reason/resume/context pressure for each step, and made no repository writes.
 - Work-mode control actions now have side effects: `send_message` writes to outbox, `ask_user` creates a normal question, and `finish` closes the work session while appending a final note to the task.
@@ -222,12 +223,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `522 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `523 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, side-effect recovery review context, and 17 commands.
-- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 13 commands.
+- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session` with 17 commands.
 - `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 - `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.

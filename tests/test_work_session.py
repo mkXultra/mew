@@ -2068,6 +2068,65 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_prompt_approval_can_reject_dry_run_write_inline(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview edit",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "README.md",
+                            "old": "old text",
+                            "new": "new text",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch("sys.stdin", StringIO("n\n")):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--live",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-write",
+                                            ".",
+                                            "--prompt-approval",
+                                            "--max-steps",
+                                            "1",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                output = stdout.getvalue()
+                self.assertIn("Apply dry-run work tool #1 edit_file", output)
+                self.assertIn("README.md? [y/N/q]:", output)
+                self.assertIn("rejected work tool #1", output)
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+                rejected = load_state()["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(rejected["approval_status"], "rejected")
+                self.assertEqual(rejected["rejection_reason"], "inline approval rejected")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_think_prompt_guides_independent_reads_to_batch(self):
         from mew.work_loop import build_work_think_prompt
 

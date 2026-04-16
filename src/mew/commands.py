@@ -711,6 +711,32 @@ def work_ai_has_tool_gates(options):
     )
 
 
+def live_approval_prompt_enabled(args):
+    return bool(
+        getattr(args, "prompt_approval", False)
+        or (getattr(args, "live", False) and not getattr(args, "json", False) and sys.stdin.isatty())
+    )
+
+
+def prompt_live_write_approval(tool_call):
+    result = (tool_call or {}).get("result") or {}
+    parameters = (tool_call or {}).get("parameters") or {}
+    path = result.get("path") or parameters.get("path") or ""
+    prompt = f"Apply dry-run work tool #{(tool_call or {}).get('id')} {(tool_call or {}).get('tool')} {path}? [y/N/q]: "
+    print(prompt, end="", flush=True)
+    answer = sys.stdin.readline()
+    if answer == "":
+        return "skip"
+    normalized = answer.strip().lower()
+    if normalized in ("y", "yes"):
+        return "approve"
+    if normalized in ("n", "no"):
+        return "reject"
+    if normalized in ("q", "quit"):
+        return "quit"
+    return "skip"
+
+
 def _work_control_text(action, fallback):
     for key in ("text", "note", "question", "reason", "summary"):
         value = (action or {}).get(key)
@@ -1019,6 +1045,7 @@ def cmd_do(args):
         work_guidance=getattr(args, "work_guidance", None),
         progress=True,
         stream_model=bool(getattr(args, "stream_model", False)),
+        prompt_approval=bool(getattr(args, "prompt_approval", False)),
         allow_read=getattr(args, "allow_read", None) or ["."],
         allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or ["."]),
         allow_shell=False,
@@ -1436,6 +1463,40 @@ def cmd_work_ai(args):
             print(f"Work live step #{index} resume")
             print(format_work_session_resume(build_work_session_resume(session, task=task)))
         if pending_approval:
+            if live_approval_prompt_enabled(args):
+                approval = prompt_live_write_approval(tool_call)
+                report["steps"][-1]["inline_approval"] = approval
+                if approval == "approve":
+                    approve_args = SimpleNamespace(
+                        task_id=task_id,
+                        approve_tool=tool_call.get("id"),
+                        allow_write=args.allow_write or [],
+                        allow_verify=args.allow_verify,
+                        verify_command=args.verify_command or "",
+                        verify_cwd=args.verify_cwd,
+                        verify_timeout=args.verify_timeout,
+                        progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                        json=False,
+                    )
+                    approval_code = cmd_work_approve_tool(approve_args)
+                    report["steps"][-1]["inline_approval"] = "applied" if approval_code == 0 else "failed"
+                    if approval_code != 0:
+                        report["stop_reason"] = "tool_failed"
+                        break
+                    continue
+                if approval == "reject":
+                    reject_args = SimpleNamespace(
+                        task_id=task_id,
+                        reject_tool=tool_call.get("id"),
+                        reject_reason="inline approval rejected",
+                        json=False,
+                    )
+                    cmd_work_reject_tool(reject_args)
+                    report["steps"][-1]["inline_approval"] = "rejected"
+                    continue
+                if approval == "quit":
+                    report["stop_reason"] = "user_quit"
+                    break
             report["stop_reason"] = "pending_approval"
             if progress:
                 progress(f"step #{index}: pending write approval")
