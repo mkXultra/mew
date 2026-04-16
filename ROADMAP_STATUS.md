@@ -8,7 +8,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 | Milestone | Status | Short Assessment |
 |---|---|---|
-| 1. Native Hands | `foundation` | Read/write/verify primitives exist, but no native multi-turn work loop yet. |
+| 1. Native Hands | `in_progress` | Native work sessions can run and journal read-only tools; write/test/model tool loop is still missing. |
 | 2. Interactive Parity | `foundation` | `mew chat` exists and gained cockpit commands, but it is not yet a Claude Code-quality live coding UI. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Milestone 1: Native Hands
 
-Status: `foundation`
+Status: `in_progress`
 
 Evidence:
 
@@ -24,16 +24,21 @@ Evidence:
 - Runtime action application can perform bounded actions.
 - `src/mew/action_application.py` started extracting action application helpers.
 - Roadmap first slice is defined.
+- `work_session` state now tracks active native work sessions and their tool calls.
+- `mew work <task-id> --start-session` starts or reuses a native work session.
+- `mew work --tool read_file|search_text|glob|inspect_dir --allow-read ...` runs read-only native tools and journals outcomes.
+- `/work-session` in chat can start, show, and close native work sessions.
+- `dogfood --scenario work-session` exercises session creation, `read_file`, `glob`, and workbench journal visibility.
 
 Missing proof:
 
-- No `mew work <task-id>` native work session yet.
-- No model tool loop where read/edit/test results flow back into the same work session.
+- No model tool loop where read/edit/test results flow back into the same model work session.
+- No native edit/write/test tools inside work sessions yet.
 - Real coding still leans on external agent dispatch for serious work.
 
 Next action:
 
-- Add a `work_session` state concept and a read-only native tool dispatcher for `read_file`, `search_text`, and `glob`.
+- Add write/test-capable work-session tools behind explicit gates, then feed tool results into a resident model work loop.
 
 ## Milestone 2: Interactive Parity
 
@@ -122,10 +127,10 @@ Next action:
 
 ## Latest Validation
 
-- This status update did not rerun tests or dogfood.
-- `uv run pytest -q` last observed: `437 passed, 4 subtests passed`.
-- `./mew dogfood --scenario all --cleanup` last observed: pass.
-- `./mew doctor --auth auth.json` last observed: state/runtime/auth ok.
+- `uv run pytest -q` current: `442 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --cleanup` current: pass.
+- `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
+- `./mew doctor --auth auth.json` current: state/runtime/auth ok.
 
 ## Current Roadmap Focus
 

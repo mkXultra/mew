@@ -8,6 +8,7 @@ REQUIRED_LISTS = (
     "verification_runs",
     "write_runs",
     "runtime_effects",
+    "work_sessions",
     "step_runs",
     "thought_journal",
 )
@@ -31,6 +32,8 @@ RUNTIME_EFFECT_STATUSES = {
     "deferred",
     "interrupted",
 }
+WORK_SESSION_STATUSES = {"active", "closed"}
+WORK_TOOL_CALL_STATUSES = {"running", "completed", "failed"}
 INCOMPLETE_RUNTIME_EFFECT_STATUSES = {
     "planning",
     "planned",
@@ -182,12 +185,34 @@ def validate_state(state):
         "verification_runs": "verification_run",
         "write_runs": "write_run",
         "runtime_effects": "runtime_effect",
+        "work_sessions": "work_session",
         "step_runs": "step_run",
         "thought_journal": "thought",
         "attention": "attention",
     }
     for container, name in next_name_by_container.items():
         _check_next_id(state, name, max_ids.get(container, 0), issues)
+
+    max_work_tool_call_id = 0
+    for session_index, session in enumerate(state.get("work_sessions", [])):
+        if not isinstance(session, dict):
+            continue
+        session_path = f"work_sessions[{session_index}]"
+        _check_status(session, WORK_SESSION_STATUSES, f"{session_path}.status", issues, level="warning")
+        calls = session.get("tool_calls", [])
+        if not isinstance(calls, list):
+            issues.append(issue("error", f"{session_path}.tool_calls", "must be a list"))
+            continue
+        max_work_tool_call_id = max(
+            max_work_tool_call_id,
+            _check_unique_ids(calls, f"{session_path}.tool_calls", issues),
+        )
+        for call_index, call in enumerate(calls):
+            if not isinstance(call, dict):
+                continue
+            call_path = f"{session_path}.tool_calls[{call_index}]"
+            _check_status(call, WORK_TOOL_CALL_STATUSES, f"{call_path}.status", issues, level="warning")
+    _check_next_id(state, "work_tool_call", max_work_tool_call_id, issues)
 
     plan_max_id = 0
     seen_plan_ids = set()

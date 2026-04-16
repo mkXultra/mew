@@ -6,6 +6,7 @@ import fnmatch
 
 DEFAULT_READ_MAX_CHARS = 6000
 DEFAULT_SEARCH_MAX_MATCHES = 50
+DEFAULT_GLOB_MAX_MATCHES = 100
 SENSITIVE_GLOBS = (
     ".mew",
     "auth.json",
@@ -198,6 +199,43 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
     }
 
 
+def glob_paths(pattern, path, allowed_roots, max_matches=DEFAULT_GLOB_MAX_MATCHES):
+    max_matches = max(1, min(int(max_matches), 500))
+    if not pattern or not str(pattern).strip():
+        raise ValueError("glob pattern is empty")
+
+    resolved = resolve_allowed_path(path or ".", allowed_roots)
+    ensure_not_sensitive(resolved, verb="glob")
+    if not resolved.is_dir():
+        raise ValueError(f"path is not a directory: {resolved}")
+
+    matches = []
+    for candidate in sorted(resolved.rglob(str(pattern)), key=lambda item: str(item)):
+        if is_sensitive_path(candidate):
+            continue
+        if len(matches) >= max_matches:
+            break
+        kind = "dir" if candidate.is_dir() else "file"
+        matches.append({"path": str(candidate), "type": kind})
+
+    truncated = False
+    if len(matches) >= max_matches:
+        matched_paths = {match["path"] for match in matches}
+        for candidate in resolved.rglob(str(pattern)):
+            if is_sensitive_path(candidate):
+                continue
+            if str(candidate) not in matched_paths:
+                truncated = True
+                break
+
+    return {
+        "path": str(resolved),
+        "pattern": str(pattern),
+        "matches": matches,
+        "truncated": truncated,
+    }
+
+
 def summarize_read_result(action_type, result):
     if action_type == "inspect_dir":
         entries = result.get("entries", [])
@@ -211,4 +249,10 @@ def summarize_read_result(action_type, result):
         suffix = " (truncated)" if result.get("truncated") else ""
         matches = "\n".join(result.get("matches", []))
         return f"Searched {result.get('path')} for {result.get('query')!r}{suffix}\n{matches}"
+    if action_type == "glob":
+        suffix = " (truncated)" if result.get("truncated") else ""
+        matches = "\n".join(
+            f"{match.get('type')}:{match.get('path')}" for match in result.get("matches", [])[:50]
+        )
+        return f"Globbed {result.get('path')} for {result.get('pattern')!r}{suffix}\n{matches}"
     return str(result)

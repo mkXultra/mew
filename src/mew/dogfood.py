@@ -34,7 +34,7 @@ DOGFOOD_SKIP_DIR_NAMES = {
 }
 DOGFOOD_MAX_COPY_FILE_BYTES = 1_000_000
 DOGFOOD_READY_CODING_TASK_TITLE = "Dogfood programmer loop smoke task"
-DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search", "runtime-focus")
+DOGFOOD_SCENARIOS = ("interrupted-focus", "trace-smoke", "memory-search", "runtime-focus", "work-session")
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -493,6 +493,72 @@ def run_runtime_focus_scenario(workspace, env=None):
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
 
+def run_work_session_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    (workspace / "README.md").write_text("# Dogfood\nnative hands\n", encoding="utf-8")
+    (workspace / "src").mkdir(exist_ok=True)
+    (workspace / "src" / "sample.py").write_text("print('native hands')\n", encoding="utf-8")
+
+    run(["task", "add", "Native work task", "--kind", "coding"])
+    start_result = run(["work", "1", "--start-session", "--json"])
+    read_result = run(
+        ["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", ".", "--json"]
+    )
+    glob_result = run(
+        ["work", "1", "--tool", "glob", "--pattern", "*.py", "--path", ".", "--allow-read", ".", "--json"]
+    )
+    work_result = run(["work", "1", "--json"])
+
+    start_data = _json_stdout(start_result)
+    read_data = _json_stdout(read_result)
+    glob_data = _json_stdout(glob_result)
+    work_data = _json_stdout(work_result)
+    session = work_data.get("work_session") or {}
+    tool_calls = session.get("tool_calls") or []
+
+    _scenario_check(
+        checks,
+        "work_session_starts",
+        start_result.get("exit_code") == 0 and (start_data.get("work_session") or {}).get("task_id") == 1,
+        observed=start_data.get("work_session"),
+        expected="work session for task #1",
+    )
+    _scenario_check(
+        checks,
+        "work_read_file_completes",
+        read_result.get("exit_code") == 0
+        and ((read_data.get("tool_call") or {}).get("result") or {}).get("text", "").find("native hands") >= 0,
+        observed=read_data.get("tool_call"),
+        expected="read_file captures README content",
+    )
+    _scenario_check(
+        checks,
+        "work_glob_completes",
+        glob_result.get("exit_code") == 0
+        and any(
+            str(match.get("path") or "").endswith("src/sample.py")
+            for match in ((glob_data.get("tool_call") or {}).get("result") or {}).get("matches", [])
+        ),
+        observed=glob_data.get("tool_call"),
+        expected="glob finds src/sample.py",
+    )
+    _scenario_check(
+        checks,
+        "workbench_surfaces_tool_journal",
+        len(tool_calls) == 2 and [call.get("tool") for call in tool_calls] == ["read_file", "glob"],
+        observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
+        expected=["read_file", "glob"],
+    )
+    return _scenario_report("work-session", workspace, commands, checks)
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -510,6 +576,8 @@ def run_dogfood_scenario(args):
             reports.append(run_memory_search_scenario(scenario_workspace, env=env))
         elif name == "runtime-focus":
             reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
+        elif name == "work-session":
+            reports.append(run_work_session_scenario(scenario_workspace, env=env))
         else:
             raise ValueError(f"unknown dogfood scenario: {name}")
 

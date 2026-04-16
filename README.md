@@ -236,6 +236,18 @@ without rewriting persistent guidance.
 Use `mew work [task-id]` as a read-only resume surface for one coding task: it
 shows the current plan, recent agent runs, verification, writes, open questions,
 and exactly one recommended next action.
+Native work sessions are the first Milestone 1 path toward giving the resident
+model its own hands. Start one with `mew work <task-id> --start-session`, inspect
+it with `mew work --session` or `/work-session` in chat, and run read-only
+session tools with explicit read gates:
+
+```sh
+uv run mew work 1 --start-session
+uv run mew work --session
+uv run mew work 1 --tool read_file --path README.md --allow-read .
+uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
+uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
+```
 
 ## Resident Model
 
@@ -348,6 +360,7 @@ uv run mew tool status
 uv run mew tool list src/mew
 uv run mew tool read src/mew/cli.py --max-chars 4000
 uv run mew tool search "self-improve" src
+uv run mew tool glob "*.py" src/mew
 uv run mew tool write notes.md --content "hello" --create --dry-run
 uv run mew tool edit notes.md --old "hello" --new "hello mew" --dry-run
 uv run mew tool test --command "UV_CACHE_DIR=.uv-cache uv run python -m unittest"

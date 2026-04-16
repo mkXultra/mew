@@ -88,6 +88,7 @@ def default_state():
         "verification_runs": [],
         "write_runs": [],
         "runtime_effects": [],
+        "work_sessions": [],
         "step_runs": [],
         "thought_journal": [],
         "autonomy": {
@@ -142,6 +143,8 @@ def default_state():
             "verification_run": 1,
             "write_run": 1,
             "runtime_effect": 1,
+            "work_session": 1,
+            "work_tool_call": 1,
             "step_run": 1,
             "thought": 1,
         },
@@ -187,6 +190,12 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
     _ensure_next_id_after_existing(next_ids, "write_run", state.get("write_runs", []))
     _ensure_next_id_after_existing(next_ids, "runtime_effect", state.get("runtime_effects", []))
+    _ensure_next_id_after_existing(next_ids, "work_session", state.get("work_sessions", []))
+    work_tool_calls = []
+    for session in state.get("work_sessions", []):
+        if isinstance(session, dict):
+            work_tool_calls.extend(session.get("tool_calls") or [])
+    _ensure_next_id_after_existing(next_ids, "work_tool_call", work_tool_calls)
     _ensure_next_id_after_existing(next_ids, "step_run", state.get("step_runs", []))
     _ensure_next_id_after_existing(next_ids, "thought", state.get("thought_journal", []))
 
@@ -324,6 +333,7 @@ def migrate_state(state):
     next_ids = state.setdefault("next_ids", {})
     state.setdefault("write_runs", [])
     state.setdefault("runtime_effects", [])
+    state.setdefault("work_sessions", [])
     state.setdefault("step_runs", [])
     state.setdefault("thought_journal", [])
 
@@ -336,6 +346,8 @@ def migrate_state(state):
         "verification_run",
         "write_run",
         "runtime_effect",
+        "work_session",
+        "work_tool_call",
         "step_run",
         "thought",
     ):
@@ -430,6 +442,7 @@ def state_counts(state):
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
         "runtime_effects": len(state.get("runtime_effects", [])),
+        "work_sessions": len(state.get("work_sessions", [])),
         "step_runs": len(state.get("step_runs", [])),
         "thoughts": len(state.get("thought_journal", [])),
     }

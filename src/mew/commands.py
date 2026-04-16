@@ -105,7 +105,7 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
-from .read_tools import inspect_dir, read_file, search_text, summarize_read_result
+from .read_tools import glob_paths, inspect_dir, read_file, search_text, summarize_read_result
 from .tasks import (
     clip_output,
     find_task,
@@ -123,6 +123,16 @@ from .timeutil import now_iso
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, summarize_write_result, write_file
+from .work_session import (
+    active_work_session,
+    close_work_session,
+    create_work_session,
+    execute_work_tool,
+    finish_work_tool_call,
+    format_work_session,
+    start_work_tool_call,
+    work_session_task,
+)
 
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
@@ -309,6 +319,11 @@ def build_workbench_data(state, task):
         if latest_implementation
         else None
     )
+    work_session = None
+    for session in reversed(state.get("work_sessions", [])):
+        if str(session.get("task_id")) == str(task_id) and session.get("status") == "active":
+            work_session = session
+            break
 
     next_action = "mew task show {task_id}".format(task_id=task_id)
     if task.get("status") == "done":
@@ -342,6 +357,7 @@ def build_workbench_data(state, task):
         "verification_runs": verification_runs,
         "write_runs": write_runs,
         "open_questions": questions,
+        "work_session": work_session,
         "next_action": next_action,
     }
 
@@ -399,6 +415,18 @@ def format_workbench(data):
         lines.append("(none)")
 
     lines.append("")
+    lines.append("Work session")
+    if data.get("work_session"):
+        session = data["work_session"]
+        tool_calls = session.get("tool_calls") or []
+        lines.append(
+            f"#{session.get('id')} [{session.get('status')}] "
+            f"tool_calls={len(tool_calls)} last_tool=#{session.get('last_tool_call_id') or ''}"
+        )
+    else:
+        lines.append("(none)")
+
+    lines.append("")
     lines.append("Open questions")
     if data.get("open_questions"):
         for question in data["open_questions"]:
@@ -428,6 +456,15 @@ def select_workbench_task(state, task_id=None):
 
 
 def cmd_work(args):
+    if getattr(args, "tool", None):
+        return cmd_work_tool(args)
+    if getattr(args, "start_session", False):
+        return cmd_work_start_session(args)
+    if getattr(args, "session", False):
+        return cmd_work_show_session(args)
+    if getattr(args, "close_session", False):
+        return cmd_work_close_session(args)
+
     state = load_state()
     task_id = getattr(args, "task_id", None)
     task = select_workbench_task(state, task_id)
@@ -444,6 +481,118 @@ def cmd_work(args):
         return 0
     print(format_workbench(data))
     return 0
+
+
+def cmd_work_start_session(args):
+    task_id = getattr(args, "task_id", None)
+    with state_lock():
+        state = load_state()
+        task = select_workbench_task(state, task_id)
+        if not task:
+            if task_id:
+                print(f"mew: task not found: {task_id}", file=sys.stderr)
+                return 1
+            print("No tasks.")
+            return 0
+        session, created = create_work_session(state, task)
+        save_state(state)
+    if args.json:
+        print(json.dumps({"created": created, "work_session": session}, ensure_ascii=False, indent=2))
+    else:
+        print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
+        print(format_work_session(session, task=task))
+    return 0
+
+
+def cmd_work_show_session(args):
+    state = load_state()
+    session = active_work_session(state)
+    if getattr(args, "task_id", None):
+        task = find_task(state, args.task_id)
+        session = None
+        for candidate in reversed(state.get("work_sessions", [])):
+            if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
+                session = candidate
+                break
+    else:
+        task = work_session_task(state, session)
+    if args.json:
+        print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_session(session, task=task))
+    return 0
+
+
+def cmd_work_close_session(args):
+    with state_lock():
+        state = load_state()
+        session = active_work_session(state)
+        if getattr(args, "task_id", None):
+            session = None
+            for candidate in reversed(state.get("work_sessions", [])):
+                if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
+                    session = candidate
+                    break
+        if not session:
+            print("No active work session.")
+            return 0
+        close_work_session(session)
+        save_state(state)
+    if args.json:
+        print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
+    else:
+        print(f"closed work session #{session['id']}")
+    return 0
+
+
+def _work_tool_parameters(args):
+    parameters = {
+        "path": args.path,
+        "query": getattr(args, "query", None),
+        "pattern": getattr(args, "pattern", None),
+        "limit": getattr(args, "limit", None),
+        "max_chars": getattr(args, "max_chars", None),
+        "max_matches": getattr(args, "max_matches", None),
+    }
+    return {key: value for key, value in parameters.items() if value is not None}
+
+
+def cmd_work_tool(args):
+    with state_lock():
+        state = load_state()
+        session = active_work_session(state)
+        if getattr(args, "task_id", None):
+            session = None
+            for candidate in reversed(state.get("work_sessions", [])):
+                if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
+                    session = candidate
+                    break
+        if not session:
+            print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
+            return 1
+        parameters = _work_tool_parameters(args)
+        tool_call = start_work_tool_call(state, session, args.tool, parameters)
+        session_id = session.get("id")
+        tool_call_id = tool_call.get("id")
+        save_state(state)
+
+    try:
+        result = execute_work_tool(args.tool, parameters, getattr(args, "allow_read", None) or [])
+        error = ""
+    except (OSError, ValueError) as exc:
+        result = None
+        error = str(exc)
+
+    with state_lock():
+        state = load_state()
+        tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        save_state(state)
+    if args.json:
+        print(json.dumps({"tool_call": tool_call}, ensure_ascii=False, indent=2))
+    else:
+        print(f"work tool #{tool_call['id']} [{tool_call['status']}] {tool_call['tool']}")
+        print(tool_call.get("summary") or tool_call.get("error") or "")
+    return 0 if tool_call.get("status") == "completed" else 1
 
 def cmd_task_done(args):
     with state_lock():
@@ -2045,6 +2194,20 @@ def cmd_tool_search(args):
     _print_json_or_text(result, args.json, summarize_read_result("search_text", result))
     return 0
 
+def cmd_tool_glob(args):
+    try:
+        result = glob_paths(
+            args.pattern,
+            args.path,
+            _tool_allowed_roots(args),
+            max_matches=args.max_matches,
+        )
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, summarize_read_result("glob", result))
+    return 0
+
 def cmd_tool_write(args):
     try:
         result = write_file(
@@ -3451,6 +3614,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
+/work-session [cmd]   show/start/close native work session
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -3561,6 +3725,56 @@ def print_chat_workbench(task_id):
             print("No tasks.")
         return
     print(format_workbench(build_workbench_data(state, task)))
+
+
+def chat_work_session(rest):
+    parts = rest.split()
+    action = parts[0].casefold() if parts else "show"
+    task_id = parts[1] if len(parts) > 1 else None
+    if action not in ("show", "start", "close"):
+        task_id = parts[0] if parts else None
+        action = "show"
+
+    if action == "start":
+        with state_lock():
+            state = load_state()
+            task = select_workbench_task(state, task_id)
+            if not task:
+                print(f"mew: task not found: {task_id}" if task_id else "No tasks.")
+                return
+            session, created = create_work_session(state, task)
+            save_state(state)
+        print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
+        print(format_work_session(session, task=task))
+        return
+
+    if action == "close":
+        with state_lock():
+            state = load_state()
+            session = active_work_session(state)
+            if task_id:
+                session = None
+                for candidate in reversed(state.get("work_sessions", [])):
+                    if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
+                        session = candidate
+                        break
+            if not session:
+                print("No active work session.")
+                return
+            close_work_session(session)
+            save_state(state)
+        print(f"closed work session #{session['id']}")
+        return
+
+    state = load_state()
+    session = active_work_session(state)
+    if task_id:
+        session = None
+        for candidate in reversed(state.get("work_sessions", [])):
+            if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
+                session = candidate
+                break
+    print(format_work_session(session, task=work_session_task(state, session)))
 
 
 def chat_add_task(rest):
@@ -4509,6 +4723,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "work":
         print_chat_workbench(rest or None)
+        return "continue"
+    if command in ("work-session", "work_session"):
+        chat_work_session(rest)
         return "continue"
     if command == "note":
         chat_append_task_note(rest)

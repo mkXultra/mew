@@ -64,6 +64,7 @@ from .commands import (
     cmd_trace,
     cmd_tool_git,
     cmd_tool_edit,
+    cmd_tool_glob,
     cmd_tool_list,
     cmd_tool_read,
     cmd_tool_search,
@@ -522,7 +523,7 @@ def build_parser():
     dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
     dogfood_parser.add_argument(
         "--scenario",
-        choices=("all", "interrupted-focus", "trace-smoke", "memory-search", "runtime-focus"),
+        choices=("all", "interrupted-focus", "trace-smoke", "memory-search", "runtime-focus", "work-session"),
         help="run a deterministic CLI dogfood scenario instead of a timed runtime dogfood",
     )
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")
@@ -645,6 +646,21 @@ def build_parser():
 
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")
     work_parser.add_argument("task_id", nargs="?")
+    work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
+    work_parser.add_argument("--session", action="store_true", help="show the active native work session")
+    work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
+    work_parser.add_argument(
+        "--tool",
+        choices=("inspect_dir", "read_file", "search_text", "glob"),
+        help="run a read-only native work-session tool",
+    )
+    work_parser.add_argument("--allow-read", action="append", default=[], help="read root for native work tools")
+    work_parser.add_argument("--path", default=".", help="path for a native work tool")
+    work_parser.add_argument("--query", help="query for search_text")
+    work_parser.add_argument("--pattern", help="pattern for glob")
+    work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
+    work_parser.add_argument("--max-chars", type=int, default=6000, help="maximum read_file characters")
+    work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 
@@ -698,6 +714,14 @@ def build_parser():
     tool_search_parser.add_argument("--max-matches", type=int, default=50)
     tool_search_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_search_parser.set_defaults(func=cmd_tool_search)
+
+    tool_glob_parser = tool_subparsers.add_parser("glob", help="glob paths under an allowed root")
+    tool_glob_parser.add_argument("pattern")
+    tool_glob_parser.add_argument("path", nargs="?", default=".")
+    tool_glob_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
+    tool_glob_parser.add_argument("--max-matches", type=int, default=100)
+    tool_glob_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_glob_parser.set_defaults(func=cmd_tool_glob)
 
     tool_write_parser = tool_subparsers.add_parser("write", help="write a file under an allowed root")
     tool_write_parser.add_argument("path")
