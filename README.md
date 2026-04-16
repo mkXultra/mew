@@ -247,6 +247,7 @@ uv run mew work --session
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
+uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify
 ```
 
 ## Resident Model

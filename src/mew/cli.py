@@ -651,13 +651,18 @@ def build_parser():
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
     work_parser.add_argument(
         "--tool",
-        choices=("inspect_dir", "read_file", "search_text", "glob"),
-        help="run a read-only native work-session tool",
+        choices=("inspect_dir", "read_file", "search_text", "glob", "run_command", "run_tests"),
+        help="run a native work-session tool",
     )
     work_parser.add_argument("--allow-read", action="append", default=[], help="read root for native work tools")
+    work_parser.add_argument("--allow-shell", action="store_true", help="allow run_command work-session tool")
+    work_parser.add_argument("--allow-verify", action="store_true", help="allow run_tests work-session tool")
     work_parser.add_argument("--path", default=".", help="path for a native work tool")
     work_parser.add_argument("--query", help="query for search_text")
     work_parser.add_argument("--pattern", help="pattern for glob")
+    work_parser.add_argument("--command", help="command for run_command or run_tests")
+    work_parser.add_argument("--cwd", default=".", help="cwd for run_command or run_tests")
+    work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=6000, help="maximum read_file characters")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")

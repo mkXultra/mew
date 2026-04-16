@@ -2,10 +2,12 @@ from .read_tools import glob_paths, inspect_dir, read_file, search_text, summari
 from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso
+from .toolbox import format_command_record, run_command_record
 
 
 WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed"}
+WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob", "run_command", "run_tests"}
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 
 
@@ -94,9 +96,9 @@ def start_work_tool_call(state, session, tool, parameters):
 
 def execute_work_tool(tool, parameters, allowed_read_roots):
     parameters = dict(parameters or {})
-    if tool not in READ_ONLY_WORK_TOOLS:
+    if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
-    if not allowed_read_roots:
+    if tool in READ_ONLY_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
 
     if tool == "inspect_dir":
@@ -114,12 +116,36 @@ def execute_work_tool(tool, parameters, allowed_read_roots):
             allowed_read_roots,
             max_matches=parameters.get("max_matches", 50),
         )
-    return glob_paths(
-        parameters.get("pattern") or "",
-        parameters.get("path") or ".",
-        allowed_read_roots,
-        max_matches=parameters.get("max_matches", 100),
+    if tool == "glob":
+        return glob_paths(
+            parameters.get("pattern") or "",
+            parameters.get("path") or ".",
+            allowed_read_roots,
+            max_matches=parameters.get("max_matches", 100),
+        )
+    if tool == "run_tests":
+        if not parameters.get("allow_verify"):
+            raise ValueError("verification is disabled; pass --allow-verify")
+        command = parameters.get("command") or ""
+        if not command:
+            raise ValueError("run_tests command is empty")
+        return run_command_record(command, cwd=parameters.get("cwd") or ".", timeout=parameters.get("timeout", 300))
+    if not parameters.get("allow_shell"):
+        raise ValueError("shell command execution is disabled; pass --allow-shell")
+    command = parameters.get("command") or ""
+    if not command:
+        raise ValueError("run_command command is empty")
+    return run_command_record(
+        command,
+        cwd=parameters.get("cwd") or ".",
+        timeout=parameters.get("timeout", 300),
     )
+
+
+def summarize_work_tool_result(tool, result):
+    if tool in READ_ONLY_WORK_TOOLS:
+        return summarize_read_result(tool, result or {})
+    return format_command_record(result or {})
 
 
 def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""):
@@ -135,7 +161,7 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
     else:
         tool_call["status"] = "completed"
         tool_call["result"] = result
-        tool_call["summary"] = clip_output(summarize_read_result(tool_call.get("tool"), result or {}), 4000)
+        tool_call["summary"] = clip_output(summarize_work_tool_result(tool_call.get("tool"), result or {}), 4000)
     tool_call["finished_at"] = finished_at
     if session:
         session["updated_at"] = finished_at

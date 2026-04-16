@@ -172,6 +172,99 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_runs_tests_behind_verify_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                "python -c \"print('ok')\"",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("verification is disabled", stdout.getvalue())
+
+                command = f"{os.environ.get('PYTHON', 'python3')} -c \"print('ok')\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["tool_call"]["status"], "completed")
+                self.assertEqual(data["tool_call"]["result"]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_runs_command_behind_shell_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{os.environ.get('PYTHON', 'python3')} -c \"print('shell ok')\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_command", "--command", command]),
+                        1,
+                    )
+                self.assertIn("shell command execution is disabled", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["tool_call"]["status"], "completed")
+                self.assertIn("shell ok", data["tool_call"]["result"]["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_start_and_show_session(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

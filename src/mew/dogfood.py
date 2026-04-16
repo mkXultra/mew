@@ -514,11 +514,24 @@ def run_work_session_scenario(workspace, env=None):
     glob_result = run(
         ["work", "1", "--tool", "glob", "--pattern", "*.py", "--path", ".", "--allow-read", ".", "--json"]
     )
+    test_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "run_tests",
+            "--command",
+            f"{sys.executable} -c \"print('work test ok')\"",
+            "--allow-verify",
+            "--json",
+        ]
+    )
     work_result = run(["work", "1", "--json"])
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
+    test_data = _json_stdout(test_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
@@ -551,10 +564,18 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_run_tests_completes",
+        test_result.get("exit_code") == 0
+        and ((test_data.get("tool_call") or {}).get("result") or {}).get("exit_code") == 0,
+        observed=test_data.get("tool_call"),
+        expected="run_tests records exit_code=0",
+    )
+    _scenario_check(
+        checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 2 and [call.get("tool") for call in tool_calls] == ["read_file", "glob"],
+        len(tool_calls) == 3 and [call.get("tool") for call in tool_calls] == ["read_file", "glob", "run_tests"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
-        expected=["read_file", "glob"],
+        expected=["read_file", "glob", "run_tests"],
     )
     return _scenario_report("work-session", workspace, commands, checks)
 
