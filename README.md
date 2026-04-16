@@ -251,6 +251,8 @@ uv run mew work --session --details
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
+uv run mew work 1 --tool git_status --allow-read .
+uv run mew work 1 --tool git_diff --allow-read .
 uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify
 uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify --progress --json
 uv run mew work 1 --tool write_file --path notes.md --content "hello" --create --allow-write .

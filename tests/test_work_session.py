@@ -1,6 +1,8 @@
 import json
 import os
 import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -351,6 +353,65 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["tool_call"]["status"], "completed")
                 self.assertIn("shell ok", data["tool_call"]["result"]["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_git_tools_are_read_only_and_gated(self):
+        if not shutil.which("git"):
+            self.skipTest("git not found")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                subprocess.run(["git", "init"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                Path("app.py").write_text("print('old')\n", encoding="utf-8")
+                subprocess.run(["git", "add", "app.py"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.email=mew@example.invalid",
+                        "-c",
+                        "user.name=mew",
+                        "commit",
+                        "-m",
+                        "init",
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                Path("app.py").write_text("print('new')\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tool", "git_status", "--json"]), 1)
+                self.assertIn("git inspection is disabled", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_status", "--allow-read", ".", "--json"]),
+                        0,
+                    )
+                status_data = json.loads(stdout.getvalue())
+                self.assertEqual(status_data["tool_call"]["status"], "completed")
+                self.assertIn(" M app.py", status_data["tool_call"]["result"]["stdout"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_diff", "--allow-read", ".", "--json"]),
+                        0,
+                    )
+                diff_data = json.loads(stdout.getvalue())
+                diff_text = diff_data["tool_call"]["result"]["stdout"]
+                self.assertIn("-print('old')", diff_text)
+                self.assertIn("+print('new')", diff_text)
             finally:
                 os.chdir(old_cwd)
 

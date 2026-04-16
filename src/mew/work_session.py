@@ -3,13 +3,14 @@ from .read_tools import (
     glob_paths,
     inspect_dir,
     read_file,
+    resolve_allowed_path,
     search_text,
     summarize_read_result,
 )
 from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso
-from .toolbox import format_command_record, run_command_record, run_command_record_streaming
+from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -29,10 +30,14 @@ WORK_TOOLS = {
     "glob",
     "run_command",
     "run_tests",
+    "git_status",
+    "git_diff",
+    "git_log",
     "write_file",
     "edit_file",
 }
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
+GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 
 
@@ -186,6 +191,8 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
         raise ValueError(f"unsupported work tool: {tool}")
     if tool in READ_ONLY_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
+    if tool in GIT_WORK_TOOLS and not allowed_read_roots:
+        raise ValueError("git inspection is disabled; pass --allow-read PATH")
 
     if tool == "inspect_dir":
         return inspect_dir(parameters.get("path") or ".", allowed_read_roots, limit=parameters.get("limit", 50))
@@ -209,6 +216,19 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             allowed_read_roots,
             max_matches=parameters.get("max_matches", 100),
         )
+    if tool in GIT_WORK_TOOLS:
+        cwd = resolve_allowed_path(parameters.get("cwd") or ".", allowed_read_roots)
+        if tool == "git_status":
+            return run_git_tool("status", cwd=str(cwd))
+        if tool == "git_diff":
+            return run_git_tool(
+                "diff",
+                cwd=str(cwd),
+                staged=bool(parameters.get("staged")),
+                stat=bool(parameters.get("stat")),
+                base=parameters.get("base") or "",
+            )
+        return run_git_tool("log", cwd=str(cwd), limit=parameters.get("limit", 20))
     if tool in WRITE_WORK_TOOLS:
         return execute_work_write_tool(tool, parameters, on_output=on_output)
     if tool == "run_tests":
@@ -304,6 +324,8 @@ def work_tool_result_error(tool, result):
     result = result or {}
     if tool == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
         return f"verification failed with exit_code={result.get('exit_code')}"
+    if tool in GIT_WORK_TOOLS and "exit_code" in result and result.get("exit_code") != 0:
+        return f"{tool} failed with exit_code={result.get('exit_code')}"
     if tool in WRITE_WORK_TOOLS:
         if "verification_exit_code" in result and result.get("verification_exit_code") != 0:
             exit_code = result.get("verification_exit_code")
@@ -358,6 +380,8 @@ def summarize_work_tool_result(tool, result):
         return summary
     if tool == "run_tests" and (result or {}).get("exit_code") != 0:
         return format_command_failure_summary(result or {})
+    if tool in GIT_WORK_TOOLS:
+        return format_command_record(result or {})
     return format_command_record(result or {})
 
 

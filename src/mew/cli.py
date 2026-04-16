@@ -669,6 +669,9 @@ def build_parser():
             "read_file",
             "search_text",
             "glob",
+            "git_status",
+            "git_diff",
+            "git_log",
             "run_command",
             "run_tests",
             "write_file",
@@ -684,6 +687,9 @@ def build_parser():
     work_parser.add_argument("--query", help="query for search_text")
     work_parser.add_argument("--pattern", help="pattern for glob")
     work_parser.add_argument("--command", help="command for run_command or run_tests")
+    work_parser.add_argument("--base", help="base ref for git_diff base...HEAD")
+    work_parser.add_argument("--staged", action="store_true", help="show staged changes for git_diff")
+    work_parser.add_argument("--stat", action="store_true", help="show diffstat for git_diff")
     work_parser.add_argument("--content", help="content for write_file")
     work_parser.add_argument("--old", help="old text for edit_file")
     work_parser.add_argument("--new", help="new text for edit_file")

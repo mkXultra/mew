@@ -34,7 +34,7 @@ def _compact_tool_result(tool, result):
             for key in ("path", "query", "pattern", "entries", "matches", "truncated")
             if key in result
         }
-    if tool in ("run_command", "run_tests"):
+    if tool in ("run_command", "run_tests", "git_status", "git_diff", "git_log"):
         return {
             "command": result.get("command"),
             "cwd": result.get("cwd"),
@@ -156,7 +156,7 @@ def _work_action_schema_text():
         "{\n"
         '  "summary": "short reason",\n'
         '  "action": {\n'
-        '    "type": "inspect_dir|read_file|search_text|glob|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
+        '    "type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
         '    "pattern": "glob pattern",\n'
@@ -224,6 +224,9 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "query",
         "pattern",
         "command",
+        "cwd",
+        "base",
+        "limit",
         "content",
         "old",
         "new",
@@ -234,7 +237,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)
-    for key in ("create", "replace_all"):
+    for key in ("create", "replace_all", "staged", "stat"):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
 
