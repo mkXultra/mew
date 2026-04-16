@@ -319,7 +319,10 @@ write.
 pane after each step, and a resume after each completed tool step. The thinking
 pane includes `step/max`, session, and task ids, so a longer live run has a
 stable progress anchor. Read results stay summarized in the result pane and
-final step report so large files do not flood the cockpit.
+final step report so large files do not flood the cockpit. Add `--compact-live`
+when you want only thinking/action/result panes during a longer run and will
+open `mew work --session --resume` separately if you need the full reentry
+bundle.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set

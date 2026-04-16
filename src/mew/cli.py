@@ -713,6 +713,11 @@ def build_parser():
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")
     work_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas to progress output when supported")
     work_parser.add_argument(
+        "--compact-live",
+        action="store_true",
+        help="in --live mode, skip the full per-step resume and keep the stream to thinking/action/result panes",
+    )
+    work_parser.add_argument(
         "--prompt-approval",
         action="store_true",
         help="force inline approval prompts before applying dry-run writes in --live mode, even when stdin is not a TTY",

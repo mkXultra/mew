@@ -806,6 +806,7 @@ def _work_control_options(args, session=None):
         "allow_verify": bool(option("allow_verify", False)),
         "verify_command": option("verify_command", ""),
         "act_mode": option("act_mode"),
+        "compact_live": bool(option("compact_live", False)),
         "prompt_approval": bool(option("prompt_approval", False)),
         "no_prompt_approval": bool(option("no_prompt_approval", False)),
     }
@@ -825,6 +826,7 @@ def remember_work_session_default_options(session, args):
             options.get("model"),
             options.get("base_url"),
             options.get("act_mode") and options.get("act_mode") != "model",
+            options.get("compact_live"),
             options.get("prompt_approval"),
             options.get("no_prompt_approval"),
         )
@@ -865,6 +867,7 @@ def remember_work_session_default_options(session, args):
         "allow_verify": bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": merged_scalar("verify_command"),
         "act_mode": merged_scalar("act_mode"),
+        "compact_live": bool(current.get("compact_live") or options.get("compact_live")),
         "prompt_approval": prompt_approval,
         "no_prompt_approval": no_prompt_approval,
     }
@@ -917,6 +920,8 @@ def work_chat_continue_options(session):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("compact_live"):
+        parts.append("--compact-live")
     if options.get("no_prompt_approval"):
         parts.append("--no-prompt-approval")
     elif options.get("prompt_approval"):
@@ -950,6 +955,8 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1):
         parts.extend(["--verify-command", options["verify_command"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("compact_live"):
+        parts.append("--compact-live")
     if options.get("no_prompt_approval"):
         parts.append("--no-prompt-approval")
     elif options.get("prompt_approval"):
@@ -1359,6 +1366,7 @@ def cmd_do(args):
         work_guidance=getattr(args, "work_guidance", None),
         progress=True,
         stream_model=bool(getattr(args, "stream_model", False)),
+        compact_live=bool(getattr(args, "compact_live", False)),
         prompt_approval=bool(getattr(args, "prompt_approval", False)),
         no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
         allow_read=getattr(args, "allow_read", None) or ["."],
@@ -1600,9 +1608,10 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} result")
                 print(format_work_live_step_result(batch_step, resume=resume))
-                print("")
-                print(f"Work live step #{index} resume")
-                print(format_work_session_resume(resume))
+                if not getattr(args, "compact_live", False):
+                    print("")
+                    print(f"Work live step #{index} resume")
+                    print(format_work_session_resume(resume))
             if batch_step.get("error"):
                 report["stop_reason"] = "tool_failed"
                 break
@@ -1664,9 +1673,10 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} result")
                 print(format_work_live_step_result(control_step, resume=resume))
-                print("")
-                print(f"Work live step #{index} resume")
-                print(format_work_session_resume(resume))
+                if not getattr(args, "compact_live", False):
+                    print("")
+                    print(f"Work live step #{index} resume")
+                    print(format_work_session_resume(resume))
             report["steps"].append(
                 {
                     "index": index,
@@ -1809,9 +1819,10 @@ def cmd_work_ai(args):
             print("")
             print(f"Work live step #{index} result")
             print(format_work_live_step_result(report["steps"][-1], resume=resume))
-            print("")
-            print(f"Work live step #{index} resume")
-            print(format_work_session_resume(resume))
+            if not getattr(args, "compact_live", False):
+                print("")
+                print(f"Work live step #{index} resume")
+                print(format_work_session_resume(resume))
         if pending_approval:
             if live_approval_prompt_enabled(args):
                 with state_lock():
@@ -5740,6 +5751,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /continue --allow-read .              run one live resident-model step
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop
+/work-session live --compact-live     show thinking/action/result panes without full per-step resumes
 /work-session live                    prompts inline for dry-run writes in an interactive TTY
 /work-session live --no-prompt-approval
                                       disable inline dry-run write prompts for this run
@@ -5869,6 +5881,7 @@ def _parse_chat_work_ai_args(parts):
         "progress": False,
         "live": False,
         "stream_model": False,
+        "compact_live": False,
         "prompt_approval": False,
         "no_prompt_approval": False,
         "allow_read": [],
@@ -5945,6 +5958,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--stream-model":
             args["stream_model"] = True
+            index += 1
+            continue
+        if token == "--compact-live":
+            args["compact_live"] = True
             index += 1
             continue
         if token == "--prompt-approval":
@@ -6038,7 +6055,9 @@ def _split_continue_options_and_guidance(rest):
         "--progress",
         "--live",
         "--stream-model",
+        "--compact-live",
         "--prompt-approval",
+        "--no-prompt-approval",
     }
     value_option_prefixes = tuple(f"{option}=" for option in value_options)
     kept = []

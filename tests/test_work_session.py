@@ -3780,6 +3780,51 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_compact_skips_per_step_resume(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("compact content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "read README",
+                    "action": {"type": "read_file", "path": "README.md"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--compact-live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 thinking", output)
+                self.assertIn("progress: step=1/1 session=#1 task=#1", output)
+                self.assertIn("Work live step #1 result", output)
+                self.assertNotIn("Work live step #1 resume", output)
+                self.assertNotIn("Work resume #1", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("--compact-live", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prints_resume_after_finish(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

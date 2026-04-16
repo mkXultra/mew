@@ -3562,6 +3562,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session resume --auto-recover-safe", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
+        self.assertIn("/work-session live --compact-live", output)
         self.assertIn("/work-session live                    prompts inline", output)
         self.assertIn("/work-session live --no-prompt-approval", output)
         self.assertNotIn("/agents [all]", output)
@@ -3569,10 +3570,13 @@ class CommandTests(unittest.TestCase):
     def test_chat_work_ai_args_accept_prompt_approval(self):
         from mew.commands import _parse_chat_work_ai_args
 
-        args, error = _parse_chat_work_ai_args(["live", "--allow-read", ".", "--prompt-approval", "--no-prompt-approval"])
+        args, error = _parse_chat_work_ai_args(
+            ["live", "--allow-read", ".", "--compact-live", "--prompt-approval", "--no-prompt-approval"]
+        )
 
         self.assertEqual(error, "")
         self.assertEqual(args.allow_read, ["."])
+        self.assertTrue(args.compact_live)
         self.assertTrue(args.prompt_approval)
         self.assertTrue(args.no_prompt_approval)
 
