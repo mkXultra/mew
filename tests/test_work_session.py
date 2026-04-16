@@ -770,6 +770,19 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--session", "--diffs", "--json"]), 0)
                 diff_data = json.loads(stdout.getvalue())
                 self.assertEqual(diff_data["diffs"][0]["diff_stats"], {"added": 1, "removed": 1})
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)
+                tests_output = stdout.getvalue()
+                self.assertIn("Work tests #1 [active] task=#1", tests_output)
+                self.assertIn("[passed] edit_file_verification", tests_output)
+                self.assertIn("verify ok", tests_output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--tests", "--json"]), 0)
+                tests_data = json.loads(stdout.getvalue())
+                self.assertEqual(tests_data["tests"][0]["kind"], "edit_file_verification")
+                self.assertEqual(tests_data["tests"][0]["exit_code"], 0)
             finally:
                 os.chdir(old_cwd)
 
@@ -867,6 +880,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Diff preview (+1 -1)", diff_text)
                 self.assertIn("-before", diff_text)
                 self.assertIn("+after", diff_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session tests", {}), "continue")
+                tests_text = stdout.getvalue()
+                self.assertIn("Work tests #1 [active] task=#1", tests_text)
+                self.assertIn("[passed] run_tests", tests_text)
+                self.assertIn("resume ok", tests_text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", {}), "continue")

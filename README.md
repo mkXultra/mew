@@ -388,7 +388,7 @@ Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
 Inside `mew chat`, use `/work-session details`, `/work-session diffs`,
-`/work-session timeline`, `/work-session resume --allow-read .`,
+`/work-session tests`, `/work-session timeline`, `/work-session resume --allow-read .`,
 `/work-session resume --allow-read . --auto-recover-safe`,
 `/work-session live 1 --allow-read . --max-steps 1`,
 `/work-session live --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,

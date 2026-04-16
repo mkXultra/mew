@@ -1314,6 +1314,75 @@ def format_work_session_diffs(session, task=None, limit=8):
     return "\n".join(lines)
 
 
+def build_work_session_test_entries(session, limit=8, max_chars=1200):
+    entries = []
+    for call in (session or {}).get("tool_calls") or []:
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        if call.get("tool") == "run_tests" and result.get("command"):
+            entries.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "status": call.get("status") or "unknown",
+                    "kind": "run_tests",
+                    "command": result.get("command") or parameters.get("command") or "",
+                    "cwd": result.get("cwd") or parameters.get("cwd") or "",
+                    "exit_code": result.get("exit_code"),
+                    "stdout": clip_tail(result.get("stdout") or "", max_chars),
+                    "stderr": clip_tail(result.get("stderr") or "", max_chars),
+                    "finished_at": call.get("finished_at"),
+                }
+            )
+        verification = result.get("verification") or {}
+        if verification.get("command"):
+            entries.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "status": call.get("status") or "unknown",
+                    "kind": f"{call.get('tool')}_verification",
+                    "command": verification.get("command") or "",
+                    "cwd": verification.get("cwd") or "",
+                    "exit_code": verification.get("exit_code"),
+                    "stdout": clip_tail(verification.get("stdout") or "", max_chars),
+                    "stderr": clip_tail(verification.get("stderr") or "", max_chars),
+                    "finished_at": verification.get("finished_at") or call.get("finished_at"),
+                }
+            )
+    return entries[-limit:]
+
+
+def format_work_session_tests(session, task=None, limit=8):
+    if not session:
+        return "No active work session."
+    lines = [
+        f"Work tests #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
+        f"title: {session.get('title') or (task or {}).get('title') or ''}",
+        "",
+        "Tests and verifications",
+    ]
+    entries = build_work_session_test_entries(session, limit=limit)
+    if not entries:
+        lines.append("(none)")
+        return "\n".join(lines)
+    for entry in entries:
+        outcome = "passed" if entry.get("exit_code") == 0 else "failed"
+        if entry.get("exit_code") is None:
+            outcome = "unknown"
+        lines.append(
+            f"#{entry.get('tool_call_id')} [{outcome}] {entry.get('kind')} "
+            f"exit={entry.get('exit_code')} {entry.get('command') or ''}"
+        )
+        if entry.get("cwd"):
+            lines.append(f"cwd: {entry.get('cwd')}")
+        if entry.get("stdout"):
+            lines.append("stdout:")
+            lines.append(entry["stdout"])
+        if entry.get("stderr"):
+            lines.append("stderr:")
+            lines.append(entry["stderr"])
+    return "\n".join(lines)
+
+
 def format_work_session(session, task=None, limit=8, details=False):
     if not session:
         return "No active work session."

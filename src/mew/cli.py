@@ -786,6 +786,7 @@ def build_parser():
     work_parser.add_argument("--resume", action="store_true", help="show a compact work-session resume bundle")
     work_parser.add_argument("--timeline", action="store_true", help="show a compact chronological work-session timeline")
     work_parser.add_argument("--diffs", action="store_true", help="show recent work-session write/edit diffs")
+    work_parser.add_argument("--tests", action="store_true", help="show recent work-session test and verification output")
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 
