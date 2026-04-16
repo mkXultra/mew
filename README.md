@@ -279,7 +279,8 @@ can still show the closed session. Work-mode `send_message` writes to outbox;
 `batch` action to run up to five inspection tools in one work turn; writes and
 shell commands remain outside batch mode. In `mew chat`, live work steps print
 `Next controls` after execution. `/continue` remembers the previous live-step
-options for the chat session, so `/continue <guidance>` can steer the next step
+options for the chat session, and a fresh chat can recover the active work
+session's stored defaults, so `/continue <guidance>` can steer the next step
 without retyping gates such as `--allow-read .`. A long work loop can be asked
 to pause at the next model/tool boundary with `mew work --stop-session` or
 `/work-session stop`. Work steps are journaled before THINK/ACT starts, and stop
@@ -338,7 +339,7 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic 
 
 Inside `mew chat`, use `/work-session details`, `/work-session resume --allow-read .`, `/work-session live 1 --allow-read . --max-steps 1`,
 `/continue --allow-read .` to advance the active work session by one live step,
-`/continue focus on README.md` to reuse the previous live options with new guidance,
+`/continue focus on README.md` to reuse the previous or persisted live options with new guidance,
 `/work-session note prefer small verified steps`,
 `/work-session stop pause after this step`,
 `/work-session ai 1 --allow-read . --max-steps 1`,

@@ -2739,6 +2739,40 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_continue_uses_persisted_session_options_after_reentry(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("fresh continue\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(run_chat_slash_command("/continue inspect README after reentry", {}), "continue")
+
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("fresh continue", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
+                self.assertIn("inspect README after reentry", prompts[0])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_run_ai_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

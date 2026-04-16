@@ -5176,6 +5176,8 @@ def _looks_like_work_continue_options(rest):
 def _chat_continue_rest(rest, chat_state):
     rest = (rest or "").strip()
     cached = (chat_state or {}).get("work_continue_options", "").strip()
+    if not cached:
+        cached = work_chat_continue_options(active_work_session(load_state()))
     if not rest:
         return cached
     if _looks_like_work_continue_options(rest):
