@@ -124,6 +124,30 @@ def close_work_session(session, current_time=None):
     return session
 
 
+def request_work_session_stop(session, reason="", current_time=None):
+    current_time = current_time or now_iso()
+    session["stop_requested_at"] = current_time
+    session["stop_reason"] = reason or "stop requested"
+    session["updated_at"] = current_time
+    return session
+
+
+def consume_work_session_stop(session, current_time=None):
+    if not session or not session.get("stop_requested_at"):
+        return None
+    current_time = current_time or now_iso()
+    stop = {
+        "requested_at": session.get("stop_requested_at"),
+        "reason": session.get("stop_reason") or "stop requested",
+    }
+    session["last_stop_request"] = stop
+    session["stop_acknowledged_at"] = current_time
+    session.pop("stop_requested_at", None)
+    session.pop("stop_reason", None)
+    session["updated_at"] = current_time
+    return stop
+
+
 def mark_running_work_interrupted(state, current_time=None):
     current_time = current_time or now_iso()
     repairs = []
@@ -526,6 +550,8 @@ def work_session_phase(session, calls, turns, pending_approvals):
         return "none"
     if session.get("status") == "closed":
         return "closed"
+    if session.get("stop_requested_at"):
+        return "stop_requested"
     if pending_approvals:
         return "awaiting_approval"
     if any((call or {}).get("status") == "running" for call in calls):
@@ -640,6 +666,8 @@ def build_work_session_resume(session, task=None, limit=8):
 
     if session.get("status") == "closed":
         next_action = "review this closed work session or start a new one with mew work --ai"
+    elif phase == "stop_requested":
+        next_action = "stop requested; the running work loop should pause at the next boundary"
     elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
     elif phase == "running_tool":

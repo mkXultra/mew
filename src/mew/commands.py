@@ -128,6 +128,7 @@ from .work_session import (
     active_work_session,
     build_work_session_resume,
     close_work_session,
+    consume_work_session_stop,
     create_work_session,
     execute_work_tool,
     find_work_session,
@@ -138,6 +139,7 @@ from .work_session import (
     format_work_session_resume,
     format_work_session,
     mark_running_work_interrupted,
+    request_work_session_stop,
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
@@ -702,6 +704,8 @@ def cmd_work(args):
         return cmd_work_show_session(args)
     if getattr(args, "close_session", False):
         return cmd_work_close_session(args)
+    if getattr(args, "stop_session", False):
+        return cmd_work_stop_session(args)
 
     state = load_state()
     task_id = getattr(args, "task_id", None)
@@ -775,6 +779,18 @@ def cmd_work_ai(args):
             task = work_session_task(state, session)
         if not session or session.get("status") != "active":
             report["stop_reason"] = "no_active_session"
+            break
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            stop_request = consume_work_session_stop(session)
+            if stop_request:
+                save_state(state)
+        if stop_request:
+            report["stop_reason"] = "stop_requested"
+            report["stop_request"] = stop_request
+            if progress:
+                progress(f"step #{index}: stop requested")
             break
 
         try:
@@ -1177,6 +1193,23 @@ def cmd_work_close_session(args):
         print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
     else:
         print(f"closed work session #{session['id']}")
+    return 0
+
+
+def cmd_work_stop_session(args):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        request_work_session_stop(session, reason=getattr(args, "stop_reason", None) or "")
+        save_state(state)
+    if args.json:
+        print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
+    else:
+        reason = session.get("stop_reason") or "stop requested"
+        print(f"requested stop for work session #{session['id']}: {reason}")
     return 0
 
 
@@ -4298,7 +4331,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/ai/live/resume/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/ai/live/resume/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
@@ -4615,6 +4648,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
     lines.append("- /work-session details")
+    lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     return "\n".join(lines)
 
@@ -4629,7 +4663,7 @@ def chat_work_session(rest, chat_state=None):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "ai", "step", "live", "resume", "approve", "reject"):
+    if action not in ("show", "start", "close", "stop", "ai", "step", "live", "resume", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4662,6 +4696,12 @@ def chat_work_session(rest, chat_state=None):
             close_work_session(session)
             save_state(state)
         print(f"closed work session #{session['id']}")
+        return
+
+    if action == "stop":
+        args = SimpleNamespace(task_id=None, stop_reason=" ".join(parts[1:]), json=False)
+        cmd_work_stop_session(args)
+        print(format_work_cockpit_controls(continue_options=(chat_state or {}).get("work_continue_options", "")))
         return
 
     if action in ("ai", "step", "live"):

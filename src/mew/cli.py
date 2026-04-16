@@ -667,6 +667,8 @@ def build_parser():
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
     work_parser.add_argument("--session", action="store_true", help="show the active native work session")
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
+    work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
+    work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument("--approve-tool", type=int, help="approve and apply a dry-run write/edit tool call")
     work_parser.add_argument("--reject-tool", type=int, help="reject a dry-run write/edit tool call")
     work_parser.add_argument("--reject-reason", help="reason recorded with --reject-tool")

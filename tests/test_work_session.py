@@ -676,6 +676,47 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_stop_request_is_consumed_before_model_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--stop-session", "--stop-reason", "pause after this boundary", "--json"]),
+                        0,
+                    )
+                stopped = json.loads(stdout.getvalue())["work_session"]
+                self.assertTrue(stopped["stop_requested_at"])
+                self.assertEqual(stopped["stop_reason"], "pause after this boundary")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "stop_requested")
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(main(["work", "1", "--ai", "--auth", "auth.json", "--json"]), 0)
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "stop_requested")
+                self.assertEqual(report["steps"], [])
+                call_model.assert_not_called()
+
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("stop_requested_at", session)
+                self.assertEqual(session["last_stop_request"]["reason"], "pause after this boundary")
+                self.assertTrue(session["stop_acknowledged_at"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_resume_next_action_uses_latest_tool_status(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1746,6 +1787,30 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("/continue <guidance>", output)
                 self.assertIn("/work-session resume 1", output)
                 self.assertIn("Work session finished: guidance followed", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_can_request_stop(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session stop pause soon", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("requested stop for work session #1: pause soon", output)
+                self.assertIn("Next controls", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["stop_reason"], "pause soon")
             finally:
                 os.chdir(old_cwd)
 

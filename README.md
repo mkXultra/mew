@@ -252,13 +252,16 @@ can still show the closed session. Work-mode `send_message` writes to outbox;
 shell commands remain outside batch mode. In `mew chat`, live work steps print
 `Next controls` after execution. `/continue` remembers the previous live-step
 options for the chat session, so `/continue <guidance>` can steer the next step
-without retyping gates such as `--allow-read .`.
+without retyping gates such as `--allow-read .`. A long work loop can be asked
+to pause at the next model/tool boundary with `mew work --stop-session` or
+`/work-session stop`.
 
 ```sh
 uv run mew work 1 --start-session
 uv run mew work --session
 uv run mew work --session --details
 uv run mew work --session --resume
+uv run mew work --stop-session --stop-reason "pause after this step"
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool read_file --path src/mew/commands.py --allow-read . --offset 50000 --max-chars 12000
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
@@ -281,6 +284,7 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic 
 Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session live 1 --allow-read . --max-steps 1`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/continue focus on README.md` to reuse the previous live options with new guidance,
+`/work-session stop pause after this step`,
 `/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
 `/work-session reject 7 not the right change`.

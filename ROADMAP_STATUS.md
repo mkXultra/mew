@@ -88,6 +88,7 @@ Evidence:
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
+- Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
 
 Missing proof:
 
@@ -95,7 +96,7 @@ Missing proof:
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible, but there is no prompt budget enforcement or automatic compaction of noisy work-session history.
-- Live coding work session UX now has a one-step `/continue` command, reusable options, and inline guidance capture, but it is still not a full REPL-style coding cockpit with polished streaming, defaults for approval verification, and richer pause/stop state.
+- Live coding work session UX now has a one-step `/continue` command, reusable options, inline guidance capture, and boundary stop requests, but it is still not a full REPL-style coding cockpit with polished streaming and defaults for approval verification.
 
 Next action:
 
@@ -174,9 +175,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `477 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `36 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `51 passed`.
+- `uv run pytest -q` current: `479 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `38 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `53 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.
