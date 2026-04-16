@@ -1494,6 +1494,41 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_continue_runs_active_work_session_live_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("continue content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/continue --auth auth.json --allow-read . --act-mode deterministic",
+                                    {},
+                                ),
+                                "continue",
+                            )
+                output = stdout.getvalue()
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("action: read_file", output)
+                self.assertIn("continue content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_approve_and_reject_tool_changes(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -4154,6 +4154,7 @@ CHAT_HELP = """Commands:
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
 /work-session [cmd]   show/start/close/ai/live/resume/approve/reject native work session; add details
+/continue [opts]      run one live step for the active work session
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -5518,6 +5519,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("work-session", "work_session"):
         chat_work_session(rest)
+        return "continue"
+    if command in ("continue", "cont"):
+        chat_work_session(("live " + rest).strip())
         return "continue"
     if command == "note":
         chat_append_task_note(rest)
