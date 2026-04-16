@@ -114,6 +114,7 @@ Evidence:
 - Work-session resume bundles now expose a compact `phase` such as `idle`, `awaiting_approval`, `running_tool`, `planning`, `interrupted`, or `closed`, giving the cockpit and resident prompt a clearer state label.
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
+- `mew work --live` now preflights missing tool gates and prints concrete reentry controls before calling the model, avoiding a wasted model turn that can only fail on permissions.
 - Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
 - Stop requests leave their reason in the work report and resume bundle after they are consumed, preserving why a live loop paused.
 - Work model turns are now journaled as `running` before THINK/ACT starts, so resume can show `phase=planning` during an in-flight model call and repair has real state to interrupt if the process dies.
@@ -221,7 +222,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `521 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `522 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `189 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

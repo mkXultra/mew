@@ -702,6 +702,15 @@ def format_work_cli_controls(session, args):
     return "\n".join(lines)
 
 
+def work_ai_has_tool_gates(options):
+    return bool(
+        options.get("allow_read")
+        or options.get("allow_write")
+        or options.get("allow_shell")
+        or options.get("allow_verify")
+    )
+
+
 def _work_control_text(action, fallback):
     for key in ("text", "note", "question", "reason", "summary"):
         value = (action or {}).get(key)
@@ -1076,6 +1085,18 @@ def cmd_work_ai(args):
         "stop_reason": "max_steps",
         "steps": [],
     }
+    options = _work_control_options(args, session=session)
+    if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
+        report["stop_reason"] = "missing_gates"
+        if progress:
+            progress("no work tool gates enabled; skipping model call")
+        print(format_work_ai_report(report))
+        print(
+            "No work tool gates are enabled. Rerun with `--allow-read .`, explicit write/verify gates, "
+            "or use `mew do <task-id>` for the supervised default loop."
+        )
+        print(format_work_cli_controls(session, args))
+        return 1
 
     for index in range(1, max_steps + 1):
         if progress:

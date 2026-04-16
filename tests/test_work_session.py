@@ -2426,6 +2426,30 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_without_tool_gates_preflights_before_model_call(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(main(["work", "1", "--live", "--auth", "auth.json"]), 1)
+
+                call_model.assert_not_called()
+                output = stdout.getvalue()
+                self.assertIn("stop=missing_gates", output)
+                self.assertIn("No work tool gates are enabled", output)
+                self.assertIn("mew work 1 --live --auth auth.json --model-backend codex --allow-read .", output)
+                self.assertIn("skipping model call", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prints_resume_after_finish(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2450,6 +2474,8 @@ class WorkSessionTests(unittest.TestCase):
                                         "--live",
                                         "--auth",
                                         "auth.json",
+                                        "--allow-read",
+                                        ".",
                                         "--act-mode",
                                         "deterministic",
                                     ]
@@ -2501,6 +2527,8 @@ class WorkSessionTests(unittest.TestCase):
                                         "--live",
                                         "--auth",
                                         "auth.json",
+                                        "--allow-read",
+                                        ".",
                                         "--act-mode",
                                         "deterministic",
                                     ]
