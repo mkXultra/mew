@@ -239,6 +239,8 @@ and exactly one recommended next action. For coding tasks that do not already
 have a running implementation path, the next action starts or continues a native
 work session so the resident model can work from inside mew instead of forcing
 the older external-agent planner path first.
+`mew next` and passive next-move messages use the same native work-session
+entry point for unplanned coding tasks.
 Native work sessions are the first Milestone 1 path toward giving the resident
 model its own hands. Start one with `mew work <task-id> --start-session`, inspect
 it with `mew work --session` or `/work-session` in chat, and run tools with

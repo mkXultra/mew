@@ -95,7 +95,7 @@ class BriefTests(unittest.TestCase):
         question, _ = add_question(state, "What should I do?", related_task_id=1)
         mark_question_deferred(state, question, reason="later")
 
-        self.assertEqual(next_move(state), "plan task #1 with `mew task plan 1`")
+        self.assertEqual(next_move(state), "start native work session for task #1 with `mew work 1 --start-session`")
 
     def test_next_move_recommends_review_for_completed_implementation(self):
         state = default_state()
@@ -145,7 +145,7 @@ class BriefTests(unittest.TestCase):
         state = default_state()
         add_task(state)
 
-        self.assertEqual(next_move(state), "plan task #1 with `mew task plan 1`")
+        self.assertEqual(next_move(state), "start native work session for task #1 with `mew work 1 --start-session`")
 
     def test_next_move_does_not_programmer_plan_admin_task(self):
         state = default_state()

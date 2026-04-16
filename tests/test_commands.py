@@ -2249,7 +2249,7 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["next", "--json"]), 0)
                 next_data = json.loads(stdout.getvalue())
                 self.assertIn("next_move", next_data)
-                self.assertEqual(next_data["command"], "mew task plan 1")
+                self.assertEqual(next_data["command"], "mew work 1 --start-session")
             finally:
                 os.chdir(old_cwd)
 

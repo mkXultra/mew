@@ -532,7 +532,8 @@ def next_move(state):
         task, plan = dispatchable[0]
         return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `mew task dispatch {task.get('id')}`"
     if plan_needed:
-        return f"plan task #{plan_needed[0].get('id')} with `mew task plan {plan_needed[0].get('id')}`"
+        task_id = plan_needed[0].get("id")
+        return f"start native work session for task #{task_id} with `mew work {task_id} --start-session`"
     if attention:
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
