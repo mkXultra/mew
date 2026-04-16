@@ -1417,6 +1417,7 @@ class WorkSessionTests(unittest.TestCase):
                 resume_text = stdout.getvalue()
                 self.assertIn("Work resume #1 [closed] task=#1", resume_text)
                 self.assertIn("read result observed", resume_text)
+                self.assertIn("review this closed work session", resume_text)
             finally:
                 os.chdir(old_cwd)
 

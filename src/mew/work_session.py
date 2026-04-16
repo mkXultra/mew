@@ -544,7 +544,9 @@ def build_work_session_resume(session, task=None, limit=8):
         and (latest_call.get("status") == "failed" or work_tool_failure_record(latest_call))
     )
 
-    if pending_approvals:
+    if session.get("status") == "closed":
+        next_action = "review this closed work session or start a new one with mew work --ai"
+    elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
     elif latest_failed:
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
