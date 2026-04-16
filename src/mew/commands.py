@@ -524,41 +524,110 @@ def format_work_ai_report(report):
     return "\n".join(lines)
 
 
-def _work_live_continue_command(args, task_id):
+def _work_control_options(args, session=None):
+    defaults = (session or {}).get("default_options") or {}
+
+    def option(name, fallback=None):
+        value = defaults.get(name)
+        if value not in (None, "", [], False):
+            return value
+        return getattr(args, name, fallback)
+
+    return {
+        "auth": option("auth"),
+        "model_backend": option("model_backend"),
+        "model": option("model"),
+        "base_url": option("base_url"),
+        "allow_read": list(option("allow_read", []) or []),
+        "allow_write": list(option("allow_write", []) or []),
+        "allow_shell": bool(option("allow_shell", False)),
+        "allow_verify": bool(option("allow_verify", False)),
+        "verify_command": option("verify_command", ""),
+        "act_mode": option("act_mode"),
+    }
+
+
+def remember_work_session_default_options(session, args):
+    if not session:
+        return
+    options = _work_control_options(args, session=None)
+    session["default_options"] = {
+        "auth": options.get("auth") or "",
+        "model_backend": options.get("model_backend") or "",
+        "model": options.get("model") or "",
+        "base_url": options.get("base_url") or "",
+        "allow_read": options.get("allow_read") or [],
+        "allow_write": options.get("allow_write") or [],
+        "allow_shell": bool(options.get("allow_shell")),
+        "allow_verify": bool(options.get("allow_verify")),
+        "verify_command": options.get("verify_command") or "",
+        "act_mode": options.get("act_mode") or "",
+    }
+
+
+def work_chat_continue_options(session):
+    options = (session or {}).get("default_options") or {}
+    parts = []
+    for key, flag in (
+        ("auth", "--auth"),
+        ("model_backend", "--model-backend"),
+        ("model", "--model"),
+        ("base_url", "--base-url"),
+    ):
+        if options.get(key):
+            parts.extend([flag, options[key]])
+    for root in options.get("allow_read") or []:
+        parts.extend(["--allow-read", root])
+    for root in options.get("allow_write") or []:
+        parts.extend(["--allow-write", root])
+    if options.get("allow_shell"):
+        parts.append("--allow-shell")
+    if options.get("allow_verify"):
+        parts.append("--allow-verify")
+    if options.get("verify_command"):
+        parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("act_mode"):
+        parts.extend(["--act-mode", options["act_mode"]])
+    return shlex.join(parts)
+
+
+def _work_live_continue_command(args, task_id, session=None):
     parts = ["mew", "work"]
     if task_id is not None:
         parts.append(str(task_id))
     parts.append("--live")
-    if getattr(args, "auth", None):
-        parts.extend(["--auth", args.auth])
-    if getattr(args, "model_backend", None):
-        parts.extend(["--model-backend", args.model_backend])
-    if getattr(args, "model", None):
-        parts.extend(["--model", args.model])
-    if getattr(args, "base_url", None):
-        parts.extend(["--base-url", args.base_url])
-    for root in getattr(args, "allow_read", None) or ["."]:
+    options = _work_control_options(args, session=session)
+    if options.get("auth"):
+        parts.extend(["--auth", options["auth"]])
+    if options.get("model_backend"):
+        parts.extend(["--model-backend", options["model_backend"]])
+    if options.get("model"):
+        parts.extend(["--model", options["model"]])
+    if options.get("base_url"):
+        parts.extend(["--base-url", options["base_url"]])
+    for root in options.get("allow_read") or ["."]:
         parts.extend(["--allow-read", root])
-    for root in getattr(args, "allow_write", None) or []:
+    for root in options.get("allow_write") or []:
         parts.extend(["--allow-write", root])
-    if getattr(args, "allow_shell", False):
+    if options.get("allow_shell"):
         parts.append("--allow-shell")
-    if getattr(args, "allow_verify", False):
+    if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if getattr(args, "verify_command", None):
-        parts.extend(["--verify-command", args.verify_command])
-    if getattr(args, "act_mode", None):
-        parts.extend(["--act-mode", args.act_mode])
+    if options.get("verify_command"):
+        parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("act_mode"):
+        parts.extend(["--act-mode", options["act_mode"]])
     parts.extend(["--max-steps", "1"])
     return shlex.join(parts)
 
 
-def _work_resume_command(args, task_id):
+def _work_resume_command(args, task_id, session=None):
     parts = ["mew", "work"]
     if task_id is not None:
         parts.append(str(task_id))
     parts.extend(["--session", "--resume"])
-    for root in getattr(args, "allow_read", None) or ["."]:
+    options = _work_control_options(args, session=session)
+    for root in options.get("allow_read") or ["."]:
         parts.extend(["--allow-read", root])
     return shlex.join(parts)
 
@@ -568,11 +637,11 @@ def work_cli_control_commands(session, args):
         return ["mew work <task-id> --start-session"]
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        return [_work_resume_command(args, task_id), f"mew work {task_id} --start-session"]
+        return [_work_resume_command(args, task_id, session=session), f"mew work {task_id} --start-session"]
     return [
-        _work_live_continue_command(args, task_id),
+        _work_live_continue_command(args, task_id, session=session),
         f"mew work {task_id} --stop-session --stop-reason pause",
-        _work_resume_command(args, task_id),
+        _work_resume_command(args, task_id, session=session),
         "mew chat",
     ]
 
@@ -881,6 +950,7 @@ def cmd_work_ai(args):
             print("No tasks.", file=sys.stderr)
             return 1
         session, created = create_work_session(state, task)
+        remember_work_session_default_options(session, args)
         session_id = session.get("id")
         task_id = task.get("id")
         save_state(state)
@@ -5119,7 +5189,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         if approval.get("reject_hint"):
             lines.append(f"- {approval.get('reject_hint')}")
 
-    cached = (continue_options or "").strip()
+    cached = (continue_options or "").strip() or work_chat_continue_options(session)
     if cached:
         lines.append("- /continue")
         lines.append("- /continue <guidance>")

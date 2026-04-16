@@ -2572,6 +2572,64 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_reentry_controls_reuse_live_options(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("remember gates\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "uv run pytest -q",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--allow-read .", output)
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--allow-verify", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
+                self.assertIn("--act-mode deterministic", output)
+
+                stdin = StringIO("/exit\n")
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["chat", "--no-brief", "--no-unread", "--no-activity"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("/work-session live --auth auth.json", output)
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_run_ai_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

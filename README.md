@@ -261,6 +261,8 @@ Active `mew work --session --json` and `--resume --json` also include
 `next_cli_controls`, so machine readers get the same reentry commands.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
 used, so quiet chat still preserves the reentry affordance.
+When a live work command uses read/write/verify/model options, the active
+session remembers those defaults and reuses them in later CLI and chat controls.
 `mew work --live` prints the selected action before execution and a resume after
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
