@@ -710,6 +710,7 @@ def build_parser():
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS, help="maximum read_file characters")
+    work_parser.add_argument("--offset", type=int, default=0, help="character offset for read_file")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")
     work_parser.add_argument("--resume", action="store_true", help="show a compact work-session resume bundle")
@@ -756,6 +757,7 @@ def build_parser():
     tool_read_parser.add_argument("path")
     tool_read_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
     tool_read_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS)
+    tool_read_parser.add_argument("--offset", type=int, default=0)
     tool_read_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_read_parser.set_defaults(func=cmd_tool_read)
 

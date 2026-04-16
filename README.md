@@ -250,6 +250,7 @@ uv run mew work --session
 uv run mew work --session --details
 uv run mew work --session --resume
 uv run mew work 1 --tool read_file --path README.md --allow-read .
+uv run mew work 1 --tool read_file --path src/mew/commands.py --allow-read . --offset 50000 --max-chars 12000
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
 uv run mew work 1 --tool git_status --allow-read .

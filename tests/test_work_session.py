@@ -156,6 +156,32 @@ class WorkSessionTests(unittest.TestCase):
                 result = data["tool_call"]["result"]
                 self.assertFalse(result["truncated"])
                 self.assertIn(marker, result["text"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "large.py",
+                                "--allow-read",
+                                ".",
+                                "--max-chars",
+                                "12",
+                                "--offset",
+                                "7000",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                page = json.loads(stdout.getvalue())["tool_call"]["result"]
+                self.assertEqual(page["offset"], 7000)
+                self.assertEqual(page["next_offset"], 7012)
+                self.assertEqual(page["text"], marker[:12])
             finally:
                 os.chdir(old_cwd)
 

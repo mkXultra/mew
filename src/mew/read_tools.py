@@ -102,29 +102,34 @@ def inspect_dir(path, allowed_roots, limit=50):
     }
 
 
-def read_file(path, allowed_roots, max_chars=DEFAULT_READ_MAX_CHARS):
+def read_file(path, allowed_roots, max_chars=DEFAULT_READ_MAX_CHARS, offset=0):
     max_chars = max(1, min(int(max_chars), 50000))
+    offset = max(0, min(int(offset or 0), 1_000_000))
     resolved = resolve_allowed_path(path, allowed_roots)
     ensure_not_sensitive(resolved)
     if not resolved.is_file():
         raise ValueError(f"path is not a file: {resolved}")
 
-    byte_limit = max_chars * 4 + 1
+    byte_limit = (offset + max_chars) * 4 + 1
     with resolved.open("rb") as handle:
         data = handle.read(byte_limit)
-    text = data.decode("utf-8", errors="replace")
-    truncated = len(text) > max_chars
+    full_text = data.decode("utf-8", errors="replace")
+    text = full_text[offset : offset + max_chars]
+    truncated = len(full_text) > offset + max_chars
     if truncated:
         text = text[:max_chars]
     try:
         size = resolved.stat().st_size
     except OSError:
         size = len(data)
+    next_offset = offset + len(text) if truncated or size > len(data) else None
 
     return {
         "path": str(resolved),
         "type": "file",
         "size": size,
+        "offset": offset,
+        "next_offset": next_offset,
         "text": text,
         "truncated": truncated or size > len(data),
     }

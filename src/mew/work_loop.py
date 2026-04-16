@@ -25,6 +25,8 @@ def _compact_tool_result(tool, result):
     if tool == "read_file":
         return {
             "path": result.get("path"),
+            "offset": result.get("offset"),
+            "next_offset": result.get("next_offset"),
             "text": clip_output(result.get("text") or "", WORK_RESULT_TEXT_LIMIT),
             "truncated": bool(result.get("truncated")),
         }
@@ -228,6 +230,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "cwd",
         "base",
         "limit",
+        "offset",
         "content",
         "old",
         "new",

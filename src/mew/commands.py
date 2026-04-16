@@ -987,6 +987,7 @@ def _work_tool_parameters(args):
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
         "max_chars": getattr(args, "max_chars", None),
+        "offset": getattr(args, "offset", None),
         "max_matches": getattr(args, "max_matches", None),
     }
     return {key: value for key, value in parameters.items() if value is not None}
@@ -2618,7 +2619,7 @@ def cmd_tool_list(args):
 
 def cmd_tool_read(args):
     try:
-        result = read_file(args.path, _tool_allowed_roots(args), max_chars=args.max_chars)
+        result = read_file(args.path, _tool_allowed_roots(args), max_chars=args.max_chars, offset=args.offset)
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1

@@ -70,6 +70,7 @@ Evidence:
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
+- `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 
 Missing proof:
 

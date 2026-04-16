@@ -202,6 +202,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             parameters.get("path") or "",
             allowed_read_roots,
             max_chars=parameters.get("max_chars", DEFAULT_READ_MAX_CHARS),
+            offset=parameters.get("offset", 0),
         )
     if tool == "search_text":
         return search_text(
