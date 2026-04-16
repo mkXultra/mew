@@ -424,8 +424,10 @@ state without leaving the session:
 ```text
 /help work
 /focus
+/focus coding
 /brief
 /next
+/next coding
 /doctor
 /repair
 /perception

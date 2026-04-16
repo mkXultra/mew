@@ -2492,6 +2492,16 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("Mew focus (coding)", output)
                 self.assertIn("Improve coding cockpit", output)
                 self.assertNotIn("Which city?", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(commands_module.run_chat_slash_command("/focus coding", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("Mew focus (coding)", output)
+                self.assertNotIn("Which city?", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(commands_module.run_chat_slash_command("/next --kind coding", {}), "continue")
+                self.assertIn("mew work 2 --start-session", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

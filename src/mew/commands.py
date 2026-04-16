@@ -5148,10 +5148,10 @@ def cmd_listen(args):
 
 CHAT_HELP = """Commands:
 /help [work]          show this help, or focused work-session help
-/focus                show the quiet next-action view
-/daily                alias for /focus
+/focus [kind]         show the quiet next-action view
+/daily [kind]         alias for /focus
 /brief                show the current operational brief
-/next                 show the next useful move
+/next [kind]          show the next useful move
 /doctor              show state/runtime health
 /repair [--force]    reconcile state if the runtime is stopped
 /status               show compact runtime status
@@ -5202,6 +5202,26 @@ CHAT_HELP = """Commands:
 /history              print all outbox messages
 /exit                 leave chat
 Any non-slash line is sent to mew as a user message."""
+
+
+def chat_kind_filter(rest):
+    if not rest:
+        return None, ""
+    try:
+        tokens = shlex.split(rest)
+    except ValueError as exc:
+        return None, f"invalid kind filter: {exc}"
+    if len(tokens) == 1:
+        token = tokens[0]
+        candidate = token.removeprefix("--kind=") if token.startswith("--kind=") else token
+    elif len(tokens) == 2 and tokens[0] == "--kind":
+        candidate = tokens[1]
+    else:
+        return None, "usage: /focus [kind] or /focus --kind <kind>"
+    kind = normalize_task_kind(candidate)
+    if not kind:
+        return None, "kind must be one of: coding, research, personal, admin, unknown"
+    return kind, ""
 
 CHAT_WORK_HELP = """Work session quick help:
 /work-session                         show active session, or recent sessions if none is active
@@ -6777,13 +6797,21 @@ def run_chat_slash_command(line, chat_state):
             print(CHAT_HELP)
         return "continue"
     if command in ("focus", "daily"):
-        print(format_focus(build_focus_data(load_state(), limit=3)))
+        kind, error = chat_kind_filter(rest)
+        if error:
+            print(error)
+        else:
+            print(format_focus(build_focus_data(load_state(), limit=3, kind=kind)))
         return "continue"
     if command == "brief":
         print(build_brief(load_state()))
         return "continue"
     if command == "next":
-        print(next_move(load_state()))
+        kind, error = chat_kind_filter(rest)
+        if error:
+            print(error)
+        else:
+            print(next_move(load_state(), kind=kind))
         return "continue"
     if command == "doctor":
         if rest:
