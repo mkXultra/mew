@@ -551,6 +551,21 @@ def remember_work_session_default_options(session, args):
     if not session:
         return
     options = _work_control_options(args, session=None)
+    has_meaningful_defaults = any(
+        (
+            options.get("allow_read"),
+            options.get("allow_write"),
+            options.get("allow_shell"),
+            options.get("allow_verify"),
+            options.get("verify_command"),
+            options.get("model"),
+            options.get("base_url"),
+            options.get("act_mode") and options.get("act_mode") != "model",
+        )
+    )
+    if not has_meaningful_defaults:
+        session.pop("default_options", None)
+        return
     session["default_options"] = {
         "auth": options.get("auth") or "",
         "model_backend": options.get("model_backend") or "",
@@ -1459,6 +1474,7 @@ def cmd_work_start_session(args):
             print("No tasks.")
             return 0
         session, created = create_work_session(state, task)
+        remember_work_session_default_options(session, args)
         save_state(state)
     if args.json:
         print(json.dumps({"created": created, "work_session": session}, ensure_ascii=False, indent=2))
@@ -4894,6 +4910,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session resume --allow-read .   add live git/file world state to the reentry bundle
 /work-session start <task-id>         start or reuse a native work session
 /continue --allow-read .              run one live resident-model step
+/work-session live --allow-read . --max-steps 3
+                                      run a short bounded resident-model loop
 /continue <guidance>                  reuse prior live options with new guidance
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context

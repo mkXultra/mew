@@ -2903,6 +2903,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Work session quick help", output)
         self.assertIn("/work-session <task-id> resume", output)
         self.assertIn("/continue --allow-read .", output)
+        self.assertIn("/work-session live --allow-read . --max-steps 3", output)
         self.assertNotIn("/agents [all]", output)
 
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):

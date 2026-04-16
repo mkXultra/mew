@@ -2633,6 +2633,45 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_start_can_seed_reentry_options(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "uv run pytest -q",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--allow-read .", output)
+                self.assertIn("--allow-write .", output)
+                self.assertIn("--allow-verify", output)
+                self.assertIn("--verify-command 'uv run pytest -q'", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_run_ai_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

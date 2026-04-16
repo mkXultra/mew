@@ -95,7 +95,7 @@ Evidence:
 - Active `mew work --session`, active `/work-session`, and normal `mew chat` startup now surface next controls for continuing, stopping, resuming, or entering chat.
 - Text resume surfaces (`mew work --session --resume` and `/work-session resume`) now print controls after the compact resume bundle.
 - Quiet `mew chat --no-brief` startup still surfaces active work-session controls, so suppressing the brief does not remove the reentry affordance.
-- Active sessions remember live read/write/verify/model options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
+- Active sessions remember start/live read/write/verify/model options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - CLI/chat controls now show both one-step continue and bounded `--max-steps 3` continue paths, making short autonomous runs discoverable without removing the safer single-step path.
 - `mew next` and passive next-move messages now route unplanned coding tasks to `mew work <task-id> --start-session`, matching native hands as the first execution path.
 - Chat work-session parsing accepts task-first resume order such as `/work-session 26 resume --allow-read .`, reducing command-order friction during reentry.
@@ -206,7 +206,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `508 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `509 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `175 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
