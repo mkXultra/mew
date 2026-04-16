@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -221,6 +222,55 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["tool_call"]["status"], "completed")
                 self.assertEqual(data["tool_call"]["result"]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_marks_failed_tests_and_summarizes_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = (
+                    f"{sys.executable} -c "
+                    "\"import sys; print('stdout context'); print('stderr context', file=sys.stderr); sys.exit(1)\""
+                )
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                data = json.loads(stdout.getvalue())
+                call = data["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("verification failed with exit_code=1", call["error"])
+                self.assertIn("stderr context", call["summary"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
+                details = stdout.getvalue()
+                self.assertIn("Verification failures", details)
+                self.assertIn("#1 [failed] run_tests verification failed with exit_code=1", details)
+                self.assertIn("exit_code: 1", details)
+                self.assertIn("stderr context", details)
+                self.assertIn("stdout context", details)
             finally:
                 os.chdir(old_cwd)
 
@@ -864,5 +914,96 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
                 self.assertIn("Work session #1 [active] task=#1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_can_approve_and_reject_tool_changes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                dry_run = json.loads(stdout.getvalue())
+                self.assertEqual(dry_run["tool_call"]["id"], 1)
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+
+                command = f"{sys.executable} -c \"from pathlib import Path; assert Path('notes.md').read_text() == 'after\\n'\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command(
+                            f"/work-session approve 1 --allow-write . --verify-command {shlex.quote(command)}",
+                            {},
+                        ),
+                        "continue",
+                    )
+                self.assertIn("approved work tool #1 -> #2 [completed]", stdout.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "after",
+                                "--new",
+                                "never",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                second_dry_run = json.loads(stdout.getvalue())
+                self.assertEqual(second_dry_run["tool_call"]["id"], 3)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session reject 3 not needed", {}),
+                        "continue",
+                    )
+                self.assertIn("rejected work tool #3", stdout.getvalue())
+                state = load_state()
+                rejected = state["work_sessions"][0]["tool_calls"][2]
+                self.assertEqual(rejected["approval_status"], "rejected")
+                self.assertEqual(rejected["rejection_reason"], "not needed")
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
             finally:
                 os.chdir(old_cwd)

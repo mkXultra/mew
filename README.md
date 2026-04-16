@@ -241,7 +241,8 @@ model its own hands. Start one with `mew work <task-id> --start-session`, inspec
 it with `mew work --session` or `/work-session` in chat, and run tools with
 explicit gates. Write tools default to dry-run. Applied writes require
 `--allow-verify` and `--verify-command`; failed verification rolls the change
-back and records the failed tool result.
+back and records the failed tool result. Nonzero `run_tests` exits are treated
+as failed tool calls and summarized in `mew work --session --details`.
 
 ```sh
 uv run mew work 1 --start-session
@@ -258,6 +259,8 @@ uv run mew work 1 --reject-tool 7 --reject-reason "not the right change"
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 ```
+
+Inside `mew chat`, use `/work-session details`, `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or `/work-session reject 7 not the right change`.
 
 ## Resident Model
 

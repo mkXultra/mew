@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has progress events and detailed cockpit output, but still lacks true model/command streaming and approval UX. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has progress events, detailed cockpit output, chat approval controls, and compact verification failure summaries; true model/command streaming is still missing. |
 | 3. Persistent Advantage | `foundation` | Durable state, memory, context, and runtime effects exist; automatic task resume context is still incomplete. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Self-improvement and dogfood entry points exist; closed-loop self-improvement is not yet reliable. |
@@ -58,17 +58,18 @@ Evidence:
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
 - Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
+- `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
+- `run_tests` tool calls now fail the work-session step when the verifier exits nonzero, and `/work-session details` includes a compact `Verification failures` section with command, cwd, exit code, stderr, and stdout context.
 
 Missing proof:
 
 - No streaming model token output.
 - No streaming command output.
-- Diff approval exists as a CLI flow; it is not yet a smooth chat cockpit flow.
 - Live coding work session UX is improving, but it is still report-style rather than an interactive cockpit.
 
 Next action:
 
-- Add compact verification failure summaries and expose approve/reject operations from chat.
+- Add live command/model streaming surfaces or a tighter chat prompt loop so tool feedback appears while the model is still working.
 
 ## Milestone 3: Persistent Advantage
 
@@ -137,9 +138,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `453 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `15 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `16 passed`.
+- `uv run pytest -q` current: `455 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `17 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `18 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

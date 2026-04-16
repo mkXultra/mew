@@ -3981,7 +3981,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close native work session; add details
+/work-session [cmd]   show/start/close/approve/reject native work session; add details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -4095,12 +4095,16 @@ def print_chat_workbench(task_id):
 
 
 def chat_work_session(rest):
-    parts = rest.split()
+    try:
+        parts = shlex.split(rest)
+    except ValueError as exc:
+        print(f"mew: {exc}")
+        return
     details = "details" in {part.casefold() for part in parts}
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close"):
+    if action not in ("show", "start", "close", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4133,6 +4137,122 @@ def chat_work_session(rest):
             close_work_session(session)
             save_state(state)
         print(f"closed work session #{session['id']}")
+        return
+
+    if action == "approve":
+        if len(parts) < 2:
+            print(
+                'usage: /work-session approve <tool-call-id> [--task <task-id>] '
+                '--allow-write <path> --verify-command "<command>"'
+            )
+            return
+        try:
+            tool_call_id = int(parts[1])
+        except ValueError:
+            print(f"mew: invalid tool call id: {parts[1]}")
+            return
+        approve_task_id = None
+        allow_write = []
+        verify_command = ""
+        verify_cwd = "."
+        verify_timeout = 300.0
+        index = 2
+        while index < len(parts):
+            token = parts[index]
+            if token in ("--task", "--task-id") and index + 1 < len(parts):
+                approve_task_id = parts[index + 1]
+                index += 2
+                continue
+            if token == "--allow-write" and index + 1 < len(parts):
+                allow_write.append(parts[index + 1])
+                index += 2
+                continue
+            if token.startswith("--allow-write="):
+                allow_write.append(token.partition("=")[2])
+                index += 1
+                continue
+            if token == "--allow-verify":
+                index += 1
+                continue
+            if token == "--verify-command" and index + 1 < len(parts):
+                verify_command = parts[index + 1]
+                index += 2
+                continue
+            if token.startswith("--verify-command="):
+                verify_command = token.partition("=")[2]
+                index += 1
+                continue
+            if token == "--verify-cwd" and index + 1 < len(parts):
+                verify_cwd = parts[index + 1]
+                index += 2
+                continue
+            if token.startswith("--verify-cwd="):
+                verify_cwd = token.partition("=")[2]
+                index += 1
+                continue
+            if token == "--verify-timeout" and index + 1 < len(parts):
+                try:
+                    verify_timeout = float(parts[index + 1])
+                except ValueError:
+                    print(f"mew: invalid --verify-timeout: {parts[index + 1]}")
+                    return
+                index += 2
+                continue
+            if token.startswith("--verify-timeout="):
+                value = token.partition("=")[2]
+                try:
+                    verify_timeout = float(value)
+                except ValueError:
+                    print(f"mew: invalid --verify-timeout: {value}")
+                    return
+                index += 1
+                continue
+            print(f"mew: unsupported approve option: {token}")
+            return
+        if not allow_write or not verify_command:
+            print("mew: approve requires --allow-write and --verify-command")
+            return
+        args = SimpleNamespace(
+            task_id=approve_task_id,
+            approve_tool=tool_call_id,
+            allow_write=allow_write,
+            allow_verify=True,
+            verify_command=verify_command,
+            verify_cwd=verify_cwd,
+            verify_timeout=verify_timeout,
+            allow_read=[],
+            json=False,
+        )
+        cmd_work_approve_tool(args)
+        return
+
+    if action == "reject":
+        if len(parts) < 2:
+            print("usage: /work-session reject <tool-call-id> [reason]")
+            return
+        try:
+            tool_call_id = int(parts[1])
+        except ValueError:
+            print(f"mew: invalid tool call id: {parts[1]}")
+            return
+        reject_task_id = None
+        reason_parts = []
+        index = 2
+        while index < len(parts):
+            token = parts[index]
+            if token in ("--task", "--task-id") and index + 1 < len(parts):
+                reject_task_id = parts[index + 1]
+                index += 2
+                continue
+            reason_parts.append(token)
+            index += 1
+        args = SimpleNamespace(
+            task_id=reject_task_id,
+            reject_tool=tool_call_id,
+            reject_reason=" ".join(reason_parts),
+            json=False,
+        )
+        cmd_work_reject_tool(args)
         return
 
     state = load_state()

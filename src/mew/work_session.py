@@ -282,6 +282,8 @@ def execute_work_write_tool(tool, parameters):
 
 def work_tool_result_error(tool, result):
     result = result or {}
+    if tool == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
+        return f"verification failed with exit_code={result.get('exit_code')}"
     if tool in WRITE_WORK_TOOLS:
         if "verification_exit_code" in result and result.get("verification_exit_code") != 0:
             exit_code = result.get("verification_exit_code")
@@ -295,6 +297,29 @@ def work_tool_result_error(tool, result):
     return ""
 
 
+def clip_tail(text, max_chars=1200):
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    return "[...snip...]\n" + text[-max_chars:]
+
+
+def format_command_failure_summary(record, max_chars=1200):
+    record = record or {}
+    lines = [
+        f"command: {record.get('command')}",
+        f"cwd: {record.get('cwd')}",
+        f"exit_code: {record.get('exit_code')}",
+    ]
+    stderr = record.get("stderr") or ""
+    stdout = record.get("stdout") or ""
+    if stderr:
+        lines.extend(["stderr:", clip_tail(stderr, max_chars)])
+    if stdout:
+        lines.extend(["stdout:", clip_tail(stdout, max_chars)])
+    return "\n".join(lines)
+
+
 def summarize_work_tool_result(tool, result):
     if tool in READ_ONLY_WORK_TOOLS:
         return summarize_read_result(tool, result or {})
@@ -302,13 +327,29 @@ def summarize_work_tool_result(tool, result):
         summary = summarize_write_result(result or {})
         verification = (result or {}).get("verification")
         if verification:
-            summary += "\nverification:\n" + format_command_record(verification)
+            if verification.get("exit_code") == 0:
+                summary += "\nverification:\n" + format_command_record(verification)
+            else:
+                summary += "\nverification_failure:\n" + format_command_failure_summary(verification)
         if (result or {}).get("rolled_back"):
             summary += "\nrolled_back: True"
         if (result or {}).get("rollback_error"):
             summary += f"\nrollback_error: {(result or {}).get('rollback_error')}"
         return summary
+    if tool == "run_tests" and (result or {}).get("exit_code") != 0:
+        return format_command_failure_summary(result or {})
     return format_command_record(result or {})
+
+
+def work_tool_failure_record(call):
+    result = call.get("result") or {}
+    if call.get("tool") == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
+        return result
+    if call.get("tool") in WRITE_WORK_TOOLS:
+        verification = result.get("verification") or {}
+        if "exit_code" in verification and verification.get("exit_code") != 0:
+            return verification
+    return None
 
 
 def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""):
@@ -403,6 +444,19 @@ def format_work_session(session, task=None, limit=8, details=False):
                     f"verification_exit_code={result.get('verification_exit_code')}{approval}"
                 )
                 lines.append(result.get("diff") or "")
+        else:
+            lines.append("(none)")
+
+        failure_calls = [(call, work_tool_failure_record(call)) for call in calls]
+        failure_calls = [(call, record) for call, record in failure_calls if record]
+        lines.extend(["", "Verification failures"])
+        if failure_calls:
+            for call, record in failure_calls[-limit:]:
+                lines.append(
+                    f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
+                    f"{call.get('error') or ''}"
+                )
+                lines.append(format_command_failure_summary(record))
         else:
             lines.append("(none)")
 
