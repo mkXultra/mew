@@ -316,6 +316,50 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_progress_streams_command_output(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = (
+                    f"{sys.executable} -c "
+                    "\"import sys; print('stream stdout', flush=True); "
+                    "print('stream stderr', file=sys.stderr, flush=True)\""
+                )
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--progress",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["tool_call"]["status"], "completed")
+                progress = stderr.getvalue()
+                self.assertIn("mew work: tool #1 run_tests start", progress)
+                self.assertIn("mew work: tool #1 stdout: stream stdout", progress)
+                self.assertIn("mew work: tool #1 stderr: stream stderr", progress)
+                self.assertIn("mew work: tool #1 completed", progress)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_write_tools_default_to_dry_run_and_can_apply_with_verification(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -788,6 +832,51 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("THINK start", progress)
                 self.assertIn("ACT ok action=read_file", progress)
                 self.assertIn("tool #1 read_file start", progress)
+                self.assertIn("tool #1 completed", progress)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_progress_streams_command_output(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = (
+                    f"{sys.executable} -c "
+                    "\"import sys; print('ai stdout', flush=True); "
+                    "print('ai stderr', file=sys.stderr, flush=True)\""
+                )
+                model_outputs = [
+                    {"summary": "run tests", "action": {"type": "run_tests", "command": command}},
+                    {"summary": "run tests", "action": {"type": "run_tests", "command": command}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-verify",
+                                        "--progress",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                progress = stderr.getvalue()
+                self.assertIn("tool #1 run_tests start", progress)
+                self.assertIn("tool #1 stdout: ai stdout", progress)
+                self.assertIn("tool #1 stderr: ai stderr", progress)
                 self.assertIn("tool #1 completed", progress)
             finally:
                 os.chdir(old_cwd)

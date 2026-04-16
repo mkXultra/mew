@@ -1,6 +1,7 @@
 import os
 import shlex
 import subprocess
+import threading
 from pathlib import Path
 
 from .tasks import clip_output
@@ -83,6 +84,89 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             "stdout": "",
             "stderr": str(exc),
         }
+
+
+def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None, on_output=None):
+    argv, env_overrides = split_command_env(command)
+    if not argv:
+        raise ValueError("command is empty")
+
+    resolved_cwd = resolve_tool_cwd(cwd)
+    started_at = now_iso()
+    env = {**os.environ, **env_overrides, **(extra_env or {})}
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=str(resolved_cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            shell=False,
+            env=env,
+        )
+    except OSError as exc:
+        return {
+            "command": command,
+            "argv": argv,
+            "cwd": str(resolved_cwd),
+            "started_at": started_at,
+            "finished_at": now_iso(),
+            "exit_code": None,
+            "stdout": "",
+            "stderr": str(exc),
+        }
+
+    chunks = {"stdout": [], "stderr": []}
+
+    def read_stream(name, stream):
+        if stream is None:
+            return
+        for chunk in iter(stream.readline, ""):
+            chunks[name].append(chunk)
+            if on_output:
+                on_output(name, chunk)
+        stream.close()
+
+    threads = [
+        threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True),
+        threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    timed_out = False
+    try:
+        exit_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+        exit_code = None
+
+    for thread in threads:
+        thread.join(timeout=1)
+
+    stdout = "".join(chunks["stdout"])
+    stderr = "".join(chunks["stderr"])
+    if timed_out:
+        timeout_message = f"command timed out after {timeout} second(s)"
+        if stderr and not stderr.endswith("\n"):
+            stderr += "\n"
+        stderr += timeout_message
+        if on_output:
+            on_output("stderr", timeout_message + "\n")
+
+    return {
+        "command": command,
+        "argv": argv,
+        "cwd": str(resolved_cwd),
+        "started_at": started_at,
+        "finished_at": now_iso(),
+        "exit_code": exit_code,
+        "stdout": clip_output(stdout),
+        "stderr": clip_output(stderr),
+    }
 
 
 def validate_git_ref(ref):

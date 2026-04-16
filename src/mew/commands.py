@@ -497,6 +497,33 @@ def work_ai_progress(args):
     return emit
 
 
+def work_tool_progress(args):
+    if not getattr(args, "progress", False):
+        return None
+
+    def emit(line):
+        print(f"mew work: {line}", file=sys.stderr, flush=True)
+
+    return emit
+
+
+def work_tool_output_progress(progress, tool_call_id):
+    if not progress:
+        return None
+
+    def emit(stream_name, text):
+        for line in (text or "").splitlines():
+            progress(f"tool #{tool_call_id} {stream_name}: {clip_output(line, 500)}")
+
+    return emit
+
+
+def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None):
+    if output_progress:
+        return execute_work_tool(tool, parameters, allowed_read_roots, on_output=output_progress)
+    return execute_work_tool(tool, parameters, allowed_read_roots)
+
+
 def cmd_work(args):
     if getattr(args, "ai", False):
         if getattr(args, "tool", None):
@@ -689,7 +716,12 @@ def cmd_work_ai(args):
             progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
         try:
-            result = execute_work_tool(action_type, parameters, args.allow_read or [])
+            result = execute_work_tool_with_output(
+                action_type,
+                parameters,
+                args.allow_read or [],
+                work_tool_output_progress(progress, tool_call_id),
+            )
             error = work_tool_result_error(action_type, result)
         except (OSError, ValueError) as exc:
             result = None
@@ -751,6 +783,7 @@ def _approval_parameters_from_call(call, args):
 
 
 def cmd_work_approve_tool(args):
+    progress = work_tool_progress(args)
     with state_lock():
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
@@ -782,9 +815,16 @@ def cmd_work_approve_tool(args):
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
         save_state(state)
+    if progress:
+        progress(f"approval #{args.approve_tool} -> tool #{tool_call_id} start")
 
     try:
-        result = execute_work_tool(source_call.get("tool"), parameters, getattr(args, "allow_read", None) or [])
+        result = execute_work_tool_with_output(
+            source_call.get("tool"),
+            parameters,
+            getattr(args, "allow_read", None) or [],
+            work_tool_output_progress(progress, tool_call_id),
+        )
         error = work_tool_result_error(source_call.get("tool"), result)
     except (OSError, ValueError) as exc:
         result = None
@@ -804,6 +844,8 @@ def cmd_work_approve_tool(args):
     else:
         print(f"approved work tool #{args.approve_tool} -> #{tool_call['id']} [{tool_call['status']}]")
         print(tool_call.get("summary") or tool_call.get("error") or "")
+    if progress:
+        progress(f"approval #{args.approve_tool} -> tool #{tool_call_id} {tool_call.get('status')}")
     return 0 if tool_call.get("status") == "completed" else 1
 
 
@@ -925,6 +967,7 @@ def _work_tool_parameters(args):
 
 
 def cmd_work_tool(args):
+    progress = work_tool_progress(args)
     with state_lock():
         state = load_state()
         session = active_work_session(state)
@@ -942,9 +985,16 @@ def cmd_work_tool(args):
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
         save_state(state)
+    if progress:
+        progress(f"tool #{tool_call_id} {args.tool} start")
 
     try:
-        result = execute_work_tool(args.tool, parameters, getattr(args, "allow_read", None) or [])
+        result = execute_work_tool_with_output(
+            args.tool,
+            parameters,
+            getattr(args, "allow_read", None) or [],
+            work_tool_output_progress(progress, tool_call_id),
+        )
         error = work_tool_result_error(args.tool, result)
     except (OSError, ValueError) as exc:
         result = None
@@ -959,6 +1009,8 @@ def cmd_work_tool(args):
     else:
         print(f"work tool #{tool_call['id']} [{tool_call['status']}] {tool_call['tool']}")
         print(tool_call.get("summary") or tool_call.get("error") or "")
+    if progress:
+        progress(f"tool #{tool_call_id} {tool_call.get('status')}")
     return 0 if tool_call.get("status") == "completed" else 1
 
 def cmd_task_done(args):

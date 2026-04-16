@@ -2,7 +2,7 @@ from .read_tools import glob_paths, inspect_dir, read_file, search_text, summari
 from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso
-from .toolbox import format_command_record, run_command_record
+from .toolbox import format_command_record, run_command_record, run_command_record_streaming
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -167,7 +167,13 @@ def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=
     return turn
 
 
-def execute_work_tool(tool, parameters, allowed_read_roots):
+def run_command_for_work(command, cwd=".", timeout=300, on_output=None):
+    if on_output:
+        return run_command_record_streaming(command, cwd=cwd, timeout=timeout, on_output=on_output)
+    return run_command_record(command, cwd=cwd, timeout=timeout)
+
+
+def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
@@ -197,27 +203,33 @@ def execute_work_tool(tool, parameters, allowed_read_roots):
             max_matches=parameters.get("max_matches", 100),
         )
     if tool in WRITE_WORK_TOOLS:
-        return execute_work_write_tool(tool, parameters)
+        return execute_work_write_tool(tool, parameters, on_output=on_output)
     if tool == "run_tests":
         if not parameters.get("allow_verify"):
             raise ValueError("verification is disabled; pass --allow-verify")
         command = parameters.get("command") or ""
         if not command:
             raise ValueError("run_tests command is empty")
-        return run_command_record(command, cwd=parameters.get("cwd") or ".", timeout=parameters.get("timeout", 300))
+        return run_command_for_work(
+            command,
+            cwd=parameters.get("cwd") or ".",
+            timeout=parameters.get("timeout", 300),
+            on_output=on_output,
+        )
     if not parameters.get("allow_shell"):
         raise ValueError("shell command execution is disabled; pass --allow-shell")
     command = parameters.get("command") or ""
     if not command:
         raise ValueError("run_command command is empty")
-    return run_command_record(
+    return run_command_for_work(
         command,
         cwd=parameters.get("cwd") or ".",
         timeout=parameters.get("timeout", 300),
+        on_output=on_output,
     )
 
 
-def execute_work_write_tool(tool, parameters):
+def execute_work_write_tool(tool, parameters, on_output=None):
     allowed_write_roots = parameters.get("allowed_write_roots") or []
     if not allowed_write_roots:
         raise ValueError("write is disabled; pass --allow-write PATH")
@@ -261,10 +273,11 @@ def execute_work_write_tool(tool, parameters):
 
     result["applied"] = bool(apply)
     if apply and result.get("written"):
-        verification = run_command_record(
+        verification = run_command_for_work(
             parameters.get("verify_command") or "",
             cwd=parameters.get("verify_cwd") or ".",
             timeout=parameters.get("verify_timeout", 300),
+            on_output=on_output,
         )
         result["verification"] = verification
         result["verification_exit_code"] = verification.get("exit_code")

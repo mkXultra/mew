@@ -252,6 +252,7 @@ uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
 uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify
+uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify --progress --json
 uv run mew work 1 --tool write_file --path notes.md --content "hello" --create --allow-write .
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write .
 uv run mew work 1 --approve-tool 7 --allow-write . --allow-verify --verify-command "uv run pytest -q"
