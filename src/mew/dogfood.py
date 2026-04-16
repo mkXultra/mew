@@ -963,6 +963,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "programmer_loop": programmer_loop_metrics(state),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
+        "runtime_effects": len(state.get("runtime_effects", [])),
         "dropped_threads": {
             "thought_count": len(dropped),
             "latest": dropped[-1].get("dropped_threads", []) if dropped else [],
@@ -1110,6 +1111,7 @@ def format_dogfood_report(report):
         f"agent_runs: {report.get('agent_runs')}",
         f"programmer_loop: {report.get('programmer_loop')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
+        f"runtime_effects: {report.get('runtime_effects')}",
         f"model_enabled: {bool(report.get('model_enabled'))}",
     ]
     injected = report.get("injected_messages") or {}

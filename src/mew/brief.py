@@ -130,6 +130,11 @@ def recent_write_runs(state, limit=5):
     return list(reversed(runs[-limit:]))
 
 
+def recent_runtime_effects(state, limit=5):
+    runs = list(state.get("runtime_effects", []))
+    return list(reversed(runs[-limit:]))
+
+
 def recent_step_runs(state, limit=3):
     runs = list(state.get("step_runs", []))
     return list(reversed(runs[-limit:]))
@@ -403,6 +408,7 @@ def build_brief_data(state, limit=5):
         "recent_writes": [
             _write_item(run) for run in recent_write_runs(state, limit=limit)
         ],
+        "recent_runtime_effects": recent_runtime_effects(state, limit=limit),
         "recent_steps": recent_step_runs(state, limit=limit),
         "programmer_queue": {
             "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
@@ -557,6 +563,7 @@ def build_brief(state, limit=5):
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
     writes = recent_write_runs(state, limit=limit)
+    runtime_effects = recent_runtime_effects(state, limit=limit)
     step_runs = recent_step_runs(state, limit=limit)
     thoughts = recent_thoughts_for_context(state, limit=limit)
     activity = recent_activity(state, limit=limit)
@@ -656,6 +663,19 @@ def build_brief(state, limit=5):
                 f"- #{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
                 f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
                 f"written={run.get('written')}{rollback}{verification} path={run.get('path')}"
+            )
+        lines.append("")
+
+    if runtime_effects:
+        lines.append("Recent runtime effects")
+        for effect in runtime_effects[:limit]:
+            actions = ",".join(effect.get("action_types") or []) or "-"
+            verification = ",".join(str(item) for item in effect.get("verification_run_ids") or []) or "-"
+            writes_text = ",".join(str(item) for item in effect.get("write_run_ids") or []) or "-"
+            lines.append(
+                f"- #{effect.get('id')} [{effect.get('status')}] "
+                f"event=#{effect.get('event_id')} reason={effect.get('reason')} "
+                f"actions={actions} verification={verification} writes={writes_text}"
             )
         lines.append("")
 

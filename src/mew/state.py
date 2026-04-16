@@ -52,6 +52,7 @@ def default_state():
             "last_action": None,
             "current_reason": None,
             "current_event_id": None,
+            "current_effect_id": None,
             "current_phase": None,
             "cycle_started_at": None,
             "last_cycle_reason": None,
@@ -86,6 +87,7 @@ def default_state():
         "agent_runs": [],
         "verification_runs": [],
         "write_runs": [],
+        "runtime_effects": [],
         "step_runs": [],
         "thought_journal": [],
         "autonomy": {
@@ -139,6 +141,7 @@ def default_state():
             "plan": 1,
             "verification_run": 1,
             "write_run": 1,
+            "runtime_effect": 1,
             "step_run": 1,
             "thought": 1,
         },
@@ -183,6 +186,7 @@ def reconcile_next_ids(state):
     _ensure_next_id_after_existing(next_ids, "agent_run", state.get("agent_runs", []))
     _ensure_next_id_after_existing(next_ids, "verification_run", state.get("verification_runs", []))
     _ensure_next_id_after_existing(next_ids, "write_run", state.get("write_runs", []))
+    _ensure_next_id_after_existing(next_ids, "runtime_effect", state.get("runtime_effects", []))
     _ensure_next_id_after_existing(next_ids, "step_run", state.get("step_runs", []))
     _ensure_next_id_after_existing(next_ids, "thought", state.get("thought_journal", []))
 
@@ -319,6 +323,7 @@ def migrate_state(state):
 
     next_ids = state.setdefault("next_ids", {})
     state.setdefault("write_runs", [])
+    state.setdefault("runtime_effects", [])
     state.setdefault("step_runs", [])
     state.setdefault("thought_journal", [])
 
@@ -330,6 +335,7 @@ def migrate_state(state):
         "plan",
         "verification_run",
         "write_run",
+        "runtime_effect",
         "step_run",
         "thought",
     ):
@@ -423,6 +429,7 @@ def state_counts(state):
         "agent_runs": len(state.get("agent_runs", [])),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
+        "runtime_effects": len(state.get("runtime_effects", [])),
         "step_runs": len(state.get("step_runs", [])),
         "thoughts": len(state.get("thought_journal", [])),
     }
@@ -683,6 +690,84 @@ def add_event(state, event_type, source, payload=None):
     }
     state["inbox"].append(event)
     return event
+
+def add_runtime_effect(state, event, reason, status, current_time):
+    effect = {
+        "id": next_id(state, "runtime_effect"),
+        "event_id": event.get("id") if isinstance(event, dict) else None,
+        "event_type": event.get("type") if isinstance(event, dict) else "",
+        "reason": reason or "",
+        "status": status,
+        "phase": status,
+        "summary": "",
+        "action_types": [],
+        "processed_count": None,
+        "counts": {},
+        "verification_run_ids": [],
+        "write_run_ids": [],
+        "deferred": False,
+        "error": "",
+        "started_at": current_time,
+        "updated_at": current_time,
+        "finished_at": None,
+    }
+    state.setdefault("runtime_effects", []).append(effect)
+    del state["runtime_effects"][:-100]
+    return effect
+
+def find_runtime_effect(state, effect_id):
+    if effect_id is None:
+        return None
+    for effect in state.get("runtime_effects", []):
+        if str(effect.get("id")) == str(effect_id):
+            return effect
+    return None
+
+def update_runtime_effect(state, effect_id, current_time=None, **updates):
+    effect = find_runtime_effect(state, effect_id)
+    if not effect:
+        return None
+    if current_time is None:
+        current_time = now_iso()
+    effect.update(updates)
+    if "status" in updates and "phase" not in updates:
+        effect["phase"] = updates["status"]
+    effect["updated_at"] = current_time
+    return effect
+
+def complete_runtime_effect(
+    state,
+    effect_id,
+    current_time,
+    status,
+    processed_count=None,
+    counts=None,
+    verification_run_ids=None,
+    write_run_ids=None,
+    deferred=False,
+    error="",
+):
+    return update_runtime_effect(
+        state,
+        effect_id,
+        current_time=current_time,
+        status=status,
+        processed_count=processed_count,
+        counts=counts or {},
+        verification_run_ids=verification_run_ids or [],
+        write_run_ids=write_run_ids or [],
+        deferred=bool(deferred),
+        error=error or "",
+        finished_at=current_time,
+    )
+
+def incomplete_runtime_effects(state):
+    incomplete_statuses = {"planning", "planned", "precomputing", "precomputed", "committing"}
+    return [
+        effect
+        for effect in state.get("runtime_effects", [])
+        if effect.get("status") in incomplete_statuses and not effect.get("finished_at")
+    ]
 
 def _event_type_for_id(state, event_id):
     if event_id is None:

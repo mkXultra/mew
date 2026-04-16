@@ -172,6 +172,34 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_doctor_flags_incomplete_runtime_effect_without_active_lock(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    event = add_event(state, "passive_tick", "runtime", {})
+                    add_runtime_effect(state, event, "passive_tick", "planning", "now")
+                    save_state(state)
+
+                with (
+                    patch("mew.commands.shutil.which", return_value="/usr/bin/tool"),
+                    patch("mew.commands.load_codex_oauth", return_value={"path": "auth.json"}),
+                    patch("mew.commands.read_lock", return_value=None),
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["doctor"])
+
+                self.assertEqual(code, 1)
+                output = stdout.getvalue()
+                self.assertIn("runtime_effects: total=1 incomplete=1", output)
+                self.assertIn("latest=#1 status=planning", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_without_subcommand_lists_tasks(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

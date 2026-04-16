@@ -193,6 +193,90 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_records_effect_journal_for_cycle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "journaled", "decisions": []},
+                            {
+                                "summary": "journaled",
+                                "actions": [
+                                    {
+                                        "type": "send_message",
+                                        "message_type": "info",
+                                        "text": "journaled runtime effect",
+                                    }
+                                ],
+                            },
+                        ),
+                    ),
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--echo-outbox", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(len(state["runtime_effects"]), 1)
+                effect = state["runtime_effects"][0]
+                self.assertEqual(effect["status"], "applied")
+                self.assertEqual(effect["summary"], "journaled")
+                self.assertEqual(effect["action_types"], ["send_message"])
+                self.assertEqual(effect["counts"]["messages"], 1)
+                self.assertIsNotNone(effect["finished_at"])
+                self.assertIsNone(state["runtime_status"]["current_effect_id"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_runtime_marks_deferred_effect_when_user_message_arrives_during_planning(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fake_plan_runtime_event(_state_snapshot, _event_snapshot, *args, **_kwargs):
+                    with state_lock():
+                        state = load_state()
+                        add_event(state, "user_message", "test", {"text": "urgent"})
+                        save_state(state)
+                    return (
+                        {"summary": "stale passive", "decisions": []},
+                        {
+                            "summary": "stale passive",
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "message_type": "info",
+                                    "text": "stale passive response",
+                                }
+                            ],
+                        },
+                    )
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event),
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(len(state["runtime_effects"]), 1)
+                effect = state["runtime_effects"][0]
+                self.assertEqual(effect["status"], "deferred")
+                self.assertTrue(effect["deferred"])
+                self.assertEqual(effect["processed_count"], 0)
+                self.assertEqual(effect["action_types"], ["send_message"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_focus_is_passed_to_planner_guidance(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

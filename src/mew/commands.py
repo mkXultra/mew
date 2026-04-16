@@ -78,6 +78,7 @@ from .state import (
     ensure_self,
     ensure_state_dir,
     find_question,
+    incomplete_runtime_effects,
     is_routine_outbox_message,
     load_state,
     mark_message_read,
@@ -1323,17 +1324,28 @@ def build_doctor_data(args):
         or runtime_status.get("current_event_id")
         or runtime_status.get("current_reason")
     )
+    runtime_effects = list((state or {}).get("runtime_effects", []))
+    incomplete_effects = incomplete_runtime_effects(state or {})
+    latest_runtime_effect = runtime_effects[-1] if runtime_effects else None
     data["runtime"] = {
         "state": runtime_status.get("state"),
         "pid": runtime_status.get("pid"),
         "current_phase": runtime_status.get("current_phase"),
         "current_event_id": runtime_status.get("current_event_id"),
+        "current_effect_id": runtime_status.get("current_effect_id"),
         "current_reason": runtime_status.get("current_reason"),
         "cycle_started_at": runtime_status.get("cycle_started_at"),
         "incomplete_cycle": incomplete_cycle,
     }
+    data["runtime_effects"] = {
+        "total": len(runtime_effects),
+        "incomplete": len(incomplete_effects),
+        "latest": latest_runtime_effect,
+    }
     if data["runtime_lock"]["state"] == "stale" or (
         incomplete_cycle and data["runtime_lock"]["state"] != "active"
+    ) or (
+        incomplete_effects and data["runtime_lock"]["state"] != "active"
     ):
         data["ok"] = False
 
@@ -1398,7 +1410,23 @@ def format_doctor_data(data):
         "runtime: "
         f"{runtime.get('state') or 'unknown'} pid={runtime.get('pid')} "
         f"phase={runtime.get('current_phase') or ''} "
+        f"effect={runtime.get('current_effect_id') or ''} "
         f"incomplete_cycle={bool(runtime.get('incomplete_cycle'))}"
+    )
+    runtime_effects = data.get("runtime_effects") or {}
+    latest_effect = runtime_effects.get("latest") or {}
+    latest_text = "none"
+    if latest_effect:
+        latest_text = (
+            f"#{latest_effect.get('id')} status={latest_effect.get('status')} "
+            f"event=#{latest_effect.get('event_id')} reason={latest_effect.get('reason')} "
+            f"actions={','.join(latest_effect.get('action_types') or []) or '-'}"
+        )
+    lines.append(
+        "runtime_effects: "
+        f"total={runtime_effects.get('total', 0)} "
+        f"incomplete={runtime_effects.get('incomplete', 0)} "
+        f"latest={latest_text}"
     )
 
     for executable in ("ai-cli", "rg"):

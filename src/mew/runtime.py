@@ -34,11 +34,14 @@ from .model_backends import (
 from .state import (
     acquire_lock,
     add_event,
+    add_runtime_effect,
     append_log,
+    complete_runtime_effect,
     ensure_desires,
     ensure_guidance,
     ensure_policy,
     ensure_self,
+    find_runtime_effect,
     has_pending_user_message,
     load_state,
     read_desires,
@@ -48,6 +51,7 @@ from .state import (
     release_lock,
     save_state,
     state_lock,
+    update_runtime_effect,
 )
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso
@@ -69,6 +73,7 @@ def set_runtime_stopped(state, stopped_at):
     runtime["stopped_at"] = stopped_at
     runtime["current_reason"] = None
     runtime["current_event_id"] = None
+    runtime["current_effect_id"] = None
     runtime["current_phase"] = None
     runtime["cycle_started_at"] = None
     runtime["last_action"] = "runtime stopped"
@@ -200,6 +205,38 @@ def apply_runtime_event_plans(
         autonomous=autonomy_controls["autonomous"],
     )
     return processed_count, counts
+
+def action_types_for_plan(action_plan):
+    if not isinstance(action_plan, dict):
+        return []
+    return [
+        action.get("type") or "unknown"
+        for action in action_plan.get("actions", [])
+        if isinstance(action, dict)
+    ]
+
+def runtime_effect_final_status(state, verification_run_ids, write_run_ids, processed_count):
+    if processed_count == 0:
+        return "skipped"
+    writes = [
+        run
+        for run in state.get("write_runs", [])
+        if run.get("id") in set(write_run_ids or [])
+    ]
+    if any(run.get("rolled_back") for run in writes):
+        return "recovered"
+    if any(run.get("verification_exit_code") not in (None, 0) for run in writes):
+        return "failed"
+    verifications = [
+        run
+        for run in state.get("verification_runs", [])
+        if run.get("id") in set(verification_run_ids or [])
+    ]
+    if any(run.get("exit_code") not in (None, 0) for run in verifications):
+        return "failed"
+    if verification_run_ids:
+        return "verified"
+    return "applied"
 
 def precompute_runtime_action_effects(
     event_snapshot,
@@ -454,6 +491,7 @@ def run_runtime(args):
             archive_result = None
             reason = None
             event_id = None
+            effect_id = None
             event_snapshot = None
             state_snapshot = None
             decision_plan = None
@@ -522,9 +560,12 @@ def run_runtime(args):
                         event = next_unprocessed_event(state)
                     if event:
                         event_id = event["id"]
+                        effect = add_runtime_effect(state, event, reason, "planning", current_time)
+                        effect_id = effect["id"]
                         event_snapshot = deepcopy(event)
                         state_snapshot = deepcopy(state)
                         runtime_status["current_event_id"] = event_id
+                        runtime_status["current_effect_id"] = effect_id
                         runtime_status["current_phase"] = "planning"
                     save_state(state)
 
@@ -554,6 +595,22 @@ def run_runtime(args):
                     desires,
                     autonomy_controls,
                 )
+                with state_lock():
+                    state = load_state()
+                    event = find_event(state, event_id)
+                    effect = find_runtime_effect(state, effect_id)
+                    if effect and event and not event.get("processed_at"):
+                        update_runtime_effect(
+                            state,
+                            effect_id,
+                            current_time=now_iso(),
+                            status="planned",
+                            summary=(decision_plan or {}).get("summary")
+                            or (action_plan or {}).get("summary")
+                            or "",
+                            action_types=action_types_for_plan(action_plan),
+                        )
+                        save_state(state)
                 if action_plan_needs_runtime_precompute(
                     event_snapshot,
                     action_plan,
@@ -565,8 +622,23 @@ def run_runtime(args):
                         event = find_event(state, event_id)
                         if not event or event.get("processed_at"):
                             action_plan = None
+                            complete_runtime_effect(
+                                state,
+                                effect_id,
+                                now_iso(),
+                                "skipped",
+                                processed_count=0,
+                                counts={},
+                            )
+                            save_state(state)
                         else:
                             state["runtime_status"]["current_phase"] = "precomputing"
+                            update_runtime_effect(
+                                state,
+                                effect_id,
+                                current_time=now_iso(),
+                                status="precomputing",
+                            )
                             save_state(state)
                     if action_plan is not None:
                         action_plan = precompute_runtime_action_effects(
@@ -576,12 +648,29 @@ def run_runtime(args):
                             autonomy_controls,
                         )
                         precomputed_effects = True
+                        with state_lock():
+                            state = load_state()
+                            event = find_event(state, event_id)
+                            if event and not event.get("processed_at"):
+                                update_runtime_effect(
+                                    state,
+                                    effect_id,
+                                    current_time=now_iso(),
+                                    status="precomputed",
+                                )
+                                save_state(state)
 
             with state_lock():
                 state = load_state()
                 if event_id is not None and decision_plan is not None and action_plan is not None:
                     commit_time = now_iso()
                     state["runtime_status"]["current_phase"] = "committing"
+                    update_runtime_effect(
+                        state,
+                        effect_id,
+                        current_time=commit_time,
+                        status="committing",
+                    )
                     save_state(state)
                     if should_defer_commit_for_user_message(
                         state,
@@ -589,11 +678,24 @@ def run_runtime(args):
                         precomputed_effects=precomputed_effects,
                     ):
                         processed_count = 0
+                        complete_runtime_effect(
+                            state,
+                            effect_id,
+                            commit_time,
+                            "deferred",
+                            processed_count=0,
+                            counts={},
+                            deferred=True,
+                        )
                         append_log(
                             "- "
                             f"{commit_time}: deferred {reason} commit because a user message arrived"
                         )
                     else:
+                        verification_ids_before = {
+                            run.get("id") for run in state.get("verification_runs", [])
+                        }
+                        write_ids_before = {run.get("id") for run in state.get("write_runs", [])}
                         processed_count, processing_counts = apply_runtime_event_plans(
                             state,
                             event_id,
@@ -604,6 +706,31 @@ def run_runtime(args):
                             args,
                             allow_task_execution,
                             autonomy_controls,
+                        )
+                        verification_run_ids = [
+                            run.get("id")
+                            for run in state.get("verification_runs", [])
+                            if run.get("id") not in verification_ids_before
+                        ]
+                        write_run_ids = [
+                            run.get("id")
+                            for run in state.get("write_runs", [])
+                            if run.get("id") not in write_ids_before
+                        ]
+                        complete_runtime_effect(
+                            state,
+                            effect_id,
+                            commit_time,
+                            runtime_effect_final_status(
+                                state,
+                                verification_run_ids,
+                                write_run_ids,
+                                processed_count,
+                            ),
+                            processed_count=processed_count,
+                            counts=processing_counts,
+                            verification_run_ids=verification_run_ids,
+                            write_run_ids=write_run_ids,
                         )
                 else:
                     processed_count = 0
@@ -617,9 +744,19 @@ def run_runtime(args):
                         0,
                         autonomous=autonomy_controls["autonomous"],
                     )
+                    if effect_id is not None:
+                        complete_runtime_effect(
+                            state,
+                            effect_id,
+                            now_iso(),
+                            "skipped",
+                            processed_count=0,
+                            counts={},
+                        )
                 runtime_status = state["runtime_status"]
                 runtime_status["current_reason"] = None
                 runtime_status["current_event_id"] = None
+                runtime_status["current_effect_id"] = None
                 runtime_status["current_phase"] = None
                 runtime_status["cycle_started_at"] = None
                 runtime_status["last_cycle_reason"] = reason

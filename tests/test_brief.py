@@ -230,6 +230,27 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["recent_writes"][0]["path"], "/tmp/project/note.md")
         self.assertEqual(data["recent_writes"][0]["verification_run_id"], 7)
 
+    def test_brief_surfaces_recent_runtime_effects(self):
+        state = default_state()
+        state["runtime_effects"].append(
+            {
+                "id": 1,
+                "event_id": 2,
+                "reason": "passive_tick",
+                "status": "verified",
+                "action_types": ["run_verification"],
+                "verification_run_ids": [3],
+                "write_run_ids": [],
+            }
+        )
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("Recent runtime effects", brief)
+        self.assertIn("#1 [verified] event=#2 reason=passive_tick", brief)
+        self.assertEqual(data["recent_runtime_effects"][0]["status"], "verified")
+
     def test_brief_marks_rolled_back_recent_writes(self):
         state = default_state()
         state["write_runs"].append(
