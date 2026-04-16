@@ -1917,10 +1917,28 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                     "tool": tool,
                 }
             }
-        world_state_before = {}
-        if getattr(args, "allow_read", None):
-            resume = build_work_session_resume(session, task=work_session_task(state, session))
-            world_state_before = build_work_world_state(resume, args.allow_read)
+        source_tool_call_id = source_call.get("id")
+        resume_for_world = build_work_session_resume(session, task=work_session_task(state, session))
+
+    world_state_before = {}
+    if getattr(args, "allow_read", None):
+        world_state_before = build_work_world_state(resume_for_world, args.allow_read)
+
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            return 0, {"recovery": {"action": "none", "reason": "no active work session"}}
+        source_call = find_work_tool_call(session, source_tool_call_id)
+        if not source_call or source_call.get("status") != "interrupted" or source_call.get("recovery_status"):
+            return 0, {
+                "recovery": {
+                    "action": "none",
+                    "reason": "interrupted work tool already changed before recovery could start",
+                    "source_tool_call_id": source_tool_call_id,
+                    "tool": tool,
+                }
+            }
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         tool_call = start_work_tool_call(state, session, tool, parameters)
@@ -5522,7 +5540,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     resume = build_work_session_resume(session, task=work_session_task(state, session))
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
-        lines.append("- /work-session resume --allow-read . --auto-recover-safe")
+        lines.append(f"- /work-session resume{task_suffix} --allow-read . --auto-recover-safe")
     for approval in (resume or {}).get("pending_approvals") or []:
         if approval.get("approve_hint"):
             lines.append(f"- {approval.get('approve_hint')}")

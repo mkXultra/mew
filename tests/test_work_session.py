@@ -1142,6 +1142,93 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_auto_recovery_hint_keeps_task_scope_with_multiple_sessions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("one.md").write_text("one session\n", encoding="utf-8")
+                Path("two.md").write_text("two session\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    second = dict(state["tasks"][0])
+                    second["id"] = 2
+                    second["title"] = "Second task"
+                    state["tasks"].append(second)
+                    state["work_sessions"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "task_id": 1,
+                                "status": "active",
+                                "title": "First session",
+                                "goal": "Recover first.",
+                                "created_at": "then",
+                                "updated_at": "then",
+                                "last_tool_call_id": 1,
+                                "tool_calls": [
+                                    {
+                                        "id": 1,
+                                        "session_id": 1,
+                                        "task_id": 1,
+                                        "tool": "read_file",
+                                        "status": "interrupted",
+                                        "parameters": {"path": "one.md"},
+                                        "started_at": "then",
+                                        "finished_at": "then",
+                                    }
+                                ],
+                                "model_turns": [],
+                            },
+                            {
+                                "id": 2,
+                                "task_id": 2,
+                                "status": "active",
+                                "title": "Second session",
+                                "goal": "Recover second.",
+                                "created_at": "then",
+                                "updated_at": "then",
+                                "last_tool_call_id": 2,
+                                "tool_calls": [
+                                    {
+                                        "id": 2,
+                                        "session_id": 2,
+                                        "task_id": 2,
+                                        "tool": "read_file",
+                                        "status": "interrupted",
+                                        "parameters": {"path": "two.md"},
+                                        "started_at": "then",
+                                        "finished_at": "then",
+                                    }
+                                ],
+                                "model_turns": [],
+                            },
+                        ]
+                    )
+                    state["next_ids"]["work_tool_call"] = 3
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session 1", {}), "continue")
+                self.assertIn("/work-session resume 1 --allow-read . --auto-recover-safe", stdout.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session resume 1 --allow-read . --auto-recover-safe", {}),
+                        "continue",
+                    )
+                output = stdout.getvalue()
+                self.assertIn("Work resume #1 [active] task=#1", output)
+                self.assertIn("one session", load_state()["work_sessions"][0]["tool_calls"][1]["result"]["text"])
+                state = load_state()
+                self.assertEqual(state["work_sessions"][0]["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(state["work_sessions"][1]["tool_calls"][0]["status"], "interrupted")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recovery_plan_deduplicates_turn_for_interrupted_tool(self):
         from mew.work_session import build_work_session_resume
 
