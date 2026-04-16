@@ -13,6 +13,7 @@ from .config import (
 from .errors import ModelBackendError
 from .agent_runs import find_agent_run, get_agent_run_result, start_agent_run
 from .model_backends import call_model_json, model_backend_label
+from .model_trace import append_model_trace
 from .plan_schema import (
     ACTION_TYPES,
     DECISION_TYPES,
@@ -1007,6 +1008,7 @@ def think_phase(
     model_backend=DEFAULT_MODEL_BACKEND,
     prompt_context=None,
     log_phases=True,
+    trace_model=False,
 ):
     fallback = deterministic_decision_plan(
         state,
@@ -1022,6 +1024,18 @@ def think_phase(
         verify_interval_seconds=verify_interval_seconds,
     )
     if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
+        if trace_model:
+            append_model_trace(
+                at=current_time,
+                phase="think",
+                event=event,
+                backend=model_backend,
+                model=model,
+                status="skipped",
+                plan=fallback,
+                error="model backend not enabled for this event",
+                include_prompt=False,
+            )
         return fallback
 
     prompt = build_think_prompt(
@@ -1068,8 +1082,31 @@ def think_phase(
             }
         )
         fallback["model_error"] = True
+        if trace_model:
+            append_model_trace(
+                at=current_time,
+                phase="think",
+                event=event,
+                backend=model_backend,
+                model=model,
+                status="error",
+                prompt=prompt,
+                plan=fallback,
+                error=str(exc),
+            )
         return fallback
     normalized = append_missing_guardrail_decisions(normalize_decision_plan(plan, fallback["summary"]), fallback)
+    if trace_model:
+        append_model_trace(
+            at=current_time,
+            phase="think",
+            event=event,
+            backend=model_backend,
+            model=model,
+            status="ok",
+            prompt=prompt,
+            plan=normalized,
+        )
     if log_phases and normalized.get("schema_issues"):
         append_log(
             "- "
@@ -1223,11 +1260,36 @@ def act_phase(
     model_backend=DEFAULT_MODEL_BACKEND,
     prompt_context=None,
     log_phases=True,
+    trace_model=False,
 ):
     fallback = deterministic_action_plan(decision_plan)
     if decision_plan.get("model_error"):
+        if trace_model:
+            append_model_trace(
+                at=current_time,
+                phase="act",
+                event=event,
+                backend=model_backend,
+                model=model,
+                status="skipped",
+                plan=fallback,
+                error="think phase returned model_error",
+                include_prompt=False,
+            )
         return fallback
     if not model_auth or not should_use_ai_for_event(event, event["type"], ai_ticks):
+        if trace_model:
+            append_model_trace(
+                at=current_time,
+                phase="act",
+                event=event,
+                backend=model_backend,
+                model=model,
+                status="skipped",
+                plan=fallback,
+                error="model backend not enabled for this event",
+                include_prompt=False,
+            )
         return fallback
 
     prompt = build_act_prompt(
@@ -1273,8 +1335,31 @@ def act_phase(
                 "text": f"{model_backend_label(model_backend)} ACT error: {exc}",
             }
         )
+        if trace_model:
+            append_model_trace(
+                at=current_time,
+                phase="act",
+                event=event,
+                backend=model_backend,
+                model=model,
+                status="error",
+                prompt=prompt,
+                plan=fallback,
+                error=str(exc),
+            )
         return fallback
     normalized = normalize_action_plan(action_plan, fallback)
+    if trace_model:
+        append_model_trace(
+            at=current_time,
+            phase="act",
+            event=event,
+            backend=model_backend,
+            model=model,
+            status="ok",
+            prompt=prompt,
+            plan=normalized,
+        )
     if log_phases and normalized.get("schema_issues"):
         append_log(
             "- "
@@ -2497,6 +2582,7 @@ def plan_event(
     allowed_read_roots=None,
     allowed_write_roots=None,
     log_phases=True,
+    trace_model=False,
 ):
     prompt_context = build_context(
         state,
@@ -2539,6 +2625,7 @@ def plan_event(
         model_backend=model_backend,
         prompt_context=prompt_context,
         log_phases=log_phases,
+        trace_model=trace_model,
     )
     action_plan = act_phase(
         state,
@@ -2565,6 +2652,7 @@ def plan_event(
         model_backend=model_backend,
         prompt_context=prompt_context,
         log_phases=log_phases,
+        trace_model=trace_model,
     )
     return decision_plan, action_plan
 

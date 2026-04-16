@@ -10,7 +10,7 @@ import tempfile
 import time
 
 from .brief import recent_activity, next_move
-from .config import LOG_FILE, STATE_DIR, STATE_FILE
+from .config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
@@ -183,6 +183,8 @@ def build_runtime_command(args, workspace):
         command.extend(["--agent-start-timeout", str(args.agent_start_timeout)])
     if getattr(args, "review_model", None):
         command.extend(["--review-model", args.review_model])
+    if getattr(args, "trace_model", False):
+        command.append("--trace-model")
     return command
 
 
@@ -584,6 +586,47 @@ def plan_schema_issues(events, limit=5):
     }
 
 
+def read_jsonl_records(path):
+    records = []
+    for line in read_text_file(path).splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            record = {"status": "corrupt", "raw": line}
+        if not isinstance(record, dict):
+            record = {"status": "corrupt", "raw": line}
+        record.pop("prompt", None)
+        records.append(record)
+    return records
+
+
+def model_trace_summary(workspace, limit=5):
+    records = read_jsonl_records(Path(workspace) / MODEL_TRACE_FILE)
+    latest = []
+    for record in records[-limit:]:
+        latest.append(
+            {
+                "at": record.get("at"),
+                "phase": record.get("phase"),
+                "event_id": record.get("event_id"),
+                "event_type": record.get("event_type"),
+                "status": record.get("status"),
+                "backend": record.get("backend"),
+                "model": record.get("model"),
+                "prompt_chars": record.get("prompt_chars", 0),
+                "prompt_sha256": record.get("prompt_sha256", ""),
+            }
+        )
+    return {
+        "total": len(records),
+        "by_status": count_by(records, "status"),
+        "by_phase": count_by(records, "phase"),
+        "latest": latest,
+    }
+
+
 def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=True):
     workspace = Path(workspace)
     state = read_json_file(workspace / STATE_FILE, {})
@@ -611,6 +654,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         },
         "runtime_status": state.get("runtime_status", {}) if state else {},
         "model_phases": parse_phase_counts(log_text),
+        "model_traces": model_trace_summary(workspace),
         "plan_schema_issues": plan_schema_issues(inbox),
         "outbox": {
             "total": len(outbox),
@@ -741,6 +785,7 @@ def format_dogfood_report(report):
         "model_phases: " + ", ".join(
             f"{key}={value}" for key, value in report.get("model_phases", {}).items()
         ),
+        f"model_traces: {report.get('model_traces')}",
         "runtime_cycle: "
         f"last_reason={report.get('runtime_status', {}).get('last_cycle_reason')} "
         f"duration={report.get('runtime_status', {}).get('last_cycle_duration_seconds')} "

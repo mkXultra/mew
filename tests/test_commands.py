@@ -2118,6 +2118,38 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_trace_command_reads_model_trace_records(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.model_trace import append_model_trace
+
+                append_model_trace(
+                    at="now",
+                    phase="think",
+                    event={"id": 7, "type": "passive_tick"},
+                    backend="codex",
+                    model="test-model",
+                    status="ok",
+                    prompt="trace prompt",
+                    plan={"summary": "ok", "decisions": [{"type": "remember"}]},
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["trace"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("think ok event=#7/passive_tick", output)
+                self.assertIn("decisions=1", output)
+                self.assertNotIn("trace prompt", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["trace", "--json", "--prompt"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["traces"][0]["prompt"], "trace prompt")
+            finally:
+                os.chdir(old_cwd)
+
     def test_focus_and_daily_show_quiet_next_action_view(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

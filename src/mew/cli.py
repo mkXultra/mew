@@ -60,6 +60,7 @@ from .commands import (
     cmd_task_show,
     cmd_task_update,
     cmd_thoughts,
+    cmd_trace,
     cmd_tool_git,
     cmd_tool_edit,
     cmd_tool_list,
@@ -298,6 +299,11 @@ def build_parser():
         default=60.0,
         help="resident model request timeout in seconds",
     )
+    run_parser.add_argument(
+        "--trace-model",
+        action="store_true",
+        help="record THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl",
+    )
     run_parser.set_defaults(func=run_runtime)
 
     start_parser = subparsers.add_parser("start", help="start the runtime in the background")
@@ -485,6 +491,11 @@ def build_parser():
         help="resident model API base URL override",
     )
     step_parser.add_argument("--timeout", type=float, default=60.0, help="resident model request timeout")
+    step_parser.add_argument(
+        "--trace-model",
+        action="store_true",
+        help="record THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl",
+    )
     step_parser.add_argument("--json", action="store_true", help="print structured JSON")
     step_parser.set_defaults(func=cmd_step)
 
@@ -532,6 +543,11 @@ def build_parser():
         default=os.environ.get("MEW_MODEL_BASE_URL", os.environ.get("MEW_CODEX_BASE_URL", "")),
     )
     dogfood_parser.add_argument("--model-timeout", type=float, default=60.0, help="resident model request timeout")
+    dogfood_parser.add_argument(
+        "--trace-model",
+        action="store_true",
+        help="pass --trace-model to the dogfood runtime",
+    )
     dogfood_parser.add_argument(
         "--autonomy-level",
         choices=("observe", "propose", "act"),
@@ -853,6 +869,12 @@ def build_parser():
 
     log_parser = subparsers.add_parser("log", help="show runtime log")
     log_parser.set_defaults(func=cmd_log)
+
+    trace_parser = subparsers.add_parser("trace", help="show opt-in model THINK/ACT traces")
+    trace_parser.add_argument("--limit", type=int, default=20, help="maximum trace records")
+    trace_parser.add_argument("--prompt", action="store_true", help="include full stored prompts")
+    trace_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    trace_parser.set_defaults(func=cmd_trace)
 
     effects_parser = subparsers.add_parser("effects", help="show recent state effect checkpoints")
     effects_parser.add_argument("--limit", type=int, default=20, help="maximum effect records")

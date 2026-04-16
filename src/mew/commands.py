@@ -45,6 +45,7 @@ from .model_backends import (
     model_backend_default_model,
     normalize_model_backend,
 )
+from .model_trace import read_model_traces
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
 from .programmer import (
@@ -1681,6 +1682,7 @@ def cmd_step(args):
         allow_verify=args.allow_verify,
         verify_command=args.verify_command or "",
         verify_timeout=args.verify_timeout,
+        trace_model=getattr(args, "trace_model", False),
         progress=progress,
     )
     if args.json:
@@ -4500,6 +4502,40 @@ def cmd_log(args):
         print("No runtime log.")
         return 0
     print(LOG_FILE.read_text(encoding="utf-8").rstrip())
+    return 0
+
+def cmd_trace(args):
+    records = read_model_traces(limit=args.limit, include_prompt=args.prompt)
+    if args.json:
+        print(json.dumps({"traces": records}, ensure_ascii=False, indent=2))
+        return 0
+    if not records:
+        print("No model traces.")
+        return 0
+    for record in records:
+        plan = record.get("plan") if isinstance(record.get("plan"), dict) else {}
+        decisions = len(plan.get("decisions") or [])
+        actions = len(plan.get("actions") or [])
+        suffix = ""
+        if decisions:
+            suffix = f" decisions={decisions}"
+        elif actions:
+            suffix = f" actions={actions}"
+        print(
+            f"{record.get('at') or '(unknown)'} "
+            f"{record.get('phase') or '?'} "
+            f"{record.get('status') or '?'} "
+            f"event=#{record.get('event_id') or ''}/{record.get('event_type') or ''} "
+            f"backend={record.get('backend') or ''} model={record.get('model') or ''} "
+            f"prompt_chars={record.get('prompt_chars') or 0} "
+            f"sha={str(record.get('prompt_sha256') or '')[:12]}"
+            f"{suffix}"
+        )
+        if record.get("error"):
+            print(f"  error: {record.get('error')}")
+        if args.prompt and record.get("prompt"):
+            print("  prompt:")
+            print(record.get("prompt"))
     return 0
 
 def read_effect_records(limit=20):

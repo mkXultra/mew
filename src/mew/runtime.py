@@ -149,6 +149,7 @@ def plan_runtime_event(
         allow_write=bool(args.allow_write),
         allowed_read_roots=args.allow_read,
         allowed_write_roots=args.allow_write,
+        trace_model=bool(getattr(args, "trace_model", False)),
     )
 
 def apply_runtime_event_plans(

@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mew.config import LOG_FILE, STATE_DIR, STATE_FILE
+from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
@@ -122,6 +122,7 @@ class DogfoodTests(unittest.TestCase):
             review_model="codex-ultra",
             verify_command="",
             verify_interval_minutes=0.05,
+            trace_model=True,
         )
 
         command = build_runtime_command(args, Path("/tmp/work"))
@@ -132,6 +133,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(command[command.index("--agent-result-timeout") + 1], "4.0")
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
         self.assertEqual(command[command.index("--review-model") + 1], "codex-ultra")
+        self.assertIn("--trace-model", command)
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:
@@ -228,6 +230,24 @@ class DogfoodTests(unittest.TestCase):
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
                 encoding="utf-8",
             )
+            (workspace / MODEL_TRACE_FILE).write_text(
+                json.dumps(
+                    {
+                        "at": "now",
+                        "phase": "think",
+                        "event_id": event["id"],
+                        "event_type": event["type"],
+                        "status": "ok",
+                        "backend": "codex",
+                        "model": "test",
+                        "prompt_chars": 12,
+                        "prompt_sha256": "abc",
+                        "prompt": "hidden in report",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
             runtime_out_path = workspace / STATE_DIR / "dogfood-runtime.out"
             runtime_out_path.write_text(
@@ -254,6 +274,8 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["events"]["processed"], 1)
             self.assertEqual(report["model_phases"]["think_ok"], 1)
+            self.assertEqual(report["model_traces"]["total"], 1)
+            self.assertNotIn("prompt", report["model_traces"]["latest"][0])
             self.assertEqual(report["runtime_status"]["last_cycle_reason"], "passive_tick")
             self.assertEqual(report["actions"], {"inspect_dir": 1})
             self.assertEqual(report["read_inspection"]["read_progress_messages"], 1)
@@ -270,6 +292,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
             self.assertIn("Recent activity", text)
+            self.assertIn("model_traces", text)
             self.assertIn("Project snapshot", text)
             self.assertIn("runtime_cycle:", text)
             self.assertIn("read_inspection:", text)
