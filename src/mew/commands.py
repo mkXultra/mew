@@ -125,6 +125,7 @@ from .validation import format_validation_issues, validate_state, validation_err
 from .write_tools import edit_file, summarize_write_result, write_file
 from .work_session import (
     active_work_session,
+    build_work_session_resume,
     close_work_session,
     create_work_session,
     execute_work_tool,
@@ -132,6 +133,7 @@ from .work_session import (
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
+    format_work_session_resume,
     format_work_session,
     start_work_model_turn,
     work_tool_result_error,
@@ -911,6 +913,13 @@ def cmd_work_show_session(args):
                 break
     else:
         task = work_session_task(state, session)
+    if getattr(args, "resume", False):
+        resume = build_work_session_resume(session, task=task)
+        if args.json:
+            print(json.dumps({"resume": resume}, ensure_ascii=False, indent=2))
+        else:
+            print(format_work_session_resume(resume))
+        return 0
     if args.json:
         print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
     else:
@@ -4037,7 +4046,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/ai/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/ai/resume/approve/reject native work session; add details
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -4267,7 +4276,7 @@ def chat_work_session(rest):
     parts = [part for part in parts if part.casefold() != "details"]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
-    if action not in ("show", "start", "close", "ai", "step", "approve", "reject"):
+    if action not in ("show", "start", "close", "ai", "step", "resume", "approve", "reject"):
         task_id = parts[0] if parts else None
         action = "show"
 
@@ -4308,6 +4317,18 @@ def chat_work_session(rest):
             print(error)
             return
         cmd_work_ai(args)
+        return
+
+    if action == "resume":
+        state = load_state()
+        session = active_work_session(state)
+        if task_id:
+            session = None
+            for candidate in reversed(state.get("work_sessions", [])):
+                if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
+                    session = candidate
+                    break
+        print(format_work_session_resume(build_work_session_resume(session, task=work_session_task(state, session))))
         return
 
     if action == "approve":

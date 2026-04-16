@@ -38,6 +38,7 @@ WORK_TOOLS = {
 }
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
+COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 
 
@@ -394,6 +395,175 @@ def work_tool_failure_record(call):
         if "exit_code" in verification and verification.get("exit_code") != 0:
             return verification
     return None
+
+
+def work_call_path(call):
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    return result.get("path") or parameters.get("path") or ""
+
+
+def build_work_session_resume(session, task=None, limit=8):
+    if not session:
+        return None
+    calls = list(session.get("tool_calls") or [])
+    turns = list(session.get("model_turns") or [])
+    paths = []
+    commands = []
+    failures = []
+    pending_approvals = []
+
+    for call in calls:
+        path = work_call_path(call)
+        if path and path not in paths:
+            paths.append(path)
+
+        result = call.get("result") or {}
+        if call.get("tool") in COMMAND_WORK_TOOLS:
+            commands.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "command": result.get("command"),
+                    "cwd": result.get("cwd"),
+                    "exit_code": result.get("exit_code"),
+                }
+            )
+        verification = result.get("verification") or {}
+        if verification:
+            commands.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": "verification",
+                    "command": verification.get("command"),
+                    "cwd": verification.get("cwd"),
+                    "exit_code": verification.get("exit_code"),
+                }
+            )
+
+        failure_record = work_tool_failure_record(call)
+        if call.get("status") == "failed" or failure_record:
+            failures.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "error": call.get("error") or "",
+                    "summary": call.get("summary") or "",
+                    "exit_code": (failure_record or result).get("exit_code"),
+                }
+            )
+
+        if (
+            call.get("tool") in WRITE_WORK_TOOLS
+            and result.get("dry_run")
+            and result.get("changed")
+            and not call.get("approval_status")
+        ):
+            pending_approvals.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "path": path,
+                    "summary": call.get("summary") or "",
+                }
+            )
+
+    recent_decisions = []
+    for turn in turns[-limit:]:
+        action = turn.get("action") or {}
+        recent_decisions.append(
+            {
+                "model_turn_id": turn.get("id"),
+                "status": turn.get("status"),
+                "action": action.get("type") or action.get("tool") or "unknown",
+                "summary": turn.get("summary") or turn.get("error") or "",
+                "tool_call_id": turn.get("tool_call_id"),
+            }
+        )
+
+    if pending_approvals:
+        next_action = "approve or reject pending write tool calls"
+    elif failures:
+        next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
+    else:
+        next_action = "continue the work session with mew work --ai or /work-session ai"
+
+    return {
+        "session_id": session.get("id"),
+        "task_id": session.get("task_id"),
+        "status": session.get("status"),
+        "title": session.get("title") or (task or {}).get("title") or "",
+        "goal": session.get("goal") or "",
+        "updated_at": session.get("updated_at"),
+        "files_touched": paths[-limit:],
+        "commands": commands[-limit:],
+        "failures": failures[-limit:],
+        "pending_approvals": pending_approvals[-limit:],
+        "recent_decisions": recent_decisions,
+        "next_action": next_action,
+    }
+
+
+def format_work_session_resume(resume):
+    if not resume:
+        return "No active work session."
+    lines = [
+        f"Work resume #{resume.get('session_id')} [{resume.get('status')}] task=#{resume.get('task_id')}",
+        f"title: {resume.get('title') or ''}",
+        f"updated_at: {resume.get('updated_at')}",
+        "",
+        "Files touched",
+    ]
+    files = resume.get("files_touched") or []
+    if files:
+        lines.extend(f"- {path}" for path in files)
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Commands"])
+    commands = resume.get("commands") or []
+    if commands:
+        for command in commands:
+            lines.append(
+                f"#{command.get('tool_call_id')} {command.get('tool')} "
+                f"exit={command.get('exit_code')} {command.get('command') or ''}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Pending approvals"])
+    approvals = resume.get("pending_approvals") or []
+    if approvals:
+        for approval in approvals:
+            lines.append(f"#{approval.get('tool_call_id')} {approval.get('tool')} {approval.get('path') or ''}")
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Failures"])
+    failures = resume.get("failures") or []
+    if failures:
+        for failure in failures:
+            lines.append(
+                f"#{failure.get('tool_call_id')} {failure.get('tool')} "
+                f"exit={failure.get('exit_code')} {failure.get('error') or failure.get('summary') or ''}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Recent decisions"])
+    decisions = resume.get("recent_decisions") or []
+    if decisions:
+        for decision in decisions:
+            tool_text = f" tool_call=#{decision.get('tool_call_id')}" if decision.get("tool_call_id") else ""
+            lines.append(
+                f"#{decision.get('model_turn_id')} [{decision.get('status')}] "
+                f"{decision.get('action')}{tool_text} {decision.get('summary') or ''}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Next action", resume.get("next_action") or ""])
+    return "\n".join(lines)
 
 
 def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""):

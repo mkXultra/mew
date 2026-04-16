@@ -248,6 +248,7 @@ as failed tool calls and summarized in `mew work --session --details`.
 uv run mew work 1 --start-session
 uv run mew work --session
 uv run mew work --session --details
+uv run mew work --session --resume
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
@@ -264,7 +265,7 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-v
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
 
-Inside `mew chat`, use `/work-session details`, `/work-session ai 1 --allow-read . --max-steps 1`,
+Inside `mew chat`, use `/work-session details`, `/work-session resume`, `/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`, or
 `/work-session reject 7 not the right change`.
 

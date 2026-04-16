@@ -568,6 +568,68 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_resume_bundle_summarizes_reentry_context(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 0)
+                command = f"{sys.executable} -c \"print('resume ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]),
+                        0,
+                    )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "README.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(resume["session_id"], 1)
+                self.assertIn("README.md", resume["files_touched"][0])
+                self.assertEqual(resume["commands"][0]["tool"], "run_tests")
+                self.assertEqual(resume["commands"][0]["exit_code"], 0)
+                self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 3)
+                self.assertEqual(resume["next_action"], "approve or reject pending write tool calls")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session resume", {}), "continue")
+                text = stdout.getvalue()
+                self.assertIn("Work resume #1 [active] task=#1", text)
+                self.assertIn("Pending approvals", text)
+                self.assertIn("#3 edit_file", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_can_approve_and_reject_dry_run_write_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
