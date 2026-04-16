@@ -1296,8 +1296,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("hello second turn", prompts[2])
                 state = load_state()
                 session = state["work_sessions"][0]
+                self.assertEqual(session["status"], "closed")
                 self.assertEqual([turn["status"] for turn in session["model_turns"]], ["completed", "completed"])
+                self.assertEqual(session["model_turns"][-1]["finished_note"], "read result observed")
                 self.assertEqual([call["tool"] for call in session["tool_calls"]], ["read_file"])
+                self.assertIn("Work session finished: read result observed", state["tasks"][0]["notes"])
             finally:
                 os.chdir(old_cwd)
 
@@ -1348,8 +1351,10 @@ class WorkSessionTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(len(state["work_sessions"]), 1)
                 session = state["work_sessions"][0]
+                self.assertEqual(session["status"], "closed")
                 self.assertEqual(len(session["model_turns"]), 2)
                 self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertIn("Work session finished: previous read is visible", state["tasks"][0]["notes"])
             finally:
                 os.chdir(old_cwd)
 

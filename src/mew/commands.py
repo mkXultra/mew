@@ -503,10 +503,18 @@ def _work_control_text(action, fallback):
     return fallback
 
 
-def apply_work_control_action(state, task, action):
+def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
     task_id = task.get("id") if task else None
+    if action_type == "finish":
+        note = _work_control_text(action, "Work session finished.")
+        if session:
+            close_work_session(session)
+        if task is not None:
+            append_task_note(task, f"Work session finished: {note}")
+            task["updated_at"] = now_iso()
+        return {"finished_note": note}
     if action_type == "send_message":
         message_type = action.get("message_type") or "assistant"
         if message_type not in ("assistant", "info", "warning"):
@@ -686,7 +694,7 @@ def cmd_work_ai(args):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
-                task = work_session_task(state, session)
+                task = work_session_task(state, session) or find_task(state, task_id)
                 turn = start_work_model_turn(
                     state,
                     session,
@@ -720,6 +728,7 @@ def cmd_work_ai(args):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
+                task = work_session_task(state, session) or find_task(state, task_id)
                 turn = start_work_model_turn(
                     state,
                     session,
@@ -728,11 +737,13 @@ def cmd_work_ai(args):
                     action,
                 )
                 turn = finish_work_model_turn(state, session_id, turn.get("id"))
-                control_effect = apply_work_control_action(state, task, action)
+                control_effect = apply_work_control_action(state, session, task, action)
                 if control_effect.get("outbox_message"):
                     turn["outbox_message_id"] = control_effect["outbox_message"].get("id")
                 if control_effect.get("question"):
                     turn["question_id"] = control_effect["question"].get("id")
+                if control_effect.get("finished_note"):
+                    turn["finished_note"] = control_effect["finished_note"]
                 save_state(state)
             report["steps"].append(
                 {
