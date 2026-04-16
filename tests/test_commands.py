@@ -657,6 +657,78 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_kind_filter_scopes_startup_brief_and_unread(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "title": "Research roadmap alternatives",
+                                "description": "Compare product options.",
+                                "kind": "research",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                            {
+                                "id": 2,
+                                "title": "Implement chat kind scope",
+                                "description": "Keep coding cockpit focused.",
+                                "kind": "coding",
+                                "status": "ready",
+                                "priority": "normal",
+                                "notes": "",
+                                "command": "",
+                                "cwd": ".",
+                                "auto_execute": False,
+                                "agent_backend": "",
+                                "agent_model": "",
+                                "agent_prompt": "",
+                                "agent_run_id": None,
+                                "plans": [],
+                                "latest_plan_id": None,
+                                "runs": [],
+                                "created_at": "now",
+                                "updated_at": "now",
+                            },
+                        ]
+                    )
+                    add_question(state, "Which research angle should I use?", related_task_id=1)
+                    add_question(state, "Which coding patch should I make?", related_task_id=2)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["chat", "--kind", "coding", "--timeout", "0", "--no-activity"])
+
+                output = stdout.getvalue()
+                self.assertEqual(code, 0)
+                self.assertIn("Mew brief (coding)", output)
+                self.assertIn("Implement chat kind scope", output)
+                self.assertIn("Which coding patch should I make?", output)
+                self.assertNotIn("Research roadmap alternatives", output)
+                self.assertNotIn("Which research angle should I use?", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_handles_status_outbox_ack_and_message(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -1032,6 +1032,11 @@ def build_parser():
         help=f"poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
     )
     chat_parser.add_argument("--limit", type=int, default=5, help="maximum items in the startup brief")
+    chat_parser.add_argument(
+        "--kind",
+        choices=["coding", "research", "personal", "admin", "unknown"],
+        help="scope the startup brief and unread messages by task kind",
+    )
     chat_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
     chat_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     chat_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")

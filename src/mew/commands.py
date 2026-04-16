@@ -5256,7 +5256,15 @@ def wait_for_event_response(event_id, timeout=60.0, poll_interval=1.0, mark_read
 
         time.sleep(max(0.01, poll_interval))
 
-def emit_initial_outbox(history, unread, mark_read):
+
+def messages_for_kind_scope(state, messages, kind=None):
+    if not kind:
+        return list(messages)
+    tasks = filter_tasks_by_kind(state.get("tasks", []), kind=kind)
+    return filter_messages_for_tasks(messages, tasks, kind=kind)
+
+
+def emit_initial_outbox(history, unread, mark_read, kind=None):
     state = load_state()
     seen_ids = {str(message.get("id")) for message in state["outbox"]}
     if history:
@@ -5265,12 +5273,14 @@ def emit_initial_outbox(history, unread, mark_read):
         messages = [message for message in state["outbox"] if not message.get("read_at")]
     else:
         messages = []
+    messages = messages_for_kind_scope(state, messages, kind=kind)
     print_outbox_messages(messages)
     if mark_read:
         mark_outbox_read(message.get("id") for message in messages)
     return seen_ids
 
-def emit_new_outbox(seen_ids, mark_read):
+
+def emit_new_outbox(seen_ids, mark_read, kind=None):
     state = load_state()
     messages = []
     for message in state["outbox"]:
@@ -5281,20 +5291,23 @@ def emit_new_outbox(seen_ids, mark_read):
         if message.get("read_at"):
             continue
         messages.append(message)
+    messages = messages_for_kind_scope(state, messages, kind=kind)
     print_outbox_messages(messages)
     if mark_read:
         mark_outbox_read(message.get("id") for message in messages)
     return len(messages)
 
+
 def stream_outbox_and_input(args, allow_input):
-    seen_ids = emit_initial_outbox(args.history, args.unread, args.mark_read)
+    kind = getattr(args, "kind", None) or None
+    seen_ids = emit_initial_outbox(args.history, args.unread, args.mark_read, kind=kind)
     activity_offset = current_log_offset() if args.activity else None
     deadline = None
     if args.timeout is not None:
         deadline = time.monotonic() + max(0.0, args.timeout)
 
     while True:
-        emit_new_outbox(seen_ids, args.mark_read)
+        emit_new_outbox(seen_ids, args.mark_read, kind=kind)
         if args.activity:
             activity_offset = emit_new_activity(activity_offset)
         if deadline is not None and time.monotonic() >= deadline:
@@ -7304,9 +7317,10 @@ def read_chat_line(poll_interval, prompt_state):
 
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
+    kind = getattr(args, "kind", None) or None
     state = load_state()
     if not args.no_brief:
-        print(build_brief(state, limit=args.limit), flush=True)
+        print(build_brief(state, limit=args.limit, kind=kind), flush=True)
     session = active_work_session(state)
     if session:
         print(format_work_cockpit_controls(state=state, session=session), flush=True)
@@ -7315,6 +7329,7 @@ def cmd_chat(args):
         history=False,
         unread=not args.no_unread,
         mark_read=args.mark_read,
+        kind=kind,
     )
     chat_state = {
         "activity": bool(args.activity),
@@ -7325,7 +7340,7 @@ def cmd_chat(args):
 
     try:
         while True:
-            emit_new_outbox(seen_ids, args.mark_read)
+            emit_new_outbox(seen_ids, args.mark_read, kind=kind)
             if chat_state["activity"]:
                 chat_state["activity_offset"] = emit_new_activity(chat_state["activity_offset"])
             if deadline is not None and time.monotonic() >= deadline:
