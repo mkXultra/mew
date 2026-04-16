@@ -126,6 +126,15 @@ def recent_verification_runs(state, limit=5):
     return list(reversed(runs[-limit:]))
 
 
+def recent_verification_runs_for_tasks(state, task_ids, limit=1):
+    matching = [
+        run
+        for run in reversed(state.get("verification_runs", []))
+        if str(run.get("task_id")) in task_ids
+    ]
+    return matching[:limit]
+
+
 def recent_write_runs(state, limit=5):
     runs = list(state.get("write_runs", []))
     return list(reversed(runs[-limit:]))
@@ -601,7 +610,11 @@ def next_move(state, kind=None):
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
-    recent_verifications = recent_verification_runs(state, limit=1)
+    recent_verifications = (
+        recent_verification_runs_for_tasks(state, task_ids, limit=1)
+        if kind
+        else recent_verification_runs(state, limit=1)
+    )
     active_work = active_work_session_items(state, limit=1, kind=kind)
 
     if running_tasks:

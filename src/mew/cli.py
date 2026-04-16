@@ -869,6 +869,7 @@ def build_parser():
     self_improve_parser.add_argument("--agent-model", help="implementation model")
     self_improve_parser.add_argument("--review-model", help="review model")
     self_improve_parser.add_argument("--no-plan", action="store_true", help="create/reuse the task without creating a plan")
+    self_improve_parser.add_argument("--native", action="store_true", help="create/reuse the task for native mew work instead of a programmer plan")
     self_improve_parser.add_argument("--force", action="store_true", help="create a new task even if one is open")
     self_improve_parser.add_argument("--force-plan", action="store_true", help="create a new plan even if one exists")
     self_improve_parser.add_argument("--dispatch", action="store_true", help="start an implementation run immediately")

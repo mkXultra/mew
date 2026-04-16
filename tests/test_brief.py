@@ -504,6 +504,22 @@ class BriefTests(unittest.TestCase):
 
         self.assertEqual(next_move(state), "inspect verification run #2 with `mew verification`")
 
+    def test_next_move_kind_filter_ignores_unrelated_failed_verification(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Research grants", kind="research")
+        add_task(state, task_id=2, title="Improve cockpit", kind="coding")
+        state["verification_runs"].append(
+            {
+                "id": 7,
+                "task_id": 1,
+                "command": "python -m unittest",
+                "exit_code": 1,
+                "finished_at": "done",
+            }
+        )
+
+        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `mew work 2 --start-session`")
+
 
 if __name__ == "__main__":
     unittest.main()

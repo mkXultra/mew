@@ -3468,6 +3468,57 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_self_improve_native_skips_programmer_plan(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                stdin = StringIO("/self native improve native loop\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("created #1 [todo/normal/coding] Improve mew itself", output)
+                self.assertIn("native work: mew work 1 --start-session", output)
+                self.assertNotIn("created plan", output)
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], None)
+                self.assertEqual(state["tasks"][0]["plans"], [])
+                self.assertEqual(state["agent_runs"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_self_improve_native_prompt_is_rejected_before_mutation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                stdin = StringIO("/self native prompt improve native loop\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("does not create a programmer prompt", stdout.getvalue())
+                state = load_state()
+                self.assertEqual(state["tasks"], [])
+                self.assertEqual(state["agent_runs"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_autonomy_controls_respect_pause_and_mode_override(self):
         from argparse import Namespace
 

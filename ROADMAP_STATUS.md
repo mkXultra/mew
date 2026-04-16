@@ -131,6 +131,7 @@ Evidence:
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
+- `mew self-improve --native` and chat `/self native ...` create/reuse a self-improvement coding task without forcing the older programmer-plan path, then print native work-session next commands.
 
 Missing proof:
 
@@ -231,9 +232,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `537 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `202 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `543 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `204 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_brief.py` current: `30 passed`.
+- `uv run pytest -q tests/test_self_improve.py` current: `12 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 21 commands.

@@ -93,6 +93,55 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_native_skips_programmer_plan(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--native", "--focus", "Use native work"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("native work: mew work 1 --start-session", output)
+                self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+                state = load_state()
+                self.assertEqual(len(state["tasks"]), 1)
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], None)
+                self.assertEqual(state["tasks"][0]["plans"], [])
+                self.assertEqual(len(state["agent_runs"]), 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_native_rejects_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["self-improve", "--native", "--dispatch"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("--native cannot be combined with --cycle or --dispatch", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_native_rejects_cycle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(["self-improve", "--native", "--cycle", "--dry-run"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("--native cannot be combined with --cycle or --dispatch", stderr.getvalue())
+                state = load_state()
+                self.assertEqual(state["tasks"], [])
+                self.assertEqual(state["agent_runs"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_cycle_dry_run(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

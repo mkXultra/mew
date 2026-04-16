@@ -158,6 +158,7 @@ MEW_WEBHOOK_TOKEN=secret uv run mew webhook --host 127.0.0.1 --port 8765
 uv run mew run --notify-command "scripts/notify-mew" --notify-bell
 uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
+uv run mew self-improve --native --focus "Make one small native work improvement"
 uv run mew outbox
 uv run mew outbox --json
 uv run mew ack --routine
@@ -468,6 +469,7 @@ state without leaving the session:
 /dispatch 4 dry-run
 /buddy 4 dispatch dry-run
 /self dry-run prompt improve chat loop
+/self native improve the native work loop
 /done 4
 /block 4
 /pause

@@ -3838,6 +3838,9 @@ def cmd_tool_git(args):
     return 0 if result.get("exit_code") == 0 else 1
 
 def cmd_self_improve(args):
+    if getattr(args, "native", False) and (args.cycle or args.dispatch):
+        print("mew: --native cannot be combined with --cycle or --dispatch", file=sys.stderr)
+        return 1
     if args.cycle:
         return cmd_self_improve_cycle(args)
     if args.cycles != 1:
@@ -3861,7 +3864,7 @@ def cmd_self_improve(args):
         plan = None
         plan_created = False
         run = None
-        if not args.no_plan or args.dispatch:
+        if not getattr(args, "native", False) and (not args.no_plan or args.dispatch):
             plan, plan_created = ensure_self_improve_plan(
                 state,
                 task,
@@ -3881,6 +3884,9 @@ def cmd_self_improve(args):
     print(("created" if created else "reused") + f" {format_task(task)}")
     if plan:
         print(("created" if plan_created else "reused") + f" {format_task_plan(plan)}")
+    if getattr(args, "native", False):
+        print(f"native work: mew work {task['id']} --start-session")
+        print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']}")
@@ -5192,7 +5198,7 @@ CHAT_HELP = """Commands:
 /plan <task-id>       create or show a programmer plan; add prompt to print prompts
 /dispatch <task-id>   start an implementation run; add dry-run to preview
 /buddy [task-id]      plan one coding task; add dispatch, dry-run, review
-/self [focus]         create/plan self-improvement; add dispatch or dry-run
+/self [focus]         create/plan self-improvement; add native, dispatch, or dry-run
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
 /mode <level>         override autonomy level: observe|propose|act|default
@@ -6734,6 +6740,8 @@ def chat_self_improve(rest):
         "--ready",
         "auto-execute",
         "--auto-execute",
+        "native",
+        "--native",
     }
     flags = {part.casefold() for part in parts if part.casefold() in option_tokens}
     dry_run = "dry-run" in flags or "--dry-run" in flags
@@ -6743,6 +6751,13 @@ def chat_self_improve(rest):
     show_prompt = "prompt" in flags or "--prompt" in flags
     ready = dispatch or "ready" in flags or "--ready" in flags
     auto_execute = "auto-execute" in flags or "--auto-execute" in flags
+    native = "native" in flags or "--native" in flags
+    if native and dispatch:
+        print("mew: native self-improve cannot be combined with dispatch")
+        return
+    if native and show_prompt:
+        print("mew: native self-improve does not create a programmer prompt")
+        return
     focus = " ".join(part for part in parts if part.casefold() not in option_tokens).strip()
 
     with state_lock():
@@ -6755,7 +6770,10 @@ def chat_self_improve(rest):
             auto_execute=auto_execute,
             force=force,
         )
-        plan, plan_created = ensure_self_improve_plan(state, task, force=force_plan)
+        plan = None
+        plan_created = False
+        if not native:
+            plan, plan_created = ensure_self_improve_plan(state, task, force=force_plan)
         run = None
         if dispatch:
             run = create_implementation_run_from_plan(state, task, plan, dry_run=dry_run)
@@ -6767,8 +6785,15 @@ def chat_self_improve(rest):
         save_state(state)
 
     print(("created " if created else "reused ") + format_task(task))
-    print(("created " if plan_created else "reused ") + format_task_plan(plan))
+    if plan:
+        print(("created " if plan_created else "reused ") + format_task_plan(plan))
+    if native:
+        print(f"native work: mew work {task['id']} --start-session")
+        print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
     if show_prompt:
+        if not plan:
+            print("No programmer plan was created for native self-improvement.")
+            return
         print("implementation_prompt:")
         print(plan.get("implementation_prompt") or "")
         print("review_prompt:")
