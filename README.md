@@ -159,6 +159,7 @@ uv run mew run --notify-command "scripts/notify-mew" --notify-bell
 uv run mew thoughts --details
 uv run mew self-improve --focus "Make one small mew improvement"
 uv run mew self-improve --native --focus "Make one small native work improvement"
+uv run mew self-improve --start-session --focus "Start a native self-improvement session"
 uv run mew outbox
 uv run mew outbox --json
 uv run mew ack --routine
@@ -470,6 +471,7 @@ state without leaving the session:
 /buddy 4 dispatch dry-run
 /self dry-run prompt improve chat loop
 /self native improve the native work loop
+/self start improve the native work loop
 /done 4
 /block 4
 /pause

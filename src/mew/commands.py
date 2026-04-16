@@ -3838,8 +3838,9 @@ def cmd_tool_git(args):
     return 0 if result.get("exit_code") == 0 else 1
 
 def cmd_self_improve(args):
-    if getattr(args, "native", False) and (args.cycle or args.dispatch):
-        print("mew: --native cannot be combined with --cycle or --dispatch", file=sys.stderr)
+    native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
+    if native and (args.cycle or args.dispatch):
+        print("mew: --native/--start-session cannot be combined with --cycle or --dispatch", file=sys.stderr)
         return 1
     if args.cycle:
         return cmd_self_improve_cycle(args)
@@ -3864,7 +3865,9 @@ def cmd_self_improve(args):
         plan = None
         plan_created = False
         run = None
-        if not getattr(args, "native", False) and (not args.no_plan or args.dispatch):
+        session = None
+        session_created = False
+        if not native and (not args.no_plan or args.dispatch):
             plan, plan_created = ensure_self_improve_plan(
                 state,
                 task,
@@ -3879,12 +3882,16 @@ def cmd_self_improve(args):
                 run["command"] = build_ai_cli_run_command(run)
             else:
                 start_agent_run(state, run)
+        if getattr(args, "start_session", False):
+            session, session_created = create_work_session(state, task)
         save_state(state)
 
     print(("created" if created else "reused") + f" {format_task(task)}")
     if plan:
         print(("created" if plan_created else "reused") + f" {format_task_plan(plan)}")
-    if getattr(args, "native", False):
+    if session:
+        print(("started" if session_created else "reused") + f" work session #{session['id']}")
+    if native:
         print(f"native work: mew work {task['id']} --start-session")
         print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
     if run:
@@ -5198,7 +5205,7 @@ CHAT_HELP = """Commands:
 /plan <task-id>       create or show a programmer plan; add prompt to print prompts
 /dispatch <task-id>   start an implementation run; add dry-run to preview
 /buddy [task-id]      plan one coding task; add dispatch, dry-run, review
-/self [focus]         create/plan self-improvement; add native, dispatch, or dry-run
+/self [focus]         create/plan self-improvement; add native, start, dispatch, or dry-run
 /pause [reason]       pause autonomous non-user work
 /resume               resume autonomous non-user work
 /mode <level>         override autonomy level: observe|propose|act|default
@@ -6742,6 +6749,10 @@ def chat_self_improve(rest):
         "--auto-execute",
         "native",
         "--native",
+        "start",
+        "--start",
+        "start-session",
+        "--start-session",
     }
     flags = {part.casefold() for part in parts if part.casefold() in option_tokens}
     dry_run = "dry-run" in flags or "--dry-run" in flags
@@ -6751,7 +6762,8 @@ def chat_self_improve(rest):
     show_prompt = "prompt" in flags or "--prompt" in flags
     ready = dispatch or "ready" in flags or "--ready" in flags
     auto_execute = "auto-execute" in flags or "--auto-execute" in flags
-    native = "native" in flags or "--native" in flags
+    start_session = bool({"start", "--start", "start-session", "--start-session"} & flags)
+    native = "native" in flags or "--native" in flags or start_session
     if native and dispatch:
         print("mew: native self-improve cannot be combined with dispatch")
         return
@@ -6782,12 +6794,18 @@ def chat_self_improve(rest):
                 run["command"] = build_ai_cli_run_command(run)
             else:
                 start_agent_run(state, run)
+        session = None
+        session_created = False
+        if start_session:
+            session, session_created = create_work_session(state, task)
         save_state(state)
 
     print(("created " if created else "reused ") + format_task(task))
     if plan:
         print(("created " if plan_created else "reused ") + format_task_plan(plan))
     if native:
+        if session:
+            print(("started " if session_created else "reused ") + f"work session #{session['id']}")
         print(f"native work: mew work {task['id']} --start-session")
         print(f"continue: mew work {task['id']} --live --allow-read . --max-steps 1")
     if show_prompt:

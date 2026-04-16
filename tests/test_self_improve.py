@@ -122,7 +122,7 @@ class SelfImproveTests(unittest.TestCase):
                     code = main(["self-improve", "--native", "--dispatch"])
 
                 self.assertEqual(code, 1)
-                self.assertIn("--native cannot be combined with --cycle or --dispatch", stderr.getvalue())
+                self.assertIn("--native/--start-session cannot be combined with --cycle or --dispatch", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 
@@ -135,10 +135,29 @@ class SelfImproveTests(unittest.TestCase):
                     code = main(["self-improve", "--native", "--cycle", "--dry-run"])
 
                 self.assertEqual(code, 1)
-                self.assertIn("--native cannot be combined with --cycle or --dispatch", stderr.getvalue())
+                self.assertIn("--native/--start-session cannot be combined with --cycle or --dispatch", stderr.getvalue())
                 state = load_state()
                 self.assertEqual(state["tasks"], [])
                 self.assertEqual(state["agent_runs"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_start_session_uses_native_work(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--start-session", "--focus", "Start native work"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("started work session #1", output)
+                self.assertIn("native work: mew work 1 --start-session", output)
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["plans"], [])
+                self.assertEqual(state["work_sessions"][0]["task_id"], 1)
+                self.assertEqual(state["work_sessions"][0]["status"], "active")
             finally:
                 os.chdir(old_cwd)
 

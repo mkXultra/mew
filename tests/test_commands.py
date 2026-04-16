@@ -3496,6 +3496,32 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_self_improve_start_opens_native_work_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                stdin = StringIO("/self start improve native start\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("started work session #1", output)
+                self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["plans"], [])
+                self.assertEqual(state["work_sessions"][0]["task_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_self_improve_native_prompt_is_rejected_before_mutation(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
