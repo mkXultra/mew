@@ -27,7 +27,8 @@ Current guiding judgment:
 - Reflex observation exists: with bounded opt-in rounds, mew can read/inspect/search, rethink with the observation, and then act.
 - Gated write/verify/rollback exists, and write runs link to verification runs; this is now a real feedback loop.
 - Runtime effect journaling has started: cycles now persist planning/commit/apply/verify status and surface it in doctor/brief/dogfood.
-- The remaining frontier is true interruption recovery: use the journal to resume, repair, or explicitly resolve unfinished effects after process death.
+- Repair can explicitly mark unfinished runtime effects as interrupted after process death.
+- The remaining frontier is true interruption recovery: use the journal to resume or repair unfinished effects with actionable next steps, not only close them.
 - The next maintainability frontier is extracting action application from the large agent/command modules so mew can reason about and improve its own execution layer.
 
 If confidence is low, say what is uncertain. Use `acm run` with another model only when the user explicitly asks for that model, then compare its answer with your own before responding.
