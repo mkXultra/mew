@@ -1287,6 +1287,7 @@ def cmd_stop(args):
 
 def build_doctor_data(args):
     data = {"ok": True}
+    state = None
     try:
         state = load_state()
         validation_issues = validate_state(state)
@@ -1316,6 +1317,25 @@ def build_doctor_data(args):
         data["runtime_lock"] = {"state": lock_state, "pid": lock.get("pid")}
     else:
         data["runtime_lock"] = {"state": "none", "pid": None}
+    runtime_status = (state or {}).get("runtime_status", {})
+    incomplete_cycle = bool(
+        runtime_status.get("current_phase")
+        or runtime_status.get("current_event_id")
+        or runtime_status.get("current_reason")
+    )
+    data["runtime"] = {
+        "state": runtime_status.get("state"),
+        "pid": runtime_status.get("pid"),
+        "current_phase": runtime_status.get("current_phase"),
+        "current_event_id": runtime_status.get("current_event_id"),
+        "current_reason": runtime_status.get("current_reason"),
+        "cycle_started_at": runtime_status.get("cycle_started_at"),
+        "incomplete_cycle": incomplete_cycle,
+    }
+    if data["runtime_lock"]["state"] == "stale" or (
+        incomplete_cycle and data["runtime_lock"]["state"] != "active"
+    ):
+        data["ok"] = False
 
     data["tools"] = {}
     for executable in ("ai-cli", "rg"):
@@ -1373,6 +1393,13 @@ def format_doctor_data(data):
         lines.append("runtime_lock: none")
     else:
         lines.append(f"runtime_lock: {runtime_lock.get('state')} pid={runtime_lock.get('pid')}")
+    runtime = data.get("runtime") or {}
+    lines.append(
+        "runtime: "
+        f"{runtime.get('state') or 'unknown'} pid={runtime.get('pid')} "
+        f"phase={runtime.get('current_phase') or ''} "
+        f"incomplete_cycle={bool(runtime.get('incomplete_cycle'))}"
+    )
 
     for executable in ("ai-cli", "rg"):
         tool = (data.get("tools") or {}).get(executable) or {}

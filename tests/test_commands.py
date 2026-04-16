@@ -138,6 +138,40 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_doctor_flags_stale_runtime_incomplete_cycle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["runtime_status"]["state"] = "running"
+                    state["runtime_status"]["pid"] = 999
+                    state["runtime_status"]["current_phase"] = "planning"
+                    state["runtime_status"]["current_event_id"] = 1
+                    state["runtime_status"]["current_reason"] = "passive_tick"
+                    state["runtime_status"]["cycle_started_at"] = "then"
+                    save_state(state)
+
+                with (
+                    patch("mew.commands.shutil.which", return_value="/usr/bin/tool"),
+                    patch("mew.commands.load_codex_oauth", return_value={"path": "auth.json"}),
+                    patch("mew.commands.read_lock", return_value={"pid": 999}),
+                    patch("mew.commands.pid_alive", return_value=False),
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["doctor"])
+
+                self.assertEqual(code, 1)
+                output = stdout.getvalue()
+                self.assertIn("runtime_lock: stale pid=999", output)
+                self.assertIn("phase=planning", output)
+                self.assertIn("incomplete_cycle=True", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_without_subcommand_lists_tasks(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
