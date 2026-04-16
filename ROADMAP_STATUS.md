@@ -79,18 +79,19 @@ Evidence:
 - Work-mode control actions now have side effects: `send_message` writes to outbox, `ask_user` creates a normal question, and `finish` closes the work session while appending a final note to the task.
 - Closed work sessions can still be inspected with `mew work <task-id> --session --resume`, so a finished resident work loop leaves a durable reentry/final-state artifact.
 - `mew chat` now has `/continue ...` as a short one-step live command for the active work session, reducing the repeated `/work-session live ...` command burden.
+- Work mode now supports a read-only `batch` action with up to five inspection tools in one model turn, journaling each tool call separately while keeping writes and shell commands outside batch mode.
 
 Missing proof:
 
 - Model delta streaming is wired for Codex SSE, but live UX still prints raw JSON deltas rather than a polished reasoning view.
 - Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
-- Work mode still executes one tool per model step.
+- Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible, but there is no prompt budget enforcement or automatic compaction of noisy work-session history.
 - Live coding work session UX now has a one-step `/continue` command, but it is still not a full REPL-style coding cockpit with first-class pause/approve/reject prompts and inline guidance capture.
 
 Next action:
 
-- Build the next live cockpit slice: first-class chat prompts after each live action that offer continue/approve/reject/stop, capture inline guidance, and avoid requiring the user to remember command syntax.
+- Build the next live cockpit slice: first-class chat prompts after each live action that offer continue/approve/reject/stop, capture inline guidance, and dogfood batch reads on real repository investigations.
 
 ## Milestone 3: Persistent Advantage
 
@@ -162,9 +163,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `470 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `30 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `45 passed`.
+- `uv run pytest -q` current: `471 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `31 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `46 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

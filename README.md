@@ -247,7 +247,9 @@ as failed tool calls and summarized in `mew work --session --details`.
 each completed tool step. When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. Work-mode `send_message` writes to outbox;
-`ask_user` creates a normal question.
+`ask_user` creates a normal question. The model can also choose a read-only
+`batch` action to run up to five inspection tools in one work turn; writes and
+shell commands remain outside batch mode.
 
 ```sh
 uv run mew work 1 --start-session
