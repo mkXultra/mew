@@ -676,6 +676,11 @@ def build_parser():
     do_parser.add_argument("--work-guidance", help="extra guidance for the resident work loop")
     do_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas when supported")
     do_parser.add_argument(
+        "--compact-live",
+        action="store_true",
+        help="skip full per-step resumes and keep the live stream to thinking/action/result panes",
+    )
+    do_parser.add_argument(
         "--prompt-approval",
         action="store_true",
         help="force inline approval prompts before applying dry-run writes, even when stdin is not a TTY",

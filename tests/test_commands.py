@@ -37,7 +37,17 @@ class CommandTests(unittest.TestCase):
 
                 with patch("mew.commands.cmd_work_ai", side_effect=fake_work_ai):
                     with redirect_stdout(StringIO()):
-                        code = main(["do", "7", "--work-guidance", "ship the small fix", "--max-steps", "4"])
+                        code = main(
+                            [
+                                "do",
+                                "7",
+                                "--work-guidance",
+                                "ship the small fix",
+                                "--max-steps",
+                                "4",
+                                "--compact-live",
+                            ]
+                        )
             finally:
                 os.chdir(old_cwd)
 
@@ -55,6 +65,7 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(args.allow_verify)
         self.assertEqual(args.verify_command, "uv run pytest -q")
         self.assertEqual(args.work_guidance, "ship the small fix")
+        self.assertTrue(args.compact_live)
         self.assertFalse(args.no_prompt_approval)
 
     def test_do_can_disable_interactive_prompt_approval(self):
