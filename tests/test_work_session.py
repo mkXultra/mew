@@ -117,6 +117,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("Work session", text)
+                self.assertIn("phase=idle", text)
                 self.assertIn("tool_calls=2", text)
             finally:
                 os.chdir(old_cwd)
@@ -1623,6 +1624,7 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
                 self.assertIn("Work session #1 [active] task=#1", stdout.getvalue())
+                self.assertIn("phase: idle", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

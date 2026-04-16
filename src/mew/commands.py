@@ -436,8 +436,10 @@ def format_workbench(data):
         session = data["work_session"]
         tool_calls = session.get("tool_calls") or []
         model_turns = session.get("model_turns") or []
+        resume = build_work_session_resume(session, task=task)
         lines.append(
             f"#{session.get('id')} [{session.get('status')}] "
+            f"phase={(resume or {}).get('phase') or 'unknown'} "
             f"model_turns={len(model_turns)} tool_calls={len(tool_calls)} "
             f"last_tool=#{session.get('last_tool_call_id') or ''}"
         )

@@ -860,10 +860,12 @@ def format_work_session(session, task=None, limit=8, details=False):
         return "No active work session."
     calls = list(session.get("tool_calls") or [])
     turns = list(session.get("model_turns") or [])
+    resume = build_work_session_resume(session, task=task, limit=limit)
     lines = [
         f"Work session #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
         f"title: {session.get('title') or (task or {}).get('title') or ''}",
         f"goal: {session.get('goal') or ''}",
+        f"phase: {(resume or {}).get('phase') or 'unknown'}",
         f"created_at: {session.get('created_at')}",
         f"updated_at: {session.get('updated_at')}",
         f"model_turns={len(turns)} tool_calls={len(calls)}",
