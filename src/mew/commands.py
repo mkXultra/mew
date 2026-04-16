@@ -38,7 +38,7 @@ from .config import EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
 from .dogfood import format_dogfood_loop_report, format_dogfood_report, run_dogfood, run_dogfood_loop
 from .errors import MewError
-from .memory import compact_memory
+from .memory import compact_memory, search_memory
 from .model_backends import (
     load_model_auth,
     model_backend_default_base_url,
@@ -2379,6 +2379,27 @@ def cmd_memory(args):
         return 0
 
     state = load_state()
+    if args.search:
+        results = search_memory(state, args.search, limit=args.limit)
+        if args.json:
+            print(json.dumps({"query": args.search, "matches": results}, ensure_ascii=False, indent=2))
+            return 0
+        if not results:
+            print("No memory matches.")
+            return 0
+        for result in results:
+            location = f"{result.get('scope')}.{result.get('key')}"
+            details = []
+            if result.get("event_id") is not None:
+                details.append(f"event=#{result.get('event_id')}")
+            if result.get("event_type"):
+                details.append(str(result.get("event_type")))
+            if result.get("at"):
+                details.append(str(result.get("at")))
+            suffix = f" ({', '.join(details)})" if details else ""
+            print(f"- {location}{suffix}: {result.get('text')}")
+        return 0
+
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
     deep = memory.get("deep", {})
@@ -4531,7 +4552,12 @@ def cmd_trace(args):
             f"sha={str(record.get('prompt_sha256') or '')[:12]}"
             f"{suffix}"
         )
-        if record.get("error"):
+        reason = record.get("reason")
+        if not reason and record.get("status") == "skipped":
+            reason = record.get("error")
+        if reason:
+            print(f"  reason: {reason}")
+        elif record.get("error"):
             print(f"  error: {record.get('error')}")
         if args.prompt and record.get("prompt"):
             print("  prompt:")

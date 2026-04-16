@@ -1,11 +1,12 @@
 import os
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 
 from mew.cli import main
-from mew.memory import compact_memory
+from mew.memory import compact_memory, search_memory
 from mew.state import default_state, load_state, save_state
 
 
@@ -43,6 +44,19 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(len(state["memory"]["shallow"]["recent_events"]), 3)
         self.assertEqual(state["memory"]["deep"]["project"], [])
 
+    def test_search_memory_finds_shallow_and_deep_entries(self):
+        state = default_state()
+        state["memory"]["shallow"]["current_context"] = "Working on model trace logs"
+        state["memory"]["deep"]["decisions"].append("Keep running-task focus as the default.")
+        add_recent_events(state, 2)
+
+        trace_results = search_memory(state, "model trace")
+        self.assertEqual(trace_results[0]["key"], "current_context")
+
+        focus_results = search_memory(state, "running focus")
+        self.assertEqual(focus_results[0]["scope"], "deep")
+        self.assertEqual(focus_results[0]["key"], "decisions")
+
     def test_cli_memory_compact(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -58,6 +72,30 @@ class MemoryTests(unittest.TestCase):
                 self.assertIn("Memory compact", stdout.getvalue())
                 state = load_state()
                 self.assertEqual(len(state["memory"]["shallow"]["recent_events"]), 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_search(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = load_state()
+                state["memory"]["shallow"]["current_context"] = "Trace logs are useful for runtime debugging."
+                state["memory"]["deep"]["project"].append("Model runtime should expose trace search.")
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--search", "trace"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("shallow.current_context", output)
+                self.assertIn("deep.project", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--search", "runtime", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["query"], "runtime")
+                self.assertTrue(data["matches"])
             finally:
                 os.chdir(old_cwd)
 

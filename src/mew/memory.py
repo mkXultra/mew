@@ -1,6 +1,60 @@
 from .timeutil import now_iso
 
 
+def _matches_query(text, query):
+    haystack = str(text or "").casefold()
+    needle = str(query or "").strip().casefold()
+    if not needle:
+        return False
+    if needle in haystack:
+        return True
+    terms = [term for term in needle.split() if term]
+    return bool(terms) and all(term in haystack for term in terms)
+
+
+def search_memory(state, query, limit=20):
+    limit = max(0, int(limit or 0))
+    if limit <= 0:
+        return []
+    memory = state.get("memory", {})
+    shallow = memory.get("shallow", {})
+    deep = memory.get("deep", {})
+    results = []
+
+    def add_match(scope, key, text, **extra):
+        if not _matches_query(text, query):
+            return
+        item = {
+            "scope": scope,
+            "key": key,
+            "text": str(text or ""),
+        }
+        item.update(extra)
+        results.append(item)
+
+    add_match("shallow", "current_context", shallow.get("current_context") or "")
+    add_match("shallow", "latest_task_summary", shallow.get("latest_task_summary") or "")
+    for event in shallow.get("recent_events", []):
+        add_match(
+            "shallow",
+            "recent_events",
+            event.get("summary") or "",
+            at=event.get("at"),
+            event_id=event.get("event_id"),
+            event_type=event.get("event_type"),
+        )
+
+    for key in ("preferences", "project", "decisions"):
+        for index, text in enumerate(deep.get(key, [])):
+            add_match("deep", key, text, index=index)
+
+    snapshot = deep.get("project_snapshot")
+    if snapshot:
+        add_match("deep", "project_snapshot", snapshot)
+
+    return results[-limit:]
+
+
 def compact_memory(state, keep_recent=5, dry_run=False):
     keep_recent = max(0, int(keep_recent))
     memory = state.setdefault("memory", {})

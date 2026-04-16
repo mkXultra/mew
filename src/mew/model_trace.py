@@ -30,6 +30,7 @@ def append_model_trace(
     status,
     prompt="",
     plan=None,
+    reason="",
     error="",
     include_prompt=True,
 ):
@@ -48,6 +49,8 @@ def append_model_trace(
         record["prompt"] = prompt
     if plan is not None:
         record["plan"] = _jsonable(plan)
+    if reason:
+        record["reason"] = str(reason)
     if error:
         record["error"] = str(error)
 

@@ -1033,7 +1033,7 @@ def think_phase(
                 model=model,
                 status="skipped",
                 plan=fallback,
-                error="model backend not enabled for this event",
+                reason="model backend not enabled for this event",
                 include_prompt=False,
             )
         return fallback
@@ -1273,7 +1273,7 @@ def act_phase(
                 model=model,
                 status="skipped",
                 plan=fallback,
-                error="think phase returned model_error",
+                reason="think phase returned model_error",
                 include_prompt=False,
             )
         return fallback
@@ -1287,7 +1287,7 @@ def act_phase(
                 model=model,
                 status="skipped",
                 plan=fallback,
-                error="model backend not enabled for this event",
+                reason="model backend not enabled for this event",
                 include_prompt=False,
             )
         return fallback

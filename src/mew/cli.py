@@ -302,7 +302,7 @@ def build_parser():
     run_parser.add_argument(
         "--trace-model",
         action="store_true",
-        help="record THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl",
+        help="record full THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl; may contain private state",
     )
     run_parser.set_defaults(func=run_runtime)
 
@@ -494,7 +494,7 @@ def build_parser():
     step_parser.add_argument(
         "--trace-model",
         action="store_true",
-        help="record THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl",
+        help="record full THINK/ACT prompts and normalized plans to .mew/model-trace.jsonl; may contain private state",
     )
     step_parser.add_argument("--json", action="store_true", help="print structured JSON")
     step_parser.set_defaults(func=cmd_step)
@@ -546,7 +546,7 @@ def build_parser():
     dogfood_parser.add_argument(
         "--trace-model",
         action="store_true",
-        help="pass --trace-model to the dogfood runtime",
+        help="pass --trace-model to the dogfood runtime; trace files may contain private state",
     )
     dogfood_parser.add_argument(
         "--autonomy-level",
@@ -783,6 +783,9 @@ def build_parser():
     memory_parser = subparsers.add_parser("memory", help="show what mew remembers")
     memory_parser.add_argument("--recent", type=int, default=5, help="number of recent shallow memory events")
     memory_parser.add_argument("--deep", action="store_true", help="include deep memory sections")
+    memory_parser.add_argument("--search", help="search shallow and deep memory text")
+    memory_parser.add_argument("--limit", type=int, default=20, help="maximum search matches")
+    memory_parser.add_argument("--json", action="store_true", help="print structured search results")
     memory_parser.add_argument("--compact", action="store_true", help="compact recent shallow memory into project memory")
     memory_parser.add_argument("--keep-recent", type=int, default=5, help="recent events to keep when compacting")
     memory_parser.add_argument("--dry-run", action="store_true", help="print compact note without changing state")

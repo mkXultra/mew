@@ -2135,18 +2135,31 @@ class CommandTests(unittest.TestCase):
                     prompt="trace prompt",
                     plan={"summary": "ok", "decisions": [{"type": "remember"}]},
                 )
+                append_model_trace(
+                    at="later",
+                    phase="act",
+                    event={"id": 7, "type": "passive_tick"},
+                    backend="codex",
+                    model="test-model",
+                    status="skipped",
+                    reason="model backend not enabled for this event",
+                    plan={"summary": "fallback", "actions": [{"type": "record_memory"}]},
+                    include_prompt=False,
+                )
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["trace"]), 0)
                 output = stdout.getvalue()
                 self.assertIn("think ok event=#7/passive_tick", output)
                 self.assertIn("decisions=1", output)
+                self.assertIn("reason: model backend not enabled for this event", output)
                 self.assertNotIn("trace prompt", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["trace", "--json", "--prompt"]), 0)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["traces"][0]["prompt"], "trace prompt")
+                self.assertEqual(data["traces"][1]["reason"], "model backend not enabled for this event")
             finally:
                 os.chdir(old_cwd)
 
