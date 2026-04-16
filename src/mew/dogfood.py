@@ -564,6 +564,8 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    stop_result = run(["work", "1", "--stop-session", "--stop-reason", "dogfood pause", "--json"])
+    resume_result = run(["work", "1", "--session", "--resume", "--json"])
     work_result = run(["work", "1", "--json"])
     chat_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
@@ -577,6 +579,8 @@ def run_work_session_scenario(workspace, env=None):
     test_data = _json_stdout(test_result)
     edit_data = _json_stdout(edit_result)
     write_data = _json_stdout(write_result)
+    stop_data = _json_stdout(stop_result)
+    resume_data = _json_stdout(resume_result)
     work_data = _json_stdout(work_result)
     session = work_data.get("work_session") or {}
     tool_calls = session.get("tool_calls") or []
@@ -632,6 +636,22 @@ def run_work_session_scenario(workspace, env=None):
         and (workspace / "generated.md").read_text(encoding="utf-8") == "generated dogfood\n",
         observed=write_data.get("tool_call"),
         expected="write_file writes generated.md after verification",
+    )
+    _scenario_check(
+        checks,
+        "work_stop_request_records",
+        stop_result.get("exit_code") == 0
+        and (stop_data.get("work_session") or {}).get("stop_reason") == "dogfood pause",
+        observed=stop_data.get("work_session"),
+        expected="stop request recorded on active work session",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_stop_phase",
+        resume_result.get("exit_code") == 0
+        and (resume_data.get("resume") or {}).get("phase") == "stop_requested",
+        observed=resume_data.get("resume"),
+        expected="resume reports phase=stop_requested",
     )
     _scenario_check(
         checks,

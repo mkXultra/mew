@@ -92,6 +92,7 @@ Evidence:
 - Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
 - Stop requests leave their reason in the work report and resume bundle after they are consumed, preserving why a live loop paused.
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
+- `dogfood --scenario work-session` now covers stop request recording and `phase=stop_requested` resume output.
 
 Missing proof:
 
