@@ -5827,7 +5827,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
 
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
     if cached:
-        lines.append("- /continue")
+        lines.append(f"- /continue {cached}")
         lines.append("- /continue <guidance>")
         lines.append(f"- /work-session live {cached}")
         lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")

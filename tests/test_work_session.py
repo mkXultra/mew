@@ -4127,6 +4127,10 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 self.assertIn("focus on the README summary", prompts[-1])
                 self.assertIn("Next controls", output)
+                self.assertIn(
+                    "/continue --auth auth.json --allow-read . --act-mode deterministic --prompt-approval",
+                    output,
+                )
                 self.assertIn("/continue <guidance>", output)
                 self.assertIn("--prompt-approval", output)
                 self.assertIn("/work-session resume 1", output)
