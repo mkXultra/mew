@@ -11,6 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from http.server import ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -54,6 +55,51 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(args.allow_verify)
         self.assertEqual(args.verify_command, "uv run pytest -q")
         self.assertEqual(args.work_guidance, "ship the small fix")
+        self.assertFalse(args.no_prompt_approval)
+
+    def test_do_can_disable_interactive_prompt_approval(self):
+        captured = []
+
+        def fake_work_ai(args):
+            captured.append(args)
+            return 0
+
+        with patch("mew.commands.cmd_work_ai", side_effect=fake_work_ai):
+            with redirect_stdout(StringIO()):
+                code = main(["do", "7", "--no-prompt-approval"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(captured[0].no_prompt_approval)
+
+    def test_live_approval_prompt_defaults_to_interactive_tty(self):
+        from mew.commands import live_approval_prompt_enabled
+
+        class TTYInput(StringIO):
+            def isatty(self):
+                return True
+
+        with patch("mew.commands.sys.stdin", TTYInput()):
+            self.assertTrue(
+                live_approval_prompt_enabled(
+                    SimpleNamespace(live=True, json=False, prompt_approval=False, no_prompt_approval=False)
+                )
+            )
+            self.assertFalse(
+                live_approval_prompt_enabled(
+                    SimpleNamespace(live=True, json=False, prompt_approval=True, no_prompt_approval=True)
+                )
+            )
+
+        self.assertTrue(
+            live_approval_prompt_enabled(
+                SimpleNamespace(live=True, json=False, prompt_approval=True, no_prompt_approval=False)
+            )
+        )
+        self.assertFalse(
+            live_approval_prompt_enabled(
+                SimpleNamespace(live=True, json=True, prompt_approval=False, no_prompt_approval=False)
+            )
+        )
 
     def test_step_focus_is_injected_into_guidance(self):
         old_cwd = os.getcwd()
@@ -3513,17 +3559,19 @@ class CommandTests(unittest.TestCase):
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session resume --auto-recover-safe", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
-        self.assertIn("/work-session live --prompt-approval", output)
+        self.assertIn("/work-session live                    prompts inline", output)
+        self.assertIn("/work-session live --no-prompt-approval", output)
         self.assertNotIn("/agents [all]", output)
 
     def test_chat_work_ai_args_accept_prompt_approval(self):
         from mew.commands import _parse_chat_work_ai_args
 
-        args, error = _parse_chat_work_ai_args(["live", "--allow-read", ".", "--prompt-approval"])
+        args, error = _parse_chat_work_ai_args(["live", "--allow-read", ".", "--prompt-approval", "--no-prompt-approval"])
 
         self.assertEqual(error, "")
         self.assertEqual(args.allow_read, ["."])
         self.assertTrue(args.prompt_approval)
+        self.assertTrue(args.no_prompt_approval)
 
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):
         from mew.commands import run_chat_slash_command

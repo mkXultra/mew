@@ -866,6 +866,8 @@ def work_ai_has_tool_gates(options):
 
 
 def live_approval_prompt_enabled(args):
+    if getattr(args, "no_prompt_approval", False):
+        return False
     return bool(
         getattr(args, "prompt_approval", False)
         or (getattr(args, "live", False) and not getattr(args, "json", False) and sys.stdin.isatty())
@@ -1209,6 +1211,7 @@ def cmd_do(args):
         progress=True,
         stream_model=bool(getattr(args, "stream_model", False)),
         prompt_approval=bool(getattr(args, "prompt_approval", False)),
+        no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
         allow_read=getattr(args, "allow_read", None) or ["."],
         allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or ["."]),
         allow_shell=False,
@@ -5532,7 +5535,9 @@ CHAT_WORK_HELP = """Work session quick help:
 /continue --allow-read .              run one live resident-model step
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop
-/work-session live --prompt-approval  prompt inline before applying dry-run writes
+/work-session live                    prompts inline for dry-run writes in an interactive TTY
+/work-session live --no-prompt-approval
+                                      disable inline dry-run write prompts for this run
 /continue <guidance>                  reuse prior live options with new guidance
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
@@ -5660,6 +5665,7 @@ def _parse_chat_work_ai_args(parts):
         "live": False,
         "stream_model": False,
         "prompt_approval": False,
+        "no_prompt_approval": False,
         "allow_read": [],
         "allow_write": [],
         "allow_shell": False,
@@ -5738,6 +5744,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--prompt-approval":
             args["prompt_approval"] = True
+            index += 1
+            continue
+        if token == "--no-prompt-approval":
+            args["no_prompt_approval"] = True
             index += 1
             continue
         return None, f"mew: unsupported ai option: {token}"

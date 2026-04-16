@@ -77,8 +77,8 @@ Evidence:
 - Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
-- `mew work --live --prompt-approval` and `mew do --prompt-approval` can now ask for inline `[y/N/q]` approval on dry-run writes, rejecting or applying without requiring the user to compose a separate command.
-- `/work-session live --prompt-approval` is available from chat and appears in focused work help, so inline approval is reachable from the resident cockpit path.
+- Interactive `mew work --live` and `mew do` prompt inline by default for dry-run writes, with `--prompt-approval` for non-TTY forcing and `--no-prompt-approval` for explicit opt-out.
+- `/work-session live` inherits the same interactive inline approval behavior from chat, and focused work help now documents the default plus `--no-prompt-approval`.
 - Work-session resume output now reports context pressure (`tool_calls`, `model_turns`, recent chars, total chars, pressure), making large active-session growth visible to both humans and the model.
 - A real Codex Web API dogfood run on task #21 used `mew work --live --act-mode deterministic` for two read-only steps; it selected `inspect_dir` then `read_file`, printed action/reason/resume/context pressure for each step, and made no repository writes.
 - Work-mode control actions now have side effects: `send_message` writes to outbox, `ask_user` creates a normal question, and `finish` closes the work session while appending a final note to the task.
@@ -260,9 +260,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `579 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `581 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed`.
-- `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `156 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
@@ -279,6 +280,7 @@ Next action:
 - `codex-ultra` human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers pass without tracked file edits.
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
+- `claude-ultra` Milestone 2 review after pending diff previews judged the cockpit direction coherent and recommended consolidating inline approval as the next small slice; interactive live/do approval prompts now have explicit default/force/opt-out semantics.
 - Isolated `codex-ultra` agent-as-human E2E in `/tmp/mew-agent-human-role-20260417-013828` ran `chat-cockpit`, `work-session`, `all`, manual `chat --kind coding`, work-session reentry, line reads, and a live read-only resident model step. It judged mew usable for narrow task-coding shell work and found three papercuts: source-checkout command prefixes, timeline failure summaries, and line-window truncation wording; all three were fixed in commit `4e8ecf1`.
 - Isolated `codex-ultra` retest in `/tmp/mew-agent-human-role-retest-20260417-015606` verified the three papercut fixes: `./mew` next controls, timeline failure text, and line-window `has_more_lines` without `(truncated)`; `chat-cockpit` dogfood also passed.
 - `mew chat --kind coding`, `mew next --kind coding`, and `mew status --kind coding` were dogfooded locally after the scoped-chat changes; startup and slash-view scoping stayed quiet and task/coding-focused.

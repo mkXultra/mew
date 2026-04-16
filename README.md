@@ -368,9 +368,9 @@ uv run mew work 1 --reject-tool 7 --reject-reason "not the right change"
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 uv run mew do 1 --work-guidance "make the smallest verified fix"
-uv run mew do 1 --prompt-approval --work-guidance "ask before applying writes"
+uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in the resume bundle"
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
-uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --prompt-approval --max-steps 3
+uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-steps 1
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
@@ -379,14 +379,16 @@ uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic 
 work loop live with deterministic ACT, `--allow-read .`, `--allow-write .`, and
 an auto-detected verification command such as `uv run pytest -q` when available.
 It uses the normal auth fallback (`./auth.json`, then `~/.codex/auth.json`)
-unless `--auth` is explicitly supplied. Use `--prompt-approval` to review
-dry-run writes inline, or `--read-only` / `--no-verify` to remove the default
-write and verification gates.
+unless `--auth` is explicitly supplied. In an interactive terminal, `mew do`
+and `mew work --live` prompt inline before applying dry-run writes; use
+`--prompt-approval` to force that behavior in non-TTY runs, or
+`--no-prompt-approval` to leave approvals in the resume bundle. Use
+`--read-only` / `--no-verify` to remove the default write and verification gates.
 
 Inside `mew chat`, use `/work-session details`, `/work-session timeline`, `/work-session resume --allow-read .`,
 `/work-session resume --allow-read . --auto-recover-safe`,
 `/work-session live 1 --allow-read . --max-steps 1`,
-`/work-session live --prompt-approval --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,
+`/work-session live --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/continue focus on README.md` to reuse the previous or persisted live options with new guidance,
 `/work-session note prefer small verified steps`,
