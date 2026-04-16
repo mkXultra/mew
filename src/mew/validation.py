@@ -33,7 +33,7 @@ RUNTIME_EFFECT_STATUSES = {
     "interrupted",
 }
 WORK_SESSION_STATUSES = {"active", "closed"}
-WORK_TOOL_CALL_STATUSES = {"running", "completed", "failed"}
+WORK_TOOL_CALL_STATUSES = {"running", "completed", "failed", "interrupted"}
 INCOMPLETE_RUNTIME_EFFECT_STATUSES = {
     "planning",
     "planned",

@@ -77,6 +77,24 @@ def _compact_parameters(parameters):
     return compact
 
 
+def _reasoning_value_text(value):
+    if isinstance(value, str):
+        return value
+    return _json_clip(value, 2000)
+
+
+def compact_turn_reasoning(turn):
+    decision_plan = turn.get("decision_plan") or {}
+    if not isinstance(decision_plan, dict) or not decision_plan:
+        return ""
+    parts = []
+    for key, value in decision_plan.items():
+        if key == "action" or value in (None, "", [], {}):
+            continue
+        parts.append(f"{key}: {clip_output(_reasoning_value_text(value), 2000)}")
+    return clip_output("\n".join(parts), 4000)
+
+
 def work_tool_call_for_model(call):
     tool = call.get("tool") or ""
     return {
@@ -105,6 +123,7 @@ def work_model_turn_for_model(turn):
         "tool_call_id": turn.get("tool_call_id"),
         "tool_call_ids": turn.get("tool_call_ids") or [],
         "summary": clip_output(turn.get("summary") or "", WORK_RESULT_TEXT_LIMIT),
+        "reasoning": compact_turn_reasoning(turn),
         "error": clip_output(turn.get("error") or "", WORK_RESULT_TEXT_LIMIT),
         "started_at": turn.get("started_at"),
         "finished_at": turn.get("finished_at"),

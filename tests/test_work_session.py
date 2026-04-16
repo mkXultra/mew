@@ -697,7 +697,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(len(resume["failures"]), 1)
                 self.assertEqual(
                     resume["next_action"],
-                    "continue the work session with mew work --ai or /work-session ai",
+                    "continue the work session with /continue in chat or mew work --live",
                 )
             finally:
                 os.chdir(old_cwd)
@@ -1381,7 +1381,11 @@ class WorkSessionTests(unittest.TestCase):
                 def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None):
                     prompts.append(prompt)
                     if len(prompts) <= 2:
-                        return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+                        return {
+                            "summary": "read README",
+                            "analysis_notes": "remember that README content is the evidence source",
+                            "action": {"type": "read_file", "path": "README.md"},
+                        }
                     return {"summary": "enough context", "action": {"type": "finish", "reason": "read result observed"}}
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
@@ -1409,6 +1413,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["stop_reason"], "finish")
                 self.assertEqual(len(data["steps"]), 2)
                 self.assertIn("hello second turn", prompts[2])
+                self.assertIn("README content is the evidence source", prompts[2])
                 state = load_state()
                 session = state["work_sessions"][0]
                 self.assertEqual(session["status"], "closed")

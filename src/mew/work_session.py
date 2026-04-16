@@ -24,8 +24,8 @@ from .write_tools import (
 
 
 WORK_SESSION_STATUSES = {"active", "closed"}
-WORK_TOOL_STATUSES = {"running", "completed", "failed"}
-WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed"}
+WORK_TOOL_STATUSES = {"running", "completed", "failed", "interrupted"}
+WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_TOOLS = {
     "inspect_dir",
     "read_file",
@@ -122,6 +122,62 @@ def close_work_session(session, current_time=None):
     session["status"] = "closed"
     session["updated_at"] = current_time
     return session
+
+
+def mark_running_work_interrupted(state, current_time=None):
+    current_time = current_time or now_iso()
+    repairs = []
+    for session in state.get("work_sessions", []):
+        if not isinstance(session, dict):
+            continue
+        changed = False
+        recovery_hint = (
+            f"Review work session #{session.get('id')} resume, verify world state, then retry or choose a new action."
+        )
+        for call in session.get("tool_calls") or []:
+            if not isinstance(call, dict) or call.get("status") != "running":
+                continue
+            call["status"] = "interrupted"
+            call["finished_at"] = current_time
+            call["error"] = call.get("error") or "Interrupted before the work tool completed."
+            call["summary"] = call.get("summary") or "interrupted work tool call"
+            call["recovery_hint"] = recovery_hint
+            repairs.append(
+                {
+                    "type": "interrupted_work_tool_call",
+                    "session_id": session.get("id"),
+                    "task_id": session.get("task_id"),
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "old_status": "running",
+                    "new_status": "interrupted",
+                    "recovery_hint": recovery_hint,
+                }
+            )
+            changed = True
+        for turn in session.get("model_turns") or []:
+            if not isinstance(turn, dict) or turn.get("status") != "running":
+                continue
+            turn["status"] = "interrupted"
+            turn["finished_at"] = current_time
+            turn["error"] = turn.get("error") or "Interrupted before the work model turn completed."
+            turn["summary"] = turn.get("summary") or "interrupted work model turn"
+            turn["recovery_hint"] = recovery_hint
+            repairs.append(
+                {
+                    "type": "interrupted_work_model_turn",
+                    "session_id": session.get("id"),
+                    "task_id": session.get("task_id"),
+                    "model_turn_id": turn.get("id"),
+                    "old_status": "running",
+                    "new_status": "interrupted",
+                    "recovery_hint": recovery_hint,
+                }
+            )
+            changed = True
+        if changed:
+            session["updated_at"] = current_time
+    return repairs
 
 
 def start_work_tool_call(state, session, tool, parameters):
@@ -506,7 +562,7 @@ def build_work_session_resume(session, task=None, limit=8):
             )
 
         failure_record = work_tool_failure_record(call)
-        if call.get("status") == "failed" or failure_record:
+        if call.get("status") in ("failed", "interrupted") or failure_record:
             failures.append(
                 {
                     "tool_call_id": call.get("id"),
@@ -555,7 +611,10 @@ def build_work_session_resume(session, task=None, limit=8):
     latest_call = calls[-1] if calls else None
     latest_failed = bool(
         latest_call
-        and (latest_call.get("status") == "failed" or work_tool_failure_record(latest_call))
+        and (
+            latest_call.get("status") in ("failed", "interrupted")
+            or work_tool_failure_record(latest_call)
+        )
     )
 
     if session.get("status") == "closed":
@@ -565,7 +624,7 @@ def build_work_session_resume(session, task=None, limit=8):
     elif latest_failed:
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
     else:
-        next_action = "continue the work session with mew work --ai or /work-session ai"
+        next_action = "continue the work session with /continue in chat or mew work --live"
 
     return {
         "session_id": session.get("id"),

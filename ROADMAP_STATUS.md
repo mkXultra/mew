@@ -85,6 +85,7 @@ Evidence:
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
+- Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 
 Missing proof:
 
@@ -109,6 +110,7 @@ Evidence:
 - Project snapshot and memory systems exist.
 - Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, recent decisions, next action, and context pressure.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
+- Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 
 Missing proof:
 
@@ -132,10 +134,11 @@ Evidence:
 - `mew repair` can mark unfinished effects as `interrupted`.
 - Interrupted effects receive `recovery_hint`.
 - Runtime effects now record user-visible `outcome`.
+- `mew repair` now marks stale `running` work-session tool calls and model turns as `interrupted` with a recovery hint, so native work resumes do not keep ambiguous in-flight state forever.
 
 Missing proof:
 
-- No automatic resume/retry/abort/ask_user decision from interrupted effects.
+- No automatic resume/retry/abort/ask_user decision from interrupted effects or interrupted work-session items.
 - No world-state revalidation before retry.
 - No recovery report after automatic resume.
 
@@ -168,7 +171,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `475 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `476 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `35 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `50 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

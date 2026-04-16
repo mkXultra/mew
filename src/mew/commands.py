@@ -137,6 +137,7 @@ from .work_session import (
     format_work_action,
     format_work_session_resume,
     format_work_session,
+    mark_running_work_interrupted,
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
@@ -2335,6 +2336,11 @@ def repair_incomplete_runtime_effects(state):
         )
     return repairs
 
+
+def repair_incomplete_work_sessions(state):
+    return mark_running_work_interrupted(state)
+
+
 def build_repair_data():
     try:
         with state_lock():
@@ -2344,6 +2350,7 @@ def build_repair_data():
             repairs = []
             repairs.extend(repair_stale_task_questions(state))
             repairs.extend(repair_incomplete_runtime_effects(state))
+            repairs.extend(repair_incomplete_work_sessions(state))
             issues = validate_state(state)
             errors = validation_errors(issues)
             if errors:
@@ -2416,6 +2423,20 @@ def cmd_repair(args):
                         print(
                             f"- {repair.get('type')} effect=#{repair.get('effect_id')} "
                             f"event=#{repair.get('event_id')} {repair.get('old_status')}->{repair.get('new_status')}"
+                        )
+                        print(f"  next: {repair.get('recovery_hint')}")
+                    elif repair.get("type") == "interrupted_work_tool_call":
+                        print(
+                            f"- {repair.get('type')} session=#{repair.get('session_id')} "
+                            f"tool_call=#{repair.get('tool_call_id')} "
+                            f"{repair.get('old_status')}->{repair.get('new_status')}"
+                        )
+                        print(f"  next: {repair.get('recovery_hint')}")
+                    elif repair.get("type") == "interrupted_work_model_turn":
+                        print(
+                            f"- {repair.get('type')} session=#{repair.get('session_id')} "
+                            f"model_turn=#{repair.get('model_turn_id')} "
+                            f"{repair.get('old_status')}->{repair.get('new_status')}"
                         )
                         print(f"  next: {repair.get('recovery_hint')}")
                     else:

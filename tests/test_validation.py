@@ -311,6 +311,83 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repair_marks_running_work_items_interrupted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = default_state()
+                state["tasks"].append(
+                    {
+                        "id": 1,
+                        "title": "Repair work session",
+                        "status": "todo",
+                        "priority": "normal",
+                        "kind": "coding",
+                        "plans": [],
+                    }
+                )
+                state["work_sessions"].append(
+                    {
+                        "id": 1,
+                        "task_id": 1,
+                        "status": "active",
+                        "title": "Repair work session",
+                        "goal": "Recover stale work state.",
+                        "created_at": "then",
+                        "updated_at": "then",
+                        "last_tool_call_id": 1,
+                        "last_model_turn_id": 1,
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "session_id": 1,
+                                "task_id": 1,
+                                "tool": "read_file",
+                                "status": "running",
+                                "parameters": {"path": "README.md"},
+                                "result": None,
+                                "summary": "",
+                                "error": "",
+                                "started_at": "then",
+                                "finished_at": None,
+                            }
+                        ],
+                        "model_turns": [
+                            {
+                                "id": 1,
+                                "session_id": 1,
+                                "task_id": 1,
+                                "status": "running",
+                                "decision_plan": {},
+                                "action_plan": {},
+                                "action": {"type": "read_file", "path": "README.md"},
+                                "tool_call_id": 1,
+                                "summary": "",
+                                "error": "",
+                                "started_at": "then",
+                                "finished_at": None,
+                            }
+                        ],
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair"])
+                repaired = load_state()
+                session = repaired["work_sessions"][0]
+
+                self.assertEqual(code, 0)
+                self.assertIn("interrupted_work_tool_call session=#1 tool_call=#1 running->interrupted", stdout.getvalue())
+                self.assertIn("interrupted_work_model_turn session=#1 model_turn=#1 running->interrupted", stdout.getvalue())
+                self.assertEqual(session["tool_calls"][0]["status"], "interrupted")
+                self.assertEqual(session["model_turns"][0]["status"], "interrupted")
+                self.assertTrue(session["tool_calls"][0]["finished_at"])
+                self.assertIn("verify world state", session["tool_calls"][0]["recovery_hint"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_effects_command_reads_state_checkpoints(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
