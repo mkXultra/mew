@@ -18,6 +18,15 @@ class WriteToolsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside allowed write roots"):
                 write_file(str(path), "hello", [allowed], create=True)
 
+    def test_write_allows_exact_new_file_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+
+            result = write_file(str(path), "hello\n", [str(path)], create=True)
+
+            self.assertTrue(result["written"])
+            self.assertEqual(path.read_text(encoding="utf-8"), "hello\n")
+
     def test_edit_refuses_missing_old_text(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "notes.md"

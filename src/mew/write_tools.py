@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 
-from .read_tools import _is_relative_to, ensure_not_sensitive, normalize_allowed_roots
+from .read_tools import _is_relative_to, ensure_not_sensitive
 from .tasks import clip_output
 from .timeutil import now_iso
 
@@ -12,8 +12,27 @@ DEFAULT_WRITE_MAX_CHARS = 100000
 DEFAULT_DIFF_MAX_CHARS = 12000
 
 
+def normalize_allowed_write_roots(allowed_roots):
+    roots = []
+    for root in allowed_roots or []:
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        try:
+            roots.append(path.resolve(strict=True))
+            continue
+        except OSError:
+            pass
+        try:
+            parent = path.parent.resolve(strict=True)
+        except OSError:
+            continue
+        roots.append(parent / path.name)
+    return roots
+
+
 def resolve_allowed_write_path(path, allowed_roots, create=False):
-    roots = normalize_allowed_roots(allowed_roots)
+    roots = normalize_allowed_write_roots(allowed_roots)
     if not roots:
         raise ValueError("write is disabled; pass --allow-write PATH")
 
@@ -39,6 +58,8 @@ def resolve_allowed_write_path(path, allowed_roots, create=False):
         ensure_not_sensitive(resolved, verb="write")
         for root in roots:
             if parent == root or _is_relative_to(parent, root):
+                return resolved
+            if resolved == root:
                 return resolved
 
     allowed = ", ".join(str(root) for root in roots)

@@ -544,6 +544,38 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    approve_dry_run_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "write_file",
+            "--path",
+            "approved.md",
+            "--content",
+            "approved dogfood\n",
+            "--create",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    approve_dry_run_data = _json_stdout(approve_dry_run_result)
+    approve_dry_run_id = str((approve_dry_run_data.get("tool_call") or {}).get("id") or "")
+    approve_result = run(
+        [
+            "work",
+            "1",
+            "--approve-tool",
+            approve_dry_run_id,
+            "--allow-write",
+            "approved.md",
+            "--allow-verify",
+            "--verify-command",
+            f"{sys.executable} -c \"from pathlib import Path; assert Path('approved.md').read_text() == 'approved dogfood\\n'\"",
+            "--json",
+        ]
+    )
     write_result = run(
         [
             "work",
@@ -649,6 +681,7 @@ def run_work_session_scenario(workspace, env=None):
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
     edit_data = _json_stdout(edit_result)
+    approve_data = _json_stdout(approve_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -712,6 +745,17 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_approve_exact_new_file_write_root",
+        approve_dry_run_result.get("exit_code") == 0
+        and approve_result.get("exit_code") == 0
+        and ((approve_dry_run_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and ((approve_data.get("tool_call") or {}).get("result") or {}).get("verification_exit_code") == 0
+        and (workspace / "approved.md").read_text(encoding="utf-8") == "approved dogfood\n",
+        observed={"dry_run": approve_dry_run_data.get("tool_call"), "approval": approve_data.get("tool_call")},
+        expected="approve-tool applies a new file when --allow-write names that exact missing file",
+    )
+    _scenario_check(
+        checks,
         "work_write_file_applies_with_verification",
         write_result.get("exit_code") == 0
         and ((write_data.get("tool_call") or {}).get("result") or {}).get("verification_exit_code") == 0
@@ -747,11 +791,11 @@ def run_work_session_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 5
+        len(tool_calls) == 7
         and [call.get("tool") for call in tool_calls]
-        == ["read_file", "glob", "run_tests", "edit_file", "write_file"],
+        == ["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
         observed={"tool_count": len(tool_calls), "tools": [call.get("tool") for call in tool_calls]},
-        expected=["read_file", "glob", "run_tests", "edit_file", "write_file"],
+        expected=["read_file", "glob", "run_tests", "edit_file", "write_file", "write_file", "write_file"],
     )
     _scenario_check(
         checks,
