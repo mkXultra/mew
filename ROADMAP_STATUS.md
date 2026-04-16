@@ -14,6 +14,14 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
+## Current Focus
+
+Milestone 2 is the active focus. Readable diff panes, command/test output panes,
+chat cockpit controls, compact live result panes, and scoped reentry controls
+now exist. The next product gap is a more polished continuous coding cockpit:
+better reasoning/progress flow, less duplicate output, and more real dogfood on
+long-running repository work.
+
 ## Milestone 1: Native Hands
 
 Status: `done`
@@ -44,7 +52,7 @@ Missing proof:
 
 Next action:
 
-- Move roadmap focus to Milestone 2: streaming/live coding parity, especially readable diff display, command output, and chat cockpit control for active work sessions.
+- Historical handoff complete. Keep current implementation work under Milestone 2's active focus rather than reopening Milestone 1.
 
 ## Milestone 2: Interactive Parity
 
