@@ -513,19 +513,24 @@ def run_chat_cockpit_scenario(workspace, env=None):
 
     research_result = run(["task", "add", "Research default task", "--kind", "research"])
     coding_result = run(["task", "add", "Implement scoped chat cockpit", "--kind", "coding"])
+    coding_session_result = run(["work", "2", "--start-session", "--allow-read", "coding-root"])
+    research_session_result = run(["work", "1", "--start-session", "--allow-read", "research-root"])
     chat_result = run(
         ["chat", "--kind", "coding", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
-        input_text="/scope\n/tasks\n/work\n/exit\n",
+        input_text="/scope\n/tasks\n/work\n/work-session\n/exit\n",
     )
     chat_output = chat_result.get("stdout") or ""
 
     _scenario_check(
         checks,
         "chat_kind_scope_starts_active",
-        chat_result.get("exit_code") == 0 and "scope: coding" in chat_output,
+        chat_result.get("exit_code") == 0
+        and "scope: coding" in chat_output
+        and "--allow-read coding-root" in chat_output
+        and "--allow-read research-root" not in chat_output,
         observed=command_result_tail(chat_result),
-        expected="chat --kind coding starts with coding scope visible",
+        expected="chat --kind coding starts with coding scope and scoped work controls visible",
     )
     _scenario_check(
         checks,
@@ -548,9 +553,26 @@ def run_chat_cockpit_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "chat_cockpit_seed_commands_succeed",
-        research_result.get("exit_code") == 0 and coding_result.get("exit_code") == 0,
-        observed=[command_result_tail(research_result), command_result_tail(coding_result)],
-        expected="scenario task seeds succeed",
+        research_result.get("exit_code") == 0
+        and coding_result.get("exit_code") == 0
+        and coding_session_result.get("exit_code") == 0
+        and research_session_result.get("exit_code") == 0,
+        observed=[
+            command_result_tail(research_result),
+            command_result_tail(coding_result),
+            command_result_tail(coding_session_result),
+            command_result_tail(research_session_result),
+        ],
+        expected="scenario task and active-session seeds succeed",
+    )
+    _scenario_check(
+        checks,
+        "chat_work_session_respects_kind_scope",
+        chat_result.get("exit_code") == 0
+        and "Work session #1 [active] task=#2" in chat_output
+        and "Research default task" not in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="/work-session uses the scoped coding active session even when a research session is newer",
     )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 
