@@ -37,13 +37,18 @@ def recent_git_commits(limit=5):
 def build_self_improve_description(state, focus=""):
     focus_text = focus.strip() if isinstance(focus, str) else ""
     commits = recent_git_commits()
-    commit_text = f"\nRecent git commits:\n{commits}\n" if commits else ""
+    commit_text = (
+        "Recently completed git commits. Do not repeat these topics:\n"
+        f"{commits}\n\n"
+        if commits
+        else ""
+    )
     return (
         "Improve mew through one small, reviewable code or documentation change.\n\n"
         f"Focus:\n{focus_text or next_move(state)}\n\n"
+        f"{commit_text}"
         "Current brief:\n"
         f"{build_brief(state, limit=5)}\n\n"
-        f"{commit_text}"
         "Constraints:\n"
         "- Keep the change small.\n"
         "- Preserve unrelated user changes.\n"

@@ -31,13 +31,17 @@ class SelfImproveTests(unittest.TestCase):
         self.assertEqual(task["latest_plan_id"], plan["id"])
         self.assertIn("Improve next command", task["description"])
 
-    def test_self_improve_description_includes_recent_commits(self):
+    def test_self_improve_description_prioritizes_recent_commits(self):
         state = default_state()
 
         with patch("mew.self_improve.recent_git_commits", return_value="abc123 Fix latest thing"):
             description = build_self_improve_description(state, focus="Pick next")
 
-        self.assertIn("Recent git commits:", description)
+        self.assertLess(
+            description.index("Recently completed git commits"),
+            description.index("Current brief:"),
+        )
+        self.assertIn("Do not repeat these topics", description)
         self.assertIn("abc123 Fix latest thing", description)
 
     def test_self_improve_reuses_open_task(self):
