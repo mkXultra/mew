@@ -57,17 +57,18 @@ Evidence:
 - `mew work --session --details` and `/work-session details` expose touched files, model turns, and tool-call summaries for the active work session.
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
+- Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
 
 Missing proof:
 
 - No streaming model token output.
 - No streaming command output.
-- No integrated diff approval flow.
+- Diff approval exists as a CLI flow; it is not yet a smooth chat cockpit flow.
 - Live coding work session UX is improving, but it is still report-style rather than an interactive cockpit.
 
 Next action:
 
-- Add an integrated diff approval flow and a compact verification failure summary for active work sessions.
+- Add compact verification failure summaries and expose approve/reject operations from chat.
 
 ## Milestone 3: Persistent Advantage
 
@@ -136,9 +137,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `452 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `14 passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `15 passed`.
+- `uv run pytest -q` current: `453 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `15 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `16 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

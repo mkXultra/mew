@@ -396,10 +396,11 @@ def format_work_session(session, task=None, limit=8, details=False):
         if write_calls:
             for call in write_calls[-limit:]:
                 result = call.get("result") or {}
+                approval = f" approval={call.get('approval_status')}" if call.get("approval_status") else ""
                 lines.append(
                     f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
                     f"written={result.get('written')} rolled_back={result.get('rolled_back')} "
-                    f"verification_exit_code={result.get('verification_exit_code')}"
+                    f"verification_exit_code={result.get('verification_exit_code')}{approval}"
                 )
                 lines.append(result.get("diff") or "")
         else:

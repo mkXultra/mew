@@ -129,6 +129,7 @@ from .work_session import (
     create_work_session,
     execute_work_tool,
     find_work_session,
+    find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
     format_work_session,
@@ -502,6 +503,10 @@ def cmd_work(args):
             print("mew: --ai and --tool cannot be combined", file=sys.stderr)
             return 1
         return cmd_work_ai(args)
+    if getattr(args, "approve_tool", None):
+        return cmd_work_approve_tool(args)
+    if getattr(args, "reject_tool", None):
+        return cmd_work_reject_tool(args)
     if getattr(args, "tool", None):
         return cmd_work_tool(args)
     if getattr(args, "start_session", False):
@@ -718,6 +723,116 @@ def cmd_work_ai(args):
     else:
         print(format_work_ai_report(report))
     return 0 if report.get("stop_reason") not in ("model_error", "tool_failed", "no_active_session") else 1
+
+
+def _select_active_work_session_for_args(state, args):
+    session = active_work_session(state)
+    if getattr(args, "task_id", None):
+        session = None
+        for candidate in reversed(state.get("work_sessions", [])):
+            if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
+                session = candidate
+                break
+    return session
+
+
+def _approval_parameters_from_call(call, args):
+    parameters = dict(call.get("parameters") or {})
+    for key in ("allowed_write_roots", "allow_shell", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
+        parameters.pop(key, None)
+    parameters["apply"] = True
+    parameters["approved_from_tool_call_id"] = call.get("id")
+    parameters["allowed_write_roots"] = getattr(args, "allow_write", None) or []
+    parameters["allow_verify"] = bool(getattr(args, "allow_verify", False))
+    parameters["verify_command"] = getattr(args, "verify_command", None)
+    parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or "."
+    parameters["verify_timeout"] = getattr(args, "verify_timeout", None)
+    return {key: value for key, value in parameters.items() if value is not None}
+
+
+def cmd_work_approve_tool(args):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
+            return 1
+        source_call = find_work_tool_call(session, args.approve_tool)
+        if not source_call:
+            print(f"mew: work tool call not found: {args.approve_tool}", file=sys.stderr)
+            return 1
+        if source_call.get("tool") not in ("write_file", "edit_file"):
+            print("mew: only write_file/edit_file tool calls can be approved", file=sys.stderr)
+            return 1
+        result = source_call.get("result") or {}
+        if not result.get("dry_run"):
+            print("mew: only dry-run write/edit tool calls can be approved", file=sys.stderr)
+            return 1
+        if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+            print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
+            return 1
+        if not result.get("changed"):
+            print("mew: dry-run tool call has no changes to approve", file=sys.stderr)
+            return 1
+        parameters = _approval_parameters_from_call(source_call, args)
+        tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)
+        source_call["approval_status"] = "applying"
+        source_call["approved_by_tool_call_id"] = tool_call.get("id")
+        source_call["approved_at"] = now_iso()
+        session_id = session.get("id")
+        tool_call_id = tool_call.get("id")
+        save_state(state)
+
+    try:
+        result = execute_work_tool(source_call.get("tool"), parameters, getattr(args, "allow_read", None) or [])
+        error = work_tool_result_error(source_call.get("tool"), result)
+    except (OSError, ValueError) as exc:
+        result = None
+        error = str(exc)
+
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        source_call = find_work_tool_call(session, args.approve_tool)
+        tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        if source_call:
+            source_call["approval_status"] = "applied" if tool_call.get("status") == "completed" else "failed"
+            source_call["approval_error"] = tool_call.get("error") or ""
+        save_state(state)
+    if args.json:
+        print(json.dumps({"approved_tool_call": source_call, "tool_call": tool_call}, ensure_ascii=False, indent=2))
+    else:
+        print(f"approved work tool #{args.approve_tool} -> #{tool_call['id']} [{tool_call['status']}]")
+        print(tool_call.get("summary") or tool_call.get("error") or "")
+    return 0 if tool_call.get("status") == "completed" else 1
+
+
+def cmd_work_reject_tool(args):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
+            return 1
+        source_call = find_work_tool_call(session, args.reject_tool)
+        if not source_call:
+            print(f"mew: work tool call not found: {args.reject_tool}", file=sys.stderr)
+            return 1
+        if source_call.get("tool") not in ("write_file", "edit_file"):
+            print("mew: only write_file/edit_file tool calls can be rejected", file=sys.stderr)
+            return 1
+        if source_call.get("approval_status") in ("applying", "applied"):
+            print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
+            return 1
+        source_call["approval_status"] = "rejected"
+        source_call["rejected_at"] = now_iso()
+        source_call["rejection_reason"] = getattr(args, "reject_reason", None) or ""
+        save_state(state)
+    if args.json:
+        print(json.dumps({"rejected_tool_call": source_call}, ensure_ascii=False, indent=2))
+    else:
+        print(f"rejected work tool #{source_call['id']}")
+    return 0
 
 
 def cmd_work_start_session(args):

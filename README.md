@@ -253,6 +253,8 @@ uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
 uv run mew work 1 --tool run_tests --command "uv run pytest -q tests/test_work_session.py" --allow-verify
 uv run mew work 1 --tool write_file --path notes.md --content "hello" --create --allow-write .
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write .
+uv run mew work 1 --approve-tool 7 --allow-write . --allow-verify --verify-command "uv run pytest -q"
+uv run mew work 1 --reject-tool 7 --reject-reason "not the right change"
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 ```

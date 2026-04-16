@@ -375,6 +375,135 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_can_approve_and_reject_dry_run_write_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                dry_run = json.loads(stdout.getvalue())
+                self.assertEqual(dry_run["tool_call"]["id"], 1)
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+
+                command = f"{sys.executable} -c \"from pathlib import Path; assert Path('notes.md').read_text() == 'after\\n'\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+                self.assertEqual(approved["approved_tool_call"]["approval_status"], "applied")
+                self.assertEqual(approved["tool_call"]["parameters"]["approved_from_tool_call_id"], 1)
+                self.assertTrue(approved["tool_call"]["result"]["written"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("already applied", stderr.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "after",
+                                "--new",
+                                "never",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                second_dry_run = json.loads(stdout.getvalue())
+                self.assertEqual(second_dry_run["tool_call"]["id"], 3)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--reject-tool",
+                                "3",
+                                "--reject-reason",
+                                "not needed",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                rejected = json.loads(stdout.getvalue())
+                self.assertEqual(rejected["rejected_tool_call"]["approval_status"], "rejected")
+                self.assertEqual(rejected["rejected_tool_call"]["rejection_reason"], "not needed")
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_rolls_back_failed_applied_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
