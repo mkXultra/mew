@@ -106,7 +106,7 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
-from .read_tools import glob_paths, inspect_dir, read_file, resolve_allowed_path, search_text, summarize_read_result
+from .read_tools import glob_paths, inspect_dir, read_file, search_text, summarize_read_result
 from .tasks import (
     clip_output,
     find_task,
@@ -151,6 +151,7 @@ from .work_session import (
     work_session_task,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
+from .work_world import build_work_world_state
 
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
@@ -1232,37 +1233,6 @@ def cmd_work_start_session(args):
     return 0
 
 
-def build_work_resume_world_state(resume, allowed_read_roots):
-    if not allowed_read_roots:
-        return {}
-    world = {"files": []}
-    git_status = run_git_tool("status", cwd=".")
-    world["git_status"] = {
-        "exit_code": git_status.get("exit_code"),
-        "stdout": clip_output(git_status.get("stdout") or "", 2000),
-        "stderr": clip_output(git_status.get("stderr") or "", 1000),
-    }
-    for path in (resume or {}).get("files_touched") or []:
-        record = {"path": path}
-        try:
-            resolved = resolve_allowed_path(path, allowed_read_roots)
-            stat = resolved.stat()
-            record.update(
-                {
-                    "exists": True,
-                    "type": "directory" if resolved.is_dir() else "file",
-                    "size": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
-                }
-            )
-        except OSError as exc:
-            record.update({"exists": False, "error": str(exc)})
-        except ValueError as exc:
-            record.update({"exists": None, "error": str(exc)})
-        world["files"].append(record)
-    return world
-
-
 def cmd_work_show_session(args):
     state = load_state()
     session = active_work_session(state)
@@ -1274,7 +1244,7 @@ def cmd_work_show_session(args):
     if getattr(args, "resume", False):
         resume = build_work_session_resume(session, task=task)
         if resume and getattr(args, "allow_read", None):
-            resume["world_state"] = build_work_resume_world_state(resume, args.allow_read)
+            resume["world_state"] = build_work_world_state(resume, args.allow_read)
         if args.json:
             print(json.dumps({"resume": resume}, ensure_ascii=False, indent=2))
         else:

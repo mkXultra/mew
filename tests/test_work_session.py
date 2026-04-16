@@ -1570,6 +1570,57 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("secret content 1", knowledge_text)
         self.assertLess(len(knowledge_text), 3000)
 
+    def test_work_model_context_includes_bounded_world_state_when_read_allowed(self):
+        from mew.work_loop import build_work_model_context
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for index in range(10):
+                    Path(f"file{index}.py").write_text(f"print({index})\n", encoding="utf-8")
+                tool_calls = [
+                    {
+                        "id": index + 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": f"file{index}.py"},
+                        "result": {"path": f"file{index}.py", "text": f"print({index})\n", "offset": 0},
+                        "summary": f"read file{index}",
+                    }
+                    for index in range(10)
+                ]
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": "Revalidate live files.",
+                    "created_at": "then",
+                    "updated_at": "now",
+                    "tool_calls": tool_calls,
+                    "model_turns": [],
+                }
+                task = {
+                    "id": 1,
+                    "title": "World",
+                    "description": "Revalidate live files.",
+                    "status": "todo",
+                    "kind": "coding",
+                }
+
+                context = build_work_model_context({}, session, task, "now", allowed_read_roots=["."])
+                world = context["work_session"]["world_state"]
+
+                self.assertIn("exit_code", world["git_status"])
+                self.assertEqual(len(world["files"]), 8)
+                self.assertEqual(world["files"][0]["path"], "file2.py")
+                self.assertEqual(world["files"][-1]["path"], "file9.py")
+                self.assertTrue(world["files"][0]["exists"])
+                self.assertEqual(world["files"][0]["type"], "file")
+                self.assertNotIn("print(9)", json.dumps(world, ensure_ascii=False))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_batch_skips_read_tools_without_required_parameters(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

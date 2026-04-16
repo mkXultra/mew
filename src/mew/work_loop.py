@@ -11,6 +11,7 @@ from .work_session import (
     WRITE_WORK_TOOLS,
     build_work_session_resume,
 )
+from .work_world import DEFAULT_WORLD_STATE_FILE_LIMIT, build_work_world_state
 
 
 WORK_BATCH_ACTIONS = {"batch"}
@@ -210,6 +211,12 @@ def build_work_model_context(
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
+    resume = build_work_session_resume(session, task=task, limit=8)
+    world_state = build_work_world_state(
+        resume,
+        allowed_read_roots or [],
+        file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
+    )
     return {
         "date": {"now": current_time},
         "task": {
@@ -227,7 +234,8 @@ def build_work_model_context(
             "goal": session.get("goal"),
             "created_at": session.get("created_at"),
             "updated_at": session.get("updated_at"),
-            "resume": build_work_session_resume(session, task=task, limit=8),
+            "resume": resume,
+            "world_state": world_state,
             "session_knowledge": build_session_knowledge(tool_calls),
             "tool_calls": [
                 work_tool_call_for_model(call)
