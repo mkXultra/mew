@@ -45,7 +45,7 @@ from .dogfood import (
     run_dogfood_scenario,
 )
 from .errors import MewError
-from .memory import compact_memory, search_memory
+from .memory import add_deep_memory, compact_memory, search_memory
 from .model_backends import (
     load_model_auth,
     model_backend_default_base_url,
@@ -2387,6 +2387,17 @@ def cmd_archive(args):
     return 0
 
 def cmd_memory(args):
+    if args.add:
+        with state_lock():
+            state = load_state()
+            entry = add_deep_memory(state, args.category, args.add)
+            save_state(state)
+        if args.json:
+            print(json.dumps({"category": args.category, "entry": entry}, ensure_ascii=False, indent=2))
+        else:
+            print(f"remembered {args.category}: {entry}")
+        return 0
+
     if args.compact:
         with state_lock():
             state = load_state()

@@ -1,6 +1,20 @@
 from .timeutil import now_iso
 
 
+def add_deep_memory(state, category, text, current_time=None, limit=100):
+    category = category if category in ("preferences", "project", "decisions") else "project"
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    current_time = current_time or now_iso()
+    entry = f"{current_time}: {text}"
+    deep = state.setdefault("memory", {}).setdefault("deep", {})
+    items = deep.setdefault(category, [])
+    items.append(entry)
+    del items[:-max(1, int(limit or 100))]
+    return entry
+
+
 def _matches_query(text, query):
     haystack = str(text or "").casefold()
     needle = str(query or "").strip().casefold()

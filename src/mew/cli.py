@@ -791,6 +791,13 @@ def build_parser():
     memory_parser.add_argument("--search", help="search shallow and deep memory text")
     memory_parser.add_argument("--limit", type=int, default=20, help="maximum search matches")
     memory_parser.add_argument("--json", action="store_true", help="print structured search results")
+    memory_parser.add_argument("--add", help="add a deep memory entry")
+    memory_parser.add_argument(
+        "--category",
+        choices=("preferences", "project", "decisions"),
+        default="project",
+        help="deep memory category for --add",
+    )
     memory_parser.add_argument("--compact", action="store_true", help="compact recent shallow memory into project memory")
     memory_parser.add_argument("--keep-recent", type=int, default=5, help="recent events to keep when compacting")
     memory_parser.add_argument("--dry-run", action="store_true", help="print compact note without changing state")

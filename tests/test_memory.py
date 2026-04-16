@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 
 from mew.cli import main
-from mew.memory import compact_memory, search_memory
+from mew.memory import add_deep_memory, compact_memory, search_memory
 from mew.state import default_state, load_state, save_state
 
 
@@ -57,6 +57,14 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(focus_results[0]["scope"], "deep")
         self.assertEqual(focus_results[0]["key"], "decisions")
 
+    def test_add_deep_memory_records_timestamped_entry(self):
+        state = default_state()
+
+        entry = add_deep_memory(state, "decisions", "Preserve passive-first design.", current_time="now")
+
+        self.assertEqual(entry, "now: Preserve passive-first design.")
+        self.assertEqual(state["memory"]["deep"]["decisions"], [entry])
+
     def test_cli_memory_compact(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,6 +104,28 @@ class MemoryTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["query"], "runtime")
                 self.assertTrue(data["matches"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--add", "Mew is a model runtime.", "--category", "decisions"]),
+                        0,
+                    )
+                self.assertIn("remembered decisions", stdout.getvalue())
+
+                state = load_state()
+                self.assertIn("Mew is a model runtime.", state["memory"]["deep"]["decisions"][0])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--search", "model runtime", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["matches"][0]["key"], "decisions")
             finally:
                 os.chdir(old_cwd)
 
