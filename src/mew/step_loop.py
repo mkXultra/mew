@@ -251,6 +251,8 @@ def compact_step_effect(effect_type, item):
                 "changed": item.get("changed"),
                 "written": item.get("written"),
                 "rolled_back": item.get("rolled_back"),
+                "verification_run_id": item.get("verification_run_id"),
+                "verification_exit_code": item.get("verification_exit_code"),
             }
         )
     return {key: value for key, value in effect.items() if value is not None}

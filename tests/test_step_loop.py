@@ -316,6 +316,8 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(state["write_runs"][0]["dry_run"], False)
         self.assertEqual(state["write_runs"][0]["written"], True)
         self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+        self.assertEqual(state["write_runs"][0]["verification_run_id"], state["verification_runs"][0]["id"])
+        self.assertEqual(state["write_runs"][0]["verification_exit_code"], 0)
         self.assertIn("write_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
         self.assertIn("verification_run", [effect["type"] for effect in state["step_runs"][0]["effects"]])
 
@@ -423,6 +425,8 @@ class StepLoopTests(unittest.TestCase):
         self.assertEqual(report["steps"][0]["counts"]["messages"], 3)
         self.assertEqual(state["write_runs"][0]["written"], True)
         self.assertEqual(state["write_runs"][0]["rolled_back"], True)
+        self.assertEqual(state["write_runs"][0]["verification_run_id"], state["verification_runs"][0]["id"])
+        self.assertEqual(state["write_runs"][0]["verification_exit_code"], 1)
         self.assertEqual(state["verification_runs"][0]["exit_code"], 1)
         self.assertTrue(state["attention"]["items"])
 

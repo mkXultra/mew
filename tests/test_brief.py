@@ -215,6 +215,8 @@ class BriefTests(unittest.TestCase):
                 "changed": True,
                 "dry_run": False,
                 "written": True,
+                "verification_run_id": 7,
+                "verification_exit_code": 0,
                 "updated_at": "done",
             }
         )
@@ -224,7 +226,9 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("Recent writes", brief)
         self.assertIn("#1 [write_file]", brief)
+        self.assertIn("verification=#7 exit=0", brief)
         self.assertEqual(data["recent_writes"][0]["path"], "/tmp/project/note.md")
+        self.assertEqual(data["recent_writes"][0]["verification_run_id"], 7)
 
     def test_brief_marks_rolled_back_recent_writes(self):
         state = default_state()

@@ -2358,7 +2358,7 @@ def apply_write_action(
             "reason": f"Verification after {action_type} run #{run['id']}",
         }
         verification = run_command_record(verify_command, cwd=".", timeout=verify_timeout)
-        record_verification_result(
+        verification_run = record_verification_result(
             state,
             event,
             verification_action,
@@ -2366,6 +2366,9 @@ def apply_write_action(
             verify_command,
             verification,
         )
+        run["verification_run_id"] = verification_run.get("id")
+        run["verification_exit_code"] = verification.get("exit_code")
+        run["updated_at"] = now_iso()
         message_count += 1
         if verification.get("exit_code") != 0 and snapshot:
             try:

@@ -1850,10 +1850,15 @@ def cmd_verification(args):
 
 def format_write_run(run):
     rollback = f" rolled_back={run.get('rolled_back')}" if run.get("rolled_back") is not None else ""
+    verification = (
+        f" verification=#{run.get('verification_run_id')} exit={run.get('verification_exit_code')}"
+        if run.get("verification_run_id") is not None
+        else ""
+    )
     return (
         f"#{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
         f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
-        f"written={run.get('written')}{rollback} path={run.get('path')}"
+        f"written={run.get('written')}{rollback}{verification} path={run.get('path')}"
     )
 
 def cmd_writes(args):

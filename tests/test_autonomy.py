@@ -829,6 +829,8 @@ class AutonomyTests(unittest.TestCase):
                 "changed": True,
                 "written": True,
                 "rolled_back": True,
+                "verification_run_id": 9,
+                "verification_exit_code": 1,
                 "rollback_error": "rollback detail " * 100,
                 "diff": "-old\n+new\n" * 200,
                 "reason": "Update example",
@@ -845,6 +847,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertTrue(write_run["changed"])
         self.assertTrue(write_run["written"])
         self.assertTrue(write_run["rolled_back"])
+        self.assertEqual(write_run["verification_run_id"], 9)
+        self.assertEqual(write_run["verification_exit_code"], 1)
         self.assertIn("rollback detail", write_run["rollback_error"])
         self.assertLessEqual(len(write_run["diff_tail"]), 620)
 

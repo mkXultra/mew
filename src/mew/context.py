@@ -520,6 +520,8 @@ def write_run_for_context(run):
         "changed": run.get("changed"),
         "written": run.get("written"),
         "rolled_back": run.get("rolled_back"),
+        "verification_run_id": run.get("verification_run_id"),
+        "verification_exit_code": run.get("verification_exit_code"),
         "rollback_error": clip_context_text(run.get("rollback_error"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
         "diff_tail": clip_context_text(run.get("diff"), MAX_CONTEXT_RUN_OUTPUT_CHARS),
         "summary": clip_context_text(

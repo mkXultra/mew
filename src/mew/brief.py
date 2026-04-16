@@ -222,6 +222,8 @@ def _write_item(run):
         "dry_run": run.get("dry_run"),
         "written": run.get("written"),
         "rolled_back": run.get("rolled_back"),
+        "verification_run_id": run.get("verification_run_id"),
+        "verification_exit_code": run.get("verification_exit_code"),
         "updated_at": run.get("updated_at") or run.get("finished_at") or run.get("created_at"),
     }
 
@@ -644,10 +646,16 @@ def build_brief(state, limit=5):
         lines.append("Recent writes")
         for run in writes[:limit]:
             rollback = " rolled_back=true" if run.get("rolled_back") else ""
+            verification = (
+                f" verification=#{run.get('verification_run_id')}"
+                f" exit={run.get('verification_exit_code')}"
+                if run.get("verification_run_id") is not None
+                else ""
+            )
             lines.append(
                 f"- #{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
                 f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
-                f"written={run.get('written')}{rollback} path={run.get('path')}"
+                f"written={run.get('written')}{rollback}{verification} path={run.get('path')}"
             )
         lines.append("")
 

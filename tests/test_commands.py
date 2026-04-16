@@ -3495,6 +3495,8 @@ class CommandTests(unittest.TestCase):
                             "dry_run": False,
                             "written": True,
                             "rolled_back": True,
+                            "verification_run_id": 3,
+                            "verification_exit_code": 1,
                             "rollback": {
                                 "path": "/tmp/notes.md",
                                 "restored": True,
@@ -3512,6 +3514,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn("#1 [edit_file]", stdout.getvalue())
                 self.assertIn("rolled_back=True", stdout.getvalue())
+                self.assertIn("verification=#3 exit=1", stdout.getvalue())
                 self.assertIn("diff:", stdout.getvalue())
                 self.assertIn("rollback:", stdout.getvalue())
             finally:
