@@ -904,6 +904,52 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_next_json_and_workbench_json_include_actionable_effective_task_data(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "A high running task",
+                            "description": "",
+                            "status": "running",
+                            "priority": "high",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["next", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["command"], "mew work 1")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["kind"], "unknown")
+                self.assertEqual(data["kind"], "unknown")
+            finally:
+                os.chdir(old_cwd)
+
     def test_workbench_without_tasks_is_not_an_error(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2587,6 +2633,7 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("no active runtime", stderr.getvalue())
+                self.assertIn("mew run --once", stderr.getvalue())
                 self.assertIn("mew step --ai --auth auth.json --max-steps 1", stderr.getvalue())
                 output = stdout.getvalue()
                 self.assertIn("mew chat", output)

@@ -272,6 +272,9 @@ def _review_for_run(state, run_id):
 
 def build_workbench_data(state, task):
     task_id = task.get("id")
+    effective_kind = task_kind(task)
+    task_data = dict(task)
+    task_data["kind"] = effective_kind
     plan = latest_task_plan(task)
     agent_runs = [
         run for run in state.get("agent_runs", [])
@@ -322,8 +325,8 @@ def build_workbench_data(state, task):
         next_action = f"mew agent followup {latest_review['id']}"
 
     return {
-        "task": task,
-        "kind": task_kind(task),
+        "task": task_data,
+        "kind": effective_kind,
         "plan": plan,
         "agent_runs": agent_runs,
         "verification_runs": verification_runs,
@@ -1762,6 +1765,19 @@ def command_from_next_move(move):
         candidate = parts[index].strip()
         if candidate.startswith("mew ") or candidate.startswith("uv run mew "):
             return candidate
+    practical_prefixes = (
+        "advance coding task #",
+        "spend 10 minutes researching task #",
+        "take one concrete admin step on task #",
+        "take one 5-minute personal step on task #",
+        "clarify or take one small step on task #",
+    )
+    for prefix in practical_prefixes:
+        if not (move or "").startswith(prefix):
+            continue
+        task_id = (move or "")[len(prefix):].split(":", 1)[0].strip()
+        if task_id.isdigit():
+            return f"mew work {task_id}"
     return ""
 
 def format_verification_run(run):
@@ -3160,8 +3176,9 @@ def warn_if_runtime_inactive():
             file=sys.stderr,
         )
         print(
-            "mew: next: run `mew step --ai --auth auth.json --max-steps 1` to process one bounded step, "
-            "or `mew run --ai --auth auth.json` for passive processing.",
+            "mew: next: run `mew run --once` for one deterministic local pass, "
+            "`mew step --ai --auth auth.json --max-steps 1` for one AI pass, "
+            "or `mew run --ai --auth auth.json` for passive AI processing.",
             file=sys.stderr,
         )
 
