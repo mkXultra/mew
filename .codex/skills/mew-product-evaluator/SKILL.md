@@ -24,6 +24,7 @@ Current guiding judgment:
 - A task/coding passive AI is the first target.
 - Broader general passive AI can come later.
 - "Works" is not enough; "I would want to be inside it" is the higher bar.
-- The missing frontier is usually the nervous system: multi-step action with feedback.
+- Reflex observation exists: with bounded opt-in rounds, mew can read/inspect/search, rethink with the observation, and then act.
+- The remaining frontier is runtime-grade feedback: multi-step action with durable effects, verification, recovery, and follow-up inside the passive runtime.
 
 If confidence is low, say what is uncertain. Use `acm run` with another model only when the user explicitly asks for that model, then compare its answer with your own before responding.
