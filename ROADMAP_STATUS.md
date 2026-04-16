@@ -93,6 +93,8 @@ Evidence:
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
 - Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
 - Stop requests leave their reason in the work report and resume bundle after they are consumed, preserving why a live loop paused.
+- Work model turns are now journaled as `running` before THINK/ACT starts, so resume can show `phase=planning` during an in-flight model call and repair has real state to interrupt if the process dies.
+- Stop requests are checked again after THINK/ACT and before a selected tool starts, so a pause requested during model planning prevents the next tool call.
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 - `dogfood --scenario work-session` now covers stop request recording and `phase=stop_requested` resume output.
 - `dogfood --scenario work-session` now also covers user session notes appearing in resume output.
@@ -190,8 +192,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `488 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `47 passed`.
+- `uv run pytest -q` current: `490 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `49 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.

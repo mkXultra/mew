@@ -270,6 +270,22 @@ def start_work_model_turn(state, session, decision_plan, action_plan, action):
     return turn
 
 
+def update_work_model_turn_plan(state, session_id, turn_id, decision_plan, action_plan, action):
+    session = find_work_session(state, session_id)
+    turn = find_work_model_turn(session, turn_id)
+    if not turn:
+        return None
+    current_time = now_iso()
+    turn["decision_plan"] = dict(decision_plan or {})
+    turn["action_plan"] = dict(action_plan or {})
+    turn["action"] = dict(action or {})
+    turn["summary"] = (action_plan or {}).get("summary") or (decision_plan or {}).get("summary") or turn.get("summary") or ""
+    turn["updated_at"] = current_time
+    if session:
+        session["updated_at"] = current_time
+    return turn
+
+
 def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=""):
     session = find_work_session(state, session_id)
     turn = find_work_model_turn(session, turn_id)

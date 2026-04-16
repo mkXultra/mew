@@ -1286,6 +1286,112 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_journals_running_model_turn_during_think(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("journal planning\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    from mew.work_session import build_work_session_resume
+
+                    with state_lock():
+                        state = load_state()
+                        session = state["work_sessions"][0]
+                        self.assertEqual(session["model_turns"][0]["status"], "running")
+                        self.assertEqual(session["model_turns"][0]["action"]["type"], "planning")
+                        self.assertEqual(build_work_session_resume(session, task=state["tasks"][0])["phase"], "planning")
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["steps"][0]["action"]["type"], "read_file")
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(len(session["model_turns"]), 1)
+                self.assertEqual(session["model_turns"][0]["status"], "completed")
+                self.assertEqual(session["model_turns"][0]["tool_call_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_stop_requested_during_model_call_prevents_tool_start(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("should not be read\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    from mew.work_session import request_work_session_stop
+
+                    with state_lock():
+                        state = load_state()
+                        request_work_session_stop(state["work_sessions"][0], "pause during model")
+                        save_state(state)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "stop_requested")
+                self.assertEqual(data["steps"][0]["status"], "stopped")
+                self.assertEqual(data["steps"][0]["stop_request"]["reason"], "pause during model")
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["tool_calls"], [])
+                self.assertEqual(session["model_turns"][0]["status"], "completed")
+                self.assertEqual(session["model_turns"][0]["stop_request"]["reason"], "pause during model")
+                self.assertIn("stopped before tool execution", session["model_turns"][0]["summary"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_can_stream_model_deltas_to_progress(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

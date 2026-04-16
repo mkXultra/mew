@@ -145,6 +145,7 @@ from .work_session import (
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
+    update_work_model_turn_plan,
     GIT_WORK_TOOLS,
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
@@ -659,7 +660,7 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
 BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
 
 
-def run_work_batch_action(session_id, task_id, index, planned, action, args, progress):
+def run_work_batch_action(session_id, task_id, index, planned, action, args, progress, turn_id=None):
     sub_actions = [
         sub_action
         for sub_action in (action.get("tools") or [])[:5]
@@ -670,13 +671,23 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
-        turn = start_work_model_turn(
-            state,
-            session,
-            planned.get("decision_plan") or {},
-            planned.get("action_plan") or {},
-            action,
-        )
+        if turn_id is None:
+            turn = start_work_model_turn(
+                state,
+                session,
+                planned.get("decision_plan") or {},
+                planned.get("action_plan") or {},
+                action,
+            )
+        else:
+            turn = update_work_model_turn_plan(
+                state,
+                session_id,
+                turn_id,
+                planned.get("decision_plan") or {},
+                planned.get("action_plan") or {},
+                action,
+            )
         turn_id = turn.get("id")
         save_state(state)
 
@@ -861,6 +872,19 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: stop requested")
             break
 
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            planning_turn = start_work_model_turn(
+                state,
+                session,
+                {"summary": "planning work step"},
+                {"summary": "planning work step"},
+                {"type": "planning", "reason": "THINK/ACT in progress"},
+            )
+            planning_turn_id = planning_turn.get("id")
+            save_state(state)
+
         try:
             planned = plan_work_model_turn(
                 state,
@@ -887,14 +911,15 @@ def cmd_work_ai(args):
                 state = load_state()
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session) or find_task(state, task_id)
-                turn = start_work_model_turn(
+                turn = update_work_model_turn_plan(
                     state,
-                    session,
+                    session_id,
+                    planning_turn_id,
                     {"summary": "model planning failed"},
                     {"summary": "model planning failed"},
                     {"type": "wait", "reason": error},
                 )
-                turn = finish_work_model_turn(state, session_id, turn.get("id"), error=error)
+                turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error)
                 save_state(state)
             report["steps"].append(
                 {
@@ -912,12 +937,58 @@ def cmd_work_ai(args):
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
         action_type = action.get("type")
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            stop_request = consume_work_session_stop(session)
+            if stop_request:
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    action,
+                )
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
+                if turn is not None:
+                    turn["stop_request"] = stop_request
+                    turn["summary"] = clip_output(
+                        f"stopped before tool execution: {stop_request.get('reason') or ''}".strip(),
+                        4000,
+                    )
+                save_state(state)
+        if stop_request:
+            report["steps"].append(
+                {
+                    "index": index,
+                    "status": "stopped",
+                    "action": action,
+                    "model_turn": turn,
+                    "stop_request": stop_request,
+                    "summary": turn.get("summary") if turn else "stopped before tool execution",
+                }
+            )
+            report["stop_reason"] = "stop_requested"
+            report["stop_request"] = stop_request
+            if progress:
+                progress(f"step #{index}: stop requested after planning")
+            break
         if action_type == "batch":
             if getattr(args, "live", False):
                 print("")
                 print(f"Work live step #{index} action")
                 print(format_work_action(action))
-            batch_step = run_work_batch_action(session_id, task_id, index, planned, action, args, progress)
+            batch_step = run_work_batch_action(
+                session_id,
+                task_id,
+                index,
+                planned,
+                action,
+                args,
+                progress,
+                turn_id=planning_turn_id,
+            )
             report["steps"].append(batch_step)
             if getattr(args, "live", False):
                 with state_lock():
@@ -940,14 +1011,15 @@ def cmd_work_ai(args):
                 state = load_state()
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session) or find_task(state, task_id)
-                turn = start_work_model_turn(
+                turn = update_work_model_turn_plan(
                     state,
-                    session,
+                    session_id,
+                    planning_turn_id,
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     action,
                 )
-                turn = finish_work_model_turn(state, session_id, turn.get("id"))
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 control_effect = apply_work_control_action(state, session, task, action)
                 if control_effect.get("outbox_message"):
                     turn["outbox_message_id"] = control_effect["outbox_message"].get("id")
@@ -1001,9 +1073,10 @@ def cmd_work_ai(args):
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
-            turn = start_work_model_turn(
+            turn = update_work_model_turn_plan(
                 state,
-                session,
+                session_id,
+                planning_turn_id,
                 planned.get("decision_plan") or {},
                 planned.get("action_plan") or {},
                 action,
