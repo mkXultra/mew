@@ -267,9 +267,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `589 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `100 passed`.
-- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `131 passed`.
+- `uv run pytest -q` current: `590 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `101 passed`.
+- `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `132 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.
@@ -291,6 +291,7 @@ Next action:
 - `codex-ultra` approval-UX human-role E2E after inline defaults verified pending diff previews, explicit and TTY-default inline prompts, verifier display, opt-out behavior, verification/writes ledgers, and clean repo state. It found two continuity bugs: generated controls dropped `--no-prompt-approval`, and `approve-tool` ignored session default verification commands; both now have regression tests and fixes.
 - `codex-ultra` approval-UX retest after continuity fixes verified that `--no-prompt-approval` stays in next controls without reintroducing `--prompt-approval`, CLI and chat approvals reuse default verification commands, and focused `--diffs`/`--tests` plus `/work-session diffs`/`tests` show useful cockpit panes. No remaining bug was found in that scope.
 - `claude-ultra` review of the working-memory reentry slice found two correctness concerns: model-written verification claims could outlive later failed tests, and old memory could shadow newer turns. Both are fixed with observed verification override, stale markers, and regression tests; Claude re-review reported no blockers.
+- Work-session unit coverage now includes a deterministic resident THINK path proving model-returned `working_memory` is journaled and surfaced in the resume, not only manually synthesized state.
 - `claude-ultra` review during the 2026-04-17 long session judged mew materially closer to a usable AI shell/body and identified live cockpit fluency, recovery breadth, and day-scale persistence as the top blockers.
 - `claude-ultra` recheck after the 2026-04-17 cockpit work started successfully and identified `/work` scope leakage and mixed `/continue` options+guidance as the highest-leverage cockpit bugs; both were fixed in commit `1f97120`.
 - `claude-ultra` Milestone 2 review after pending diff previews judged the cockpit direction coherent and recommended consolidating inline approval as the next small slice; interactive live/do approval prompts now have explicit default/force/opt-out semantics.

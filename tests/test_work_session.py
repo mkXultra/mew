@@ -2629,6 +2629,74 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_persists_think_working_memory_to_resume(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello reentry memory\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "read README",
+                    "working_memory": {
+                        "hypothesis": "README is the next evidence source.",
+                        "next_step": "Read README.md before editing.",
+                        "open_questions": ["Does README mention the target behavior?"],
+                        "last_verified_state": "not verified yet",
+                    },
+                    "action": {"type": "read_file", "path": "README.md"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 1)
+                self.assertEqual(data["steps"][0]["tool_call"]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(
+                    session["model_turns"][0]["decision_plan"]["working_memory"]["hypothesis"],
+                    "README is the next evidence source.",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                memory = resume["working_memory"]
+                self.assertEqual(memory["hypothesis"], "README is the next evidence source.")
+                self.assertEqual(memory["next_step"], "Read README.md before editing.")
+                self.assertEqual(memory["open_questions"], ["Does README mention the target behavior?"])
+                self.assertEqual(memory["source"], "think")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Working memory", text)
+                self.assertIn("hypothesis: README is the next evidence source.", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_progress_streams_model_and_tool_events(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
