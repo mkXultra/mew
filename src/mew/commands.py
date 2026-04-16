@@ -398,42 +398,78 @@ def build_workbench_data(state, task):
 def work_session_verification_summaries(session, limit=5):
     items = []
     for call in (session or {}).get("tool_calls") or []:
+        if call.get("status") not in ("completed", "failed"):
+            continue
         result = call.get("result") or {}
         parameters = call.get("parameters") or {}
+        session_id = (session or {}).get("id")
+        tool_call_id = call.get("id")
         if call.get("tool") == "run_tests":
+            if result.get("exit_code") is None:
+                continue
             items.append(
                 {
-                    "tool_call_id": call.get("id"),
+                    "id": f"work:{session_id}:{tool_call_id}",
+                    "ledger_id": f"work:{session_id}:{tool_call_id}",
+                    "source": "work_session",
+                    "label": f"work{session_id}#{tool_call_id}",
+                    "work_session_id": session_id,
+                    "task_id": (session or {}).get("task_id"),
+                    "tool_call_id": tool_call_id,
                     "tool": call.get("tool"),
                     "command": result.get("command") or parameters.get("command"),
                     "exit_code": result.get("exit_code"),
+                    "stdout": result.get("stdout") or "",
+                    "stderr": result.get("stderr") or "",
+                    "finished_at": call.get("finished_at"),
                 }
             )
         verification = result.get("verification") or {}
         if verification.get("command"):
+            if verification.get("exit_code") is None:
+                continue
             items.append(
                 {
-                    "tool_call_id": call.get("id"),
+                    "id": f"work:{session_id}:{tool_call_id}:verify",
+                    "ledger_id": f"work:{session_id}:{tool_call_id}:verify",
+                    "source": "work_session",
+                    "label": f"work{session_id}#{tool_call_id}.verify",
+                    "work_session_id": session_id,
+                    "task_id": (session or {}).get("task_id"),
+                    "tool_call_id": tool_call_id,
                     "tool": f"{call.get('tool')}_verification",
                     "command": verification.get("command"),
                     "exit_code": verification.get("exit_code"),
+                    "stdout": verification.get("stdout") or "",
+                    "stderr": verification.get("stderr") or "",
+                    "finished_at": verification.get("finished_at") or call.get("finished_at"),
                 }
             )
-    return items[-limit:]
+    return items if limit is None else items[-limit:]
 
 
 def work_session_write_summaries(session, limit=5):
     items = []
     for call in (session or {}).get("tool_calls") or []:
+        if call.get("status") not in ("completed", "failed"):
+            continue
         if call.get("tool") not in WRITE_WORK_TOOLS:
             continue
         result = call.get("result") or {}
         parameters = call.get("parameters") or {}
         if not result.get("diff") and not result.get("path") and not parameters.get("path"):
             continue
+        session_id = (session or {}).get("id")
+        tool_call_id = call.get("id")
         items.append(
             {
-                "tool_call_id": call.get("id"),
+                "id": f"work:{session_id}:{tool_call_id}",
+                "ledger_id": f"work:{session_id}:{tool_call_id}",
+                "source": "work_session",
+                "label": f"work{session_id}#{tool_call_id}",
+                "work_session_id": session_id,
+                "task_id": (session or {}).get("task_id"),
+                "tool_call_id": tool_call_id,
                 "operation": call.get("tool"),
                 "path": result.get("path") or parameters.get("path"),
                 "changed": result.get("changed"),
@@ -442,9 +478,12 @@ def work_session_write_summaries(session, limit=5):
                 "rolled_back": result.get("rolled_back"),
                 "verification_exit_code": result.get("verification_exit_code"),
                 "approval_status": call.get("approval_status") or "",
+                "diff": result.get("diff") or "",
+                "rollback": result.get("rollback") or {},
+                "finished_at": call.get("finished_at"),
             }
         )
-    return items[-limit:]
+    return items if limit is None else items[-limit:]
 
 
 def format_workbench(data):
@@ -489,8 +528,8 @@ def format_workbench(data):
             outcome = "passed" if run.get("exit_code") == 0 else "failed"
             if run.get("exit_code") is None:
                 outcome = "unknown"
-            label = f"work#{run.get('tool_call_id')}"
-            if str(run.get("tool") or "").endswith("_verification"):
+            label = run.get("label") or f"work#{run.get('tool_call_id')}"
+            if not run.get("label") and str(run.get("tool") or "").endswith("_verification"):
                 label += ".verify"
             lines.append(
                 f"{label} [{outcome}] "
@@ -510,6 +549,7 @@ def format_workbench(data):
             )
     if data.get("work_session_writes"):
         for run in data["work_session_writes"]:
+            label = run.get("label") or f"work#{run.get('tool_call_id')}"
             verification = (
                 f" verification_exit={run.get('verification_exit_code')}"
                 if run.get("verification_exit_code") is not None
@@ -517,7 +557,7 @@ def format_workbench(data):
             )
             approval = f" approval={run.get('approval_status')}" if run.get("approval_status") else ""
             lines.append(
-                f"work#{run.get('tool_call_id')} [{run.get('operation') or 'write'}] "
+                f"{label} [{run.get('operation') or 'write'}] "
                 f"{run.get('path') or ''} changed={bool(run.get('changed'))} "
                 f"written={bool(run.get('written'))} dry_run={bool(run.get('dry_run'))} "
                 f"rolled_back={bool(run.get('rolled_back'))}{verification}{approval}"
@@ -3709,18 +3749,68 @@ def command_from_next_move(move):
     return ""
 
 def format_verification_run(run):
+    label = run.get("label") or f"#{run.get('id')}"
     return (
-        f"#{run.get('id')} [{verification_outcome(run)}] "
+        f"{label} [{verification_outcome(run)}] "
         f"exit_code={run.get('exit_code')} command={run.get('command')} "
         f"finished_at={run.get('finished_at') or run.get('updated_at') or run.get('created_at')}"
     )
 
+
+def _run_finished_sort_key(run):
+    identifier = run.get("ledger_id") or run.get("id") or run.get("label") or ""
+    return (
+        run.get("finished_at")
+        or run.get("updated_at")
+        or run.get("created_at")
+        or "0000-00-00T00:00:00Z",
+        str(identifier),
+    )
+
+
+def runtime_verification_runs(state):
+    runs = []
+    for run in state.get("verification_runs", []) or []:
+        item = dict(run)
+        item.setdefault("source", "runtime")
+        item.setdefault("label", f"#{item.get('id')}")
+        item.setdefault("ledger_id", f"verification:{item.get('id')}")
+        runs.append(item)
+    return runs
+
+
+def work_session_verification_runs(state):
+    runs = []
+    for session in state.get("work_sessions", []) or []:
+        runs.extend(work_session_verification_summaries(session, limit=None))
+    return runs
+
+
+def runtime_write_runs(state):
+    runs = []
+    for run in state.get("write_runs", []) or []:
+        item = dict(run)
+        item.setdefault("source", "runtime")
+        item.setdefault("label", f"#{item.get('id')}")
+        item.setdefault("ledger_id", f"write:{item.get('id')}")
+        runs.append(item)
+    return runs
+
+
+def work_session_write_runs(state):
+    runs = []
+    for session in state.get("work_sessions", []) or []:
+        runs.extend(work_session_write_summaries(session, limit=None))
+    return runs
+
+
 def cmd_verification(args):
     state = load_state()
-    runs = list(state.get("verification_runs", []))
+    runs = runtime_verification_runs(state) + work_session_verification_runs(state)
     if not runs:
         print("No verification runs.")
         return 0
+    runs = sorted(runs, key=_run_finished_sort_key)
     if not args.all:
         runs = runs[-args.limit :]
     runs = list(reversed(runs))
@@ -3732,31 +3822,35 @@ def cmd_verification(args):
         if args.details:
             if run.get("stdout"):
                 print("stdout:")
-                print(run["stdout"])
+                print(clip_output(run["stdout"], 4000))
             if run.get("stderr"):
                 print("stderr:")
-                print(run["stderr"])
+                print(clip_output(run["stderr"], 4000))
     return 0
 
 def format_write_run(run):
+    label = run.get("label") or f"#{run.get('id')}"
     rollback = f" rolled_back={run.get('rolled_back')}" if run.get("rolled_back") is not None else ""
     verification = (
         f" verification=#{run.get('verification_run_id')} exit={run.get('verification_exit_code')}"
         if run.get("verification_run_id") is not None
         else ""
     )
+    if not verification and run.get("verification_exit_code") is not None:
+        verification = f" verification_exit={run.get('verification_exit_code')}"
     return (
-        f"#{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
+        f"{label} [{run.get('operation') or run.get('action_type')}] "
         f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
         f"written={run.get('written')}{rollback}{verification} path={run.get('path')}"
     )
 
 def cmd_writes(args):
     state = load_state()
-    runs = list(state.get("write_runs", []))
+    runs = runtime_write_runs(state) + work_session_write_runs(state)
     if not runs:
         print("No write runs.")
         return 0
+    runs = sorted(runs, key=_run_finished_sort_key)
     if not args.all:
         runs = runs[-args.limit :]
     runs = list(reversed(runs))
@@ -3767,7 +3861,7 @@ def cmd_writes(args):
         print(format_write_run(run))
         if args.details and run.get("diff"):
             print("diff:")
-            print(run["diff"])
+            print(clip_output(run["diff"], 4000))
         if args.details and run.get("rollback"):
             print("rollback:")
             print(json.dumps(run["rollback"], ensure_ascii=False, indent=2))

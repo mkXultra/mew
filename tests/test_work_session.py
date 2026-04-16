@@ -1809,18 +1809,84 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
 
                 self.assertIn("Verification", output)
-                self.assertIn("work#1 [passed]", output)
+                self.assertIn("work1#1 [passed]", output)
                 self.assertIn("session verify ok", output)
-                self.assertIn("work#2.verify [passed]", output)
+                self.assertIn("work1#2.verify [passed]", output)
                 self.assertIn("generated.md", output)
                 self.assertIn("Writes", output)
-                self.assertIn("work#2 [write_file]", output)
+                self.assertIn("work1#2 [write_file]", output)
                 self.assertIn("written=True", output)
                 self.assertIn("verification_exit=0", output)
                 self.assertIn("Work session", output)
                 self.assertIn("#1 [closed]", output)
                 self.assertNotIn("mew work 1 --live", output)
                 self.assertIn("mew work 1 --start-session", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["verification", "--details"]), 0)
+                verification_output = stdout.getvalue()
+                self.assertIn("work1#1 [passed]", verification_output)
+                self.assertIn("work1#2.verify [passed]", verification_output)
+                self.assertIn("stdout:", verification_output)
+                self.assertIn("session verify ok", verification_output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["verification", "--json"]), 0)
+                verification_data = json.loads(stdout.getvalue())
+                self.assertTrue(any(item["id"] == "work:1:1" for item in verification_data))
+                self.assertTrue(any(item["id"] == "work:1:2:verify" for item in verification_data))
+                self.assertTrue(all(item.get("source") for item in verification_data))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["writes", "--details"]), 0)
+                writes_output = stdout.getvalue()
+                self.assertIn("work1#2 [write_file]", writes_output)
+                self.assertIn("generated.md", writes_output)
+                self.assertIn("verification_exit=0", writes_output)
+                self.assertIn("diff:", writes_output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["writes", "--json"]), 0)
+                writes_data = json.loads(stdout.getvalue())
+                self.assertTrue(any(item["id"] == "work:1:2" for item in writes_data))
+                self.assertTrue(all(item.get("source") for item in writes_data))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_global_verification_labels_include_work_session_id(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = f"{sys.executable} -c \"print('ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]),
+                        0,
+                    )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["verification", "--json", "--all"]), 0)
+                labels = [item.get("label") for item in json.loads(stdout.getvalue())]
+
+                self.assertIn("work1#1", labels)
+                self.assertIn("work2#2", labels)
             finally:
                 os.chdir(old_cwd)
 

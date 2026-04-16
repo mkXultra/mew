@@ -232,11 +232,12 @@ def _scenario_command(*args):
     return [sys.executable, "-m", "mew", *args]
 
 
-def _json_stdout(command_result):
+def _json_stdout(command_result, default=None):
+    fallback = {} if default is None else default
     try:
-        return json.loads(command_result.get("stdout") or "{}")
+        return json.loads(command_result.get("stdout") or json.dumps(fallback))
     except json.JSONDecodeError:
-        return {}
+        return fallback
 
 
 def _scenario_check(checks, name, passed, observed=None, expected=None):
@@ -600,6 +601,8 @@ def run_work_session_scenario(workspace, env=None):
     note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
     resume_result = run(["work", "1", "--session", "--resume", "--json"])
     work_result = run(["work", "1", "--json"])
+    verification_ledger_result = run(["verification", "--json"])
+    writes_ledger_result = run(["writes", "--json"])
     timeline_result = run(["work", "1", "--session", "--timeline", "--json"])
     chat_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
@@ -686,6 +689,8 @@ def run_work_session_scenario(workspace, env=None):
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
     resume_data = _json_stdout(resume_result)
+    verification_ledger_data = _json_stdout(verification_ledger_result, [])
+    writes_ledger_data = _json_stdout(writes_ledger_result, [])
     timeline_data = _json_stdout(timeline_result)
     interrupted_resume_data = _json_stdout(interrupted_resume_result)
     interrupted_recover_data = _json_stdout(interrupted_recover_result)
@@ -810,6 +815,16 @@ def run_work_session_scenario(workspace, env=None):
             "writes": workbench_session_writes,
         },
         expected="workbench includes work-session verification and write summaries",
+    )
+    _scenario_check(
+        checks,
+        "global_ledgers_surface_work_session_tools",
+        verification_ledger_result.get("exit_code") == 0
+        and writes_ledger_result.get("exit_code") == 0
+        and any((item or {}).get("source") == "work_session" for item in verification_ledger_data)
+        and any((item or {}).get("source") == "work_session" for item in writes_ledger_data),
+        observed={"verification": verification_ledger_data[:3], "writes": writes_ledger_data[:3]},
+        expected="mew verification/writes include native work-session tool calls",
     )
     _scenario_check(
         checks,
