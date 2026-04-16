@@ -290,6 +290,40 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_effects_command_lists_journal(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect, complete_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "startup", "runtime", {})
+                effect = add_runtime_effect(state, event, "startup", "planning", "then")
+                effect["action_types"] = ["send_message"]
+                complete_runtime_effect(
+                    state,
+                    effect["id"],
+                    "done",
+                    "applied",
+                    processed_count=1,
+                    counts={"messages": 1},
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["runtime-effects"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("#1 [applied] event=#1 reason=startup", output)
+                self.assertIn("actions=send_message", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["runtime-effects", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["runtime_effects"][0]["status"], "applied")
+            finally:
+                os.chdir(old_cwd)
+
     def test_repair_refuses_active_runtime_without_force(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

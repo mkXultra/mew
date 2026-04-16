@@ -41,6 +41,7 @@ from .commands import (
     cmd_questions,
     cmd_repair,
     cmd_reply,
+    cmd_runtime_effects,
     cmd_self_init,
     cmd_self_improve,
     cmd_self_show,
@@ -924,6 +925,11 @@ def build_parser():
     effects_parser.add_argument("--limit", type=int, default=20, help="maximum effect records")
     effects_parser.add_argument("--json", action="store_true", help="print structured JSON")
     effects_parser.set_defaults(func=cmd_effects)
+
+    runtime_effects_parser = subparsers.add_parser("runtime-effects", help="show recent runtime effect journal entries")
+    runtime_effects_parser.add_argument("--limit", type=int, default=20, help="maximum runtime effects")
+    runtime_effects_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    runtime_effects_parser.set_defaults(func=cmd_runtime_effects)
 
     guidance_parser = subparsers.add_parser("guidance", help="manage think-phase guidance")
     guidance_subparsers = guidance_parser.add_subparsers(dest="guidance_command")

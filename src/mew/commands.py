@@ -4797,6 +4797,31 @@ def cmd_effects(args):
         )
     return 0
 
+def format_runtime_effect(effect):
+    actions = ",".join(effect.get("action_types") or []) or "-"
+    verification = ",".join(str(item) for item in effect.get("verification_run_ids") or []) or "-"
+    writes = ",".join(str(item) for item in effect.get("write_run_ids") or []) or "-"
+    finished = effect.get("finished_at") or ""
+    return (
+        f"#{effect.get('id')} [{effect.get('status')}] "
+        f"event=#{effect.get('event_id')} reason={effect.get('reason')} "
+        f"actions={actions} verification={verification} writes={writes} "
+        f"finished={finished}"
+    )
+
+def cmd_runtime_effects(args):
+    state = load_state()
+    effects = list(reversed(state.get("runtime_effects", [])[-args.limit:]))
+    if args.json:
+        print(json.dumps({"runtime_effects": effects}, ensure_ascii=False, indent=2))
+        return 0
+    if not effects:
+        print("No runtime effects.")
+        return 0
+    for effect in effects:
+        print(format_runtime_effect(effect))
+    return 0
+
 def cmd_guidance_init(args):
     path, created = ensure_guidance(args.path)
     if created:
