@@ -34,6 +34,43 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("duplicate id 1", format_validation_issues(issues))
         self.assertTrue(validation_errors(issues))
 
+    def test_write_verification_links_are_validated(self):
+        state = default_state()
+        state["verification_runs"].append({"id": 1, "exit_code": 0})
+        state["write_runs"].extend(
+            [
+                {
+                    "id": 1,
+                    "written": True,
+                    "dry_run": False,
+                    "verification_run_id": 99,
+                    "verification_exit_code": 0,
+                },
+                {
+                    "id": 2,
+                    "written": True,
+                    "dry_run": False,
+                    "verification_run_id": 1,
+                    "verification_exit_code": 1,
+                },
+                {
+                    "id": 3,
+                    "written": True,
+                    "dry_run": False,
+                },
+            ]
+        )
+        state["next_ids"]["verification_run"] = 2
+        state["next_ids"]["write_run"] = 4
+
+        issues = validate_state(state)
+        formatted = format_validation_issues(issues)
+
+        self.assertEqual(validation_errors(issues), [])
+        self.assertIn("references missing verification run 99", formatted)
+        self.assertIn("does not match verification run 1 exit_code 0", formatted)
+        self.assertIn("written non-dry-run should link a verification run", formatted)
+
     def test_save_state_rejects_invalid_state(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

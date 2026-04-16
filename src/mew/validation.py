@@ -105,6 +105,16 @@ def _agent_run_ids(state):
     return ids
 
 
+def _verification_runs_by_id(state):
+    runs = {}
+    for run in state.get("verification_runs", []):
+        if isinstance(run, dict):
+            item_id = _int_id(run.get("id"))
+            if item_id is not None:
+                runs[item_id] = run
+    return runs
+
+
 def validate_state(state):
     issues = []
     if not isinstance(state, dict):
@@ -179,6 +189,7 @@ def validate_state(state):
 
     valid_task_ids = _task_ids(state)
     valid_run_ids = _agent_run_ids(state)
+    verification_runs_by_id = _verification_runs_by_id(state)
     for index, run in enumerate(state.get("agent_runs", [])):
         if not isinstance(run, dict):
             continue
@@ -193,6 +204,61 @@ def validate_state(state):
         review_of_run_id = _int_id(run.get("review_of_run_id"))
         if review_of_run_id is not None and review_of_run_id not in valid_run_ids:
             issues.append(issue("warning", f"{run_path}.review_of_run_id", f"references missing run {review_of_run_id}"))
+
+    for index, run in enumerate(state.get("write_runs", [])):
+        if not isinstance(run, dict):
+            continue
+        run_path = f"write_runs[{index}]"
+        raw_verification_run_id = run.get("verification_run_id")
+        verification_run_id = _int_id(raw_verification_run_id)
+        if raw_verification_run_id is None:
+            if run.get("written") is True and run.get("dry_run") is False:
+                issues.append(
+                    issue(
+                        "warning",
+                        f"{run_path}.verification_run_id",
+                        "written non-dry-run should link a verification run",
+                    )
+                )
+            continue
+        if verification_run_id is None or verification_run_id < 1:
+            issues.append(
+                issue(
+                    "warning",
+                    f"{run_path}.verification_run_id",
+                    "must be a positive integer when present",
+                )
+            )
+            continue
+        linked_verification = verification_runs_by_id.get(verification_run_id)
+        if not linked_verification:
+            issues.append(
+                issue(
+                    "warning",
+                    f"{run_path}.verification_run_id",
+                    f"references missing verification run {verification_run_id}",
+                )
+            )
+            continue
+        if "verification_exit_code" in run:
+            write_exit_code = _int_id(run.get("verification_exit_code"))
+            verification_exit_code = _int_id(linked_verification.get("exit_code"))
+            if write_exit_code is None:
+                issues.append(
+                    issue(
+                        "warning",
+                        f"{run_path}.verification_exit_code",
+                        "must be an integer when present",
+                    )
+                )
+            elif verification_exit_code is not None and write_exit_code != verification_exit_code:
+                issues.append(
+                    issue(
+                        "warning",
+                        f"{run_path}.verification_exit_code",
+                        f"does not match verification run {verification_run_id} exit_code {verification_exit_code}",
+                    )
+                )
 
     for index, question in enumerate(state.get("questions", [])):
         if isinstance(question, dict):
