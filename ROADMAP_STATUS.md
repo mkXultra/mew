@@ -90,6 +90,7 @@ Evidence:
 - The same phase is visible in normal workbench/work-session views, so the user does not need to open the full resume just to know the current state.
 - `mew work --live` now prints a resume bundle after control actions such as `finish`, so live sessions end with the closed-session state visible instead of only an action line.
 - Native work sessions now support a stop request (`mew work --stop-session` and `/work-session stop`) that is consumed at the next model/tool boundary before another model call starts.
+- CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 
 Missing proof:
 

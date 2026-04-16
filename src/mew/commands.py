@@ -515,6 +515,52 @@ def format_work_ai_report(report):
     return "\n".join(lines)
 
 
+def _work_live_continue_command(args, task_id):
+    parts = ["mew", "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.append("--live")
+    if getattr(args, "auth", None):
+        parts.extend(["--auth", args.auth])
+    if getattr(args, "model_backend", None):
+        parts.extend(["--model-backend", args.model_backend])
+    if getattr(args, "model", None):
+        parts.extend(["--model", args.model])
+    if getattr(args, "base_url", None):
+        parts.extend(["--base-url", args.base_url])
+    for root in getattr(args, "allow_read", None) or []:
+        parts.extend(["--allow-read", root])
+    for root in getattr(args, "allow_write", None) or []:
+        parts.extend(["--allow-write", root])
+    if getattr(args, "allow_shell", False):
+        parts.append("--allow-shell")
+    if getattr(args, "allow_verify", False):
+        parts.append("--allow-verify")
+    if getattr(args, "verify_command", None):
+        parts.extend(["--verify-command", args.verify_command])
+    if getattr(args, "act_mode", None):
+        parts.extend(["--act-mode", args.act_mode])
+    parts.extend(["--max-steps", "1"])
+    return shlex.join(parts)
+
+
+def format_work_cli_controls(session, args):
+    lines = ["", "Next CLI controls"]
+    if not session:
+        lines.append("mew work <task-id> --start-session")
+        return "\n".join(lines)
+    task_id = session.get("task_id")
+    if session.get("status") != "active":
+        lines.append(f"mew work {task_id} --session --resume")
+        lines.append(f"mew work {task_id} --start-session")
+        return "\n".join(lines)
+    lines.append(_work_live_continue_command(args, task_id))
+    lines.append(f"mew work {task_id} --stop-session --stop-reason pause")
+    lines.append(f"mew work {task_id} --session --resume")
+    lines.append("mew chat")
+    return "\n".join(lines)
+
+
 def _work_control_text(action, fallback):
     for key in ("text", "question", "reason", "summary"):
         value = (action or {}).get(key)
@@ -998,6 +1044,10 @@ def cmd_work_ai(args):
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(format_work_ai_report(report))
+        if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
+            state = load_state()
+            session = find_work_session(state, session_id)
+            print(format_work_cli_controls(session, args))
     return 0 if report.get("stop_reason") not in ("model_error", "tool_failed", "no_active_session") else 1
 
 
@@ -4714,6 +4764,7 @@ def chat_work_session(rest, chat_state=None):
         live_session_id = None
         if action == "live":
             args.live = True
+            args.suppress_cli_controls = True
             _remember_work_continue_options(parts, chat_state)
             state = load_state()
             session = _select_active_work_session_for_args(state, args)

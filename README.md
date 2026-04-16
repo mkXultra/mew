@@ -254,7 +254,8 @@ shell commands remain outside batch mode. In `mew chat`, live work steps print
 options for the chat session, so `/continue <guidance>` can steer the next step
 without retyping gates such as `--allow-read .`. A long work loop can be asked
 to pause at the next model/tool boundary with `mew work --stop-session` or
-`/work-session stop`.
+`/work-session stop`. CLI live runs end with `Next CLI controls` so the next
+continue, stop, resume, or chat command is visible.
 
 ```sh
 uv run mew work 1 --start-session

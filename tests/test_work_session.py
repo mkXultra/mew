@@ -1405,6 +1405,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertLess(output.index("Work live step #1 action"), output.index("Work live step #1 resume"))
                 self.assertIn("Work resume #1 [active] task=#1", output)
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("mew work 1 --live", output)
                 self.assertIn("ACT deterministic action=read_file", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
@@ -1445,6 +1447,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 resume", output)
                 self.assertIn("Work resume #1 [closed] task=#1", output)
                 self.assertIn("phase: closed", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("mew work 1 --session --resume", output)
                 self.assertIn("Work session finished: finished live", load_state()["tasks"][0]["notes"])
             finally:
                 os.chdir(old_cwd)
@@ -1697,6 +1701,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("action: read_file", output)
                 self.assertIn("Next controls", output)
                 self.assertIn("/continue <guidance>", output)
+                self.assertNotIn("Next CLI controls", output)
                 self.assertIn("chat live content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
                 self.assertIn("THINK start", stderr.getvalue())
             finally:
