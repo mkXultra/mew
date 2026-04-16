@@ -3122,6 +3122,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_timeline_keeps_events_one_line(self):
+        from mew.work_session import build_work_session_timeline
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "model_turns": [],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "git_status",
+                    "status": "completed",
+                    "started_at": "now",
+                    "result": {"command": "git status --short", "cwd": ".", "exit_code": 0, "stdout": " M a.py\n"},
+                }
+            ],
+        }
+
+        timeline = build_work_session_timeline(session)
+
+        self.assertEqual(len(timeline), 1)
+        self.assertNotIn("\n", timeline[0]["summary"])
+        self.assertIn("git status --short", timeline[0]["summary"])
+
     def test_chat_work_session_show_without_active_lists_recent_sessions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

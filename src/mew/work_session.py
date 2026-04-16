@@ -1114,6 +1114,10 @@ def build_work_session_timeline(session, limit=20):
     events = []
     if not session:
         return []
+
+    def timeline_summary(text):
+        return clip_output(" ".join((text or "").split()), 240)
+
     order = 0
     for turn in session.get("model_turns") or []:
         order += 1
@@ -1131,7 +1135,7 @@ def build_work_session_timeline(session, limit=20):
                 "id": turn.get("id"),
                 "status": turn.get("status") or "unknown",
                 "label": action_type,
-                "summary": clip_output(turn.get("finished_note") or turn.get("summary") or turn.get("error") or "", 500),
+                "summary": timeline_summary(turn.get("finished_note") or turn.get("summary") or turn.get("error") or ""),
                 "started_at": turn.get("started_at") or "",
                 "finished_at": turn.get("finished_at") or "",
                 "linked": linked,
@@ -1140,13 +1144,16 @@ def build_work_session_timeline(session, limit=20):
         )
     for call in session.get("tool_calls") or []:
         order += 1
+        summary = compact_work_tool_summary(call)
+        if not summary:
+            summary = summarize_work_tool_result(call.get("tool"), call.get("result") or {})
         events.append(
             {
                 "kind": "tool_call",
                 "id": call.get("id"),
                 "status": call.get("status") or "unknown",
                 "label": call.get("tool") or "unknown",
-                "summary": clip_output(compact_work_tool_summary(call), 500),
+                "summary": timeline_summary(summary),
                 "started_at": call.get("started_at") or "",
                 "finished_at": call.get("finished_at") or "",
                 "linked": "",
