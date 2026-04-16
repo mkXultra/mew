@@ -834,6 +834,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_recovery_plan_deduplicates_turn_for_interrupted_tool(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover duplicated interruption.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "interrupted", "parameters": {"path": "README.md"}},
+            ],
+            "model_turns": [
+                {"id": 1, "status": "interrupted", "action": {"type": "read_file"}, "tool_call_id": 1},
+                {"id": 2, "status": "interrupted", "action": {"type": "planning"}, "tool_call_id": None},
+            ],
+        }
+
+        items = build_work_session_resume(session)["recovery_plan"]["items"]
+
+        self.assertEqual([item["kind"] for item in items], ["tool_call", "model_turn"])
+        self.assertEqual(items[0]["action"], "retry_tool")
+        self.assertEqual(items[1]["action"], "replan")
+
     def test_work_ai_report_includes_stop_request_reason(self):
         from mew.commands import format_work_ai_report
 

@@ -600,6 +600,11 @@ def work_session_phase(session, calls, turns, pending_approvals):
 def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
+    interrupted_tool_ids = {
+        call.get("id")
+        for call in calls
+        if call.get("status") == "interrupted" and not call.get("recovery_status")
+    }
     for call in calls:
         if call.get("status") != "interrupted" or call.get("recovery_status"):
             continue
@@ -634,6 +639,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
 
     for turn in turns:
         if turn.get("status") != "interrupted" or turn.get("recovery_status"):
+            continue
+        if turn.get("tool_call_id") in interrupted_tool_ids:
             continue
         items.append(
             {

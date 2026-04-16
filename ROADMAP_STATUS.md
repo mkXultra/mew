@@ -194,8 +194,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `492 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `51 passed`.
+- `uv run pytest -q` current: `493 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `52 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`.
