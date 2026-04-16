@@ -451,6 +451,7 @@ def run_runtime_focus_scenario(workspace, env=None):
         timeout=15,
     )
     brief_result = run(["brief"], timeout=15)
+    doctor_result = run(["doctor"], timeout=15)
 
     _scenario_check(
         checks,
@@ -473,6 +474,21 @@ def run_runtime_focus_scenario(workspace, env=None):
         brief_result.get("exit_code") == 0 and "Mew brief" in (brief_result.get("stdout") or ""),
         observed=command_result_tail(brief_result),
         expected="brief command succeeds after focused runtime",
+    )
+    _scenario_check(
+        checks,
+        "brief_surfaces_runtime_effect",
+        "Recent runtime effects" in (brief_result.get("stdout") or ""),
+        observed=command_result_tail(brief_result),
+        expected="brief shows persisted runtime effect journal",
+    )
+    _scenario_check(
+        checks,
+        "doctor_surfaces_runtime_effect",
+        doctor_result.get("exit_code") == 0
+        and "runtime_effects: total=1 incomplete=0" in (doctor_result.get("stdout") or ""),
+        observed=command_result_tail(doctor_result),
+        expected="doctor shows runtime effect count",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
