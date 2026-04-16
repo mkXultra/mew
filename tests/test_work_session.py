@@ -1363,6 +1363,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_without_task_id_prefers_active_work_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("active.md").write_text("active session content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    second = dict(state["tasks"][0])
+                    second["id"] = 2
+                    second["title"] = "Active session task"
+                    second["description"] = "Continue this active session."
+                    state["tasks"].append(second)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "2", "--start-session"]), 0)
+
+                model_outputs = [
+                    {"summary": "read active", "action": {"type": "read_file", "path": "active.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "--ai", "--auth", "auth.json", "--allow-read", ".", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertFalse(data["created"])
+                self.assertEqual(data["task_id"], 2)
+                self.assertEqual(data["session_id"], 1)
+                self.assertEqual(data["steps"][0]["tool_call"]["task_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_start_and_show_session(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

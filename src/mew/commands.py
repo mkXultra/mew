@@ -468,6 +468,16 @@ def select_workbench_task(state, task_id=None):
     return candidates[0] if candidates else None
 
 
+def select_work_ai_task(state, task_id=None):
+    if task_id:
+        return select_workbench_task(state, task_id)
+    session = active_work_session(state)
+    task = work_session_task(state, session)
+    if task:
+        return task
+    return select_workbench_task(state)
+
+
 def format_work_ai_report(report):
     lines = [
         f"mew work ai: {len(report.get('steps') or [])}/{report.get('max_steps')} step(s) "
@@ -635,7 +645,7 @@ def cmd_work_ai(args):
     progress = work_ai_progress(args)
     with state_lock():
         state = load_state()
-        task = select_workbench_task(state, getattr(args, "task_id", None))
+        task = select_work_ai_task(state, getattr(args, "task_id", None))
         if not task:
             if getattr(args, "task_id", None):
                 print(f"mew: task not found: {args.task_id}", file=sys.stderr)
