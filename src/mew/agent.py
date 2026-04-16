@@ -627,8 +627,12 @@ def append_autonomous_decisions(
     ):
         return
 
+    tasks = sorted(open_tasks(state), key=task_sort_key)
+    running_tasks = [task for task in tasks if task.get("status") == "running"]
+    autonomous_task_candidates = running_tasks or tasks
+
     if autonomy_level in ("propose", "act"):
-        for task in sorted(open_tasks(state), key=task_sort_key):
+        for task in autonomous_task_candidates:
             if (
                 task_needs_programmer_plan(task)
                 and not pending_question_for_task(state, task.get("id"))
@@ -643,7 +647,7 @@ def append_autonomous_decisions(
                 return
 
     if autonomy_level == "act" and allow_agent_run:
-        for task in sorted(open_tasks(state), key=task_sort_key):
+        for task in autonomous_task_candidates:
             plan = latest_task_plan(task)
             if (
                 plan

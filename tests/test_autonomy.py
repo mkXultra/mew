@@ -1344,6 +1344,91 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertNotIn("plan_task", [decision["type"] for decision in plan["decisions"]])
 
+    def test_autonomous_task_actions_do_not_interrupt_running_task(self):
+        state = default_state()
+        current_time = now_iso()
+        state["tasks"].extend(
+            [
+                {
+                    "id": 1,
+                    "title": "Implement later unplanned task",
+                    "kind": "coding",
+                    "description": "",
+                    "status": "ready",
+                    "priority": "normal",
+                    "notes": "",
+                    "command": "",
+                    "cwd": ".",
+                    "auto_execute": False,
+                    "agent_backend": "",
+                    "agent_model": "",
+                    "agent_prompt": "",
+                    "agent_run_id": None,
+                    "plans": [],
+                    "latest_plan_id": None,
+                    "runs": [],
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                },
+                {
+                    "id": 2,
+                    "title": "Implement active task",
+                    "kind": "coding",
+                    "description": "",
+                    "status": "running",
+                    "priority": "high",
+                    "notes": "",
+                    "command": "",
+                    "cwd": ".",
+                    "auto_execute": False,
+                    "agent_backend": "",
+                    "agent_model": "",
+                    "agent_prompt": "",
+                    "agent_run_id": None,
+                    "plans": [],
+                    "latest_plan_id": None,
+                    "runs": [],
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                },
+                {
+                    "id": 3,
+                    "title": "Implement later dispatchable task",
+                    "kind": "coding",
+                    "description": "",
+                    "status": "ready",
+                    "priority": "normal",
+                    "notes": "",
+                    "command": "",
+                    "cwd": ".",
+                    "auto_execute": True,
+                    "agent_backend": "ai-cli",
+                    "agent_model": "codex-ultra",
+                    "agent_prompt": "",
+                    "agent_run_id": None,
+                    "plans": [{"id": 1, "status": "planned"}],
+                    "latest_plan_id": 1,
+                    "runs": [],
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                },
+            ]
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_agent_run=True,
+        )
+
+        decision_types = [decision["type"] for decision in plan["decisions"]]
+        self.assertNotIn("plan_task", decision_types)
+        self.assertNotIn("dispatch_task", decision_types)
+
     def test_think_phase_deferred_question_does_not_block_programmer_plan(self):
         from mew.state import add_question, mark_question_deferred
 
