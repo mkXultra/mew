@@ -1,3 +1,5 @@
+from subprocess import SubprocessError, run as run_subprocess
+
 from .brief import build_brief, next_move
 from .programmer import create_task_plan, latest_task_plan
 from .state import next_id
@@ -16,13 +18,32 @@ def open_task_with_title(state, title):
     return None
 
 
+def recent_git_commits(limit=5):
+    try:
+        result = run_subprocess(
+            ["git", "log", "--oneline", f"-{limit}"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def build_self_improve_description(state, focus=""):
     focus_text = focus.strip() if isinstance(focus, str) else ""
+    commits = recent_git_commits()
+    commit_text = f"\nRecent git commits:\n{commits}\n" if commits else ""
     return (
         "Improve mew through one small, reviewable code or documentation change.\n\n"
         f"Focus:\n{focus_text or next_move(state)}\n\n"
         "Current brief:\n"
         f"{build_brief(state, limit=5)}\n\n"
+        f"{commit_text}"
         "Constraints:\n"
         "- Keep the change small.\n"
         "- Preserve unrelated user changes.\n"

@@ -9,7 +9,11 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.agent_runs import sync_task_with_agent_run
 from mew.programmer import create_implementation_run_from_plan
-from mew.self_improve import create_self_improve_task, ensure_self_improve_plan
+from mew.self_improve import (
+    build_self_improve_description,
+    create_self_improve_task,
+    ensure_self_improve_plan,
+)
 from mew.state import default_state, load_state
 from mew.timeutil import now_iso
 
@@ -26,6 +30,15 @@ class SelfImproveTests(unittest.TestCase):
         self.assertEqual(task["status"], "ready")
         self.assertEqual(task["latest_plan_id"], plan["id"])
         self.assertIn("Improve next command", task["description"])
+
+    def test_self_improve_description_includes_recent_commits(self):
+        state = default_state()
+
+        with patch("mew.self_improve.recent_git_commits", return_value="abc123 Fix latest thing"):
+            description = build_self_improve_description(state, focus="Pick next")
+
+        self.assertIn("Recent git commits:", description)
+        self.assertIn("abc123 Fix latest thing", description)
 
     def test_self_improve_reuses_open_task(self):
         state = default_state()
