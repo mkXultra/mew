@@ -164,7 +164,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `472 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `473 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `32 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `47 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.

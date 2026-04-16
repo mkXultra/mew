@@ -195,6 +195,7 @@ def build_work_think_prompt(context):
         "Return only JSON. Do not use markdown.\n"
         "Choose exactly one next action for this active coding work session.\n"
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
+        "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
         "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "Use run_tests for the configured verification command or a narrow test command. Use run_command only when shell is explicitly allowed. "
         "Use finish when the task is done or the next step is clear enough to stop.\n"

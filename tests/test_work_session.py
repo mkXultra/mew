@@ -1244,6 +1244,13 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_think_prompt_guides_independent_reads_to_batch(self):
+        from mew.work_loop import build_work_think_prompt
+
+        prompt = build_work_think_prompt({"work_session": {"tool_calls": []}})
+        self.assertIn("prefer one batch action", prompt)
+        self.assertIn('"type": "batch|inspect_dir', prompt)
+
     def test_work_ai_batch_skips_read_tools_without_required_parameters(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
