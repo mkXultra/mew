@@ -125,6 +125,11 @@ def recent_verification_runs(state, limit=5):
     return list(reversed(runs[-limit:]))
 
 
+def recent_write_runs(state, limit=5):
+    runs = list(state.get("write_runs", []))
+    return list(reversed(runs[-limit:]))
+
+
 def recent_step_runs(state, limit=3):
     runs = list(state.get("step_runs", []))
     return list(reversed(runs[-limit:]))
@@ -205,6 +210,19 @@ def _verification_item(run):
         "command": run.get("command"),
         "reason": run.get("reason"),
         "finished_at": run.get("finished_at") or run.get("updated_at") or run.get("created_at"),
+    }
+
+
+def _write_item(run):
+    return {
+        "id": run.get("id"),
+        "operation": run.get("operation") or run.get("action_type"),
+        "path": run.get("path"),
+        "changed": run.get("changed"),
+        "dry_run": run.get("dry_run"),
+        "written": run.get("written"),
+        "rolled_back": run.get("rolled_back"),
+        "updated_at": run.get("updated_at") or run.get("finished_at") or run.get("created_at"),
     }
 
 
@@ -380,6 +398,9 @@ def build_brief_data(state, limit=5):
         "recent_verification": [
             _verification_item(run) for run in recent_verification_runs(state, limit=limit)
         ],
+        "recent_writes": [
+            _write_item(run) for run in recent_write_runs(state, limit=limit)
+        ],
         "recent_steps": recent_step_runs(state, limit=limit),
         "programmer_queue": {
             "review_needed": [_agent_run_item(run) for run in review_waiting[:limit]],
@@ -533,6 +554,7 @@ def build_brief(state, limit=5):
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     verifications = recent_verification_runs(state, limit=limit)
+    writes = recent_write_runs(state, limit=limit)
     step_runs = recent_step_runs(state, limit=limit)
     thoughts = recent_thoughts_for_context(state, limit=limit)
     activity = recent_activity(state, limit=limit)
@@ -615,6 +637,17 @@ def build_brief(state, limit=5):
             lines.append(
                 f"- #{run.get('id')} [{verification_outcome(run)}] "
                 f"exit_code={run.get('exit_code')} command={run.get('command')}"
+            )
+        lines.append("")
+
+    if writes:
+        lines.append("Recent writes")
+        for run in writes[:limit]:
+            rollback = " rolled_back=true" if run.get("rolled_back") else ""
+            lines.append(
+                f"- #{run.get('id')} [{run.get('operation') or run.get('action_type')}] "
+                f"changed={run.get('changed')} dry_run={run.get('dry_run')} "
+                f"written={run.get('written')}{rollback} path={run.get('path')}"
             )
         lines.append("")
 

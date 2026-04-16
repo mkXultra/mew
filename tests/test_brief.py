@@ -205,6 +205,47 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Recent verification", brief)
         self.assertIn("#1 [passed]", brief)
 
+    def test_brief_surfaces_recent_writes(self):
+        state = default_state()
+        state["write_runs"].append(
+            {
+                "id": 1,
+                "operation": "write_file",
+                "path": "/tmp/project/note.md",
+                "changed": True,
+                "dry_run": False,
+                "written": True,
+                "updated_at": "done",
+            }
+        )
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("Recent writes", brief)
+        self.assertIn("#1 [write_file]", brief)
+        self.assertEqual(data["recent_writes"][0]["path"], "/tmp/project/note.md")
+
+    def test_brief_marks_rolled_back_recent_writes(self):
+        state = default_state()
+        state["write_runs"].append(
+            {
+                "id": 2,
+                "operation": "edit_file",
+                "path": "/tmp/project/app.py",
+                "changed": True,
+                "dry_run": False,
+                "written": True,
+                "rolled_back": True,
+            }
+        )
+
+        brief = build_brief(state)
+        data = build_brief_data(state)
+
+        self.assertIn("rolled_back=true", brief)
+        self.assertTrue(data["recent_writes"][0]["rolled_back"])
+
     def test_brief_surfaces_recent_thought_journal(self):
         state = default_state()
         add_task(state)
