@@ -693,6 +693,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "commands": commands[-limit:],
         "failures": failures[-limit:],
         "pending_approvals": pending_approvals[-limit:],
+        "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "context": build_work_context_metrics(calls, turns),
         "last_stop_request": session.get("last_stop_request") or {},
@@ -751,6 +752,14 @@ def format_work_session_resume(resume):
     else:
         lines.append("(none)")
 
+    lines.extend(["", "Work notes"])
+    notes = resume.get("notes") or []
+    if notes:
+        for note in notes:
+            lines.append(f"- {note.get('created_at') or ''} {note.get('text') or ''}".strip())
+    else:
+        lines.append("(none)")
+
     lines.extend(["", "Recent decisions"])
     decisions = resume.get("recent_decisions") or []
     if decisions:
@@ -796,7 +805,14 @@ def format_work_action(action, parameters=None, tool_call_id=None):
     lines = [f"action: {action_type}"]
     if tool_call_id:
         lines.append(f"tool_call: #{tool_call_id}")
-    reason = action.get("reason") or action.get("summary") or action.get("text") or action.get("question") or ""
+    reason = (
+        action.get("reason")
+        or action.get("summary")
+        or action.get("text")
+        or action.get("note")
+        or action.get("question")
+        or ""
+    )
     if reason:
         lines.append(f"reason: {clip_output(str(reason), 500)}")
     if action_type == "batch":

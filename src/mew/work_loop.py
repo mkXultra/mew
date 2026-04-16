@@ -14,7 +14,7 @@ from .work_session import (
 
 
 WORK_BATCH_ACTIONS = {"batch"}
-WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "wait"}
+WORK_CONTROL_ACTIONS = {"finish", "send_message", "ask_user", "remember", "wait"}
 WORK_MODEL_ACTIONS = set(WORK_TOOLS) | WORK_CONTROL_ACTIONS
 WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
@@ -118,7 +118,7 @@ def work_model_turn_for_model(turn):
         "action": {
             key: value
             for key, value in action.items()
-            if key in ("type", "tool", "path", "query", "pattern", "reason", "summary")
+            if key in ("type", "tool", "path", "query", "pattern", "reason", "summary", "note", "text", "question")
         },
         "tool_call_id": turn.get("tool_call_id"),
         "tool_call_ids": turn.get("tool_call_ids") or [],
@@ -187,7 +187,7 @@ def _work_action_schema_text():
         "{\n"
         '  "summary": "short reason",\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|wait",\n'
+        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": [{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", "path": "required for read_file/glob/search_text", "query": "required for search_text", "pattern": "required for glob"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text query",\n'
@@ -197,6 +197,7 @@ def _work_action_schema_text():
         '    "old": "edit_file old text",\n'
         '    "new": "edit_file new text",\n'
         '    "text": "send_message text",\n'
+        '    "note": "remember note",\n'
         '    "question": "ask_user question",\n'
         '    "message_type": "assistant|info|warning",\n'
         '    "create": false,\n'
@@ -288,6 +289,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
         "reason",
         "text",
         "summary",
+        "note",
         "question",
         "message_type",
     ):

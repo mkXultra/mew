@@ -118,11 +118,12 @@ Evidence:
 - Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, recent decisions, next action, and context pressure.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
+- Work mode now has a `remember` control action that records durable session notes surfaced in resume bundles and future model context.
 
 Missing proof:
 
 - Task-local resume exists for native work sessions, but it is not yet proven across day-scale interruption/resume cycles.
-- There is no automatic compaction or pruning strategy for noisy long-running work-session history beyond archive retention.
+- There is no automatic compaction or pruning strategy for noisy long-running work-session history beyond archive retention and explicit `remember` notes.
 - No watcher-driven passive updates.
 - User preference memory is not yet clearly shaping behavior.
 
@@ -179,9 +180,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `480 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `39 passed`.
-- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `54 passed`.
+- `uv run pytest -q` current: `481 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `40 passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_model_backends.py tests/test_work_session.py tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `55 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass.
 - `./mew dogfood --scenario all --cleanup` current: pass, including `work-session`.

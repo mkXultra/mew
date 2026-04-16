@@ -565,7 +565,7 @@ def format_work_cli_controls(session, args):
 
 
 def _work_control_text(action, fallback):
-    for key in ("text", "question", "reason", "summary"):
+    for key in ("text", "note", "question", "reason", "summary"):
         value = (action or {}).get(key)
         if value:
             return str(value)
@@ -603,6 +603,17 @@ def apply_work_control_action(state, session, task, action):
             blocks=[f"task:{task_id}"] if task_id else [],
         )
         return {"question": question}
+    if action_type == "remember":
+        note = {
+            "created_at": now_iso(),
+            "text": _work_control_text(action, "Remembered work note."),
+        }
+        if session is not None:
+            notes = session.setdefault("notes", [])
+            notes.append(note)
+            del notes[:-50]
+            session["updated_at"] = note["created_at"]
+        return {"work_note": note}
     return {}
 
 
@@ -938,6 +949,8 @@ def cmd_work_ai(args):
                     turn["question_id"] = control_effect["question"].get("id")
                 if control_effect.get("finished_note"):
                     turn["finished_note"] = control_effect["finished_note"]
+                if control_effect.get("work_note"):
+                    turn["work_note"] = control_effect["work_note"]
                 save_state(state)
             if getattr(args, "live", False):
                 with state_lock():
@@ -957,6 +970,7 @@ def cmd_work_ai(args):
                     "summary": (
                         (action.get("text") if action_type == "send_message" else "")
                         or (action.get("question") if action_type == "ask_user" else "")
+                        or (action.get("note") if action_type == "remember" else "")
                         or action.get("summary")
                         or action.get("reason")
                         or action.get("text")

@@ -1253,6 +1253,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_remember_action_records_work_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "remember observation",
+                        "action": {"type": "remember", "note": "config lookup is the likely risk"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(["work", "1", "--ai", "--auth", "auth.json", "--act-mode", "deterministic", "--json"]),
+                                0,
+                            )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "remember")
+                self.assertEqual(data["steps"][0]["work_note"]["text"], "config lookup is the likely risk")
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["notes"][0]["text"], "config lookup is the likely risk")
+                self.assertEqual(session["model_turns"][0]["work_note"]["text"], "config lookup is the likely risk")
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                self.assertIn("Work notes", stdout.getvalue())
+                self.assertIn("config lookup is the likely risk", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_progress_streams_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
