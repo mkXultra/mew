@@ -541,6 +541,8 @@ def compact_work_tool_summary(call):
     result = call.get("result") or {}
     summary = call.get("summary") or call.get("error") or ""
     if call.get("status") in ("failed", "interrupted") and summary:
+        if summary.startswith(f"{tool} {call.get('status')}:") or summary.startswith(f"{tool} failed:"):
+            return clip_output(summary, 240)
         return f"{tool} {call.get('status')}: {clip_output(summary, 240)}"
     if tool == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""

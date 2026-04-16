@@ -319,7 +319,9 @@ class WorkSessionTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--timeline"]), 0)
-                self.assertIn("read_file failed: line_start must be >= 1", stdout.getvalue())
+                timeline_output = stdout.getvalue()
+                self.assertIn("read_file failed: line_start must be >= 1", timeline_output)
+                self.assertNotIn("read_file failed: read_file failed", timeline_output)
             finally:
                 os.chdir(old_cwd)
 
