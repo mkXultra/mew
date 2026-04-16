@@ -285,6 +285,7 @@ def plan_work_model_turn(
     verify_command="",
     guidance="",
     progress=None,
+    act_mode="model",
 ):
     current_time = now_iso()
     context = build_work_model_context(
@@ -312,16 +313,27 @@ def plan_work_model_turn(
     )
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
-        progress(f"session #{session.get('id')}: ACT start")
-    action_plan = call_model_json_with_retries(
-        model_backend,
-        model_auth,
-        build_work_act_prompt(context, decision_plan),
-        model,
-        base_url,
-        timeout,
-        log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
-    )
+    if act_mode == "deterministic":
+        action = normalize_work_model_action(decision_plan, verify_command=verify_command)
+        action_plan = {
+            "summary": decision_plan.get("summary") or action.get("summary") or action.get("reason") or "",
+            "action": action,
+            "act_mode": "deterministic",
+        }
+        if progress:
+            progress(f"session #{session.get('id')}: ACT deterministic action={action.get('type') or 'unknown'}")
+    else:
+        if progress:
+            progress(f"session #{session.get('id')}: ACT start")
+        action_plan = call_model_json_with_retries(
+            model_backend,
+            model_auth,
+            build_work_act_prompt(context, decision_plan),
+            model,
+            base_url,
+            timeout,
+            log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
+        )
     action = normalize_work_model_action(action_plan, verify_command=verify_command)
     if progress:
         progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")

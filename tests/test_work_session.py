@@ -1120,18 +1120,18 @@ class WorkSessionTests(unittest.TestCase):
 
                 model_outputs = [
                     {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
-                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
                 ]
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
                             self.assertEqual(
                                 run_chat_slash_command(
-                                    "/work-session ai 1 --auth auth.json --allow-read . --max-steps 1",
+                                    "/work-session ai 1 --auth auth.json --allow-read . --max-steps 1 --act-mode deterministic",
                                     {},
                                 ),
                                 "continue",
                             )
+                self.assertEqual(call_model.call_count, 1)
                 output = stdout.getvalue()
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
                 self.assertIn("#1 [completed] read_file tool_call=#1", output)

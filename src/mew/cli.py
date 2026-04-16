@@ -654,6 +654,12 @@ def build_parser():
     work_parser.add_argument("--base-url", help="model API base URL for --ai")
     work_parser.add_argument("--model-timeout", type=float, default=60.0, help="model timeout for --ai")
     work_parser.add_argument("--max-steps", type=int, default=1, help="maximum model tool turns for --ai")
+    work_parser.add_argument(
+        "--act-mode",
+        choices=("model", "deterministic"),
+        default="model",
+        help="ACT phase mode for --ai; default keeps model THINK and model ACT",
+    )
     work_parser.add_argument("--work-guidance", help="extra guidance for --ai work mode")
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")

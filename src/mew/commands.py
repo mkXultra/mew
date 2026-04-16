@@ -631,6 +631,7 @@ def cmd_work_ai(args):
                 verify_command=args.verify_command or "",
                 guidance=args.work_guidance or "",
                 progress=progress,
+                act_mode=getattr(args, "act_mode", "model") or "model",
             )
         except MewError as exc:
             error = str(exc)
@@ -4165,6 +4166,7 @@ def _parse_chat_work_ai_args(parts):
         "--base-url",
         "--model-timeout",
         "--max-steps",
+        "--act-mode",
         "--work-guidance",
         "--allow-read",
         "--allow-write",
@@ -4180,6 +4182,7 @@ def _parse_chat_work_ai_args(parts):
         "base_url": None,
         "model_timeout": 60.0,
         "max_steps": 1,
+        "act_mode": "model",
         "work_guidance": "",
         "progress": False,
         "allow_read": [],
@@ -4219,6 +4222,10 @@ def _parse_chat_work_ai_args(parts):
                     args["max_steps"] = int(value)
                 except ValueError:
                     return None, f"mew: invalid --max-steps: {value}"
+            elif name == "--act-mode":
+                if value not in ("model", "deterministic"):
+                    return None, f"mew: invalid --act-mode: {value}"
+                args["act_mode"] = value
             elif name == "--work-guidance":
                 args["work_guidance"] = value
             elif name == "--allow-read":

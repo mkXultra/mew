@@ -65,11 +65,12 @@ Evidence:
 - `dogfood --scenario work-session` now exercises chat `/work-session details`, so cockpit visibility is part of the recurring dogfood path.
 - Native work reads now default to 50,000 characters and model work-session context keeps up to 20,000 characters per result, reducing the chance that a model loses the relevant half of a normal source file.
 - Work sessions now expose read-only `git_status`, `git_diff`, and `git_log` tools behind the read gate, avoiding unnecessary `--allow-shell` for common coding context.
+- `mew work --ai --act-mode deterministic` can skip the second model ACT call and normalize THINK output locally; the default remains model ACT to preserve the original THINK/ACT architecture.
 
 Missing proof:
 
 - No streaming model token output.
-- THINK/ACT still uses two model calls per work step; this preserves the current architecture but adds latency for tight coding loops.
+- Default THINK/ACT still uses two model calls per work step; deterministic ACT exists but needs more dogfood before it should become the default.
 - Work mode still executes one tool per model step.
 - Large sessions can now carry more context, so state growth and prompt size need continued monitoring.
 - Live coding work session UX is improving, but it is still not a full REPL-style coding cockpit.
