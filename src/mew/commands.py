@@ -2599,7 +2599,8 @@ def handle_session_request(request):
             limit = request.get("limit", 3)
             if not isinstance(limit, int):
                 limit = 3
-            data = build_focus_data(load_state_locked(), limit=limit)
+            kind = request.get("kind") if isinstance(request.get("kind"), str) else ""
+            data = build_focus_data(load_state_locked(), limit=limit, kind=kind or None)
             payload_key = "daily" if request_type == "daily" else "focus"
             return session_message(request_type, request_id, **{payload_key: data})
 
@@ -3328,7 +3329,7 @@ def cmd_brief(args):
 
 def cmd_focus(args):
     state = load_state()
-    data = build_focus_data(state, limit=args.limit)
+    data = build_focus_data(state, limit=args.limit, kind=getattr(args, "kind", None) or None)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
@@ -3523,11 +3524,12 @@ def cmd_perceive(args):
 
 def cmd_next(args):
     state = load_state()
-    move = next_move(state)
+    kind = getattr(args, "kind", None) or None
+    move = next_move(state, kind=kind)
     if args.json:
         print(
             json.dumps(
-                {"next_move": move, "command": command_from_next_move(move)},
+                {"next_move": move, "command": command_from_next_move(move), "kind": kind or ""},
                 ensure_ascii=False,
                 indent=2,
             )

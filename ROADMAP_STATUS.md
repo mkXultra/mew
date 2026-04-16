@@ -130,6 +130,7 @@ Evidence:
 - Work-mode prompts now tell the resident model that current capability gates are authoritative, reducing stale permission-failure loops where it asks for a flag already present.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
+- `mew next --kind coding` and `mew focus --kind coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
 
 Missing proof:
 
@@ -230,8 +231,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `534 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `201 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `537 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `202 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_brief.py` current: `30 passed`.
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `1 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
 - `./mew dogfood --scenario work-session --cleanup` current: pass, including `chat_resume_surfaces_world_state`, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 21 commands.

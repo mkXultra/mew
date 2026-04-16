@@ -17,6 +17,7 @@ def add_task(
     task_id=1,
     title="Implement next move",
     priority="normal",
+    kind="",
 ):
     task = {
         "id": task_id,
@@ -24,6 +25,7 @@ def add_task(
         "description": "Make brief actionable.",
         "status": status,
         "priority": priority,
+        "kind": kind,
         "notes": "",
         "command": "",
         "cwd": ".",
@@ -96,6 +98,15 @@ class BriefTests(unittest.TestCase):
         mark_question_deferred(state, question, reason="later")
 
         self.assertEqual(next_move(state), "start native work session for task #1 with `mew work 1 --start-session`")
+
+    def test_next_move_kind_filter_ignores_unrelated_questions(self):
+        state = default_state()
+        add_task(state, task_id=1, title="補助金について調べる", kind="research")
+        add_task(state, task_id=2, title="Improve work cockpit", kind="coding")
+        add_question(state, "Which city should I research?", related_task_id=1)
+
+        self.assertIn("mew reply", next_move(state))
+        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `mew work 2 --start-session`")
 
     def test_next_move_recommends_review_for_completed_implementation(self):
         state = default_state()
@@ -462,6 +473,23 @@ class BriefTests(unittest.TestCase):
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
         self.assertIn("resume: mew work 7 --session --resume --allow-read .", focus)
         self.assertIn("continue: mew work 7 --live --allow-read . --max-steps 1", focus)
+
+    def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Research grants", kind="research")
+        add_task(state, task_id=2, title="Improve cockpit", kind="coding")
+        add_question(state, "Which area?", related_task_id=1)
+        add_question(state, "Which file?", related_task_id=2)
+
+        data = build_focus_data(state, limit=3, kind="coding")
+        focus = format_focus(data)
+
+        self.assertEqual(data["kind"], "coding")
+        self.assertEqual(data["tasks"][0]["id"], 2)
+        self.assertEqual(data["open_questions"][0]["related_task_id"], 2)
+        self.assertIn("Mew focus (coding)", focus)
+        self.assertIn("Which file?", focus)
+        self.assertNotIn("Which area?", focus)
 
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()

@@ -25,17 +25,20 @@ uv run mew message "今日のタスクは何？" --wait
 uv run mew event github_webhook --source local --payload '{"ref":"main"}' --wait
 printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew session
 uv run mew focus
+uv run mew focus --kind coding
 uv run mew daily
 uv run mew digest
 uv run mew brief
 uv run mew next
+uv run mew next --kind coding
 ```
 
 `focus` and `daily` are the quiet daily views: they show the current next move,
 open questions, and the top tasks without the full operational brief. Tasks can
 be tagged with `--kind coding|research|personal|admin|unknown`; only coding
 tasks are routed into the programmer plan queue by `mew next` and autonomous
-propose mode.
+propose mode. Use `mew next --kind coding` or `mew focus --kind coding` when
+older research/personal questions should not hide the next coding-shell move.
 `digest` summarizes activity since the last user interaction without entering
 the chat REPL.
 
@@ -124,6 +127,7 @@ uv run mew chat
 uv run mew session
 uv run mew focus
 uv run mew focus --json
+uv run mew focus --kind coding
 uv run mew daily
 uv run mew brief
 uv run mew brief --json
@@ -142,6 +146,7 @@ uv run mew dogfood --source-workspace . --cycles 3 --duration 30
 uv run mew dogfood --source-workspace . --cycles 3 --report .mew/dogfood-latest.json
 uv run mew perceive --allow-read .
 uv run mew next
+uv run mew next --kind coding
 uv run mew next --json
 uv run mew work
 uv run mew task list --kind coding

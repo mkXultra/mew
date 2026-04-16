@@ -2422,6 +2422,79 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_next_and_focus_can_filter_by_task_kind(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Research grants",
+                            "kind": "research",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": "",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    state["tasks"].append(
+                        {
+                            "id": 2,
+                            "title": "Improve coding cockpit",
+                            "kind": "coding",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": "",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    add_question(state, "Which city?", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["next", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["kind"], "coding")
+                self.assertEqual(data["command"], "mew work 2 --start-session")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["focus", "--kind", "coding"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Mew focus (coding)", output)
+                self.assertIn("Improve coding cockpit", output)
+                self.assertNotIn("Which city?", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_context_command_prints_diagnostics(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

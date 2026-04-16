@@ -411,11 +411,13 @@ def build_parser():
 
     focus_parser = subparsers.add_parser("focus", help="show the quiet daily next-action view")
     focus_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
+    focus_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     focus_parser.add_argument("--json", action="store_true", help="print structured JSON")
     focus_parser.set_defaults(func=cmd_focus)
 
     daily_parser = subparsers.add_parser("daily", help="alias for the quiet focus view")
     daily_parser.add_argument("--limit", type=int, default=3, help="maximum tasks/questions to show")
+    daily_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daily_parser.set_defaults(func=cmd_focus)
 
@@ -648,6 +650,7 @@ def build_parser():
     perceive_parser.set_defaults(func=cmd_perceive)
 
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
+    next_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     next_parser.add_argument("--json", action="store_true", help="print structured JSON")
     next_parser.set_defaults(func=cmd_next)
 

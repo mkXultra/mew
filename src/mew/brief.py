@@ -424,21 +424,55 @@ def build_brief_data(state, limit=5):
         "next_move": next_move(state),
     }
 
-def build_focus_data(state, limit=3):
-    tasks = sorted(open_tasks(state), key=task_sort_key)
-    questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
+def filter_tasks_by_kind(tasks, kind=None):
+    if not kind:
+        return list(tasks)
+    return [task for task in tasks if task_kind(task) == kind]
+
+
+def filter_questions_for_tasks(questions, tasks, kind=None):
+    if not kind:
+        return list(questions)
+    task_ids = {str(task.get("id")) for task in tasks}
+    return [
+        question
+        for question in questions
+        if str(question.get("related_task_id")) in task_ids
+    ]
+
+
+def filter_attention_for_tasks(attention, tasks, kind=None):
+    if not kind:
+        return list(attention)
+    task_ids = {str(task.get("id")) for task in tasks}
+    return [
+        item
+        for item in attention
+        if str(item.get("task_id") or item.get("related_task_id")) in task_ids
+    ]
+
+
+def build_focus_data(state, limit=3, kind=None):
+    tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    questions = filter_questions_for_tasks(
+        [question for question in state.get("questions", []) if question.get("status") == "open"],
+        tasks,
+        kind=kind,
+    )
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
+    attention = filter_attention_for_tasks(attention, tasks, kind=kind)
     unread = open_unread_messages(state)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     return {
-        "next_move": next_move(state),
+        "next_move": next_move(state, kind=kind),
+        "kind": kind or "",
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
         "open_questions": [_question_item(question) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
-        "active_work_sessions": active_work_session_items(state, limit=limit),
+        "active_work_sessions": active_work_session_items(state, limit=limit, kind=kind),
         "tasks": [
             {
                 **_task_item(task),
@@ -450,12 +484,14 @@ def build_focus_data(state, limit=3):
     }
 
 
-def active_work_session_items(state, limit=3):
+def active_work_session_items(state, limit=3, kind=None):
     items = []
     for session in reversed(state.get("work_sessions") or []):
         if session.get("status") != "active":
             continue
         task = work_session_task(state, session)
+        if kind and task_kind(task or {}) != kind:
+            continue
         resume = build_work_session_resume(session, task=task, limit=3) or {}
         task_id = session.get("task_id")
         task_arg = f" {task_id}" if task_id is not None else ""
@@ -476,7 +512,10 @@ def active_work_session_items(state, limit=3):
 
 
 def format_focus(data):
-    lines = ["Mew focus", f"Next: {data.get('next_move')}"]
+    title = "Mew focus"
+    if data.get("kind"):
+        title += f" ({data.get('kind')})"
+    lines = [title, f"Next: {data.get('next_move')}"]
     unread = data.get("unread_outbox_count") or 0
     if unread:
         lines.append(f"Unread: {unread}")
@@ -530,25 +569,40 @@ def format_focus(data):
     return "\n".join(lines)
 
 
-def next_move(state):
-    questions = [question for question in state.get("questions", []) if question.get("status") == "open"]
-    tasks = sorted(open_tasks(state), key=task_sort_key)
+def next_move(state, kind=None):
+    tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    questions = filter_questions_for_tasks(
+        [question for question in state.get("questions", []) if question.get("status") == "open"],
+        tasks,
+        kind=kind,
+    )
     running_tasks = [task for task in tasks if task.get("status") == "running"]
     running_task_ids = {str(task.get("id")) for task in running_tasks}
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
-    running_runs = running_agent_runs(state)
+    attention = filter_attention_for_tasks(attention, tasks, kind=kind)
+    task_ids = {str(task.get("id")) for task in tasks}
+    running_runs = [
+        run for run in running_agent_runs(state)
+        if not kind or str(run.get("task_id")) in task_ids
+    ]
     running_task_runs = [
         run for run in running_runs if str(run.get("task_id")) in running_task_ids
     ]
-    review_waiting = implementation_runs_needing_review(state)
-    followup_waiting = review_runs_needing_followup(state)
+    review_waiting = [
+        run for run in implementation_runs_needing_review(state)
+        if not kind or str(run.get("task_id")) in task_ids
+    ]
+    followup_waiting = [
+        run for run in review_runs_needing_followup(state)
+        if not kind or str(run.get("task_id")) in task_ids
+    ]
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
     recent_verifications = recent_verification_runs(state, limit=1)
-    active_work = active_work_session_items(state, limit=1)
+    active_work = active_work_session_items(state, limit=1, kind=kind)
 
     if running_tasks:
         for question in questions:
