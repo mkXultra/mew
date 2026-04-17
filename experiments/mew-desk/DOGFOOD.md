@@ -42,3 +42,28 @@ Would this make an AI more willing to live inside mew?
 Yes, slightly. It creates the first boundary between resident state and visible
 presence. It is not the desktop shell yet, but it is the correct substrate for
 one.
+
+## 2026-04-18
+
+Task: long-session continuation after observer/recovery validation.
+
+Built:
+
+- Added `terminal_pet.py`, a small renderer that consumes the existing
+  `mew desk --json` view model from a file or stdin.
+- Kept the prototype terminal-first and isolated under `experiments/mew-desk`
+  instead of starting a GUI/Tauri surface too early.
+- Added tests for alerting, fallback state handling, stdin loading, and file
+  rendering.
+
+Validation:
+
+- `uv run pytest -q experiments/mew-desk` -> `9 passed`.
+
+Product learning:
+
+- `mew desk --json` is already enough to drive a visible resident shell.
+- The next UI can stay dumb: it only needs to map `pet_state`, `focus`, and
+  counts into a shape the human can keep nearby.
+- A terminal renderer is not the final pet, but it proves the boundary before
+  platform-specific desktop work.

@@ -47,8 +47,10 @@ Status:
 - The prototype maps local state into `sleeping`, `thinking`, `typing`, or
   `alerting` plus a compact focus summary and counts.
 - The view model is promoted to the core `mew desk` command.
+- A second isolated slice renders the same `mew desk --json` view model as a
+  tiny terminal pet, proving the UI boundary before a Tauri/desktop shell.
 - Latest validation: `uv run pytest -q experiments/mew-desk` passed with
-  `5 passed`.
+  `9 passed`.
 
 Scope:
 - Menu bar or tray app.
@@ -344,13 +346,15 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be a tiny visual `mew-desk` prototype that
-consumes the core `mew desk --json` view model.
+The next side project should probably be the smallest platform-shell spike on
+top of `mew-desk`: either a static browser mock or a minimal Tauri/tray proof
+that consumes `mew desk --json` without touching resident runtime code.
 
 Reason: `mew-dream`, `mew-bond`, `mew-journal`, `mew-mood`, and
 `mew-morning-paper` now cover memory, self-continuity, daily continuity, passive
 state visibility, and offline research ranking in isolated form.
 `mew-passive-bundle` now proves they can be composed into one reentry artifact.
-The bundle composer has a core command now, so the next non-core question is
-whether a visual shell can read `mew desk --json` and `mew bundle --show`
+The bundle composer has a core command now, and `experiments/mew-desk` now has a
+terminal renderer over the core desk view model. The next non-core question is
+whether a real visual shell can read `mew desk --json` and `mew bundle --show`
 without touching the resident runtime.

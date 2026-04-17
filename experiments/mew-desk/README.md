@@ -6,6 +6,7 @@ Outputs:
 
 - `.mew/desk/YYYY-MM-DD.json`
 - `.mew/desk/YYYY-MM-DD.md`
+- a tiny terminal pet renderer for the same JSON view model
 
 This first slice does not create a window, tray app, or Tauri project. It only
 answers the question a future desktop shell needs first: what should the pet
@@ -34,6 +35,18 @@ Read the generated view model:
 
 ```bash
 cat /tmp/mew-desk/.mew/desk/2026-04-17.json
+```
+
+Render the same view model as a terminal pet:
+
+```bash
+uv run python experiments/mew-desk/terminal_pet.py /tmp/mew-desk/.mew/desk/2026-04-17.json
+```
+
+Or pipe the core command directly:
+
+```bash
+uv run mew desk --json | uv run python experiments/mew-desk/terminal_pet.py -
 ```
 
 ## Test
