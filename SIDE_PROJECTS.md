@@ -40,6 +40,15 @@ core execution layer.
 
 Goal: A desktop resident pet that reflects mew state.
 
+Status:
+- First isolated state-model prototype exists under `experiments/mew-desk`.
+- Dogfood task #84 used work session #109 and `mew work --ai` planning to keep
+  the first slice out of UI/runtime code.
+- The prototype maps local state into `sleeping`, `thinking`, `typing`, or
+  `alerting` plus a compact focus summary and counts.
+- Latest validation: `uv run pytest -q experiments/mew-desk` passed with
+  `5 passed`.
+
 Scope:
 - Menu bar or tray app.
 - Small cat/mascot window with states such as `sleeping`, `thinking`,
@@ -323,12 +332,14 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be a tiny `mew-desk` static prototype.
+The next side project should probably be either a tiny visual `mew-desk`
+prototype that consumes the view model, or a core command that generates the
+view model.
 
 Reason: `mew-dream`, `mew-bond`, `mew-journal`, `mew-mood`, and
 `mew-morning-paper` now cover memory, self-continuity, daily continuity, passive
 state visibility, and offline research ranking in isolated form.
 `mew-passive-bundle` now proves they can be composed into one reentry artifact.
 The bundle composer has a core command now, so the next non-core question is
-whether a visual shell can read that artifact without touching the resident
-runtime.
+whether a visual shell can read the desk view model and passive bundle without
+touching the resident runtime.

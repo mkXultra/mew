@@ -1,0 +1,24 @@
+{
+  "date": "2026-04-17",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Prototype mew-desk state model",
+      "status": "ready",
+      "kind": "coding"
+    }
+  ],
+  "outbox": [
+    {
+      "id": 2,
+      "question_id": 3,
+      "requires_reply": true,
+      "answered_at": null,
+      "text": "Should the desk pet alert the user?"
+    }
+  ],
+  "runtime_status": {
+    "state": "stopped",
+    "current_phase": ""
+  }
+}
