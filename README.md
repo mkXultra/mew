@@ -389,8 +389,10 @@ resume offset so the model can request the next page when needed. If the
 work-session context still exceeds the budget, mew shrinks the recent
 tool/turn windows and leaves a `context_compaction` note for the model. Passing
 `--allow-read` to `mew work --session --resume` adds a live world-state check
-with current git status and touched-file stats; the same bounded summary is
-included in future work-model context when read access is allowed.
+with current git status and touched-file stats. Before any file has been
+touched, non-git workspaces still show a shallow snapshot of the allowed read
+root instead of `(no files)`. The same bounded summary is included in future
+work-model context when read access is allowed.
 Model-selected `read_file` calls default to a smaller page than manual reads,
 and model-selected `git_diff` defaults to diffstat, so broad read-only batches
 do not immediately bloat a resident session. One-shot `--work-guidance` and

@@ -4919,6 +4919,38 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_world_state_snapshots_allowed_root_before_files_touched(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("scratch world\n", encoding="utf-8")
+                Path("sample").mkdir()
+                Path("sample/app.py").write_text("print('hi')\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", "."]), 0)
+                output = stdout.getvalue()
+                self.assertIn("git_status exit=128", output)
+                self.assertIn("README.md", output)
+                self.assertIn("sample", output)
+                self.assertNotIn("(no files)", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]), 0)
+                files = json.loads(stdout.getvalue())["resume"]["world_state"]["files"]
+                self.assertEqual(files[0]["source"], "workspace_snapshot")
+                self.assertTrue(any(item["path"] == "README.md" for item in files))
+                self.assertTrue(any(item["path"] == "sample" for item in files))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_world_state_uses_allowed_read_root_for_git_status(self):
         from mew.work_world import build_work_world_state
 
