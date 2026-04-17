@@ -7201,6 +7201,27 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_cli_controls_include_steer_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                controls_block = output.split("Next CLI controls", 1)[1]
+                self.assertIn("steer next step: mew work 1 --steer <guidance>", controls_block)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_reentry_options_preserve_existing_gates_when_partially_updated(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

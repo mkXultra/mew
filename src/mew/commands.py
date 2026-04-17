@@ -1549,6 +1549,10 @@ def work_cli_control_items(session, args):
                 "command": f"{mew_executable()} work{task_part} --session --resume --allow-read . --auto-recover-safe",
             }
         )
+    steer_parts = ["work"]
+    if task_id is not None:
+        steer_parts.append(task_id)
+    steer_parts.append("--steer")
     controls.extend(
         [
             {"label": "one live step", "command": _work_live_continue_command(args, task_id, session=session)},
@@ -1559,6 +1563,10 @@ def work_cli_control_items(session, args):
             {
                 "label": "follow loop",
                 "command": _work_live_continue_command(args, task_id, session=session, max_steps=10, follow=True),
+            },
+            {
+                "label": "steer next step",
+                "command": f"{mew_command(*steer_parts)} <guidance>",
             },
             {
                 "label": "pause at boundary",

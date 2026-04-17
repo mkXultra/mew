@@ -423,8 +423,8 @@ fresh chat can recover the active work session's stored defaults, so
 to pause at the next model/tool boundary with `mew work --stop-session` or
 `/work-session stop`. Work steps are journaled before THINK/ACT starts, and stop
 requests are checked again after planning before any selected tool is started.
-CLI live runs end with `Next CLI controls` so the next continue, stop, resume,
-or chat command is visible. Work-mode `remember` records
+CLI live runs end with `Next CLI controls` so the next continue, follow, steer,
+stop, resume, or chat command is visible. Work-mode `remember` records
 durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
 `/work-session note`. With an explicit task id, `mew work <task-id>
