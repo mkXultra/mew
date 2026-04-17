@@ -60,6 +60,12 @@ from .model_backends import (
     normalize_model_backend,
 )
 from .model_trace import read_model_traces
+from .mood import (
+    build_mood_view_model,
+    format_mood_view,
+    render_mood_markdown,
+    write_mood_report,
+)
 from .passive_bundle import generate_bundle
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
@@ -4784,6 +4790,32 @@ def cmd_desk(args):
         if written:
             print(f"written_json: {written[0]}")
             print(f"written_markdown: {written[1]}")
+    return 0
+
+def cmd_mood(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
+    state = load_state()
+    try:
+        view_model = build_mood_view_model(state, explicit_date=args.date)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    written = None
+    if args.write:
+        written = write_mood_report(view_model, Path(args.output_dir).expanduser())
+    if args.json:
+        data = dict(view_model)
+        if written:
+            data["path"] = str(written)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(render_mood_markdown(view_model), end="")
+    else:
+        print(format_mood_view(view_model))
+        if written:
+            print(f"written_markdown: {written}")
     return 0
 
 def cmd_activity(args):

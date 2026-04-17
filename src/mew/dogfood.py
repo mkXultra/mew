@@ -482,8 +482,10 @@ def run_runtime_focus_scenario(workspace, env=None):
     journal_path = workspace / ".mew" / "journal" / f"{bundle_day}.md"
     journal_path.parent.mkdir(parents=True, exist_ok=True)
     journal_path.write_text(f"# Mew Journal {bundle_day}\n\nDogfood journal hint.\n", encoding="utf-8")
+    mood_result = run(["mood", "--date", bundle_day, "--write", "--json"], timeout=15)
     bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
     desk_data = _json_stdout(desk_result)
+    mood_data = _json_stdout(mood_result)
     bundle_data = _json_stdout(bundle_result)
 
     _scenario_check(
@@ -547,12 +549,22 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "mood_json_writes_report",
+        mood_result.get("exit_code") == 0
+        and bool(mood_data.get("label"))
+        and (workspace / ".mew" / "mood" / f"{bundle_day}.md").exists(),
+        observed=mood_data,
+        expected="mood --write --json returns scores and writes a mood report",
+    )
+    _scenario_check(
+        checks,
         "bundle_json_surfaces_generated_report",
         bundle_result.get("exit_code") == 0
         and "Journal" in (bundle_data.get("included") or [])
+        and "Mood" in (bundle_data.get("included") or [])
         and (workspace / ".mew" / "passive-bundle" / f"{bundle_day}.md").exists(),
         observed=bundle_data,
-        expected="bundle --json includes the generated journal report",
+        expected="bundle --json includes generated journal and mood reports",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
 

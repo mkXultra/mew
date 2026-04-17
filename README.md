@@ -29,6 +29,7 @@ uv run mew focus --kind coding
 uv run mew daily
 uv run mew bundle --show
 uv run mew desk --json
+uv run mew mood --write
 uv run mew digest
 uv run mew brief
 uv run mew next
@@ -47,12 +48,14 @@ session instead of going silent.
 the chat REPL.
 `bundle` composes already-generated daily report markdown files into one
 `.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
-source reports; use it after journal, mood, dream, self-memory, or morning-paper
-experiments have written files under `.mew`.
+source reports; use it after `mew mood --write` or after journal, dream,
+self-memory, or morning-paper experiments have written files under `.mew`.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`
 artifacts.
+`mood` scores current state across `energy`, `worry`, and `joy`, then can write
+`.mew/mood/YYYY-MM-DD.md` for `mew bundle`.
 When an active work session has working memory, `focus` includes the current
 hypothesis and memory next step so reentry context is visible before opening the
 full resume. If a later tool or model turn made that memory stale, `focus` marks
@@ -164,6 +167,8 @@ uv run mew daily
 uv run mew bundle --date 2026-04-17 --show
 uv run mew desk --json
 uv run mew desk --write
+uv run mew mood --date 2026-04-17 --write
+uv run mew mood --json
 uv run mew brief
 uv run mew brief --json
 uv run mew activity

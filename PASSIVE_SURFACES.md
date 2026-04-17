@@ -46,6 +46,26 @@ Implementation notes:
 - Ignores active work sessions whose linked task is already done.
 - Validates `--date` as strict `YYYY-MM-DD` before writing files.
 
+### `mew mood`
+
+Purpose: expose a compact emotional state model from local work state.
+
+Useful commands:
+
+```bash
+uv run mew mood
+uv run mew mood --json
+uv run mew mood --show
+uv run mew mood --write
+```
+
+Outputs:
+
+- current label, such as `steady`, `concerned`, or `productive but watchful`
+- `energy`, `worry`, and `joy` scores with reason lines
+- compact signals from open tasks, open questions, and runtime effects
+- optional `.mew/mood/YYYY-MM-DD.md` report for `mew bundle`
+
 ### `mew bundle`
 
 Purpose: compose generated daily report markdown files into one reentry
@@ -67,8 +87,9 @@ Current source report paths:
 - `.mew/dreams/YYYY-MM-DD.md`
 - `.mew/self/learned-YYYY-MM-DD.md`
 
-The command composes existing reports only. It does not generate journal, mood,
-morning-paper, dream, or self-memory reports.
+The command composes existing reports only. It does not generate journal,
+morning-paper, dream, or self-memory reports. `mew mood --write` can generate
+the mood source report.
 
 ## Experiments
 
@@ -93,22 +114,22 @@ Promoted:
 - passive tick observability
 - passive bundle composition
 - desk view model
+- mood scoring
 
 Not promoted yet:
 
 - journal generation
-- mood scoring as a first-class command
 - morning-paper feed collection or ranking
 - dream/self-memory generation
 - any visual desktop shell
 
 ## Latest Verification
 
-After the core `desk` and `bundle` promotions and review fixes:
+After the core `desk`, `mood`, and `bundle` promotions and review fixes:
 
 ```text
 uv run pytest -q
-757 passed, 6 subtests passed
+762 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

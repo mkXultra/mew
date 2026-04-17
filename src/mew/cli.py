@@ -39,6 +39,7 @@ from .commands import (
     cmd_log,
     cmd_memory,
     cmd_message,
+    cmd_mood,
     cmd_next,
     cmd_outbox,
     cmd_passive_bundle,
@@ -452,6 +453,14 @@ def build_parser():
     desk_parser.add_argument("--output-dir", default=".", help="where to write .mew/desk files with --write")
     desk_parser.add_argument("--json", action="store_true", help="print structured output")
     desk_parser.set_defaults(func=cmd_desk)
+
+    mood_parser = subparsers.add_parser("mood", help="show the current mew mood score")
+    mood_parser.add_argument("--date", help="mood report date YYYY-MM-DD; defaults to today")
+    mood_parser.add_argument("--write", action="store_true", help="write .mew/mood/YYYY-MM-DD.md")
+    mood_parser.add_argument("--output-dir", default=".", help="where to write .mew/mood files with --write")
+    mood_parser.add_argument("--show", action="store_true", help="print the markdown report")
+    mood_parser.add_argument("--json", action="store_true", help="print structured output")
+    mood_parser.set_defaults(func=cmd_mood)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)

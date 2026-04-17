@@ -257,6 +257,8 @@ Status:
   the smallest slice.
 - The prototype generates one `.mew/mood/YYYY-MM-DD.md` file with `energy`,
   `worry`, and `joy` scores plus reason lines and compact signals.
+- The scorer is promoted to the core `mew mood` command. Use `mew mood --write`
+  to generate the source report that `mew bundle` composes.
 - Latest validation: `uv run pytest -q experiments/mew-mood` passed with
   `6 passed`.
 
