@@ -420,7 +420,7 @@ def _work_action_schema_text():
         '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", '
         '"path": "required for read_file/glob/search_text", '
         '"query": "required for search_text", '
-        '"pattern": "required for glob", '
+        '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
         '"line_start": "optional 1-based read_file starting line from search_text results", '
         '"line_count": "optional read_file line count"}],\n'

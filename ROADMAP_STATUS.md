@@ -384,6 +384,7 @@ Next action:
 - Follow-up dogfood of `mew work 46` exposed repeated `Work session finished:` task notes crowding the same front-door reentry block; workbench reentry now collapses older finish notes and keeps the latest one visible.
 - Full `mew work --session --resume` dogfood exposed repeated identical one-shot guidance under every recent decision; resume text now prints the first guidance and references later duplicates as `same as #...`, preserving context without replaying the same paragraph.
 - `codex-ultra` human-role retest after the reentry-noise work found the front-door behavior passing, then flagged `dogfood --json` as too large for practical terminal use; scenario JSON now stores compact command tails and clipped observed values instead of full command stdout/stderr and large diffs.
+- Mew buddy dogfood session #50 exposed that a model-selected `search_text` action with `pattern=*.md` still searched Python files; `search_text` now honors optional glob filters from resident actions and the CLI, reducing noisy false-scope search results in cockpit output.
 
 ## Current Roadmap Focus
 

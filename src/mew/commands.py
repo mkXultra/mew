@@ -4745,6 +4745,7 @@ def cmd_tool_search(args):
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
             context_lines=getattr(args, "context_lines", 3),
+            pattern=getattr(args, "pattern", None),
         )
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)

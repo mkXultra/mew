@@ -191,9 +191,9 @@ class WorkSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                Path("README.md").write_text("hello native hands\n", encoding="utf-8")
+                Path("README.md").write_text("hello native hands\nshared-needle in docs\n", encoding="utf-8")
                 Path("src").mkdir()
-                Path("src/app.py").write_text("print('hi')\n", encoding="utf-8")
+                Path("src/app.py").write_text("print('shared-needle in code')\n", encoding="utf-8")
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
@@ -251,10 +251,38 @@ class WorkSessionTests(unittest.TestCase):
                     any(match["path"].endswith("src/app.py") for match in glob_result["tool_call"]["result"]["matches"])
                 )
 
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "search_text",
+                                "--query",
+                                "shared-needle",
+                                "--pattern",
+                                "*.md",
+                                "--path",
+                                ".",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                search_result = json.loads(stdout.getvalue())
+                self.assertEqual(search_result["tool_call"]["status"], "completed")
+                matches = search_result["tool_call"]["result"]["matches"]
+                self.assertEqual(search_result["tool_call"]["result"]["pattern"], "*.md")
+                self.assertTrue(any(match.endswith("shared-needle in docs") for match in matches))
+                self.assertFalse(any("src/app.py" in match for match in matches))
+
                 state = load_state()
                 session = state["work_sessions"][0]
                 self.assertEqual(session["status"], "active")
-                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["read_file", "glob"])
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["read_file", "glob", "search_text"])
                 self.assertEqual(session["tool_calls"][0]["status"], "completed")
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -262,7 +290,7 @@ class WorkSessionTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Work session", text)
                 self.assertIn("phase=idle", text)
-                self.assertIn("tool_calls=2", text)
+                self.assertIn("tool_calls=3", text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session"]), 0)

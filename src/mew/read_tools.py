@@ -242,7 +242,24 @@ def _search_snippet(candidate, line_number, context_lines, line_cache):
     }
 
 
-def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCHES, context_lines=DEFAULT_SEARCH_CONTEXT_LINES):
+def _normalize_search_patterns(pattern):
+    if pattern in (None, ""):
+        return []
+    if isinstance(pattern, (list, tuple)):
+        values = pattern
+    else:
+        values = [pattern]
+    return [str(value).strip() for value in values if str(value).strip()][:10]
+
+
+def search_text(
+    query,
+    path,
+    allowed_roots,
+    max_matches=DEFAULT_SEARCH_MAX_MATCHES,
+    context_lines=DEFAULT_SEARCH_CONTEXT_LINES,
+    pattern=None,
+):
     max_matches = max(1, min(int(max_matches), 200))
     try:
         context_lines = max(0, min(int(context_lines or 0), 5))
@@ -279,9 +296,11 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
         "!id_rsa",
         "--glob",
         "!id_ed25519",
-        str(query),
-        str(resolved),
     ]
+    include_patterns = _normalize_search_patterns(pattern)
+    for include_pattern in include_patterns:
+        command.extend(["--glob", include_pattern])
+    command.extend([str(query), str(resolved)])
     env = os.environ.copy()
     env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     try:
@@ -329,6 +348,8 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
     return {
         "path": str(resolved),
         "query": str(query),
+        "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
+        "patterns": include_patterns,
         "matches": matches,
         "snippets": snippets,
         "context_lines": context_lines,
@@ -406,6 +427,7 @@ def summarize_read_result(action_type, result):
         )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
+        pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""
         snippets = []
         for snippet in (result.get("snippets") or [])[:10]:
             lines = []
@@ -415,7 +437,7 @@ def summarize_read_result(action_type, result):
             if lines:
                 snippets.append(f"{snippet.get('path')}:{snippet.get('start_line')}-{snippet.get('end_line')}\n" + "\n".join(lines))
         body = "\n\n".join(snippets) if snippets else "\n".join(result.get("matches", []))
-        return f"Searched {result.get('path')} for {result.get('query')!r}{suffix}\n{body}"
+        return f"Searched {result.get('path')} for {result.get('query')!r}{pattern}{suffix}\n{body}"
     if action_type == "glob":
         suffix = " (truncated)" if result.get("truncated") else ""
         matches = "\n".join(

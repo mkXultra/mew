@@ -398,6 +398,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             allowed_read_roots,
             max_matches=parameters.get("max_matches", 50),
             context_lines=parameters.get("context_lines", 3),
+            pattern=parameters.get("pattern"),
         )
     if tool == "glob":
         return glob_paths(
@@ -657,9 +658,10 @@ def compact_work_tool_summary(call):
         )
     if tool == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
+        pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""
         return (
             f"Searched {result.get('path') or (call.get('parameters') or {}).get('path')} "
-            f"for {result.get('query')!r} matches={len(result.get('matches') or [])}{suffix}"
+            f"for {result.get('query')!r}{pattern} matches={len(result.get('matches') or [])}{suffix}"
         )
     if tool == "glob":
         suffix = " (truncated)" if result.get("truncated") else ""

@@ -860,6 +860,7 @@ def build_parser():
     tool_search_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
     tool_search_parser.add_argument("--max-matches", type=int, default=50)
     tool_search_parser.add_argument("--context-lines", type=int, default=3, help="context lines around matches")
+    tool_search_parser.add_argument("--pattern", help="optional rg glob filter, e.g. '*.md'")
     tool_search_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_search_parser.set_defaults(func=cmd_tool_search)
 
