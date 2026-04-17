@@ -4241,6 +4241,50 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_finish_note_prefers_summary_over_reason(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "outer summary",
+                    "action": {
+                        "type": "finish",
+                        "summary": "useful conclusion for reentry",
+                        "reason": "stopping because this is the final follow step",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                notes = load_state()["tasks"][0]["notes"]
+                self.assertIn("Work session finished: useful conclusion for reentry", notes)
+                self.assertNotIn("Work session finished: stopping because this is the final follow step", notes)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_feeds_tool_result_into_next_model_turn(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

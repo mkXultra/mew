@@ -31,12 +31,16 @@ WORK_CONTEXT_BUDGET = 120000
 WORK_CONTEXT_WINDOW_CANDIDATES = ((12, 8), (8, 6), (6, 4), (4, 2), (2, 2))
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
+WORK_TASK_NOTES_CONTEXT_LINES = 12
 
 
-def clip_work_task_notes(notes, limit=WORK_RESULT_TEXT_LIMIT):
+def clip_work_task_notes(notes, limit=WORK_RESULT_TEXT_LIMIT, max_lines=WORK_TASK_NOTES_CONTEXT_LINES):
     if not notes:
         return ""
     notes = str(notes)
+    lines = notes.splitlines()
+    if len(lines) > max_lines:
+        notes = "[...older task notes omitted...]\n" + "\n".join(lines[-max_lines:])
     if len(notes) <= limit:
         return notes
     tail = notes[-limit:]
@@ -583,7 +587,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
                 normalized["line_start"] = action.get(alias)
                 break
 
-    if not normalized.get("summary") and action_plan.get("summary"):
+    if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
         normalized["summary"] = action_plan.get("summary")
     if action_type in WRITE_WORK_TOOLS:
         dry_run = action.get("dry_run")

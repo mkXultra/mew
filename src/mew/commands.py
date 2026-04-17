@@ -1233,12 +1233,23 @@ def _work_control_text(action, fallback):
     return fallback
 
 
+def _work_finish_text(action, fallback):
+    summary = str((action or {}).get("summary") or "").strip()
+    if summary and summary.casefold() not in ("done", "finish", "finished"):
+        return summary
+    for key in ("text", "note", "reason"):
+        value = (action or {}).get(key)
+        if value:
+            return str(value)
+    return fallback
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
     task_id = task.get("id") if task else None
     if action_type == "finish":
-        note = _work_control_text(action, "Work session finished.")
+        note = _work_finish_text(action, "Work session finished.")
         current_time = now_iso()
         if session:
             close_work_session(session)
