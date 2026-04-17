@@ -141,6 +141,11 @@ def build_parser():
         help="print newly created outbox messages in the runtime terminal",
     )
     run_parser.add_argument(
+        "--echo-effects",
+        action="store_true",
+        help="print the runtime effect summary for each processed cycle",
+    )
+    run_parser.add_argument(
         "--notify-command",
         default="",
         help="command to run once for each new outbox message; message fields are passed as MEW_OUTBOX_* env vars",

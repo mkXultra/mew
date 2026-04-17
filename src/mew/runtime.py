@@ -511,6 +511,7 @@ def run_runtime(args):
             reason = None
             event_id = None
             effect_id = None
+            effect_summary = ""
             event_snapshot = None
             state_snapshot = None
             decision_plan = None
@@ -797,6 +798,21 @@ def run_runtime(args):
                             f"{now_iso()}: archived {archive_result['total_archived']} record(s) "
                             f"path={archive_result.get('archive_path')}"
                         )
+                if getattr(args, "echo_effects", False) and effect_id is not None:
+                    effect = find_runtime_effect(state, effect_id)
+                    if effect:
+                        action_types = ",".join(effect.get("action_types") or []) or "-"
+                        summary = effect.get("summary") or ""
+                        outcome = effect.get("outcome") or ""
+                        effect_summary = (
+                            f"effect #{effect.get('id')} [{effect.get('status')}] "
+                            f"event=#{effect.get('event_id')} reason={effect.get('reason')} "
+                            f"actions={action_types}"
+                        )
+                        if summary:
+                            effect_summary = f"{effect_summary} summary={summary}"
+                        if outcome and outcome != summary:
+                            effect_summary = f"{effect_summary} outcome={outcome}"
                 if args.echo_outbox or getattr(args, "notify_bell", False) or getattr(args, "notify_command", ""):
                     new_outbox_messages = [
                         message
@@ -810,6 +826,8 @@ def run_runtime(args):
                     next_passive_at = time.time() + args.interval
 
             print(f"processed {processed_count} event(s) reason={reason}")
+            if effect_summary:
+                print(effect_summary)
             if args.echo_outbox:
                 for message in new_outbox_messages:
                     text = str(message.get("text") or "").replace("\n", "\n  ")

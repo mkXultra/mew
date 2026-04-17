@@ -262,6 +262,42 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_echo_effects_prints_runtime_effect_summary(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "journaled", "decisions": []},
+                            {
+                                "summary": "journaled",
+                                "actions": [
+                                    {
+                                        "type": "send_message",
+                                        "message_type": "info",
+                                        "text": "journaled runtime effect",
+                                    }
+                                ],
+                            },
+                        ),
+                    ),
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--echo-effects", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("processed 1 event(s) reason=startup", output)
+                self.assertIn("effect #1 [applied] event=#1 reason=startup actions=send_message", output)
+                self.assertIn("summary=journaled", output)
+                self.assertIn("outcome=journaled runtime effect", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_marks_deferred_effect_when_user_message_arrives_during_planning(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

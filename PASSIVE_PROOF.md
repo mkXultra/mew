@@ -154,10 +154,57 @@ Validation:
 
 ```text
 uv run pytest -q
-717 passed, 6 subtests passed
+718 passed, 6 subtests passed
 
 ./mew dogfood --scenario runtime-focus --cleanup --json
 status: pass, including runtime_passive_now_processes_passive_tick
+
+./mew dogfood --scenario all --cleanup --json
+status: pass
+```
+
+## 2026-04-17 Follow-Up: `--echo-effects`
+
+The passive loop was still hard to observe when a cycle updated memory or self
+review without sending a user-facing outbox message. A second small CLI option
+was added:
+
+```bash
+./mew run --echo-effects
+```
+
+For every processed cycle, it prints the applied runtime effect summary after
+the normal `processed ... reason=...` line.
+
+Live verification:
+
+```bash
+./mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --echo-effects --focus "Check one passive tick effect summary without model."
+```
+
+Result excerpt:
+
+```text
+processed 1 event(s) reason=passive_tick
+effect #15 [applied] event=#393 reason=passive_tick actions=record_memory,wait_for_user,ask_user,wait_for_user summary=3 open task(s) ... outcome=Question #3 is still unanswered.
+```
+
+Product impact:
+
+- `--echo-outbox` remains for user-facing messages.
+- `--echo-effects` exposes quiet passive cycles that only update memory,
+  review state, or wait.
+- Together with `--passive-now`, this gives a one-command passive runtime proof
+  that does not require waiting for a multi-cycle resident loop.
+
+Regression coverage:
+
+```text
+uv run pytest -q tests/test_runtime.py tests/test_dogfood.py tests/test_commands.py
+200 passed, 4 subtests passed
+
+./mew dogfood --scenario runtime-focus --cleanup --json
+status: pass, including runtime_passive_now_echoes_effect_summary
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

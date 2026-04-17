@@ -9,7 +9,7 @@ It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, a
 ```sh
 uv run mew doctor --auth auth.json
 uv run mew task add "Improve mew" --kind coding --ready --description "Pick one small useful improvement"
-uv run mew run --autonomous --autonomy-level propose --echo-outbox
+uv run mew run --autonomous --autonomy-level propose --echo-effects --echo-outbox
 uv run mew run --ai --model-backend codex --auth auth.json --echo-outbox
 # or run it in the background:
 uv run mew start -- --autonomous --autonomy-level propose
@@ -50,6 +50,9 @@ it stale and suppresses the old memory next step.
 The same view uses the active session's saved model, permission, approval, and
 verification defaults for its `continue` and `follow` commands, so quiet reentry
 does not lose the cockpit setup.
+Use `run --echo-effects` when observing passive runtime behavior: it prints the
+runtime effect id, status, event reason, action types, summary, and outcome for
+each processed cycle even when no user-facing outbox message was created.
 
 ## Programmer Loop
 
@@ -138,7 +141,7 @@ uv run mew effects --json
 uv run mew runtime-effects 10
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew run --once --autonomous --autonomy-level act --focus "Take one small verified step"
-uv run mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --focus "Check one passive tick"
+uv run mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --echo-effects --focus "Check one passive tick"
 uv run mew stop
 uv run mew -m "今日のタスクは何？" --wait
 uv run mew message "今日のタスクは何？" --wait

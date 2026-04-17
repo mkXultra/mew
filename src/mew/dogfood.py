@@ -467,6 +467,7 @@ def run_runtime_focus_scenario(workspace, env=None):
             "run",
             "--once",
             "--passive-now",
+            "--echo-effects",
             "--focus",
             "Take one focused dogfood passive tick",
             "--poll-interval",
@@ -499,6 +500,13 @@ def run_runtime_focus_scenario(workspace, env=None):
         and "processed 1 event(s) reason=passive_tick" in (passive_result.get("stdout") or ""),
         observed=command_result_tail(passive_result),
         expected="run --once --passive-now processes a passive_tick without waiting for a loop",
+    )
+    _scenario_check(
+        checks,
+        "runtime_passive_now_echoes_effect_summary",
+        "effect #2 [applied] event=#2 reason=passive_tick" in (passive_result.get("stdout") or ""),
+        observed=command_result_tail(passive_result),
+        expected="run --once --passive-now --echo-effects prints the passive runtime effect",
     )
     _scenario_check(
         checks,
