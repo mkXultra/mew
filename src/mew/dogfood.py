@@ -547,6 +547,10 @@ def run_chat_cockpit_scenario(workspace, env=None):
         ["code", "3", "--timeout", "0", "--read-only", "--no-verify"],
         timeout=15,
     )
+    code_quiet_result = run(
+        ["code", "3", "--quiet", "--timeout", "0", "--read-only", "--no-verify"],
+        timeout=15,
+    )
     code_output = code_result.get("stdout") or ""
     code_controls = code_output.split("Next controls", 1)[1] if "Next controls" in code_output else code_output
 
@@ -664,6 +668,15 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "--act-mode" not in code_controls,
         observed=command_result_tail(code_result),
         expected="mew code startup keeps primary controls short and leaves full flags behind /help work",
+    )
+    _scenario_check(
+        checks,
+        "code_quiet_startup_is_silent",
+        code_quiet_result.get("exit_code") == 0
+        and not (code_quiet_result.get("stdout") or "")
+        and not (code_quiet_result.get("stderr") or ""),
+        observed=command_result_tail(code_quiet_result),
+        expected="mew code --quiet suppresses startup output while still entering the cockpit",
     )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 
