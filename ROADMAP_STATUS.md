@@ -346,7 +346,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `667 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `668 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_chat_work_session_can_request_stop tests/test_work_session.py::WorkSessionTests::test_work_session_stop_takes_precedence_over_session_flag tests/test_brief.py::BriefTests::test_next_move_coding_filter_in_empty_project_suggests_task_creation` current: `4 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_brief.py tests/test_commands.py` current: `335 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-review-fixes --json` current: pass across 36 commands.
+- `/Users/mk/dev/personal-pj/mew/mew focus` and `/Users/mk/dev/personal-pj/mew/mew next` in `/tmp/mew-empty-check` current: default next remains wait, with a `Coding:` task-creation suggestion.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_safe_reobserve_after_failed_edit tests/test_work_session.py::WorkSessionTests::test_work_session_resume_next_action_uses_latest_tool_status` current: `2 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-safe-reobserve --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_brief.py::BriefTests::test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks tests/test_brief.py::BriefTests::test_next_move_coding_filter_in_empty_project_suggests_task_creation` current: `2 passed`.

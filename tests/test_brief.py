@@ -65,6 +65,12 @@ class BriefTests(unittest.TestCase):
                     next_move(default_state(), kind="coding"),
                     "add a coding task with `mew task add ... --kind coding --ready`",
                 )
+                data = build_focus_data(default_state(), limit=3)
+                self.assertEqual(
+                    data["coding_next_move"],
+                    "add a coding task with `mew task add ... --kind coding --ready`",
+                )
+                self.assertIn("Coding: add a coding task", format_focus(data))
             finally:
                 os.chdir(old_cwd)
 

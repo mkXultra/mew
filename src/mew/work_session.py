@@ -700,6 +700,8 @@ def work_call_path(call):
 def suggested_safe_reobserve_for_call(call):
     if not isinstance(call, dict):
         return {}
+    if call.get("recovery_status"):
+        return {}
     failure_record = work_tool_failure_record(call)
     if call.get("status") not in ("failed", "interrupted") and not failure_record:
         return {}

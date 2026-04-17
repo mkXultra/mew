@@ -1656,12 +1656,12 @@ def cmd_work(args):
         return cmd_work_tool(args)
     if getattr(args, "start_session", False):
         return cmd_work_start_session(args)
+    if getattr(args, "stop_session", False):
+        return cmd_work_stop_session(args)
     if getattr(args, "session", False):
         return cmd_work_show_session(args)
     if getattr(args, "close_session", False):
         return cmd_work_close_session(args)
-    if getattr(args, "stop_session", False):
-        return cmd_work_stop_session(args)
     if getattr(args, "session_note", None):
         return cmd_work_session_note(args)
     if getattr(args, "recover_session", False):
@@ -7141,6 +7141,10 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     if session.get("status") != "active":
         lines.append(f"- /work-session resume{task_suffix}")
         lines.append(f"- /work-session start{task_suffix or ' <task-id>'}")
+        return "\n".join(lines)
+    if session.get("stop_requested_at"):
+        lines.append(f"- /work-session resume{task_suffix}")
+        lines.append("- /work-session close")
         return "\n".join(lines)
 
     resume = build_work_session_resume(session, task=work_session_task(state, session))

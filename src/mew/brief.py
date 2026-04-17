@@ -637,7 +637,11 @@ def build_focus_data(state, limit=3, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     coding_tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind="coding") if not kind else []
     coding_active_work = active_work_session_items(state, limit=1, kind="coding") if not kind else []
-    coding_next_move = next_move(state, kind="coding") if not kind and (coding_tasks or coding_active_work) else ""
+    coding_next_move = (
+        next_move(state, kind="coding")
+        if not kind and (coding_tasks or coding_active_work or not current_project_looks_like_mew())
+        else ""
+    )
     questions = filter_questions_for_tasks(
         [question for question in state.get("questions", []) if question.get("status") == "open"],
         tasks,

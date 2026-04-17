@@ -1750,6 +1750,29 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_stop_takes_precedence_over_session_flag(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--stop-session", "--stop-reason", "pause", "--json"]),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["work_session"]["stop_reason"], "pause")
+                self.assertIn("stop_requested_at", load_state()["work_sessions"][0])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_note_records_user_note(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1985,10 +2008,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(recovered_resume["phase"], "idle")
                 self.assertEqual(recovered_resume["failures"][0]["recovery_status"], "superseded")
                 self.assertEqual(recovered_resume["failures"][0]["recovered_by_tool_call_id"], 2)
+                self.assertEqual(recovered_resume["suggested_safe_reobserve"], {})
+                self.assertNotIn("suggested_safe_reobserve", recovered_resume["failures"][0])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
-                self.assertIn("recovery=superseded by=#2", stdout.getvalue())
+                recovered_text = stdout.getvalue()
+                self.assertIn("recovery=superseded by=#2", recovered_text)
+                self.assertNotIn("reobserve:", recovered_text)
             finally:
                 os.chdir(old_cwd)
 
@@ -7049,6 +7076,9 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("requested stop for work session #1: pause soon", output)
                 self.assertIn("Next controls", output)
+                controls = output.split("Next controls", 1)[1]
+                self.assertNotIn("/follow", controls)
+                self.assertNotIn("/work-session live", controls)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["stop_reason"], "pause soon")
             finally:
