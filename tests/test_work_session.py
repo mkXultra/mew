@@ -9234,6 +9234,37 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_zero_max_steps_allows_json_snapshot_refresh(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth") as load_auth:
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(["work", "1", "--follow", "--max-steps", "0", "--quiet", "--allow-read", ".", "--json"]),
+                                0,
+                            )
+
+                load_auth.assert_not_called()
+                call_model.assert_not_called()
+                self.assertEqual(stderr.getvalue(), "")
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_reason"], "snapshot_refresh")
+                self.assertEqual(data["max_steps"], 0)
+                self.assertEqual(data["steps"], [])
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["mode"], "follow")
+                self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10127,8 +10158,39 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["status"], "absent")
                 self.assertFalse(data["exists"])
                 self.assertEqual(data["producer_health"]["state"], "absent")
+                self.assertEqual(data["suggested_recovery"]["kind"], "select_task")
+                self.assertIn("task list --json", data["suggested_recovery"]["command"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_task_absent_suggests_refresh(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 7,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Follow status",
+                            "created_at": now_iso(),
+                            "updated_at": now_iso(),
+                        }
+                    ]
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 1)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "absent")
                 self.assertEqual(data["suggested_recovery"]["kind"], "refresh_snapshot")
-                self.assertIn("--follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
+                self.assertIn("work 1 --follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
             finally:
                 os.chdir(old_cwd)
 

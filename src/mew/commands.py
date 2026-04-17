@@ -2614,9 +2614,6 @@ def cmd_work_ai(args):
         args.stream_model = True
         if getattr(args, "max_steps", None) is None:
             args.max_steps = 10
-    if getattr(args, "live", False) and getattr(args, "json", False):
-        print("mew: --live cannot be combined with --json", file=sys.stderr)
-        return 1
     try:
         max_steps = positive_max_steps(
             getattr(args, "max_steps", None),
@@ -2625,6 +2622,9 @@ def cmd_work_ai(args):
         )
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "live", False) and getattr(args, "json", False) and max_steps != 0:
+        print("mew: --live cannot be combined with --json except for --max-steps 0 snapshot refresh", file=sys.stderr)
         return 1
     args.act_mode = resolved_work_act_mode(args)
     try:
@@ -2683,7 +2683,9 @@ def cmd_work_ai(args):
                 task = work_session_task(state, session)
             resume = build_work_session_resume(session, task=task)
             write_work_follow_snapshot(args, report, session, task, resume, force=True)
-        if not getattr(args, "quiet", False):
+        if getattr(args, "json", False):
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        elif not getattr(args, "quiet", False):
             print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
         if (
             getattr(args, "live", False)
@@ -4221,6 +4223,12 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
     if planned:
         return planned
     if status == "absent":
+        if task_id is None:
+            return {
+                "kind": "select_task",
+                "command": mew_command("task", "list", "--json"),
+                "reason": "select a task before writing a task-scoped observer snapshot",
+            }
         return {
             "kind": "refresh_snapshot",
             "command": _work_task_command(task_id, "--follow", "--max-steps", "0", "--quiet", "--allow-read", "."),

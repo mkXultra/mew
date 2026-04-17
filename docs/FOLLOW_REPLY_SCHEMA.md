@@ -28,10 +28,12 @@ follow with zero steps:
 
 ```sh
 mew work <task-id> --follow --max-steps 0 --quiet --allow-read .
+mew work <task-id> --follow --max-steps 0 --quiet --allow-read . --json
 ```
 
 `--quiet` is optional; it suppresses the refresh command's terminal output while
-still writing the snapshot files.
+still writing the snapshot files. With `--json`, zero-step live/follow refreshes
+print the structured refresh report while still skipping model calls.
 
 ## Inspecting Freshness
 
