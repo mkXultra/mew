@@ -42,6 +42,11 @@ Latest native self-improvement dogfood then polished the self-improve entry
 help, aligned historical diff JSON with the text `recorded_at` label, and made
 batch action summaries show read-window fields so compact cockpit output better
 matches the model's actual tool plan.
+`codex-ultra` human-role dogfood on current HEAD then found three concrete
+cockpit papercuts that are now fixed: unclipped diff stats for huge single-line
+edits, explicit cleanup-skipped reporting for user-provided dogfood workspaces,
+and visible `work cwd` output for native self-improvement sessions started
+outside the repository.
 
 ## Milestone 1: Native Hands
 
@@ -242,6 +247,9 @@ Evidence:
 - Focused work-session panes now compose cleanly, avoid duplicated `run_tests` entries when `--tests --commands` are combined, and expose historical diff timestamps as both `finished_at` and `recorded_at` in JSON.
 - Batch action rendering now includes read-window fields such as `line_start`, `line_count`, and `max_chars`, keeping compact text summaries aligned with the underlying model/tool JSON during dogfood.
 - `mew self-improve --help` now documents the native work-session flow directly, reducing the chance that a resident or human reentry chooses the older programmer-plan path by accident.
+- Compact follow/live model stream labels are now shorter (`summary_delta`, `reason_delta`, `action_delta`), reducing mechanical cockpit noise while keeping streamed THINK progress visible.
+- Diff previews now use full, unclipped diff stats even when the stored diff body is clipped, so huge single-line edits no longer appear as false `+0 -0` changes.
+- `mew dogfood --cleanup --workspace ...` now reports `cleanup_skipped_reason=explicit_workspace` instead of silently keeping the user-provided path, and native self-improvement output now prints the resolved `work cwd`.
 
 Missing proof:
 
@@ -371,7 +379,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `696 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `699 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; temporary workspace removed.
+- `codex-ultra` human-role dogfood on current HEAD current: deterministic dogfood `all` and `trace-smoke`, temp self-improve/work-session/chat probes, and targeted `tests/test_self_improve.py tests/test_work_session.py tests/test_dogfood.py` passed; reported diff-stat, cleanup, cwd, and scoped resume frictions.
 - `uv run pytest -q tests/test_work_session.py` current: `177 passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `18 passed, 2 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-work-session-after-batch-fields --json` current: pass across 36 commands.
