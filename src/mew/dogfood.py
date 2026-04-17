@@ -462,6 +462,18 @@ def run_runtime_focus_scenario(workspace, env=None):
         ],
         timeout=15,
     )
+    passive_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--focus",
+            "Take one focused dogfood passive tick",
+            "--poll-interval",
+            "0.01",
+        ],
+        timeout=15,
+    )
     brief_result = run(["brief"], timeout=15)
     doctor_result = run(["doctor"], timeout=15)
 
@@ -482,6 +494,14 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "runtime_passive_now_processes_passive_tick",
+        passive_result.get("exit_code") == 0
+        and "processed 1 event(s) reason=passive_tick" in (passive_result.get("stdout") or ""),
+        observed=command_result_tail(passive_result),
+        expected="run --once --passive-now processes a passive_tick without waiting for a loop",
+    )
+    _scenario_check(
+        checks,
         "brief_still_works_after_runtime_focus",
         brief_result.get("exit_code") == 0 and "Mew brief" in (brief_result.get("stdout") or ""),
         observed=command_result_tail(brief_result),
@@ -498,7 +518,7 @@ def run_runtime_focus_scenario(workspace, env=None):
         checks,
         "doctor_surfaces_runtime_effect",
         doctor_result.get("exit_code") == 0
-        and "runtime_effects: total=1 incomplete=0" in (doctor_result.get("stdout") or ""),
+        and "runtime_effects: total=2 incomplete=0" in (doctor_result.get("stdout") or ""),
         observed=command_result_tail(doctor_result),
         expected="doctor shows runtime effect count",
     )

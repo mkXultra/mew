@@ -157,5 +157,5 @@ uv run pytest -q
 717 passed, 6 subtests passed
 
 ./mew dogfood --scenario runtime-focus --cleanup --json
-status: pass
+status: pass, including runtime_passive_now_processes_passive_tick
 ```
