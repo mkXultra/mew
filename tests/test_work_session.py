@@ -7762,6 +7762,50 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_quiet_suppresses_progress_stderr(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "quiet finish", "action": {"type": "finish", "reason": "quiet enough"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--quiet",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "1",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(stderr.getvalue(), "")
+                output = stdout.getvalue()
+                self.assertIn("Work active cell step #1", output)
+                self.assertIn("Work cells after step #1", output)
+                self.assertIn("plan: finish - quiet finish", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_renders_json_model_deltas_as_prose(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

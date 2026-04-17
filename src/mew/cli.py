@@ -872,6 +872,7 @@ def build_parser():
     )
     work_parser.add_argument("--work-guidance", help="extra guidance for --ai work mode")
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")
+    work_parser.add_argument("--quiet", action="store_true", help="suppress default work progress lines unless --progress is set")
     work_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas to progress output when supported")
     work_parser.add_argument(
         "--compact-live",

@@ -273,6 +273,8 @@ Initial implementation status, 2026-04-18:
 - Follow planning output is now a compact `plan: <action>` line plus model
   stream stats. The detailed planning summary remains available in non-follow
   live mode.
+- `mew work --follow --quiet` hides default progress stderr while preserving
+  stdout cells. Passing `--progress` keeps the explicit progress stream.
 
 Remaining:
 

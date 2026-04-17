@@ -1190,6 +1190,7 @@ def _work_control_options(args, session=None):
         "compact_live": bool(option("compact_live", False)),
         "prompt_approval": bool(option("prompt_approval", False)),
         "no_prompt_approval": bool(option("no_prompt_approval", False)),
+        "quiet": bool(option("quiet", False)),
     }
     options["allow_write"] = safe_work_write_roots(options.get("allow_write") or [])
     return options
@@ -1267,6 +1268,7 @@ def remember_work_session_default_options(session, args):
             options.get("base_url"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("compact_live"),
+            options.get("quiet"),
             options.get("prompt_approval"),
             options.get("no_prompt_approval"),
             clear_write_defaults,
@@ -1318,6 +1320,7 @@ def remember_work_session_default_options(session, args):
         "verify_disabled": verify_disabled,
         "act_mode": merged_scalar("act_mode"),
         "compact_live": bool(current.get("compact_live") or options.get("compact_live")),
+        "quiet": bool(current.get("quiet") or options.get("quiet")),
         "prompt_approval": prompt_approval,
         "no_prompt_approval": no_prompt_approval,
     }
@@ -1375,6 +1378,8 @@ def work_chat_continue_options(session):
         parts.extend(["--act-mode", options["act_mode"]])
     if options.get("compact_live"):
         parts.append("--compact-live")
+    if options.get("quiet"):
+        parts.append("--quiet")
     if options.get("no_prompt_approval"):
         parts.append("--no-prompt-approval")
     elif options.get("prompt_approval"):
@@ -1411,6 +1416,8 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow
         parts.extend(["--act-mode", options["act_mode"]])
     if options.get("compact_live"):
         parts.append("--compact-live")
+    if options.get("quiet"):
+        parts.append("--quiet")
     if options.get("no_prompt_approval"):
         parts.append("--no-prompt-approval")
     elif options.get("prompt_approval"):
@@ -1686,6 +1693,8 @@ def apply_work_control_action(state, session, task, action):
 
 
 def work_ai_progress(args):
+    if getattr(args, "quiet", False) and not getattr(args, "progress", False):
+        return None
     if not (getattr(args, "progress", False) or getattr(args, "live", False) or not getattr(args, "json", False)):
         return None
 
