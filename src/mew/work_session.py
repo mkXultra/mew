@@ -876,12 +876,10 @@ def _latest_tool_call_after_memory(turn, calls):
 def _annotate_working_memory_with_latest_tool(memory, turn, calls):
     if not memory:
         return memory
-    latest_call = calls[-1] if calls else None
-    if latest_call:
-        memory["latest_tool_call_id"] = latest_call.get("id")
-        memory["latest_tool_state"] = format_work_tool_observation_state(latest_call)
     stale_call = _latest_tool_call_after_memory(turn, calls)
     if stale_call:
+        memory["latest_tool_call_id"] = stale_call.get("id")
+        memory["latest_tool_state"] = format_work_tool_observation_state(stale_call)
         memory["stale_after_tool_call_id"] = stale_call.get("id")
         memory["stale_after_tool"] = stale_call.get("tool") or "unknown"
     return memory

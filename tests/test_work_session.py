@@ -1574,6 +1574,59 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("\nnext_step: Ship it.", text)
         self.assertIn("stale_after_model_turn: #1 (1 later turn(s) without working_memory; latest=#2)", text)
 
+    def test_work_session_newer_memory_does_not_readd_old_tool_state(self):
+        from mew.work_session import (
+            build_work_session_resume,
+            finish_work_model_turn,
+            format_work_session_resume,
+            start_work_model_turn,
+        )
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Corrected memory",
+            "goal": "Do not let old tool output override newer memory.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "README.md"},
+                    "result": {"changed": True, "dry_run": False, "written": True},
+                    "summary": "old edit",
+                }
+            ],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+
+        turn = start_work_model_turn(
+            state,
+            session,
+            {
+                "summary": "correct old edit",
+                "working_memory": {
+                    "hypothesis": "The old edit was reverted out of band.",
+                    "next_step": "Trust the corrected memory over the old tool summary.",
+                },
+            },
+            {"summary": "correct old edit"},
+            {"type": "remember", "summary": "old edit was reverted"},
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        resume = build_work_session_resume(session)
+        memory = resume["working_memory"]
+        self.assertEqual(memory["hypothesis"], "The old edit was reverted out of band.")
+        self.assertNotIn("latest_tool_state", memory)
+        self.assertNotIn("stale_after_tool_call_id", memory)
+        self.assertNotIn("latest_tool_state:", format_work_session_resume(resume))
+
     def test_work_session_resume_falls_back_to_latest_turn_and_verification_state(self):
         from mew.work_session import (
             build_work_session_resume,
