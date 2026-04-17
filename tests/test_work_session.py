@@ -6979,7 +6979,7 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
-    def test_chat_work_session_live_alias_runs_live_step(self):
+    def test_chat_work_session_task_first_live_alias_runs_live_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
@@ -7000,7 +7000,7 @@ class WorkSessionTests(unittest.TestCase):
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 run_chat_slash_command(
-                                    "/work-session live 1 --auth auth.json --allow-read . --max-steps 1 --act-mode deterministic",
+                                    "/work-session 1 live --auth auth.json --allow-read . --max-steps 1 --act-mode deterministic",
                                     {},
                                 ),
                                 "continue",
