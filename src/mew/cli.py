@@ -736,6 +736,7 @@ def build_parser():
     code_parser.add_argument("--activity", dest="activity", action="store_true", help="show runtime activity lines")
     code_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     code_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
+    code_parser.add_argument("--quiet", action="store_true", help="start without brief, unread messages, activity, or startup controls")
     code_parser.add_argument("--show-unread", dest="no_unread", action="store_false", help="print unread messages on startup")
     code_parser.add_argument("--no-unread", dest="no_unread", action="store_true", help=argparse.SUPPRESS)
     code_parser.add_argument("--timeout", type=float, help="leave chat after this many seconds")

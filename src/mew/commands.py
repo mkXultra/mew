@@ -1969,6 +1969,7 @@ def cmd_code(args):
         activity=bool(getattr(args, "activity", True)),
         no_brief=bool(getattr(args, "no_brief", False)),
         no_unread=bool(getattr(args, "no_unread", False)),
+        quiet=bool(getattr(args, "quiet", False)),
         work_mode=True,
         compact_controls=True,
         compact_brief=True,

@@ -911,6 +911,28 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_quiet_suppresses_chat_startup_noise(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Quiet cockpit", "--kind", "coding"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["code", "1", "--quiet", "--timeout", "0"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("created work session #1 for task #1", output)
+                self.assertNotIn("mew chat. Type /help", output)
+                self.assertNotIn("scope:", output)
+                self.assertNotIn("work-mode:", output)
+                self.assertNotIn("Mew brief", output)
+                self.assertNotIn("Next controls", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_activity_slash_uses_kind_scope(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
