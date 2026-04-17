@@ -412,6 +412,7 @@ uv run mew do 1 --work-guidance "make the smallest verified fix"
 uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in the resume bundle"
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
+uv run mew work 1 --follow --auth auth.json --allow-read .
 uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-steps 1
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
@@ -441,6 +442,7 @@ Inside `mew chat`, use `/work-session details`, `/work-session diffs`,
 `/work-session live --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/c --allow-read .` as the short alias,
+`/follow --allow-read .` for a compact bounded live loop,
 `/continue focus on README.md` to reuse the previous or persisted live options with new guidance,
 `/work-mode on` or `mew chat --work-mode` to make text act as `/continue <guidance>` and blank lines continue,
 `/work-session note prefer small verified steps`,

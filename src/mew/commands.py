@@ -972,11 +972,11 @@ def work_chat_continue_options(session):
     return shlex.join(parts)
 
 
-def _work_live_continue_command(args, task_id, session=None, max_steps=1):
+def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow=False):
     parts = [mew_executable(), "work"]
     if task_id is not None:
         parts.append(str(task_id))
-    parts.append("--live")
+    parts.append("--follow" if follow else "--live")
     option_session = None if getattr(args, "live", False) and _work_args_have_tool_gates(args) else session
     options = _work_control_options(args, session=option_session)
     if options.get("auth"):
@@ -1038,6 +1038,7 @@ def work_cli_control_commands(session, args):
         [
             _work_live_continue_command(args, task_id, session=session),
             _work_live_continue_command(args, task_id, session=session, max_steps=3),
+            _work_live_continue_command(args, task_id, session=session, max_steps=10, follow=True),
             mew_command("work", task_id, "--stop-session", "--stop-reason", "pause"),
             _work_resume_command(args, task_id, session=session),
             mew_command("chat"),
@@ -1337,7 +1338,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
 
 def cmd_work(args):
-    if getattr(args, "live", False):
+    if getattr(args, "live", False) or getattr(args, "follow", False):
         args.ai = True
     if getattr(args, "ai", False):
         if getattr(args, "tool", None):
@@ -1435,6 +1436,11 @@ def cmd_do(args):
 
 
 def cmd_work_ai(args):
+    if getattr(args, "follow", False):
+        args.live = True
+        args.compact_live = True
+        if int(getattr(args, "max_steps", 1) or 1) <= 1:
+            args.max_steps = 10
     if getattr(args, "live", False) and getattr(args, "json", False):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
         return 1
@@ -5717,6 +5723,7 @@ CHAT_HELP = """Commands:
 /work [task-id]       show task plan/runs/checks and next action
 /work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance; /c is alias
+/follow [opts|text]   run compact continuous live steps; defaults to 10 steps
 /work-mode [on|off]   toggle chat mode where text guides /continue and blank lines continue
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
@@ -5795,6 +5802,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /outside chat: mew do <task-id>       run the common supervised coding loop
 /continue --allow-read .              run one live resident-model step
 /c --allow-read .                     short alias for /continue
+/follow --allow-read .                run a compact bounded live loop; default max 10
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop
 /work-session live --compact-live     show thinking/action/result panes without full per-step resumes
@@ -5927,6 +5935,7 @@ def _parse_chat_work_ai_args(parts):
         "work_guidance": "",
         "progress": False,
         "live": False,
+        "follow": False,
         "stream_model": False,
         "compact_live": False,
         "prompt_approval": False,
@@ -6003,6 +6012,11 @@ def _parse_chat_work_ai_args(parts):
             args["live"] = True
             index += 1
             continue
+        if token == "--follow":
+            args["follow"] = True
+            args["live"] = True
+            index += 1
+            continue
         if token == "--stream-model":
             args["stream_model"] = True
             index += 1
@@ -6032,6 +6046,9 @@ def _strip_work_guidance_options(rest):
     index = 0
     while index < len(parts):
         token = parts[index]
+        if token == "--follow":
+            index += 1
+            continue
         if token == "--work-guidance":
             index += 2
             continue
@@ -6101,6 +6118,7 @@ def _split_continue_options_and_guidance(rest):
         "--allow-verify",
         "--progress",
         "--live",
+        "--follow",
         "--stream-model",
         "--compact-live",
         "--prompt-approval",
@@ -6147,6 +6165,17 @@ def _chat_continue_rest(rest, chat_state):
         return rest
     guidance = "--work-guidance " + shlex.quote(rest)
     return " ".join(part for part in (cached, guidance) if part)
+
+
+def _chat_follow_rest(rest, chat_state):
+    options = _chat_continue_rest(rest, chat_state)
+    try:
+        parts = shlex.split(options or "")
+    except ValueError:
+        return " ".join(part for part in (options, "--follow") if part)
+    if "--follow" not in parts:
+        parts.append("--follow")
+    return shlex.join(parts)
 
 
 def _remember_work_continue_options(parts, chat_state):
@@ -6236,11 +6265,13 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
     if cached:
         lines.append(f"- /continue {cached}")
+        lines.append(f"- /follow {cached}")
         lines.append("- /continue <guidance>")
         lines.append(f"- /work-session live {cached}")
         lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
         lines.append("- /continue --allow-read .")
+        lines.append("- /follow --allow-read .")
         lines.append("- /work-session live --allow-read . --max-steps 3")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")
@@ -7703,6 +7734,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("continue", "cont", "c"):
         chat_work_session(("live " + _chat_continue_rest(rest, chat_state)).strip(), chat_state)
+        return "continue"
+    if command == "follow":
+        chat_work_session(("live " + _chat_follow_rest(rest, chat_state)).strip(), chat_state)
         return "continue"
     if command in ("work-mode", "workmode"):
         chat_set_work_mode(rest, chat_state)

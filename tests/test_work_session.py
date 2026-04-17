@@ -1401,8 +1401,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session #1 [active] task=#1", output)
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --live --model-backend codex --allow-read .", output)
+                self.assertIn("mew work 1 --follow --model-backend codex --allow-read .", output)
                 self.assertNotIn("--auth auth.json", output)
                 self.assertIn("--max-steps 3", output)
+                self.assertIn("--max-steps 10", output)
                 self.assertIn("mew chat", output)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -5153,6 +5155,93 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("work mode content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
                 self.assertIn("inspect README from work mode", prompts[0])
                 self.assertIn("Work session finished: blank continued", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_runs_compact_multi_step_live_loop(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("follow content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "done", "action": {"type": "finish", "reason": "follow complete"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertEqual(call_model.call_count, 2)
+                self.assertIn("Work live step #1 thinking", output)
+                self.assertIn("progress: step=1/10", output)
+                self.assertIn("Work live step #2 thinking", output)
+                self.assertIn("mew work ai: 2/10 step(s) stop=finish", output)
+                self.assertNotIn("Work live step #1 resume", output)
+                self.assertIn("Next CLI controls", output)
+                self.assertIn("Work session finished: follow complete", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_follow_runs_bounded_live_loop(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("chat follow content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "pause", "action": {"type": "wait", "reason": "chat follow pause"}},
+                ]
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --auth auth.json --allow-read . --act-mode deterministic",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                output = stdout.getvalue()
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(chat_state["work_continue_options"], "--auth auth.json --allow-read . --act-mode deterministic")
+                self.assertIn("Work live step #2 thinking", output)
+                self.assertIn("mew work ai: 2/10 step(s) stop=wait", output)
+                self.assertIn("/follow --auth auth.json --allow-read . --act-mode deterministic", output)
             finally:
                 os.chdir(old_cwd)
 
