@@ -27,6 +27,8 @@ def test_generate_writes_dream_and_journal(tmp_path: Path) -> None:
     assert paths.journal == tmp_path / ".mew" / "journal" / "2026-04-17.md"
     assert "# Dream 2026-04-17" in paths.dream.read_text()
     assert "- Prototype [in_progress]" in paths.dream.read_text()
+    assert "## Learnings" in paths.dream.read_text()
+    assert "- No learnings recorded" in paths.dream.read_text()
     assert "# Journal 2026-04-17" in paths.journal.read_text()
     assert "- Keep it local-first." in paths.journal.read_text()
 
@@ -57,3 +59,43 @@ def test_explicit_date_override_wins_over_state_date(tmp_path: Path) -> None:
     assert paths.journal.name == "2026-04-18.md"
     assert "2026-04-18" in paths.dream.read_text()
     assert "2026-04-18" in paths.journal.read_text()
+
+
+def test_dream_renders_learnings_changes_and_decisions(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_json = (
+        '{"date":"2026-04-17",'
+        '"tasks":[{"title":"Prototype","status":"done"}],'
+        '"learnings":["Mew needs cross-task memory."],'
+        '"changes":[{"summary":"Added dream markdown output."}],'
+        '"decisions":[{"title":"Keep the prototype isolated."}],'
+        '"notes":[]}'
+    )
+    state_path.write_text(state_json)
+
+    paths = dream_journal.generate(state_path, tmp_path)
+    dream = paths.dream.read_text()
+
+    assert "## Learnings" in dream
+    assert "- Mew needs cross-task memory." in dream
+    assert "- Added dream markdown output." in dream
+    assert "- Keep the prototype isolated." in dream
+
+
+def test_dream_derives_recent_learnings_from_done_task_notes(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"tasks":['
+        '{"title":"Open work","status":"ready"},'
+        '{"title":"Old work","status":"done","notes":"Created\\n2026-04-17T12:00:00Z done: Verified dream output."}'
+        '],'
+        '"notes":[]}'
+    )
+
+    paths = dream_journal.generate(state_path, tmp_path)
+    dream = paths.dream.read_text()
+
+    assert "- Open work [ready]" in dream
+    assert "- Old work [done]" not in dream
+    assert "- Verified dream output." in dream

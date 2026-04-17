@@ -13,5 +13,18 @@
   "notes": [
     "Keep the prototype isolated under experiments/mew-dream.",
     "Generate both dream and journal markdown files from local state JSON."
+  ],
+  "learnings": [
+    "Dream logs should preserve what mew learned, not only what it did."
+  ],
+  "changes": [
+    {
+      "summary": "Added a local markdown generator for dreams and journals."
+    }
+  ],
+  "decisions": [
+    {
+      "title": "Keep side projects isolated until they expose a concrete core friction."
+    }
   ]
 }
