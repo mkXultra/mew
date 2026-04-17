@@ -6,6 +6,7 @@ STATE_DIR = Path(".mew")
 STATE_FILE = STATE_DIR / "state.json"
 ARCHIVE_DIR = STATE_DIR / "archive"
 LOG_FILE = STATE_DIR / "runtime.md"
+CHAT_TRANSCRIPT_FILE = STATE_DIR / "chat.jsonl"
 EFFECT_LOG_FILE = STATE_DIR / "effects.jsonl"
 MODEL_TRACE_FILE = STATE_DIR / "model-trace.jsonl"
 LOCK_FILE = STATE_DIR / "runtime.lock"

@@ -495,7 +495,9 @@ blockers.
 `mew chat` is the human-facing REPL for a running runtime. `mew chat --help`
 prints the startup options plus the slash-command reference. Non-slash input is
 sent to mew as a user message, and slash commands let you inspect or update
-state without leaving the session:
+state without leaving the session. Chat inputs are also appended to
+`.mew/chat.jsonl`; inspect the recent transcript with `mew chat-log` or
+`/transcript` without mixing it into the runtime activity log:
 
 ```text
 /help work
@@ -538,6 +540,7 @@ state without leaving the session:
 /why
 /thoughts details
 /digest
+/transcript
 /approve 4
 /ready 4
 /plan 4 prompt

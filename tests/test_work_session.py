@@ -5336,6 +5336,36 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_records_input_transcript_and_chat_log_reads_it(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                stdin = StringIO("hello mew\n/transcript 10\n/exit\n")
+                with patch("sys.stdin", stdin):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        self.assertEqual(main(["chat", "--no-brief", "--no-unread", "--no-activity"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("Chat transcript", output)
+                self.assertIn("message: hello mew", output)
+                self.assertIn("slash: /transcript 10", output)
+
+                with redirect_stdout(StringIO()) as log_stdout:
+                    self.assertEqual(main(["chat-log", "--limit", "10"]), 0)
+                log_output = log_stdout.getvalue()
+                self.assertIn("start: chat started", log_output)
+                self.assertIn("message: hello mew", log_output)
+                self.assertIn("slash: /exit", log_output)
+
+                with redirect_stdout(StringIO()) as json_stdout:
+                    self.assertEqual(main(["chat-log", "--limit", "2", "--json"]), 0)
+                records = json.loads(json_stdout.getvalue())
+                self.assertEqual(records[-1]["type"], "slash")
+                self.assertEqual(records[-1]["text"], "/exit")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_runs_compact_multi_step_live_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

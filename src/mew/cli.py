@@ -20,6 +20,7 @@ from .commands import (
     cmd_brief,
     cmd_buddy,
     cmd_chat,
+    cmd_chat_log,
     cmd_context,
     cmd_digest,
     cmd_do,
@@ -1110,6 +1111,11 @@ def build_parser():
 
     log_parser = subparsers.add_parser("log", help="show runtime log")
     log_parser.set_defaults(func=cmd_log)
+
+    chat_log_parser = subparsers.add_parser("chat-log", help="show recent chat input transcript")
+    chat_log_parser.add_argument("--limit", type=int, default=20, help="maximum transcript entries")
+    chat_log_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    chat_log_parser.set_defaults(func=cmd_chat_log)
 
     trace_parser = subparsers.add_parser("trace", help="show opt-in model THINK/ACT traces")
     trace_parser.add_argument("--limit", type=int, default=20, help="maximum trace records")

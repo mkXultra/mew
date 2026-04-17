@@ -39,7 +39,7 @@ from .brief import (
     verification_outcome,
 )
 from .codex_api import load_codex_oauth
-from .config import DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
+from .config import CHAT_TRANSCRIPT_FILE, DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
 from .dogfood import (
     format_dogfood_loop_report,
@@ -5947,6 +5947,7 @@ CHAT_HELP = """Commands:
 /reply <id> <text>    answer an open question
 /activity on|off      toggle runtime activity lines
 /history              print all outbox messages
+/transcript [n]       print recent chat input transcript
 /exit                 leave chat
 Any non-slash line is sent to mew as a user message unless work-mode is on."""
 
@@ -8062,6 +8063,16 @@ def run_chat_slash_command(line, chat_state):
     if command == "history":
         print_chat_outbox(show_all=True)
         return "continue"
+    if command in ("transcript", "chat-log"):
+        limit = 20
+        if rest:
+            try:
+                limit = int(rest)
+            except ValueError:
+                print("usage: /transcript [limit]")
+                return "continue"
+        print(format_chat_transcript(read_chat_transcript(limit=limit)))
+        return "continue"
     if command == "activity":
         value = rest.casefold()
         if value in ("on", "true", "1"):
@@ -8153,6 +8164,12 @@ def read_chat_line(poll_interval, prompt_state, prompt="mew> "):
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
+    append_chat_transcript(
+        "start",
+        "chat started",
+        kind=kind,
+        metadata={"work_mode": bool(getattr(args, "work_mode", False))},
+    )
     if kind:
         print(f"scope: {kind}", flush=True)
     if getattr(args, "work_mode", False):
@@ -8186,6 +8203,7 @@ def cmd_chat(args):
             if chat_state["activity"]:
                 chat_state["activity_offset"] = emit_new_activity(chat_state["activity_offset"])
             if deadline is not None and time.monotonic() >= deadline:
+                append_chat_transcript("timeout", "chat timeout", kind=chat_state.get("kind"))
                 return 0
 
             poll_interval = args.poll_interval
@@ -8196,23 +8214,28 @@ def cmd_chat(args):
             if line is None:
                 continue
             if line is CHAT_EOF:
+                append_chat_transcript("eof", "chat eof", kind=chat_state.get("kind"))
                 return 0
             text = line.strip()
             if not text:
                 if chat_state.get("work_mode"):
                     if not chat_state.get("blank_continue_ready"):
+                        append_chat_transcript("blank_ignored", "", kind=chat_state.get("kind"))
                         print("work-mode: blank ignored until one /c, /follow, or text-guided work step runs", flush=True)
                         continue
+                    append_chat_transcript("blank_continue", "/continue", kind=chat_state.get("kind"))
                     result = run_chat_slash_command("/continue", chat_state)
                     if result == "exit":
                         return 0
                 continue
             if text.startswith("/"):
+                append_chat_transcript("slash", text, kind=chat_state.get("kind"))
                 result = run_chat_slash_command(text, chat_state)
                 if result == "exit":
                     return 0
                 continue
             if chat_state.get("work_mode"):
+                append_chat_transcript("work_guidance", text, kind=chat_state.get("kind"))
                 result = run_chat_slash_command("/continue " + text, chat_state)
                 chat_state["blank_continue_ready"] = True
                 if result == "exit":
@@ -8221,8 +8244,15 @@ def cmd_chat(args):
 
             warn_if_runtime_inactive()
             event = queue_user_message(text)
+            append_chat_transcript(
+                "message",
+                text,
+                kind=chat_state.get("kind"),
+                metadata={"event_id": event.get("id")},
+            )
             print(f"queued message event #{event['id']}", flush=True)
     except KeyboardInterrupt:
+        append_chat_transcript("interrupt", "keyboard interrupt", kind=chat_state.get("kind"))
         print("\nleft chat")
         return 0
 
@@ -8231,6 +8261,64 @@ def cmd_log(args):
         print("No runtime log.")
         return 0
     print(LOG_FILE.read_text(encoding="utf-8").rstrip())
+    return 0
+
+
+def append_chat_transcript(entry_type, text="", kind=None, metadata=None):
+    ensure_state_dir()
+    record = {
+        "created_at": now_iso(),
+        "type": entry_type,
+        "kind": kind or "",
+        "text": clip_output(" ".join(str(text or "").splitlines()), 1000),
+    }
+    if metadata:
+        record["metadata"] = metadata
+    with CHAT_TRANSCRIPT_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    return record
+
+
+def read_chat_transcript(limit=20):
+    if not CHAT_TRANSCRIPT_FILE.exists():
+        return []
+    try:
+        lines = CHAT_TRANSCRIPT_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            records.append({"created_at": "", "type": "corrupt", "kind": "", "text": line})
+    if limit is None:
+        return records
+    count = max(0, int(limit))
+    if count == 0:
+        return []
+    return records[-count:]
+
+
+def format_chat_transcript(records):
+    if not records:
+        return "No chat transcript."
+    lines = ["Chat transcript"]
+    for record in records:
+        kind = f" kind={record.get('kind')}" if record.get("kind") else ""
+        text = record.get("text") or ""
+        lines.append(f"- {record.get('created_at') or ''} {record.get('type')}{kind}: {text}".rstrip())
+    return "\n".join(lines)
+
+
+def cmd_chat_log(args):
+    records = read_chat_transcript(limit=args.limit)
+    if args.json:
+        print(json.dumps(records, ensure_ascii=False, indent=2))
+    else:
+        print(format_chat_transcript(records))
     return 0
 
 def cmd_trace(args):
