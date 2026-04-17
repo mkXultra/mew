@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, phase/elapsed progress anchors, grouped action/result panes, compact chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
-| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
+| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, and safe read/git retries exist; automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -295,6 +295,7 @@ Evidence:
 - Retryable read/git recovery plan items now include manual, automatic CLI, and chat auto-recovery hints.
 - Side-effecting interrupted command/write recovery items now include the original command or path, a review hint, and short review steps; `mew work --recover-session --json` reports the same review context instead of only refusing automatic retry.
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
+- Work-session recovery plan items now carry the interrupted source record's summary, error, and `recovery_hint`, so text and JSON resumes preserve why a retry/replan/review item exists instead of showing only a generic action classification.
 - `save_state` now rotates the previous `state.json` to `state.json.bak` before replacing it, giving the resident shell a simple recovery point if the current state file is damaged.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
@@ -322,6 +323,7 @@ Evidence:
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
+- Native self-improvement dogfood session #69 used `mew self-improve --start-session` and `mew work --follow` with Codex Web API to implement a small True Recovery slice, then verified it with focused and full tests.
 
 Missing proof:
 
@@ -337,6 +339,8 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `662 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-recovery-source-context --json` current: pass, including safe read auto-recovery and side-effect recovery review context across 36 commands.
 - `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
 - Focused regression tests for default `next` coding surfacing, workbench generated-focus elision, and closed-session restart guidance current: `3 passed`.
 - Focused regression tests for `mew code` quiet unread defaults, session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.

@@ -1935,6 +1935,9 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
                 text_resume = stdout.getvalue()
                 self.assertIn("Recovery plan", text_resume)
+                self.assertIn("summary: interrupted work tool call", text_resume)
+                self.assertIn("error: Interrupted before the work tool completed.", text_resume)
+                self.assertIn("recovery_hint: Review work session #1 resume", text_resume)
                 self.assertIn("auto: mew work 1 --session --resume --allow-read <path> --auto-recover-safe", text_resume)
                 self.assertIn("chat_auto: /work-session resume 1 --allow-read <path> --auto-recover-safe", text_resume)
 

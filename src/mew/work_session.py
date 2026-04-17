@@ -1043,6 +1043,9 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "action": action,
             "safety": safety,
             "reason": reason,
+            "source_summary": call.get("summary") or "",
+            "source_error": call.get("error") or "",
+            "recovery_hint": call.get("recovery_hint") or "",
         }
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
             item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-read <path>"
@@ -1071,6 +1074,9 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 "action": "replan",
                 "safety": "no_tool_started",
                 "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
+                "source_summary": turn.get("summary") or "",
+                "source_error": turn.get("error") or "",
+                "recovery_hint": turn.get("recovery_hint") or "",
                 "hint": f"{mew_executable()} work{task_arg} --live --allow-read <path>",
             }
         )
@@ -1424,6 +1430,12 @@ def format_work_session_resume(resume):
                 f"- {target} action={item.get('action')} safety={item.get('safety')} "
                 f"{item.get('reason') or ''}"
             )
+            if item.get("source_summary"):
+                lines.append(f"  summary: {item.get('source_summary')}")
+            if item.get("source_error"):
+                lines.append(f"  error: {item.get('source_error')}")
+            if item.get("recovery_hint"):
+                lines.append(f"  recovery_hint: {item.get('recovery_hint')}")
             if item.get("hint"):
                 lines.append(f"  hint: {item.get('hint')}")
             if item.get("auto_hint"):
