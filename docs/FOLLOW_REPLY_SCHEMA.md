@@ -22,6 +22,12 @@ Apply a reply with:
 mew work <task-id> --reply-file .mew/follow/reply.json
 ```
 
+Print the current session-specific template with:
+
+```sh
+mew work <task-id> --reply-schema --json
+```
+
 Minimal payload:
 
 ```json

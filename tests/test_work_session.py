@@ -8964,6 +8964,45 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_schema_uses_active_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--reply-schema", "--json"]), 0)
+
+                data = json.loads(stdout.getvalue())
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(data["schema_version"], 1)
+                self.assertEqual(data["session_id"], 1)
+                self.assertEqual(data["task_id"], 1)
+                self.assertEqual(data["observed_session_updated_at"], session["updated_at"])
+                self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
+                self.assertEqual(data["reply_template"]["observed_session_updated_at"], session["updated_at"])
+                self.assertTrue(any(action["type"] == "reject" for action in data["supported_actions"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_schema_without_active_session_fails(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-schema", "--json"]), 1)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["error"], "no_active_work_session")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_rejects_stale_session_snapshot(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -903,6 +903,11 @@ def build_parser():
         "--reply-file",
         help="apply a structured follow reply JSON file with steer/note/stop/reject actions",
     )
+    work_parser.add_argument(
+        "--reply-schema",
+        action="store_true",
+        help="print the structured follow reply schema/template",
+    )
     work_parser.add_argument("--recover-session", action="store_true", help="recover a safely retryable interrupted work-session tool")
     work_parser.add_argument(
         "--auto-recover-safe",

@@ -1191,6 +1191,8 @@ def run_work_session_scenario(workspace, env=None):
     reply_start_result = run(["work", "5", "--start-session", "--json"])
     reply_start_data = _json_stdout(reply_start_result)
     reply_session = reply_start_data.get("work_session") or {}
+    reply_schema_result = run(["work", "5", "--reply-schema", "--json"])
+    reply_schema_data = _json_stdout(reply_schema_result)
     reply_path = workspace / "follow-reply.json"
     reply_path.write_text(
         json.dumps(
@@ -1367,6 +1369,8 @@ def run_work_session_scenario(workspace, env=None):
         checks,
         "work_reply_file_updates_follow_snapshot",
         reply_start_result.get("exit_code") == 0
+        and reply_schema_result.get("exit_code") == 0
+        and (reply_schema_data.get("reply_template") or {}).get("session_id") == reply_session.get("id")
         and reply_file_result.get("exit_code") == 0
         and any(action.get("type") == "steer" for action in reply_file_data.get("applied") or [])
         and reply_snapshot_data.get("mode") == "reply_file"
@@ -1374,8 +1378,8 @@ def run_work_session_scenario(workspace, env=None):
         and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("source") == "reply_file"
         and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("text")
         == "dogfood observer steer",
-        observed={"reply": reply_file_data, "snapshot": reply_snapshot_data},
-        expected="reply-file applies observer actions and rewrites the follow snapshot",
+        observed={"schema": reply_schema_data, "reply": reply_file_data, "snapshot": reply_snapshot_data},
+        expected="reply-schema is session-specific and reply-file rewrites the follow snapshot",
     )
     _scenario_check(
         checks,

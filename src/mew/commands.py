@@ -1939,6 +1939,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
 
 def cmd_work(args):
+    if getattr(args, "reply_schema", False):
+        return cmd_work_reply_schema(args)
     if getattr(args, "reply_file", None):
         return cmd_work_reply_file(args)
     if getattr(args, "live", False) or getattr(args, "follow", False):
@@ -3686,6 +3688,85 @@ def _active_work_sessions_for_reply(state):
         if candidate.get("status") == "active" and (not task or task.get("status") != "done"):
             sessions.append(candidate)
     return sessions
+
+
+def build_work_reply_schema(session=None):
+    task_id = (session or {}).get("task_id")
+    session_id = (session or {}).get("id")
+    observed = (session or {}).get("updated_at")
+    reply_path = STATE_DIR / "follow" / "reply.json"
+    return {
+        "schema_version": 1,
+        "docs": "docs/FOLLOW_REPLY_SCHEMA.md",
+        "reply_file": str(reply_path),
+        "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
+        "session_id": session_id,
+        "task_id": task_id,
+        "observed_session_updated_at": observed,
+        "supported_actions": [
+            {
+                "type": "steer",
+                "description": "queue one-shot guidance for the next live/follow step",
+                "required": ["text"],
+            },
+            {"type": "note", "description": "record durable observer context", "required": ["text"]},
+            {"type": "stop", "description": "request a stop at the next model/tool boundary", "required": []},
+            {
+                "type": "reject",
+                "description": "reject a pending dry-run write_file/edit_file tool call",
+                "required": ["tool_call_id"],
+            },
+        ],
+        "reply_template": {
+            "schema_version": 1,
+            "session_id": session_id,
+            "task_id": task_id,
+            "observed_session_updated_at": observed,
+            "actions": [{"type": "steer", "text": "<next-step guidance>"}],
+        },
+    }
+
+
+def format_work_reply_schema(data):
+    lines = [
+        "Follow reply schema v1",
+        f"docs: {data.get('docs')}",
+        f"reply_file: {data.get('reply_file')}",
+        f"reply_command: {data.get('reply_command')}",
+        f"session_id: {data.get('session_id') or '-'}",
+        f"task_id: {data.get('task_id') or '-'}",
+        f"observed_session_updated_at: {data.get('observed_session_updated_at') or '-'}",
+        "",
+        "Supported actions",
+    ]
+    for action in data.get("supported_actions") or []:
+        required = ", ".join(action.get("required") or []) or "-"
+        lines.append(f"- {action.get('type')}: {action.get('description')} (required: {required})")
+    lines.extend(
+        [
+            "",
+            "Reply template",
+            json.dumps(data.get("reply_template") or {}, ensure_ascii=False, indent=2),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def cmd_work_reply_schema(args):
+    state = load_state()
+    session = _select_active_work_session_for_args(state, args)
+    if not session:
+        if getattr(args, "json", False):
+            print(json.dumps({"error": "no_active_work_session"}, ensure_ascii=False, indent=2))
+        else:
+            print("mew: no active work session for reply schema", file=sys.stderr)
+        return 1
+    data = build_work_reply_schema(session)
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_reply_schema(data))
+    return 0
 
 
 def cmd_work_reply_file(args):
@@ -7729,6 +7810,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
 /work-session steer <text>            queue one-time guidance for the next live/follow step
+/outside chat: mew work <task-id> --reply-schema --json
+                                      print the structured observer reply template
 /work-session approve <id> ...        apply a dry-run write after explicit gates
 /work-session reject <id> <reason>    reject a pending write"""
 
