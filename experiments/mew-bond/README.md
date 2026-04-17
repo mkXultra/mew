@@ -16,6 +16,9 @@ The report has three sections:
 It is intentionally isolated from `src/mew`. The goal is to test whether mew can
 extract useful self-continuity from existing task notes, explicit state fields,
 and active work-session metadata before adding any core self-memory feature.
+When no explicit durable trait exists, the prototype only promotes a recent
+self-learning into a durable trait if the same normalized learning appears at
+least twice.
 
 ## Usage
 

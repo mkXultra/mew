@@ -47,6 +47,10 @@ def unique(items: list[str], limit: int = MAX_ITEMS) -> list[str]:
     return result
 
 
+def normalize_text(item: str) -> str:
+    return " ".join(item.strip().split())
+
+
 def string_items(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -63,15 +67,6 @@ def string_items(value: Any) -> list[str]:
     return items
 
 
-def collect_traits(state: dict[str, Any]) -> list[str]:
-    traits = []
-    traits.extend(string_items(state.get("traits")))
-    self_memory = state.get("self_memory")
-    if isinstance(self_memory, dict):
-        traits.extend(string_items(self_memory.get("traits")))
-    return unique(traits)
-
-
 def task_note_learning(task: dict[str, Any]) -> str:
     notes = task.get("notes")
     if not isinstance(notes, str):
@@ -85,7 +80,7 @@ def task_note_learning(task: dict[str, Any]) -> str:
     return ""
 
 
-def collect_self_learnings(state: dict[str, Any]) -> list[str]:
+def raw_self_learning_candidates(state: dict[str, Any]) -> list[str]:
     learnings = []
     for key in ("learnings", "changes", "decisions"):
         learnings.extend(string_items(state.get(key)))
@@ -95,6 +90,34 @@ def collect_self_learnings(state: dict[str, Any]) -> list[str]:
         learning = task_note_learning(task)
         if learning:
             learnings.append(learning)
+    return learnings
+
+
+def infer_repeated_traits(state: dict[str, Any]) -> list[str]:
+    counts: dict[str, int] = {}
+    originals: dict[str, str] = {}
+    for item in raw_self_learning_candidates(state):
+        normalized = normalize_text(item)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        counts[key] = counts.get(key, 0) + 1
+        originals.setdefault(key, normalized)
+    return [originals[key] for key, count in counts.items() if count >= 2]
+
+
+def collect_traits(state: dict[str, Any]) -> list[str]:
+    traits = []
+    traits.extend(string_items(state.get("traits")))
+    self_memory = state.get("self_memory")
+    if isinstance(self_memory, dict):
+        traits.extend(string_items(self_memory.get("traits")))
+    traits.extend(infer_repeated_traits(state))
+    return unique(traits)
+
+
+def collect_self_learnings(state: dict[str, Any]) -> list[str]:
+    learnings = raw_self_learning_candidates(state)
     return unique(learnings)
 
 

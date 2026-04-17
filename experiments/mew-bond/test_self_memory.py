@@ -87,8 +87,9 @@ def test_repeated_learnings_are_deduplicated(tmp_path: Path) -> None:
 
     paths = self_memory.generate(state_path, tmp_path)
     text = paths.self_memory.read_text()
+    recent = text.split("## Recent self learnings", 1)[1].split("## Continuity cues", 1)[0]
 
-    assert text.count("Repeat this.") == 1
+    assert recent.count("Repeat this.") == 1
 
 
 def test_empty_state_renders_fallbacks(tmp_path: Path) -> None:
@@ -101,6 +102,52 @@ def test_empty_state_renders_fallbacks(tmp_path: Path) -> None:
     assert "- No durable traits recorded" in text
     assert "- No self learnings recorded" in text
     assert "- No active continuity cues" in text
+
+
+def test_repeated_self_learning_becomes_durable_trait(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"tasks":['
+        '{"status":"done","notes":"2026-04-17T12:00:00Z done: I should verify every change."},'
+        '{"status":"done","notes":"2026-04-17T13:00:00Z done: I should verify every change."}'
+        ']}'
+    )
+
+    paths = self_memory.generate(state_path, tmp_path)
+    text = paths.self_memory.read_text()
+
+    assert "## Durable traits\n- I should verify every change." in text
+    assert text.count("I should verify every change.") == 2
+
+
+def test_single_self_learning_does_not_become_durable_trait(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"tasks":[{"status":"done","notes":"2026-04-17T12:00:00Z done: I should verify every change."}]}'
+    )
+
+    paths = self_memory.generate(state_path, tmp_path)
+    text = paths.self_memory.read_text()
+
+    assert "- No durable traits recorded" in text
+    assert "- I should verify every change." in text
+
+
+def test_explicit_traits_stay_before_inferred_traits(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"traits":["Explicit trait first."],'
+        '"learnings":["Repeated inferred trait."],'
+        '"changes":["Repeated inferred trait."]}'
+    )
+
+    paths = self_memory.generate(state_path, tmp_path)
+    text = paths.self_memory.read_text()
+
+    assert "## Durable traits\n- Explicit trait first.\n- Repeated inferred trait." in text
 
 
 def test_main_prints_created_path(tmp_path: Path) -> None:

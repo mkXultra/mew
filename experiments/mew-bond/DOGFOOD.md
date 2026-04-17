@@ -26,6 +26,8 @@ Prototype cross-task self-memory without touching mew core.
 - It extracts self learnings from explicit state fields and recent done-task
   notes.
 - It deduplicates repeated learnings while preserving order.
+- It now conservatively promotes repeated self learnings into durable traits
+  only when the same normalized learning appears at least twice.
 
 ## Validation
 
@@ -36,7 +38,7 @@ uv run pytest -q experiments/mew-bond
 Result:
 
 ```text
-6 passed
+9 passed
 ```
 
 Generated from sample state:
@@ -66,7 +68,7 @@ Live-state report excerpt:
 
 - Existing task notes already contain useful self-learning seeds.
 - There is still no durable trait source in live state, so traits render empty
-  unless explicit state fields exist.
+  unless explicit state fields exist or the same self-learning repeats.
 - A future core self-memory feature should probably promote selected learnings
   into durable traits instead of only replaying recent task notes.
 
@@ -74,9 +76,9 @@ Live-state report excerpt:
 
 - The resident session again needed bounded read steps before making a concrete
   recommendation. This is safe but sometimes slow.
-- The prototype can extract self learnings, but it cannot yet decide which ones
-  are durable enough to keep long term. That selection likely needs model
-  judgment later.
+- The prototype can infer repeated traits conservatively, but it cannot yet
+  decide whether a one-off learning is important enough to keep long term. That
+  selection likely needs model judgment later.
 
 ## Would this make an AI more willing to live inside mew?
 
