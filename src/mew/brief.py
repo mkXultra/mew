@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .state import is_routine_outbox_message
@@ -12,6 +14,15 @@ def _first_nonempty(*values):
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def current_project_looks_like_mew():
+    root = Path.cwd()
+    return (
+        (root / "pyproject.toml").is_file()
+        and (root / "src" / "mew").is_dir()
+        and (root / "mew").is_file()
+    )
 
 
 def _project_snapshot_item(snapshot):
@@ -907,6 +918,11 @@ def next_move(state, kind=None):
     if tasks:
         return practical_next_step(tasks[0])
     if kind == "coding":
+        if not current_project_looks_like_mew():
+            return (
+                "add a coding task with "
+                f"`{mew_command('task', 'add', '...', '--kind', 'coding', '--ready')}`"
+            )
         return (
             "start a native self-improvement session with "
             f"`{mew_command('self-improve', '--start-session', '--focus', 'Pick the next small mew improvement')}`"

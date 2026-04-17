@@ -344,7 +344,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `665 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `666 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_brief.py::BriefTests::test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks tests/test_brief.py::BriefTests::test_next_move_coding_filter_in_empty_project_suggests_task_creation` current: `2 passed`.
+- `/Users/mk/dev/personal-pj/mew/mew focus --kind coding` and `/Users/mk/dev/personal-pj/mew/mew next --kind coding` in `/tmp/mew-empty-check` current: both suggest `mew task add ... --kind coding --ready`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `2 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-reentry-controls --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_note_records_user_note` current: `1 passed`.
@@ -399,7 +401,7 @@ Next action:
 - `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 - `codex-ultra` focused retest after live-gate preflight, inline approval, interrupted recovery context, active-focus surfacing, and state backup found no concrete regressions in that scope.
 - `claude-ultra` review of the 2026-04-17 recovery/cockpit commits found no crash-level issues; follow-up fixes made empty `edit_file.old` re-observe instead of failing and changed world-state recovery wording from touched paths to observed paths.
-- `codex-ultra` human-role recovery dogfood verified focus/next/code routing, terse `mew code` cockpit controls, conservative side-effect recovery review after repair, safe read/git auto-recovery, recent-session listing, and work-session dogfood pass; it found stop-request control conflict and recovered-failure presentation issues, both now fixed.
+- `codex-ultra` human-role recovery dogfood verified focus/next/code routing, terse `mew code` cockpit controls, conservative side-effect recovery review after repair, safe read/git auto-recovery, recent-session listing, and work-session dogfood pass; it found empty-project self-improve routing, stop-request control conflict, and recovered-failure presentation issues, all now fixed.
 - `codex-ultra` human-role retest after the follow/work-mode slice verified four targeted fixes: explicit `--follow --max-steps 1` is honored, chat `/follow` controls include `--max-steps 10`, world-state git status uses allowed repo roots from disposable cwd, and `glob` skips cache/venv directories. Repo status stayed clean.
 - `claude-ultra` review after the follow interrupt/streaming/max-step work judged mew coherent but not yet preferred over Claude Code/Codex CLI; top blockers were thin streaming UX, shallow interrupt cancellation, and max-step note scope.
 - `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
@@ -438,6 +440,7 @@ Next action:
 - `mew code` now keeps compact `/c` and `/follow` primary controls after a live `/continue` step, instead of expanding cached auth/read/write/verify flags back into the main cockpit surface.
 - `mew code --read-only --no-verify` now updates an existing active coding session even when no task id is supplied, so attaching read-only cannot silently keep stale write/verify gates.
 - `mew code <text>` now explains that an existing task id is required and prints the exact `mew task add ... --kind coding` command to create the task.
+- In non-mew empty projects, `mew focus --kind coding` and `mew next --kind coding` now suggest creating a coding task instead of routing to mew self-improvement; mew source checkouts still keep the self-improvement shortcut.
 - `mew code` now uses a compact startup brief (`runtime`, task count, unread count, next move, and active session when present) instead of dumping the full general chat brief, keeping coding entry calmer while `/brief` remains available inside chat.
 - `mew next` and `mew focus` now point fresh or active coding work at `mew code <task-id>` as the quiet cockpit entry instead of surfacing `mew work --start-session` or the full flag-heavy `mew work --live ...` command in the primary next-action line.
 - Done-task work sessions no longer capture the default active cockpit, and attempts to start or run a new resident work session on a done task now ask for the task to be reopened first.

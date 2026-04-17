@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 from mew.brief import build_brief, build_brief_data, build_focus_data, format_focus, next_move, review_runs_needing_followup
@@ -53,6 +55,18 @@ class BriefTests(unittest.TestCase):
             next_move(default_state(), kind="coding"),
             "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
         )
+
+    def test_next_move_coding_filter_in_empty_project_suggests_task_creation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                self.assertEqual(
+                    next_move(default_state(), kind="coding"),
+                    "add a coding task with `mew task add ... --kind coding --ready`",
+                )
+            finally:
+                os.chdir(old_cwd)
 
     def test_next_move_prefers_open_question(self):
         state = default_state()
