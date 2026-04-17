@@ -4249,6 +4249,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("phase: idle", stdout.getvalue())
                 self.assertIn("Next controls", stdout.getvalue())
                 self.assertIn("/continue --allow-read .", stdout.getvalue())
+                self.assertIn("/c --allow-read .", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

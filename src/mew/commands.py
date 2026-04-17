@@ -6263,12 +6263,14 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
     if cached:
         lines.append(f"- /continue {cached}")
+        lines.append(f"- /c {cached}")
         lines.append(f"- /follow {cached}")
         lines.append("- /continue <guidance>")
         lines.append(f"- /work-session live {cached}")
         lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
         lines.append("- /continue --allow-read .")
+        lines.append("- /c --allow-read .")
         lines.append("- /follow --allow-read .")
         lines.append("- /work-session live --allow-read . --max-steps 3")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
