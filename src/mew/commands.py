@@ -528,7 +528,15 @@ def _format_workbench_reentry(resume, task):
             lines.append(f"open_questions: {clip_inline_text('; '.join(str(item) for item in questions), 360)}")
 
     notes = resume.get("notes") or []
-    for note in notes[-2:]:
+    display_notes = [
+        note
+        for note in notes
+        if not (
+            note.get("source") == "system"
+            and str(note.get("text") or "").startswith(("Follow reached max_steps=", "Live run reached max_steps="))
+        )
+    ] or notes
+    for note in display_notes[-2:]:
         text = clip_inline_text(note.get("text") or "", 360)
         if text:
             source = note.get("source") or "note"

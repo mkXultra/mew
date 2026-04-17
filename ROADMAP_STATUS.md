@@ -380,6 +380,7 @@ Next action:
 - Mew dogfood session #48 later verified the live working-memory pane with real Codex Web API output: the closed live result printed `memory_hypothesis`, `memory_next`, and `memory_verified` in the compact `session` section.
 - `codex-ultra` cockpit evaluation recommended the smallest next slice as surfacing active work-session `working_memory` inside the live result cockpit; this is now implemented in `format_work_live_step_result` with stale-memory labeling.
 - `claude-ultra` cockpit evaluation recommended a recurring-failure ribbon for repeated tool failures; this is now implemented by deriving repeated tool/target/error groups from existing work-session history and surfacing them in resume/live result views.
+- Focused dogfood of `mew work <task-id>` after the recurring-failure slice exposed old system max-step boundary notes crowding the front-door reentry block; workbench reentry now prefers user/model notes and hides those boundary notes while full resumes keep the audit trail.
 
 ## Current Roadmap Focus
 

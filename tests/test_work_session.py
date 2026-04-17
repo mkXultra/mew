@@ -4811,6 +4811,11 @@ class WorkSessionTests(unittest.TestCase):
                             "created_at": "then",
                             "updated_at": "now",
                             "notes": [
+                                {
+                                    "created_at": "now",
+                                    "source": "system",
+                                    "text": "Follow reached max_steps=1 after 1 step(s). Last action: glob. Resume with /c.",
+                                },
                                 {"created_at": "now", "source": "user", "text": "Use the workbench first."},
                                 {"created_at": "now", "source": "model", "text": "Resume from the latest evidence."},
                             ],
@@ -4867,6 +4872,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("next_step: Continue from the workbench without hunting through details.", output)
                 self.assertIn("note[user]: Use the workbench first.", output)
                 self.assertIn("note[model]: Resume from the latest evidence.", output)
+                self.assertNotIn("note[system]: Follow reached max_steps", output)
                 self.assertIn("repeat: run_tests uv run pytest -q failed 2x", output)
                 self.assertIn("latest_decision: #1 remember recorded reentry guidance", output)
                 self.assertIn("guidance: Keep this visible on reentry.", output)
