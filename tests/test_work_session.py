@@ -3046,7 +3046,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
-                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 main(
                                     [
@@ -5375,7 +5375,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
-                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 main(
                                     [
@@ -5395,6 +5395,9 @@ class WorkSessionTests(unittest.TestCase):
 
                 progress = stderr.getvalue()
                 self.assertIn("THINK delta follow model delta", progress)
+                output = stdout.getvalue()
+                self.assertIn("model_stream: THINK chunks=1", output)
+                self.assertIn("stream_preview: follow model delta", output)
             finally:
                 os.chdir(old_cwd)
 

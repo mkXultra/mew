@@ -811,6 +811,13 @@ def format_work_planning(planned):
     action_type = action.get("type") or action.get("tool")
     if action_type:
         lines.append(f"planned_action: {action_type}")
+    model_stream = (planned or {}).get("model_stream") or {}
+    for phase in model_stream.get("phases") or []:
+        lines.append(
+            f"model_stream: {phase.get('phase')} chunks={phase.get('chunks')} chars={phase.get('chars')}"
+        )
+        if phase.get("preview"):
+            lines.append(f"stream_preview: {phase.get('preview')}")
     reason = action.get("reason") or (action_plan.get("action") or {}).get("reason")
     if reason and reason != summary:
         lines.append(f"reason: {clip_output(str(reason), 500)}")

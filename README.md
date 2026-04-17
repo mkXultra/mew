@@ -335,7 +335,9 @@ summaries instead of replaying stdout/stderr after the result pane.
 show what was found without opening the full session details.
 `mew work --follow` uses compact live mode and streams model text deltas into
 the progress output when the backend supports it, so a bounded autonomous run is
-observable while it is thinking instead of only after each step completes.
+observable while it is thinking instead of only after each step completes. The
+thinking pane also includes a clipped model-stream preview, separated from
+tool/progress lines, when deltas are available.
 If a follow run or multi-step live run reaches `--max-steps`, mew records a
 system work-session note with the last action/result and the reentry command
 hint, so the next session can tell the loop hit its bound rather than silently
