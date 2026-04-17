@@ -209,3 +209,36 @@ status: pass, including runtime_passive_now_echoes_effect_summary
 ./mew dogfood --scenario all --cleanup --json
 status: pass
 ```
+
+## 2026-04-18 Review: Next Passive Proof
+
+After the observer JSON/recovery work and the isolated terminal `mew-desk`
+prototype, `claude-ultra` reviewed the direction and judged mew more plausible
+as a passive AI shell because the observer contract now has machine-readable
+perception and gated actuation:
+
+- `mew observe --json`
+- `mew task add/list/show/update/done --json`
+- `.mew/follow/latest.json`
+- `mew work --follow-status --json`
+- `producer_health` and `suggested_recovery`
+- reply-file actions such as approve, reject, steer, followup, interrupt, and
+  note
+
+The next proof should not be another side project. It should record a complete
+observer-driven `mew code` or `mew work --follow` cycle that uses the JSON
+contract rather than human text scraping:
+
+1. Start a small coding task with a dry-run write.
+2. Read `.mew/follow/latest.json` or `mew work <task-id> --follow-status --json`.
+3. Generate a reply file from the published schema.
+4. Approve or steer via `mew work --reply-file`.
+5. Wait for the next snapshot and preserve the trace.
+
+Open blocker before more passive-AI decoration:
+
+- The true passive loop can update memory/self-review and print
+  `--echo-effects`, but it still needs one concrete `autonomy-level=propose`
+  path that reaches a user-visible outbox message without fresh user input.
+  Until that proof exists, passive autonomy is observable but not yet clearly
+  proactive.
