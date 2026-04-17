@@ -5867,6 +5867,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(output.count("Next controls"), 1)
                 self.assertIn("- /c --allow-read sample", output)
                 self.assertIn("- /work-session resume --allow-read sample", output)
+                self.assertNotIn("- /work-session resume\n", output)
                 self.assertNotIn("- /c --allow-read .", output)
             finally:
                 os.chdir(old_cwd)

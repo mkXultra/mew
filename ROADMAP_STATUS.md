@@ -334,6 +334,7 @@ Evidence:
 - Native self-improvement dogfood session #71 used `mew work --follow` with Codex Web API to attempt the first post-error re-observer slice; it stalled on a stale edit after a partial patch, which directly shaped the manual structured `suggested_safe_reobserve` implementation.
 - Native self-improvement dogfood session #81 used `mew self-improve --start-session` and `mew work --live` with Codex Web API to identify redundant `--start-session` output; the follow-up implementation now keeps plain `--native` start guidance while showing only the actionable continue hint after a session is already started.
 - Native self-improvement dogfood session #82 used `mew work --follow` with Codex Web API plus write/verify gates to apply a real edit: chat `/self ... start` now matches CLI behavior by suppressing the redundant native-work start hint after the session already exists.
+- Native self-improvement dogfood session #83 used `mew work --follow` with Codex Web API plus write/verify gates to apply a cockpit cleanup: non-compact work controls now show only the scoped `/work-session resume --allow-read ...` hint instead of also showing a generic duplicate resume line.
 
 Missing proof:
 
@@ -349,6 +350,9 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `679 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_scripted_chat_defers_startup_controls_to_scoped_work_command` current: `1 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `163 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-cockpit-resume-controls --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_commands.py::CommandTests::test_chat_self_improve_native_skips_programmer_plan tests/test_commands.py::CommandTests::test_chat_self_improve_start_opens_native_work_session` current: `2 passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_self_improve.py` current: `162 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-chat-self-improve-output --json` current: pass across 36 commands.
