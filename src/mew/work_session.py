@@ -1963,9 +1963,11 @@ def format_work_session_tests(session, task=None, limit=8):
     return "\n".join(lines)
 
 
-def build_work_session_command_entries(session, limit=8, max_chars=1200):
+def build_work_session_command_entries(session, limit=8, max_chars=1200, include_tests=True):
     entries = []
     for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") == "run_tests" and not include_tests:
+            continue
         if call.get("tool") not in COMMAND_WORK_TOOLS:
             continue
         result = call.get("result") or {}
@@ -1988,7 +1990,7 @@ def build_work_session_command_entries(session, limit=8, max_chars=1200):
     return entries[-limit:]
 
 
-def format_work_session_commands(session, task=None, limit=8):
+def format_work_session_commands(session, task=None, limit=8, include_tests=True):
     if not session:
         return "No active work session."
     lines = [
@@ -1997,7 +1999,7 @@ def format_work_session_commands(session, task=None, limit=8):
         "",
         "Commands",
     ]
-    entries = build_work_session_command_entries(session, limit=limit)
+    entries = build_work_session_command_entries(session, limit=limit, include_tests=include_tests)
     if not entries:
         lines.append("(none)")
         return "\n".join(lines)

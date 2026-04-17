@@ -3142,7 +3142,14 @@ def cmd_work_show_session(args):
             if getattr(args, "tests", False):
                 panes.append(format_work_session_tests(session, task=task, limit=getattr(args, "limit", 8)))
             if getattr(args, "commands", False):
-                panes.append(format_work_session_commands(session, task=task, limit=getattr(args, "limit", 8)))
+                panes.append(
+                    format_work_session_commands(
+                        session,
+                        task=task,
+                        limit=getattr(args, "limit", 8),
+                        include_tests=not getattr(args, "tests", False),
+                    )
+                )
             print("\n\n".join(panes))
             print(format_work_cli_controls(session, args))
         else:

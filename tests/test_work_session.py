@@ -1477,10 +1477,16 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(applied["tool_call"]["result"]["verification_exit_code"], 0)
                 self.assertEqual(target.read_text(encoding="utf-8"), "new text\n")
 
-                command_probe = f"{sys.executable} -c \"print('command ok')\""
+                command_probe = f"{sys.executable} -c \"print('test-only ok')\""
                 with redirect_stdout(StringIO()):
                     self.assertEqual(
                         main(["work", "1", "--tool", "run_tests", "--command", command_probe, "--allow-verify"]),
+                        0,
+                    )
+                shell_probe = f"{sys.executable} -c \"print('shell-only ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_command", "--command", shell_probe, "--allow-shell"]),
                         0,
                     )
 
@@ -1542,7 +1548,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work commands #1 [active] task=#1", combined)
                 self.assertIn("Diff preview (+1 -1)", combined)
                 self.assertIn("verify ok", combined)
-                self.assertIn("command ok", combined)
+                self.assertIn("test-only ok", combined)
+                commands_section = combined.split("Work commands #1 [active] task=#1", 1)[1]
+                commands_section = commands_section.split("\n\nNext CLI controls", 1)[0]
+                self.assertIn("shell-only ok", commands_section)
+                self.assertNotIn("test-only ok", commands_section)
             finally:
                 os.chdir(old_cwd)
 
