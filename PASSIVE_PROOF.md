@@ -294,3 +294,29 @@ Learning:
   leave the file applied.
 - This closes the smallest observer-contract proof. The remaining passive-AI
   proof is still user-visible proactive output from a true passive tick.
+
+## 2026-04-18 Final 6h Passive Check
+
+Command:
+
+```bash
+./mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --echo-effects --echo-outbox --focus "Final 6h passive check: observe current state and surface a safe user-visible next step only if useful."
+```
+
+Observed result:
+
+```text
+processed 1 event(s) reason=passive_tick
+effect #19 [applied] event=#398 reason=passive_tick actions=record_memory,wait_for_user,wait_for_user,wait_for_user,self_review
+outcome=Question #3 is still unanswered.
+```
+
+No outbox message was printed by `--echo-outbox`.
+
+Judgment:
+
+- Passive processing is alive and records effects.
+- The current state is dominated by existing unanswered questions, so the
+  runtime chose `wait_for_user` rather than sending a new proactive message.
+- This reinforces the remaining proof gap: mew needs one controlled no-input
+  scenario where `autonomy-level=propose` creates a user-visible outbox proposal.
