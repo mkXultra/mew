@@ -5007,12 +5007,40 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
                 self.assertIn("tool #1 [completed] search_text", result_block)
-                self.assertIn("snippets:", result_block)
-                self.assertIn("> 1: alpha needle", result_block)
-                self.assertIn("  2: beta", result_block)
-                self.assertIn("> 3: needle gamma", result_block)
+                self.assertIn("matches:", result_block)
+                self.assertIn("README.md:1:alpha needle", result_block)
+                self.assertIn("README.md:3:needle gamma", result_block)
+                self.assertNotIn("snippets:", result_block)
+                self.assertNotIn("  2: beta", result_block)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_live_result_pane_falls_back_to_search_snippets_without_matches(self):
+        from mew.commands import _format_live_tool_call_result
+
+        lines = _format_live_tool_call_result(
+            {
+                "id": 1,
+                "tool": "search_text",
+                "status": "completed",
+                "result": {
+                    "path": ".",
+                    "matches": [],
+                    "snippets": [
+                        {
+                            "path": "README.md",
+                            "start_line": 1,
+                            "end_line": 1,
+                            "lines": [{"line": 1, "text": "alpha needle", "match": True}],
+                        }
+                    ],
+                },
+            }
+        )
+
+        output = "\n".join(lines)
+        self.assertIn("snippets:", output)
+        self.assertIn("> 1: alpha needle", output)
 
     def test_work_finish_can_mark_task_done_when_requested(self):
         old_cwd = os.getcwd()

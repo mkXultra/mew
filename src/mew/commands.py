@@ -910,8 +910,8 @@ def _format_live_tool_call_result(call):
         lines.extend(_format_live_output_preview("stderr", result.get("stderr")))
     if call.get("tool") == "search_text":
         lines.extend(
-            _format_live_search_snippet_preview(result.get("snippets") or [])
-            or _format_live_match_preview(result.get("matches") or [])
+            _format_live_match_preview(result.get("matches") or [])
+            or _format_live_search_snippet_preview(result.get("snippets") or [])
         )
     if result.get("diff"):
         lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))

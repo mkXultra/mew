@@ -346,7 +346,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `674 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `675 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_shows_search_matches tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_falls_back_to_search_snippets_without_matches` current: `2 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `305 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-compact-live-search --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Stabilize the live/follow reasoning and status pane..."` created task #51/session #74; read-only `./mew work 51 --live ...` identified noisy live `search_text` snippet rendering as the smallest next slice.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_chat_work_session_can_request_stop tests/test_work_session.py::WorkSessionTests::test_chat_work_session_stop_keeps_pending_approval_controls tests/test_work_session.py::WorkSessionTests::test_workbench_surfaces_work_session_reentry_guidance` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_parent_path_for_observation_handles_common_paths tests/test_work_session.py::WorkSessionTests::test_retry_failed_source_does_not_hide_retry_call_reobserve tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_parent_inspection_after_failed_read_file tests/test_work_session.py::WorkSessionTests::test_chat_work_session_stop_keeps_pending_approval_controls` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `304 passed, 4 subtests passed`.
