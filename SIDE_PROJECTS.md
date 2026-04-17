@@ -171,6 +171,8 @@ Status:
   the smallest slice.
 - The prototype ranks a static feed JSON against local interest tags and writes
   `.mew/morning-paper/YYYY-MM-DD.md`.
+- Static-feed ranking is promoted to the core `mew morning-paper` command. Web
+  collection remains a future slice.
 - Latest validation: `uv run pytest -q experiments/mew-morning-paper` passed
   with `6 passed`.
 

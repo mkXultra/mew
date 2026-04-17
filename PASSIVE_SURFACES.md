@@ -86,6 +86,28 @@ Outputs:
 - stuck points from open questions and active work sessions
 - optional `.mew/journal/YYYY-MM-DD.md` report for `mew bundle`
 
+### `mew morning-paper`
+
+Purpose: rank a static feed JSON against interest tags and generate a morning
+paper report.
+
+Useful commands:
+
+```bash
+uv run mew morning-paper feed.json --interest ai
+uv run mew morning-paper feed.json --interest ai --json
+uv run mew morning-paper feed.json --interest ai --show
+uv run mew morning-paper feed.json --interest ai --write
+```
+
+Outputs:
+
+- interest tags from explicit flags and local state
+- scored top picks and lower-priority exploration items
+- optional `.mew/morning-paper/YYYY-MM-DD.md` report for `mew bundle`
+
+This is only static-feed ranking. Web collection remains outside core.
+
 ### `mew bundle`
 
 Purpose: compose generated daily report markdown files into one reentry
@@ -107,9 +129,9 @@ Current source report paths:
 - `.mew/dreams/YYYY-MM-DD.md`
 - `.mew/self/learned-YYYY-MM-DD.md`
 
-The command composes existing reports only. It does not generate morning-paper,
-dream, or self-memory reports. `mew journal --write` and `mew mood --write` can
-generate core source reports.
+The command composes existing reports only. It does not generate dream or
+self-memory reports. `mew journal --write`, `mew mood --write`, and
+`mew morning-paper ... --write` can generate core source reports.
 
 ## Experiments
 
@@ -136,21 +158,22 @@ Promoted:
 - desk view model
 - mood scoring
 - journal generation
+- static-feed morning paper ranking
 
 Not promoted yet:
 
-- morning-paper feed collection or ranking
+- morning-paper feed collection
 - dream/self-memory generation
 - any visual desktop shell
 
 ## Latest Verification
 
-After the core `desk`, `journal`, `mood`, and `bundle` promotions and review
-fixes:
+After the core `desk`, `journal`, `mood`, `morning-paper`, and `bundle`
+promotions and review fixes:
 
 ```text
 uv run pytest -q
-767 passed, 6 subtests passed
+772 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

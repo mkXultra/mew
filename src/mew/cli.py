@@ -41,6 +41,7 @@ from .commands import (
     cmd_memory,
     cmd_message,
     cmd_mood,
+    cmd_morning_paper,
     cmd_next,
     cmd_outbox,
     cmd_passive_bundle,
@@ -470,6 +471,24 @@ def build_parser():
     mood_parser.add_argument("--show", action="store_true", help="print the markdown report")
     mood_parser.add_argument("--json", action="store_true", help="print structured output")
     mood_parser.set_defaults(func=cmd_mood)
+
+    morning_paper_parser = subparsers.add_parser(
+        "morning-paper",
+        help="rank a static feed JSON into a morning paper report",
+    )
+    morning_paper_parser.add_argument("feed", help="feed JSON file or object with an items array")
+    morning_paper_parser.add_argument("--date", help="report date YYYY-MM-DD; defaults to today")
+    morning_paper_parser.add_argument("--interest", action="append", default=[], help="interest tag to rank for")
+    morning_paper_parser.add_argument("--limit", type=int, default=8, help="maximum feed items to include")
+    morning_paper_parser.add_argument("--write", action="store_true", help="write .mew/morning-paper/YYYY-MM-DD.md")
+    morning_paper_parser.add_argument(
+        "--output-dir",
+        default=".",
+        help="where to write .mew/morning-paper files with --write",
+    )
+    morning_paper_parser.add_argument("--show", action="store_true", help="print the markdown report")
+    morning_paper_parser.add_argument("--json", action="store_true", help="print structured output")
+    morning_paper_parser.set_defaults(func=cmd_morning_paper)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)

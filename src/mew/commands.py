@@ -72,6 +72,13 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
+from .morning_paper import (
+    build_morning_paper_view_model,
+    format_morning_paper_view,
+    load_feed,
+    render_morning_paper_markdown,
+    write_morning_paper_report,
+)
 from .passive_bundle import generate_bundle
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
@@ -4856,6 +4863,48 @@ def cmd_journal(args):
         print(render_journal_markdown(view_model), end="")
     else:
         print(format_journal_view(view_model))
+        if written:
+            print(f"written_markdown: {written}")
+    return 0
+
+def cmd_morning_paper(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
+    state = load_state()
+    try:
+        items = load_feed(Path(args.feed).expanduser())
+        view_model = build_morning_paper_view_model(
+            items,
+            state,
+            explicit_date=args.date,
+            explicit_interests=args.interest,
+            limit=args.limit,
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"mew: failed to read feed: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    written = None
+    if args.write:
+        written = write_morning_paper_report(view_model, Path(args.output_dir).expanduser())
+    if args.json:
+        data = {
+            "date": view_model["date"],
+            "interests": view_model["interests"],
+            "top_picks": len(view_model["top_picks"]),
+            "explore_later": len(view_model["explore_later"]),
+            "items": view_model["items"],
+        }
+        if written:
+            data["path"] = str(written)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(render_morning_paper_markdown(view_model), end="")
+    else:
+        print(format_morning_paper_view(view_model))
         if written:
             print(f"written_markdown: {written}")
     return 0

@@ -28,6 +28,7 @@ uv run mew focus
 uv run mew focus --kind coding
 uv run mew daily
 uv run mew journal --write
+uv run mew morning-paper feed.json --interest ai --write
 uv run mew bundle --show
 uv run mew desk --json
 uv run mew mood --write
@@ -49,11 +50,14 @@ session instead of going silent.
 the chat REPL.
 `journal` writes a morning/evening `.mew/journal/YYYY-MM-DD.md` from tasks,
 questions, active work sessions, and runtime effects.
+`morning-paper` ranks a static feed JSON against interest tags and writes
+`.mew/morning-paper/YYYY-MM-DD.md`; collection from the web is still outside the
+core command.
 `bundle` composes already-generated daily report markdown files into one
 `.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
-source reports; use it after `mew journal --write`, `mew mood --write`, or after
-dream, self-memory, or morning-paper experiments have written files under
-`.mew`.
+source reports; use it after `mew journal --write`, `mew mood --write`,
+`mew morning-paper ... --write`, or after dream/self-memory experiments have
+written files under `.mew`.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`
@@ -170,6 +174,8 @@ uv run mew focus --kind coding
 uv run mew daily
 uv run mew journal --date 2026-04-17 --write
 uv run mew journal --show
+uv run mew morning-paper feed.json --interest ai --write
+uv run mew morning-paper feed.json --show
 uv run mew bundle --date 2026-04-17 --show
 uv run mew desk --json
 uv run mew desk --write

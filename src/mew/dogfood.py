@@ -479,12 +479,48 @@ def run_runtime_focus_scenario(workspace, env=None):
     doctor_result = run(["doctor"], timeout=15)
     desk_result = run(["desk", "--json"], timeout=15)
     bundle_day = now_iso()[:10]
+    feed_path = workspace / "morning-feed.json"
+    feed_path.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "title": "Passive AI shell dogfood",
+                        "source": "local",
+                        "summary": "A local-first passive AI shell note.",
+                        "tags": ["mew", "passive-ai"],
+                    },
+                    {
+                        "title": "Unrelated database note",
+                        "source": "local",
+                        "summary": "A low-priority exploration item.",
+                        "tags": ["database"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     journal_result = run(["journal", "--date", bundle_day, "--write", "--json"], timeout=15)
     mood_result = run(["mood", "--date", bundle_day, "--write", "--json"], timeout=15)
+    morning_paper_result = run(
+        [
+            "morning-paper",
+            str(feed_path),
+            "--date",
+            bundle_day,
+            "--interest",
+            "passive-ai",
+            "--write",
+            "--json",
+        ],
+        timeout=15,
+    )
     bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
     desk_data = _json_stdout(desk_result)
     journal_data = _json_stdout(journal_result)
     mood_data = _json_stdout(mood_result)
+    morning_paper_data = _json_stdout(morning_paper_result)
     bundle_data = _json_stdout(bundle_result)
 
     _scenario_check(
@@ -566,13 +602,23 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "morning_paper_json_writes_report",
+        morning_paper_result.get("exit_code") == 0
+        and morning_paper_data.get("top_picks") == 1
+        and (workspace / ".mew" / "morning-paper" / f"{bundle_day}.md").exists(),
+        observed=morning_paper_data,
+        expected="morning-paper --write --json ranks a static feed and writes a report",
+    )
+    _scenario_check(
+        checks,
         "bundle_json_surfaces_generated_report",
         bundle_result.get("exit_code") == 0
         and "Journal" in (bundle_data.get("included") or [])
         and "Mood" in (bundle_data.get("included") or [])
+        and "Morning Paper" in (bundle_data.get("included") or [])
         and (workspace / ".mew" / "passive-bundle" / f"{bundle_day}.md").exists(),
         observed=bundle_data,
-        expected="bundle --json includes generated journal and mood reports",
+        expected="bundle --json includes generated journal, mood, and morning paper reports",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
