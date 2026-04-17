@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from mew.cli import main
@@ -199,6 +200,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("native work: mew work 1 --start-session", output)
+                self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
                 state = load_state()
                 self.assertEqual(len(state["tasks"]), 1)
@@ -275,6 +277,7 @@ class SelfImproveTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("started work session #1", output)
                 self.assertNotIn("native work: mew work 1 --start-session", output)
+                self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["plans"], [])
