@@ -10000,6 +10000,36 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_status_keeps_fresh_status_when_zero_step_producer_exited(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": 999999},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "fresh")
+                self.assertFalse(data["producer_alive"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_status_exits_nonzero_when_snapshot_absent(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10052,6 +10082,51 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(data["snapshot_path"].endswith(".mew/follow/session-7.json"))
                 self.assertEqual(data["session_id"], 7)
                 self.assertEqual(data["task_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_task_arg_does_not_fall_back_to_unrelated_latest(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 7,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Follow status",
+                            "created_at": now_iso(),
+                            "updated_at": now_iso(),
+                        }
+                    ]
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True, exist_ok=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 99,
+                            "task_id": 99,
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 1)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "absent")
+                self.assertTrue(data["snapshot_path"].endswith(".mew/follow/session-7.json"))
             finally:
                 os.chdir(old_cwd)
 

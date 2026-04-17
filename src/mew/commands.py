@@ -4094,9 +4094,9 @@ def _work_follow_snapshot_path_for_args(args, state):
     else:
         session = active_work_session(state)
     if session and session.get("id") is not None:
-        session_path = follow_dir / f"session-{session.get('id')}.json"
-        if session_path.exists():
-            return session_path
+        return follow_dir / f"session-{session.get('id')}.json"
+    if task_id:
+        return follow_dir / f"session-for-task-{task_id}.json"
     return follow_dir / "latest.json"
 
 
