@@ -38,6 +38,10 @@ Fresh human-role dogfood with `codex-ultra` then tightened the direct CLI
 cockpit: session start gates now persist into later manual tools, closed/done
 sessions allow read-only review probes, focused pane flags compose without
 `--session`, and `mew chat --quiet` can start without a banner.
+Latest native self-improvement dogfood then polished the self-improve entry
+help, aligned historical diff JSON with the text `recorded_at` label, and made
+batch action summaries show read-window fields so compact cockpit output better
+matches the model's actual tool plan.
 
 ## Milestone 1: Native Hands
 
@@ -235,6 +239,9 @@ Evidence:
 - `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
 - `dogfood --scenario work-session` now covers line-based `read_file`, large-file dry-run `edit_file`, focused diff previews, and focused test output, bringing the recurring scenario to 29 commands.
 - `dogfood --scenario chat-cockpit` now exercises a scripted `mew chat --kind coding` session with `/scope`, `/tasks`, `/work`, scoped startup controls, scoped `/work-session`, and chat transcript logging, making the scoped cockpit path part of deterministic recurring dogfood.
+- Focused work-session panes now compose cleanly, avoid duplicated `run_tests` entries when `--tests --commands` are combined, and expose historical diff timestamps as both `finished_at` and `recorded_at` in JSON.
+- Batch action rendering now includes read-window fields such as `line_start`, `line_count`, and `max_chars`, keeping compact text summaries aligned with the underlying model/tool JSON during dogfood.
+- `mew self-improve --help` now documents the native work-session flow directly, reducing the chance that a resident or human reentry chooses the older programmer-plan path by accident.
 
 Missing proof:
 
@@ -364,7 +371,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `694 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `696 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `177 passed`.
+- `uv run pytest -q tests/test_self_improve.py` current: `18 passed, 2 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-work-session-after-batch-fields --json` current: pass across 36 commands.
+- `claude-ultra` review of `d42a9b4..7735215` current: no blockers; minor JSON/text timestamp mismatch and commands-pane scope notes were triaged, with the timestamp mismatch resolved in `0523395`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `323 passed, 4 subtests passed`.
 - `codex-ultra` human-role dogfood on HEAD `600bb1a` current: persisted gate reuse, closed/done read-only probes, combined focused panes, and final `git status --short` clean.
 - `claude-ultra` review of `d6caf93..a7ace9c` current: follow-up materially addressed persisted gates, review probes, and multi-pane composition; remaining cosmetic fallback and double-computation notes were resolved in `600bb1a`.
