@@ -4739,11 +4739,15 @@ def cmd_focus(args):
     return 0
 
 def cmd_passive_bundle(args):
-    result = generate_bundle(
-        Path(args.reports_root).expanduser(),
-        Path(args.output_dir).expanduser(),
-        explicit_date=args.date,
-    )
+    try:
+        result = generate_bundle(
+            Path(args.reports_root).expanduser(),
+            Path(args.output_dir).expanduser(),
+            explicit_date=args.date,
+        )
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     data = {
         "path": str(result.path),
         "included": result.included,
@@ -4759,7 +4763,11 @@ def cmd_passive_bundle(args):
 
 def cmd_desk(args):
     state = load_state()
-    view_model = build_desk_view_model(state, explicit_date=args.date)
+    try:
+        view_model = build_desk_view_model(state, explicit_date=args.date)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     written = None
     if args.write:
         written = write_desk_view(view_model, Path(args.output_dir).expanduser())

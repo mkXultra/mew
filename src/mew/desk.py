@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .state import open_questions as canonical_open_questions
+
+
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def validate_date(value: str) -> str:
+    if not DATE_PATTERN.fullmatch(value):
+        raise ValueError("date must be in YYYY-MM-DD format")
+    return value
 
 def resolve_desk_date(explicit_date: str | None = None) -> str:
     if explicit_date:
-        return explicit_date
-    return datetime.now().date().isoformat()
+        return validate_date(explicit_date)
+    return validate_date(datetime.now().date().isoformat())
 
 
 def normalize_text(value: Any) -> str:
@@ -27,6 +38,8 @@ def open_tasks_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def open_questions_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(state.get("questions"), list):
+        return list(canonical_open_questions(state))
     questions = []
     for message in state.get("outbox", []):
         if not isinstance(message, dict):
@@ -54,7 +67,23 @@ def active_work_sessions_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]
     raw_sessions = state.get("work_sessions")
     if isinstance(raw_sessions, list):
         sessions.extend(session for session in raw_sessions if isinstance(session, dict))
-    return [session for session in sessions if session.get("status") == "active"]
+    tasks_by_id = {str(task.get("id")): task for task in state.get("tasks", []) if isinstance(task, dict)}
+    active = []
+    seen = set()
+    for session in sessions:
+        session_id = session.get("id")
+        key = str(session_id) if session_id is not None else f"object:{id(session)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        if session.get("status") != "active":
+            continue
+        task_id = session.get("task_id")
+        task = tasks_by_id.get(str(task_id)) if task_id is not None else None
+        if task and task.get("status") == "done":
+            continue
+        active.append(session)
+    return active
 
 
 def runtime_phase_for_desk(state: dict[str, Any]) -> str:
@@ -70,9 +99,9 @@ def choose_pet_state(state: dict[str, Any]) -> str:
     if open_questions_for_desk(state) or open_attention_for_desk(state):
         return "alerting"
     phase = runtime_phase_for_desk(state)
-    if phase in ("planning", "thinking"):
+    if phase in ("planning", "thinking", "precomputing"):
         return "thinking"
-    if phase in ("applying", "acting", "executing"):
+    if phase in ("applying", "acting", "executing", "committing"):
         return "typing"
     if active_work_sessions_for_desk(state):
         return "typing"

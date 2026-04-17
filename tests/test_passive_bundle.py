@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -72,6 +72,13 @@ class PassiveBundleTests(unittest.TestCase):
 
             self.assertEqual(data["included"], ["Mood"])
             self.assertIn("Journal", data["missing"])
+
+    def test_bundle_command_rejects_invalid_date(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            code = main(["bundle", "--date", "../../outside"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("date must be in YYYY-MM-DD format", stderr.getvalue())
 
 
 if __name__ == "__main__":

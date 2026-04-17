@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 
 
 @dataclass(frozen=True)
@@ -28,11 +29,19 @@ REPORTS = (
     ReportSpec("self-memory", "Self Memory", ".mew/self/learned-{day}.md"),
 )
 
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def validate_date(value: str) -> str:
+    if not DATE_PATTERN.fullmatch(value):
+        raise ValueError("date must be in YYYY-MM-DD format")
+    return value
+
 
 def resolve_bundle_date(explicit_date: str | None = None) -> str:
     if explicit_date:
-        return explicit_date
-    return datetime.now().date().isoformat()
+        return validate_date(explicit_date)
+    return validate_date(datetime.now().date().isoformat())
 
 
 def bundle_path(output_dir: Path, day: str) -> Path:
