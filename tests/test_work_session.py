@@ -4671,6 +4671,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work resume #1 [closed] task=#1", resume_text)
                 self.assertIn("read result observed", resume_text)
                 self.assertIn("review this closed work session", resume_text)
+                self.assertIn("mew work 1 --start-session", resume_text)
+                self.assertNotIn("mew work --ai", resume_text)
             finally:
                 os.chdir(old_cwd)
 

@@ -3098,6 +3098,12 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(data["command"], "mew work 2 --start-session")
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["next"]), 0)
+                output = stdout.getvalue()
+                self.assertIn('answer question #1 with `mew reply 1 "..."`', output)
+                self.assertIn("Coding: start native work session for task #2", output)
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["focus", "--kind", "coding"]), 0)
                 output = stdout.getvalue()
                 self.assertIn("Mew focus (coding)", output)
@@ -3113,6 +3119,52 @@ class CommandTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(commands_module.run_chat_slash_command("/next --kind coding", {}), "continue")
                 self.assertIn("mew work 2 --start-session", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_workbench_omits_embedded_current_coding_focus_description_block(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                description = (
+                    "Improve mew through one small change.\n\n"
+                    "Focus:\nRetest the latest cockpit quieting changes.\n\n"
+                    "Current coding focus:\n"
+                    "Mew focus (coding)\n"
+                    "Next: start native work session for task #1 with `mew work 1 --start-session`\n\n"
+                    "Tasks\n"
+                    "- #1 [coding/todo/normal] Improve mew itself\n"
+                    "  next: advance coding task #1\n\n"
+                    "Constraints:\n"
+                    "- Keep the change small."
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "add",
+                                "Improve mew itself",
+                                "--kind",
+                                "coding",
+                                "--description",
+                                description,
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+
+                self.assertIn("description: Improve mew through one small change.", output)
+                self.assertIn("Focus:\nRetest the latest cockpit quieting changes.", output)
+                self.assertIn("Constraints:\n- Keep the change small.", output)
+                self.assertNotIn("Current coding focus:", output)
+                self.assertNotIn("Mew focus (coding)", output)
+                self.assertNotIn("Tasks\n- #1 [coding/todo/normal] Improve mew itself", output)
             finally:
                 os.chdir(old_cwd)
 

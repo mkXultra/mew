@@ -605,13 +605,31 @@ def _format_workbench_task_notes(notes):
     return clip_output("\n".join(compacted), 800)
 
 
+def _format_workbench_description(description):
+    text = str(description or "")
+    if "Current coding focus:" not in text:
+        return text
+    lines = []
+    skipping_coding_focus = False
+    for line in text.splitlines():
+        if line.strip() == "Current coding focus:":
+            skipping_coding_focus = True
+            continue
+        if skipping_coding_focus and line.strip() == "Constraints:":
+            skipping_coding_focus = False
+        if skipping_coding_focus:
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def format_workbench(data):
     task = data["task"]
     lines = [
         f"Work task #{task.get('id')}: {task.get('title')}",
         format_task(task),
         f"kind: {data.get('kind')}",
-        f"description: {task.get('description') or ''}",
+        f"description: {_format_workbench_description(task.get('description') or '')}",
         f"cwd: {task.get('cwd') or ''}",
         "",
         "Plan",
@@ -4479,17 +4497,29 @@ def cmd_perceive(args):
 def cmd_next(args):
     state = load_state()
     kind = getattr(args, "kind", None) or None
-    move = next_move(state, kind=kind)
+    coding_move = ""
+    if kind:
+        move = next_move(state, kind=kind)
+    else:
+        focus_data = build_focus_data(state, limit=0)
+        move = focus_data.get("next_move") or next_move(state)
+        coding_move = focus_data.get("coding_next_move") or ""
     if args.json:
+        payload = {"next_move": move, "command": command_from_next_move(move), "kind": kind or ""}
+        if coding_move and coding_move != move:
+            payload["coding_next_move"] = coding_move
+            payload["coding_command"] = command_from_next_move(coding_move)
         print(
             json.dumps(
-                {"next_move": move, "command": command_from_next_move(move), "kind": kind or ""},
+                payload,
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return 0
     print(move)
+    if coding_move and coding_move != move:
+        print(f"Coding: {coding_move}")
     return 0
 
 def cmd_dogfood(args):

@@ -1190,7 +1190,12 @@ def build_work_session_resume(session, task=None, limit=8):
     )
 
     if session.get("status") == "closed":
-        next_action = f"review this closed work session or start a new one with {mew_command('work', '--ai')}"
+        task_id = session.get("task_id") or (task or {}).get("id")
+        if task_id:
+            start_command = mew_command("work", task_id, "--start-session")
+        else:
+            start_command = mew_command("work", "--start-session")
+        next_action = f"review this closed work session or start a new one with {start_command}"
     elif phase == "stop_requested":
         next_action = "stop requested; the running work loop should pause at the next boundary"
     elif pending_approvals:
