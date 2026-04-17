@@ -5417,6 +5417,52 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_multi_step_max_steps_records_reentry_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("live max note content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README first", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read README second", "action": {"type": "read_file", "path": "README.md"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--max-steps",
+                                        "2",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("mew work ai: 2/2 step(s) stop=max_steps", output)
+                self.assertIn("max_steps_note: Live run reached max_steps=2", output)
+                session = load_state()["work_sessions"][0]
+                self.assertIn("Live run reached max_steps=2", session["notes"][-1]["text"])
+                self.assertIn("Last action: read_file", session["notes"][-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_final_step_adds_reentry_guidance(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

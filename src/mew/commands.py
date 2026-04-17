@@ -1495,7 +1495,7 @@ def pause_work_session_after_user_interrupt(session_id, step_index):
     return {"repairs": repairs, "note": note_text}
 
 
-def record_follow_max_steps_note(session_id, report):
+def record_max_steps_reentry_note(session_id, report, mode="follow"):
     steps = list((report or {}).get("steps") or [])
     if not steps:
         return ""
@@ -1509,8 +1509,9 @@ def record_follow_max_steps_note(session_id, report):
     if not summary and last_step.get("tool_calls"):
         summaries = [compact_work_tool_summary(call) for call in last_step.get("tool_calls") or [] if call]
         summary = "; ".join(item for item in summaries if item)
+    label = "Follow" if mode == "follow" else "Live run"
     note_text = (
-        f"Follow reached max_steps={report.get('max_steps')} after {len(steps)} step(s). "
+        f"{label} reached max_steps={report.get('max_steps')} after {len(steps)} step(s). "
         f"Last action: {action_type}."
     )
     if summary:
@@ -2051,8 +2052,14 @@ def cmd_work_ai(args):
             report["stop_reason"] = "tool_failed"
             break
 
-    if getattr(args, "follow", False) and report.get("stop_reason") == "max_steps":
-        report["max_steps_note"] = record_follow_max_steps_note(session_id, report)
+    should_note_max_steps = (
+        report.get("stop_reason") == "max_steps"
+        and getattr(args, "live", False)
+        and (getattr(args, "follow", False) or max_steps > 1)
+    )
+    if should_note_max_steps:
+        mode = "follow" if getattr(args, "follow", False) else "live"
+        report["max_steps_note"] = record_max_steps_reentry_note(session_id, report, mode=mode)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
