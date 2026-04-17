@@ -103,7 +103,8 @@ def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS):
 
 def active_work_session(state):
     for session in reversed(state.get("work_sessions", [])):
-        if session.get("status") == "active":
+        task = work_session_task(state, session)
+        if session.get("status") == "active" and (not task or task.get("status") != "done"):
             return session
     return None
 
@@ -111,7 +112,12 @@ def active_work_session(state):
 def work_session_for_task(state, task_id):
     wanted = str(task_id)
     for session in reversed(state.get("work_sessions", [])):
-        if str(session.get("task_id")) == wanted and session.get("status") == "active":
+        task = work_session_task(state, session)
+        if (
+            str(session.get("task_id")) == wanted
+            and session.get("status") == "active"
+            and (not task or task.get("status") != "done")
+        ):
             return session
     return None
 

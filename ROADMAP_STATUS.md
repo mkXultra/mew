@@ -412,6 +412,7 @@ Next action:
 - `mew code` now keeps compact `/c` and `/follow` primary controls after a live `/continue` step, instead of expanding cached auth/read/write/verify flags back into the main cockpit surface.
 - `mew code` now uses a compact startup brief (`runtime`, task count, unread count, next move, and active session when present) instead of dumping the full general chat brief, keeping coding entry calmer while `/brief` remains available inside chat.
 - `mew next` and `mew focus` now point fresh or active coding work at `mew code <task-id>` as the quiet cockpit entry instead of surfacing `mew work --start-session` or the full flag-heavy `mew work --live ...` command in the primary next-action line.
+- Done-task work sessions no longer capture the default active cockpit, and attempts to start or run a new resident work session on a done task now ask for the task to be reopened first.
 
 ## Current Roadmap Focus
 

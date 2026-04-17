@@ -4048,6 +4048,70 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_done_task_work_sessions_do_not_capture_active_cockpit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {"id": 1, "title": "Already done", "status": "done", "kind": "coding"},
+                            {"id": 2, "title": "Still open", "status": "todo", "kind": "coding"},
+                        ]
+                    )
+                    state["work_sessions"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "task_id": 2,
+                                "status": "active",
+                                "title": "Still open",
+                                "goal": "Still open",
+                                "created_at": "2026-04-17T00:00:00Z",
+                                "updated_at": "2026-04-17T00:00:00Z",
+                                "model_turns": [],
+                                "tool_calls": [],
+                            },
+                            {
+                                "id": 2,
+                                "task_id": 1,
+                                "status": "active",
+                                "title": "Already done",
+                                "goal": "Already done",
+                                "created_at": "2026-04-17T00:01:00Z",
+                                "updated_at": "2026-04-17T00:01:00Z",
+                                "model_turns": [],
+                                "tool_calls": [],
+                            },
+                        ]
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Work session #1 [active] task=#2", output)
+                self.assertNotIn("Work session #2 [active] task=#1", output)
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--start-session"]), 1)
+                self.assertIn("task #1 is done", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["code", "1", "--timeout", "0"]), 1)
+                self.assertIn("task #1 is done", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--live", "--auth", "missing-auth.json"]), 1)
+                self.assertIn("task #1 is done", stderr.getvalue())
+                self.assertNotIn("auth", stderr.getvalue().casefold())
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_read_only_clears_cloned_side_effect_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

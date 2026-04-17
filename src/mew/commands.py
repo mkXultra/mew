@@ -763,6 +763,10 @@ def select_work_ai_task(state, task_id=None):
     return select_workbench_task(state)
 
 
+def done_task_work_session_error(task):
+    return f"mew: task #{task.get('id')} is done; reopen it before starting a work session"
+
+
 def format_work_ai_report(report, compact=False):
     lines = [
         f"mew work ai: {len(report.get('steps') or [])}/{report.get('max_steps')} step(s) "
@@ -1768,6 +1772,9 @@ def cmd_code(args):
             if not task:
                 print(f"mew: task not found: {task_id}", file=sys.stderr)
                 return 1
+            if task.get("status") == "done":
+                print(done_task_work_session_error(task), file=sys.stderr)
+                return 1
             session, created = create_work_session(state, task)
             remember_work_session_default_options(session, start_args)
             save_state(state)
@@ -1908,11 +1915,6 @@ def cmd_work_ai(args):
 
     model = args.model or model_backend_default_model(model_backend)
     base_url = args.base_url or model_backend_default_base_url(model_backend)
-    try:
-        model_auth = load_model_auth(model_backend, args.auth)
-    except MewError as exc:
-        print(f"mew: {exc}", file=sys.stderr)
-        return 1
 
     progress = work_ai_progress(args)
     with state_lock():
@@ -1924,10 +1926,27 @@ def cmd_work_ai(args):
                 return 1
             print("No tasks.", file=sys.stderr)
             return 1
+        if task.get("status") == "done":
+            print(done_task_work_session_error(task), file=sys.stderr)
+            return 1
+        task_id = task.get("id")
+    try:
+        model_auth = load_model_auth(model_backend, args.auth)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task_id)
+        if not task:
+            print(f"mew: task not found: {task_id}", file=sys.stderr)
+            return 1
+        if task.get("status") == "done":
+            print(done_task_work_session_error(task), file=sys.stderr)
+            return 1
         session, created = create_work_session(state, task)
         remember_work_session_default_options(session, args)
         session_id = session.get("id")
-        task_id = task.get("id")
         save_state(state)
     if progress:
         progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
@@ -2518,7 +2537,12 @@ def _select_active_work_session_for_args(state, args):
     if getattr(args, "task_id", None):
         session = None
         for candidate in reversed(state.get("work_sessions", [])):
-            if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
+            task = work_session_task(state, candidate)
+            if (
+                str(candidate.get("task_id")) == str(args.task_id)
+                and candidate.get("status") == "active"
+                and (not task or task.get("status") != "done")
+            ):
                 session = candidate
                 break
     return session
@@ -2527,9 +2551,11 @@ def _select_active_work_session_for_args(state, args):
 def _work_session_matches_kind(state, session, kind=None):
     if not session:
         return False
+    task = work_session_task(state, session)
+    if task and task.get("status") == "done":
+        return False
     if not kind:
         return True
-    task = work_session_task(state, session)
     return bool(task and task_kind(task) == kind)
 
 
@@ -2681,6 +2707,9 @@ def cmd_work_start_session(args):
                 return 1
             print("No tasks.")
             return 0
+        if task.get("status") == "done":
+            print(done_task_work_session_error(task), file=sys.stderr)
+            return 1
         session, created = create_work_session(state, task)
         remember_work_session_default_options(session, args)
         save_state(state)
@@ -7089,6 +7118,9 @@ def chat_work_session(rest, chat_state=None):
                     print(f"No {scope_kind} tasks.")
                 else:
                     print("No tasks.")
+                return
+            if task.get("status") == "done":
+                print(done_task_work_session_error(task))
                 return
             session, created = create_work_session(state, task)
             save_state(state)
