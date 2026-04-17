@@ -2076,6 +2076,111 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("reobserve: read_file path=README.md", text)
         self.assertIn("safely re-read the target", text)
 
+    def test_work_resume_suggests_parent_inspection_after_failed_read_file(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover read",
+            "goal": "Recover read failure.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 5,
+                    "tool": "read_file",
+                    "status": "failed",
+                    "parameters": {"path": "src/app.py", "line_start": 999, "line_count": 20},
+                    "error": "line_start 999 is beyond EOF",
+                    "summary": "read failed",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        reobserve = resume["suggested_safe_reobserve"]
+        self.assertEqual(reobserve["source_tool_call_id"], 5)
+        self.assertEqual(reobserve["kind"], "tool_observation")
+        self.assertEqual(reobserve["action"], "inspect_dir")
+        self.assertEqual(reobserve["parameters"], {"path": "src"})
+
+        text = format_work_session_resume(resume)
+        self.assertIn("reobserve: inspect_dir path=src", text)
+        self.assertIn("inspect the parent directory", text)
+
+    def test_work_resume_retries_interrupted_read_file(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover interrupted read",
+            "goal": "Recover interrupted read.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 6,
+                    "tool": "read_file",
+                    "status": "interrupted",
+                    "parameters": {"path": "src/app.py", "line_start": 10, "line_count": 20},
+                    "error": "Interrupted before the work tool completed.",
+                    "summary": "read interrupted",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        reobserve = build_work_session_resume(session)["suggested_safe_reobserve"]
+        self.assertEqual(reobserve["action"], "read_file")
+        self.assertEqual(
+            reobserve["parameters"],
+            {"path": "src/app.py", "line_start": 10, "line_count": 20},
+        )
+        self.assertIn("interrupted", reobserve["reason"])
+
+    def test_work_resume_uses_recorded_output_review_after_failed_command(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover command",
+            "goal": "Recover command failure.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "uv run pytest -q", "cwd": "."},
+                    "result": {
+                        "command": "uv run pytest -q",
+                        "cwd": ".",
+                        "exit_code": 1,
+                        "stdout": "failed",
+                        "stderr": "",
+                    },
+                    "summary": "tests failed",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        reobserve = resume["suggested_safe_reobserve"]
+        self.assertEqual(reobserve["source_tool_call_id"], 7)
+        self.assertEqual(reobserve["kind"], "recorded_output_review")
+        self.assertNotIn("action", reobserve)
+        self.assertEqual(reobserve["parameters"]["command"], "uv run pytest -q")
+
+        text = format_work_session_resume(resume)
+        self.assertIn("review: recorded_output_review", text)
+        self.assertNotIn("review_command_output", text)
+
     def test_work_session_resume_auto_recovers_safe_read_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

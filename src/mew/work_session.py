@@ -697,6 +697,20 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def parent_path_for_observation(path):
+    path = str(path or "").strip()
+    if not path:
+        return ""
+    trimmed = path.rstrip("/\\")
+    if not trimmed:
+        return "/"
+    if "/" in trimmed:
+        return trimmed.rsplit("/", 1)[0] or "/"
+    if "\\" in trimmed:
+        return trimmed.rsplit("\\", 1)[0] or "."
+    return "."
+
+
 def suggested_safe_reobserve_for_call(call):
     if not isinstance(call, dict):
         return {}
@@ -708,33 +722,43 @@ def suggested_safe_reobserve_for_call(call):
 
     tool = call.get("tool")
     parameters = call.get("parameters") or {}
+    call_result = call.get("result") or {}
     path = work_call_path(call)
 
-    def suggestion(action, suggested_parameters, reason):
-        return {
+    def suggestion(action, suggested_parameters, reason, kind="tool_observation"):
+        result = {
             "source_tool_call_id": call.get("id"),
             "source_tool": tool,
-            "action": action,
+            "kind": kind,
             "parameters": {key: value for key, value in suggested_parameters.items() if value not in (None, "")},
             "reason": reason,
         }
+        if action:
+            result["action"] = action
+        return result
 
     if tool in WRITE_WORK_TOOLS and path:
         return suggestion(
             "read_file",
-            {"path": path, "line_start": parameters.get("line_start"), "line_count": parameters.get("line_count")},
+            {"path": path},
             "write/edit failed; safely re-read the target before planning another edit",
         )
     if tool == "read_file" and path:
+        if call.get("status") == "interrupted":
+            return suggestion(
+                "read_file",
+                {
+                    "path": path,
+                    "line_start": parameters.get("line_start"),
+                    "line_count": parameters.get("line_count"),
+                    "offset": parameters.get("offset"),
+                },
+                "read was interrupted; retry the bounded read after checking current read gates",
+            )
         return suggestion(
-            "read_file",
-            {
-                "path": path,
-                "line_start": parameters.get("line_start"),
-                "line_count": parameters.get("line_count"),
-                "offset": parameters.get("offset"),
-            },
-            "read failed; retry the bounded read after checking current read gates",
+            "inspect_dir",
+            {"path": parent_path_for_observation(path)},
+            "read failed; inspect the parent directory and read gates before retrying the file",
         )
     if tool in ("inspect_dir", "search_text", "glob"):
         suggested_parameters = {
@@ -748,18 +772,22 @@ def suggested_safe_reobserve_for_call(call):
         return suggestion(
             tool,
             {
-                "cwd": parameters.get("cwd"),
-                "base": parameters.get("base"),
-                "staged": parameters.get("staged"),
-                "stat": parameters.get("stat"),
+                "cwd": call_result.get("cwd") or parameters.get("cwd"),
+                "base": call_result.get("base") or parameters.get("base"),
+                "staged": call_result.get("staged") or parameters.get("staged"),
+                "stat": call_result.get("stat") or parameters.get("stat"),
             },
             "git inspection failed; retry the read-only git observation before planning",
         )
     if tool in COMMAND_WORK_TOOLS:
         return suggestion(
-            "review_command_output",
-            {"command": parameters.get("command"), "cwd": parameters.get("cwd")},
+            "",
+            {
+                "command": call_result.get("command") or parameters.get("command"),
+                "cwd": call_result.get("cwd") or parameters.get("cwd"),
+            },
             "command failed; review recorded stdout/stderr before rerunning side-effecting work",
+            kind="recorded_output_review",
         )
     return {}
 
@@ -1453,7 +1481,10 @@ def format_work_session_resume(resume):
                     f"{key}={value}" for key, value in (reobserve.get("parameters") or {}).items()
                 )
                 suffix = f" {params}" if params else ""
-                lines.append(f"  reobserve: {reobserve.get('action')}{suffix}")
+                if reobserve.get("action"):
+                    lines.append(f"  reobserve: {reobserve.get('action')}{suffix}")
+                else:
+                    lines.append(f"  review: {reobserve.get('kind') or 'recorded_output_review'}{suffix}")
                 if reobserve.get("reason"):
                     lines.append(f"  reason: {reobserve.get('reason')}")
     else:

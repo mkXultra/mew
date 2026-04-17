@@ -346,7 +346,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `668 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `671 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_safe_reobserve_after_failed_edit tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_parent_inspection_after_failed_read_file tests/test_work_session.py::WorkSessionTests::test_work_resume_retries_interrupted_read_file tests/test_work_session.py::WorkSessionTests::test_work_resume_uses_recorded_output_review_after_failed_command tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `5 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `301 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-safe-reobserve-tight --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_chat_work_session_can_request_stop tests/test_work_session.py::WorkSessionTests::test_work_session_stop_takes_precedence_over_session_flag tests/test_brief.py::BriefTests::test_next_move_coding_filter_in_empty_project_suggests_task_creation` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_brief.py tests/test_commands.py` current: `335 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-review-fixes --json` current: pass across 36 commands.
