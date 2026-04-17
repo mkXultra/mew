@@ -1522,6 +1522,8 @@ class WorkSessionTests(unittest.TestCase):
                 diff_data = json.loads(stdout.getvalue())
                 self.assertEqual(diff_data["diffs"][0]["diff_stats"], {"added": 1, "removed": 1})
                 self.assertIn("finished_at", diff_data["diffs"][0])
+                self.assertIn("recorded_at", diff_data["diffs"][0])
+                self.assertEqual(diff_data["diffs"][0]["recorded_at"], diff_data["diffs"][0]["finished_at"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)

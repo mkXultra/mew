@@ -1844,6 +1844,7 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
         diff = result.get("diff") or ""
         if not diff:
             continue
+        finished_at = call.get("finished_at") or ""
         entries.append(
             {
                 "tool_call_id": call.get("id"),
@@ -1856,7 +1857,8 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
                 "rolled_back": result.get("rolled_back"),
                 "verification_exit_code": result.get("verification_exit_code"),
                 "approval_status": call.get("approval_status") or "",
-                "finished_at": call.get("finished_at") or "",
+                "finished_at": finished_at,
+                "recorded_at": finished_at,
                 "diff_stats": diff_line_counts(diff),
                 "diff_preview": format_diff_preview(diff, max_chars=max_chars),
             }
