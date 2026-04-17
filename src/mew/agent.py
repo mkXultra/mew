@@ -356,6 +356,8 @@ def transient_model_error(exc):
             "overload",
             "502",
             "500",
+            "failed to parse json plan",
+            "response did not contain json",
         )
     )
 

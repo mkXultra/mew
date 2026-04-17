@@ -105,6 +105,7 @@ Evidence:
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 - Codex Web API SSE text deltas are forwarded even when the response omits a `content-type` header; `--follow` enables batched live `model_delta` thinking-pane output by default when the backend supports it.
+- Malformed model JSON plans are treated as retryable model errors, so a single broken THINK/ACT response does not immediately kill a live/follow work session.
 - Compact follow mode suppresses duplicate stderr delta progress while still preserving the model stream in the thinking pane and final preview, reducing token-by-token noise during real Codex Web API dogfood.
 - Compact follow mode now suppresses the duplicate raw `stream_preview` when live model deltas were already shown, keeping the planning summary to model-stream metrics, summary, action, and reason.
 - Compact follow mode now renders plan-shaped JSON streams as readable `model_summary_delta`, `model_reason_delta`, and `model_action_delta` lines instead of raw JSON tokens.
@@ -338,7 +339,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `662 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `663 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_runtime.py::RuntimeTests::test_think_phase_retries_malformed_model_json_once tests/test_runtime.py::RuntimeTests::test_think_phase_retries_transient_model_errors` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-recovery-source-context --json` current: pass, including safe read auto-recovery and side-effect recovery review context across 36 commands.
 - `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
