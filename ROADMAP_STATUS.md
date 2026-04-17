@@ -390,6 +390,7 @@ Next action:
 - `claude-ultra` cockpit review after the reentry-noise work recommended deduping the front-door workbench against the full resume; `mew work <task-id>` now leaves guidance snapshots and finish-only task-note history to `--session --resume` instead of replaying them in the compact Reentry block.
 - Mew buddy dogfood session #51 found a suspected `search_text.truncated` edge case during read-only retest; focused regression coverage now proves overflow beyond `max_matches` reports `truncated=True`, turning the dogfood concern into a preserved contract.
 - The same retest exposed that a workbench whose only recent note was a system max-step boundary note could still show that note because of a fallback path; boundary-only system notes now stay hidden in the front-door Reentry block.
+- Empty work-session front-door summaries no longer render `last_tool=#`; the field appears only when a real latest tool call exists.
 
 ## Current Roadmap Focus
 

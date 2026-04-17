@@ -5007,6 +5007,8 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Reentry", output)
                 self.assertIn("hypothesis: Quiet front door.", output)
+                self.assertIn("model_turns=1 tool_calls=0", output)
+                self.assertNotIn("last_tool=#", output)
                 self.assertNotIn("note[system]", output)
                 self.assertNotIn("Live run reached max_steps", output)
             finally:
