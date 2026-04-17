@@ -21,12 +21,15 @@ touching core runtime code.
 
 - `render_dream` now writes:
   - non-done active tasks
+  - active work-session continuity when present
   - a `## Learnings` section
 - `collect_learnings` reads:
   - explicit `learnings`
   - `changes`
   - `decisions`
   - recent done-task notes from real mew state
+- `render_work_sessions` reads active `work_session` / `work_sessions` metadata
+  such as session id, task id, task title, phase, update time, and next action.
 - The prototype remains isolated under `experiments/mew-dream`.
 
 ## Validation
@@ -38,7 +41,7 @@ uv run pytest -q experiments/mew-dream
 Result:
 
 ```text
-5 passed
+7 passed
 ```
 
 Generated from sample state:
@@ -60,11 +63,22 @@ Live-state dream excerpt:
 - Subsidy research task [todo]
 - Subsidy research constraints [todo]
 - Subsidy research task [ready]
-- Dogfood mew-dream side project [ready]
+- Improve mew-dream live-state report [ready]
 
 ## Learnings
+- Dogfooded mew-dream side project with work session #101. Added dream Learnings output from explicit learnings/changes/decisions and recent done-task notes, verified sample and live-state generation, and recorded DOGFOOD.md. Verified with uv run pytest -q experiments/mew-dream.
 - Implemented the session #100 follow-up: idle work-session resume next_action now includes the task id when known (mew work <task-id> --live). Verified with uv run pytest -q tests/test_work_session.py.
-- Implemented the session #99 recommendation: /help work now documents task-first /work-session <task-id> live usage, with test coverage. Verified with uv run pytest -q tests/test_commands.py.
+```
+
+Sample-state dream excerpt:
+
+```text
+## Active work sessions
+- #1: Improve dream continuity output [active]
+  - task: #1 Prototype mew dream journal experiment
+  - phase: idle
+  - updated: 2026-04-17T12:00:00Z
+  - next: continue with the next smallest isolated slice
 ```
 
 ## What mew learned about itself
@@ -74,6 +88,8 @@ Live-state dream excerpt:
   what mew learned.
 - Real `.mew/state.json` already contains enough task-note history to generate a
   useful first dream without adding core storage.
+- Active work-session metadata is the clearest next continuity signal. It tells
+  future mew not just what tasks exist, but where its current body was paused.
 
 ## Friction observed
 

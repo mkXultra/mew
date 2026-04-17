@@ -2,12 +2,25 @@
   "date": "2026-04-17",
   "tasks": [
     {
+      "id": 1,
       "title": "Prototype mew dream journal experiment",
       "status": "in_progress"
     },
     {
+      "id": 2,
       "title": "Write pytest coverage for markdown generation",
       "status": "todo"
+    }
+  ],
+  "work_sessions": [
+    {
+      "id": 1,
+      "task_id": 1,
+      "status": "active",
+      "goal": "Improve dream continuity output",
+      "phase": "idle",
+      "updated_at": "2026-04-17T12:00:00Z",
+      "next_action": "continue with the next smallest isolated slice"
     }
   ],
   "notes": [

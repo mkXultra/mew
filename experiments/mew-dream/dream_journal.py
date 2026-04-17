@@ -87,6 +87,65 @@ def active_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
     return tasks[:MAX_ITEMS]
 
 
+def task_title_by_id(state: dict[str, Any]) -> dict[str, str]:
+    titles = {}
+    for task in state.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        task_id = task.get("id")
+        title = task.get("title")
+        if task_id is not None and isinstance(title, str) and title.strip():
+            titles[str(task_id)] = title.strip()
+    return titles
+
+
+def active_work_sessions(state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_sessions = []
+    single_session = state.get("work_session")
+    if isinstance(single_session, dict):
+        raw_sessions.append(single_session)
+    sessions = state.get("work_sessions")
+    if isinstance(sessions, list):
+        raw_sessions.extend(session for session in sessions if isinstance(session, dict))
+
+    active = []
+    for session in raw_sessions:
+        if session.get("status") != "active":
+            continue
+        active.append(session)
+    return active[-MAX_ITEMS:]
+
+
+def render_work_sessions(state: dict[str, Any]) -> list[str]:
+    sessions = active_work_sessions(state)
+    if not sessions:
+        return []
+    titles = task_title_by_id(state)
+    lines = ["", "## Active work sessions"]
+    for session in sessions:
+        session_id = session.get("id", "?")
+        goal = str(session.get("goal") or session.get("title") or "Untitled").strip()
+        status = session.get("status", "unknown")
+        lines.append(f"- #{session_id}: {goal} [{status}]")
+        task_id = session.get("task_id")
+        if task_id is not None:
+            task_title = titles.get(str(task_id), "")
+            task_text = f"#{task_id}"
+            if task_title:
+                task_text = f"{task_text} {task_title}"
+            lines.append(f"  - task: {task_text}")
+        phase = session.get("phase")
+        if isinstance(phase, str) and phase.strip():
+            lines.append(f"  - phase: {phase.strip()}")
+        updated_at = session.get("updated_at")
+        if isinstance(updated_at, str) and updated_at.strip():
+            lines.append(f"  - updated: {updated_at.strip()}")
+        next_action = session.get("next_action")
+        if isinstance(next_action, str) and next_action.strip():
+            lines.append(f"  - next: {next_action.strip()}")
+    return lines
+
+
 def render_dream(day: str, state: dict[str, Any]) -> str:
     tasks = active_tasks(state)
     lines = [f"# Dream {day}", "", "## Active tasks"]
@@ -97,6 +156,7 @@ def render_dream(day: str, state: dict[str, Any]) -> str:
             lines.append(f"- {title} [{status}]")
     else:
         lines.append("- No tasks recorded")
+    lines.extend(render_work_sessions(state))
     lines.extend(["", "## Learnings"])
     learnings = collect_learnings(state)
     if learnings:

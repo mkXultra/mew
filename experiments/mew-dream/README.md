@@ -7,11 +7,11 @@ Outputs:
 - `.mew/dreams/YYYY-MM-DD.md`
 - `.mew/journal/YYYY-MM-DD.md`
 
-The dream file summarizes non-done active tasks and a `Learnings` section. It
-uses optional `learnings`, `changes`, and `decisions` lists when present, and it
-can also derive recent learnings from done-task notes in a real mew
-`.mew/state.json`. That keeps the prototype focused on passive self-improvement
-memory without touching the core mew runtime.
+The dream file summarizes non-done active tasks, active work sessions, and a
+`Learnings` section. It uses optional `learnings`, `changes`, and `decisions`
+lists when present, and it can also derive recent learnings from done-task notes
+in a real mew `.mew/state.json`. That keeps the prototype focused on passive
+self-improvement memory without touching the core mew runtime.
 
 ## Usage
 

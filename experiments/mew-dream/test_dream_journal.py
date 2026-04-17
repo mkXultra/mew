@@ -99,3 +99,44 @@ def test_dream_derives_recent_learnings_from_done_task_notes(tmp_path: Path) -> 
     assert "- Open work [ready]" in dream
     assert "- Old work [done]" not in dream
     assert "- Verified dream output." in dream
+
+
+def test_dream_renders_active_work_session_context(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"tasks":[{"id":7,"title":"Build resident memory","status":"ready"}],'
+        '"work_sessions":[{'
+        '"id":42,'
+        '"task_id":7,'
+        '"status":"active",'
+        '"goal":"Continue resident memory work",'
+        '"phase":"idle",'
+        '"updated_at":"2026-04-17T12:00:00Z",'
+        '"next_action":"continue with mew code 7"'
+        '}],'
+        '"notes":[]}'
+    )
+
+    paths = dream_journal.generate(state_path, tmp_path)
+    dream = paths.dream.read_text()
+
+    assert "## Active work sessions" in dream
+    assert "- #42: Continue resident memory work [active]" in dream
+    assert "  - task: #7 Build resident memory" in dream
+    assert "  - phase: idle" in dream
+    assert "  - next: continue with mew code 7" in dream
+
+
+def test_dream_omits_closed_work_sessions(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"date":"2026-04-17",'
+        '"tasks":[],'
+        '"work_session":{"id":1,"status":"closed","goal":"Done"},'
+        '"notes":[]}'
+    )
+
+    paths = dream_journal.generate(state_path, tmp_path)
+
+    assert "## Active work sessions" not in paths.dream.read_text()
