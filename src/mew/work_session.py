@@ -78,6 +78,19 @@ def diff_line_counts(diff):
     return {"added": added, "removed": removed}
 
 
+def clip_inline_text(text, limit=240):
+    text = " ".join(str(text or "").split())
+    if not text or len(text) <= limit:
+        return text
+    marker = " ... output truncated ..."
+    prefix_limit = max(1, limit - len(marker))
+    prefix = text[:prefix_limit].rstrip()
+    boundary = prefix.rfind(" ")
+    if boundary >= max(20, prefix_limit // 2):
+        prefix = prefix[:boundary].rstrip()
+    return f"{prefix}{marker}"
+
+
 def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS):
     if not diff:
         return ""
@@ -288,7 +301,7 @@ def find_work_model_turn(session, turn_id):
 
 
 def work_turn_guidance_snapshot(turn):
-    return clip_output((turn or {}).get("guidance_snapshot") or (turn or {}).get("guidance") or "", 1000)
+    return clip_inline_text((turn or {}).get("guidance_snapshot") or (turn or {}).get("guidance") or "", 1000)
 
 
 def start_work_model_turn(state, session, decision_plan, action_plan, action, guidance=""):
@@ -500,8 +513,12 @@ def execute_work_write_tool(tool, parameters, on_output=None):
 def work_tool_result_error(tool, result):
     result = result or {}
     if tool == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
+        if result.get("exit_code") is None:
+            return f"verification failed: {command_failure_reason(result)}"
         return f"verification failed with exit_code={result.get('exit_code')}"
     if tool in GIT_WORK_TOOLS and "exit_code" in result and result.get("exit_code") != 0:
+        if result.get("exit_code") is None:
+            return f"{tool} failed: {command_failure_reason(result)}"
         return f"{tool} failed with exit_code={result.get('exit_code')}"
     if tool in WRITE_WORK_TOOLS:
         if "verification_exit_code" in result and result.get("verification_exit_code") != 0:
@@ -512,6 +529,8 @@ def work_tool_result_error(tool, result):
                 suffix = f"; rollback failed: {result.get('rollback_error')}"
             else:
                 suffix = ""
+            if exit_code is None:
+                return f"verification failed: {command_failure_reason(result.get('verification') or {})}{suffix}"
             return f"verification failed with exit_code={exit_code}{suffix}"
     return ""
 
@@ -529,11 +548,14 @@ def clip_tail(text, max_chars=1200):
 
 def format_command_failure_summary(record, max_chars=1200):
     record = record or {}
+    exit_code = record.get("exit_code")
     lines = [
         f"command: {record.get('command')}",
         f"cwd: {record.get('cwd')}",
-        f"exit_code: {record.get('exit_code')}",
+        f"exit_code: {exit_code if exit_code is not None else 'unavailable'}",
     ]
+    if exit_code is None:
+        lines.append(f"failure: {command_failure_reason(record)}")
     stderr = record.get("stderr") or ""
     stdout = record.get("stdout") or ""
     if stderr:
@@ -541,6 +563,19 @@ def format_command_failure_summary(record, max_chars=1200):
     if stdout:
         lines.extend(["stdout:", clip_tail(stdout, max_chars)])
     return "\n".join(lines)
+
+
+def command_failure_reason(record):
+    record = record or {}
+    if record.get("timed_out"):
+        return "command timed out"
+    argv = record.get("argv") or []
+    if record.get("error_type") == "executable_not_found" and argv:
+        return f"executable not found: {argv[0]}"
+    stderr = (record.get("stderr") or "").strip()
+    if stderr:
+        return stderr.splitlines()[0]
+    return "command did not exit"
 
 
 def summarize_work_tool_result(tool, result):
@@ -1077,7 +1112,7 @@ def build_work_session_resume(session, task=None, limit=8):
                 "status": turn.get("status"),
                 "action": action.get("type") or action.get("tool") or "unknown",
                 "summary": turn.get("finished_note") or turn.get("summary") or turn.get("error") or "",
-                "guidance_snapshot": clip_output(work_turn_guidance_snapshot(turn), 240),
+                "guidance_snapshot": clip_inline_text(work_turn_guidance_snapshot(turn), 240),
                 "tool_call_id": turn.get("tool_call_id"),
             }
         )
@@ -1425,7 +1460,7 @@ def build_work_session_timeline(session, limit=20):
         return []
 
     def timeline_summary(text):
-        return clip_output(" ".join((text or "").split()), 240)
+        return clip_inline_text(text, 240)
 
     order = 0
     for turn in session.get("model_turns") or []:

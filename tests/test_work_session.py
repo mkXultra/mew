@@ -585,6 +585,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_tests_missing_executable_reports_not_found(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                "mew-missing-test-command --version",
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("executable not found: mew-missing-test-command", call["error"])
+                self.assertIn("exit_code: unavailable", call["summary"])
+                self.assertIn("failure: executable not found: mew-missing-test-command", call["summary"])
+                self.assertIsNone(call["result"]["exit_code"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_runs_command_behind_shell_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1021,6 +1058,42 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_tests_default_path_does_not_touch_dot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("sample.py").write_text("print('ok')\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                f"{sys.executable} -m py_compile sample.py",
+                                "--allow-verify",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(resume["files_touched"], [])
+                self.assertNotIn("path", load_state()["work_sessions"][0]["tool_calls"][0]["parameters"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_commands_pane_surfaces_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1140,6 +1213,58 @@ class WorkSessionTests(unittest.TestCase):
             "Freshly inspect README before deciding.",
         )
         self.assertNotIn("guidance", context["work_session"]["model_turns"][0])
+
+    def test_work_session_resume_clips_guidance_on_word_boundary(self):
+        from mew.work_loop import build_work_model_context
+        from mew.work_session import (
+            build_work_session_resume,
+            finish_work_model_turn,
+            format_work_session_resume,
+            start_work_model_turn,
+        )
+
+        long_guidance = " ".join(f"word{i:03d}" for i in range(80))
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Guidance",
+            "goal": "Clip one-shot guidance.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+
+        turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "remember"},
+            {"summary": "remember"},
+            {"type": "remember", "note": "keep guidance readable"},
+            guidance=long_guidance,
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        resume = build_work_session_resume(session)
+        guidance = resume["recent_decisions"][0]["guidance_snapshot"]
+        self.assertTrue(guidance.endswith(" ... output truncated ..."))
+        self.assertNotIn("\n", guidance)
+        prefix = guidance.removesuffix(" ... output truncated ...")
+        self.assertRegex(prefix.split()[-1], r"^word\d{3}$")
+        self.assertIn(f"guidance: {guidance}", format_work_session_resume(resume))
+
+        context = build_work_model_context(
+            state,
+            session,
+            {"id": 1, "title": "Guidance", "description": "Clip one-shot guidance.", "status": "todo"},
+            "now",
+            guidance="",
+        )
+        model_guidance = context["work_session"]["model_turns"][0]["guidance_snapshot"]
+        self.assertNotIn("\n... output truncated ...", model_guidance)
 
     def test_work_session_resume_surfaces_working_memory(self):
         from mew.work_loop import build_work_model_context
@@ -2707,7 +2832,7 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 call = data["tool_call"]
                 self.assertEqual(call["status"], "failed")
-                self.assertIn("exit_code=None", call["error"])
+                self.assertIn("executable not found: mew-missing-verifier-command", call["error"])
                 self.assertIsNone(call["result"]["verification_exit_code"])
                 self.assertTrue(call["result"]["rolled_back"])
                 self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
@@ -4495,6 +4620,72 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("- /work-session recover --allow-read sample", output)
                 self.assertNotIn("- /work-session resume --allow-read .", output)
                 self.assertNotIn("- /work-session recover --allow-read .", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_workbench_surfaces_work_session_reentry_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["notes"] = "older note\nlatest task note"
+                    state["work_sessions"] = [
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Make the front door useful.",
+                            "created_at": "then",
+                            "updated_at": "now",
+                            "notes": [
+                                {"created_at": "now", "source": "user", "text": "Use the workbench first."},
+                                {"created_at": "now", "source": "model", "text": "Resume from the latest evidence."},
+                            ],
+                            "tool_calls": [],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "completed",
+                                    "decision_plan": {
+                                        "summary": "remember",
+                                        "working_memory": {
+                                            "hypothesis": "The workbench should be enough to reenter.",
+                                            "next_step": "Continue from the workbench without hunting through details.",
+                                            "open_questions": ["Does the front door show notes?"],
+                                            "last_verified_state": "not yet verified",
+                                        },
+                                    },
+                                    "action_plan": {"summary": "remember"},
+                                    "action": {"type": "remember", "note": "front door context"},
+                                    "summary": "recorded reentry guidance",
+                                    "guidance_snapshot": "Keep this visible on reentry.",
+                                    "started_at": "then",
+                                    "finished_at": "now",
+                                }
+                            ],
+                        }
+                    ]
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Reentry", output)
+                self.assertIn("hypothesis: The workbench should be enough to reenter.", output)
+                self.assertIn("next_step: Continue from the workbench without hunting through details.", output)
+                self.assertIn("note[user]: Use the workbench first.", output)
+                self.assertIn("note[model]: Resume from the latest evidence.", output)
+                self.assertIn("latest_decision: #1 remember recorded reentry guidance", output)
+                self.assertIn("guidance: Keep this visible on reentry.", output)
+                self.assertIn("latest task note", output)
+                self.assertIn("resume:", output)
+                self.assertIn("chat: /work-session resume 1", output)
             finally:
                 os.chdir(old_cwd)
 

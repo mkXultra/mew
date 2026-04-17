@@ -70,6 +70,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             "started_at": started_at,
             "finished_at": now_iso(),
             "exit_code": None,
+            "timed_out": True,
             "stdout": clip_output(stdout),
             "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
         }
@@ -81,6 +82,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             "started_at": started_at,
             "finished_at": now_iso(),
             "exit_code": None,
+            "error_type": "executable_not_found" if isinstance(exc, FileNotFoundError) else exc.__class__.__name__,
             "stdout": "",
             "stderr": str(exc),
         }
@@ -113,6 +115,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
             "started_at": started_at,
             "finished_at": now_iso(),
             "exit_code": None,
+            "error_type": "executable_not_found" if isinstance(exc, FileNotFoundError) else exc.__class__.__name__,
             "stdout": "",
             "stderr": str(exc),
         }
@@ -164,6 +167,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
         "started_at": started_at,
         "finished_at": now_iso(),
         "exit_code": exit_code,
+        "timed_out": timed_out,
         "stdout": clip_output(stdout),
         "stderr": clip_output(stderr),
     }

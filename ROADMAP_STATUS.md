@@ -148,6 +148,7 @@ Evidence:
 - `mew digest` exposes the chat digest as a top-level command, making recent autonomous activity review available without entering the chat REPL.
 - Active sessions remember start/live read/write/verify/model/approval options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Chat work-session Inspect and Advanced controls now reuse the active session's saved/default read roots instead of falling back to `--allow-read .`, keeping scoped cockpits from suggesting broader or invalid read gates.
+- Manual `run_tests` / `run_command` calls no longer store the parser's default `--path .` as a touched file, so non-file actions do not create noisy `.` world-state warnings.
 - Partial reentry-option updates now preserve existing read/write/verify/model defaults and add new explicit roots, so a later read-only command does not erase previously useful write or verification gates.
 - CLI live controls now prefer the current command's explicit tool gates over saved broader defaults, so read-only reentry does not suggest stale write, shell, or verification permissions.
 - Starting a new work session for a task with only closed sessions now clones the latest closed session defaults, preserving cockpit gates across closed-session restart.
@@ -177,12 +178,14 @@ Evidence:
 - Nonzero `run_command` exits now surface in work-session failure summaries and `phase=failed` without treating the command launch itself as a tool crash.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
+- Work-session guidance previews now clip on a one-line word boundary, keeping recent decision/reentry guidance readable instead of corrupting intent with mid-word truncation.
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
 - `mew self-improve --native`, `mew self-improve --start-session`, and chat `/self native ...` / `/self start ...` create/reuse a self-improvement coding task without forcing the older programmer-plan path, then print or start the native work-session path.
 - When the coding queue is empty, `mew next --kind coding` / `mew focus --kind coding` now suggest starting a native self-improvement session rather than going silent.
 - `mew work --approve-tool` now accepts exact new-file write roots when the parent directory exists, so resume-suggested file-level approvals apply correctly without broadening the write gate to `.`.
 - Unresolvable write roots now explain that the parent directory must exist instead of reporting a misleading `write is disabled` error when `--allow-write` was supplied.
 - `mew work <task-id>` now surfaces the latest work-session write and verification ledgers, including closed sessions, so the task workbench no longer says `Verification (none)` / `Writes (none)` after verified native work.
+- `mew work <task-id>` now surfaces a compact `Reentry` block with work-session working memory, recent user/model notes, latest decision guidance, task notes, and resume/chat hints, making the top-level task workbench a usable front door for resident continuation.
 - `mew verification` and `mew writes` now include work-session tool calls with stable `source`, `id`, `ledger_id`, and session-qualified labels such as `work25#113.verify`, making native work audit trails visible outside the full session view.
 - `mew status --kind ...` and `mew brief --kind ...` now scope counts, unread task-linked messages, questions, attention, task queues, next moves, and brief ledgers by task kind; kind-scoped briefs suppress unrelated global activity/thought/step history.
 - Human-role E2E round 3 verified that `brief --kind coding`, `status --kind coding`, missing-parent write-root errors, and global work-session ledgers all behave as intended without tracked file edits.
@@ -311,9 +314,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `622 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `626 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `128 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `132 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -361,6 +364,8 @@ Next action:
 - `claude-ultra` evaluation after the live-delta/search-snippet work said mew is conditionally worth inhabiting for short bounded coding tasks, but still behind Claude Code/Codex CLI for sustained interactive coding; its top 1-2 hour recommendation was readable compact rendering of plan-shaped model deltas.
 - Live Codex Web API dogfood on task #46 session #46 verified compact follow now emits readable `model_summary_delta`, `model_action_delta`, and `model_reason_delta` lines instead of raw JSON `model_delta` text.
 - Focused local validation verified that chat `/work-session` Inspect and Advanced controls now preserve a scoped `--allow-read sample` default and no longer suggest `--allow-read .` for that session.
+- `codex-ultra` isolated human-role E2E after search-snippet/live-delta work judged mew usable for bounded supervised coding/task work and found six papercuts: model-delta ordering, mid-word guidance clipping, chat read-gate broadening, `.` touched-file noise, missing top-level workbench reentry notes, and missing-executable `exit=None` wording. This session fixed the read-gate broadening, guidance clipping, touched-file noise, top-level reentry block, and missing-executable wording.
+- `claude-ultra` priority review ranked `mew work <task>` missing reentry guidance as the highest-leverage front-door issue and mid-word guidance clipping second; both are fixed in this session.
 
 ## Current Roadmap Focus
 

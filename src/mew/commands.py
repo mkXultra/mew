@@ -145,6 +145,7 @@ from .work_session import (
     build_work_session_command_entries,
     build_work_session_diff_entries,
     build_work_session_test_entries,
+    clip_inline_text,
     format_diff_preview,
     format_work_action,
     format_work_session_commands,
@@ -510,6 +511,54 @@ def work_session_write_summaries(session, limit=5):
     return items if limit is None else items[-limit:]
 
 
+def _format_workbench_reentry(resume, task):
+    if not resume:
+        return []
+    lines = []
+    memory = resume.get("working_memory") or {}
+    if memory:
+        if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
+            lines.append("memory: stale; refresh before relying on next_step")
+        for key in ("hypothesis", "next_step", "last_verified_state"):
+            value = memory.get(key)
+            if value:
+                lines.append(f"{key}: {clip_inline_text(value, 360)}")
+        questions = memory.get("open_questions") or []
+        if questions:
+            lines.append(f"open_questions: {clip_inline_text('; '.join(str(item) for item in questions), 360)}")
+
+    notes = resume.get("notes") or []
+    for note in notes[-2:]:
+        text = clip_inline_text(note.get("text") or "", 360)
+        if text:
+            source = note.get("source") or "note"
+            lines.append(f"note[{source}]: {text}")
+
+    decisions = resume.get("recent_decisions") or []
+    if decisions:
+        decision = decisions[-1]
+        summary = clip_inline_text(decision.get("summary") or "", 300)
+        tool_text = f" tool_call=#{decision.get('tool_call_id')}" if decision.get("tool_call_id") else ""
+        lines.append(
+            f"latest_decision: #{decision.get('model_turn_id')} "
+            f"{decision.get('action') or 'unknown'}{tool_text} {summary}".rstrip()
+        )
+        guidance = decision.get("guidance_snapshot") or decision.get("guidance")
+        if guidance:
+            lines.append(f"guidance: {clip_inline_text(guidance, 360)}")
+
+    task_notes = format_task_notes_display((task or {}).get("notes") or "", max_lines=3, max_chars=800)
+    if task_notes:
+        lines.append("task_notes:")
+        lines.extend(f"  {line}" for line in task_notes.splitlines())
+
+    task_id = resume.get("task_id") or (task or {}).get("id")
+    if task_id:
+        lines.append(f"resume: {mew_command('work', task_id, '--session', '--resume')}")
+        lines.append(f"chat: /work-session resume {task_id}")
+    return lines
+
+
 def format_workbench(data):
     task = data["task"]
     lines = [
@@ -602,6 +651,10 @@ def format_workbench(data):
             f"model_turns={len(model_turns)} tool_calls={len(tool_calls)} "
             f"last_tool=#{session.get('last_tool_call_id') or ''}"
         )
+        reentry = _format_workbench_reentry(resume, task)
+        if reentry:
+            lines.append("Reentry")
+            lines.extend(f"- {line}" if not line.startswith("  ") else line for line in reentry)
     else:
         lines.append("(none)")
 
@@ -2845,8 +2898,9 @@ def cmd_work_recover_session(args):
 
 
 def _work_tool_parameters(args):
+    path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file"}
     parameters = {
-        "path": args.path,
+        "path": args.path if getattr(args, "tool", "") in path_tools else None,
         "query": getattr(args, "query", None),
         "pattern": getattr(args, "pattern", None),
         "command": getattr(args, "command", None),
