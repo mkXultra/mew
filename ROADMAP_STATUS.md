@@ -132,6 +132,7 @@ Evidence:
 - `mew focus` / `mew daily` now surface active work sessions with phase, next action, resume command, and one-step continue command, making task reentry visible from the quiet daily view.
 - `mew focus` now includes active work-session working memory when present, so the quiet daily view can show the resident model's current hypothesis and memory next step before opening a full resume.
 - `mew focus` now marks stale work-session memory and suppresses stale `memory_next` text when later tool or model activity means the resident should refresh before relying on it.
+- `mew focus` now reuses the active work session's saved model/gate/verify/approval defaults in its continue/follow commands, so daily reentry stays copy-paste runnable.
 - `mew digest` exposes the chat digest as a top-level command, making recent autonomous activity review available without entering the chat REPL.
 - Active sessions remember start/live read/write/verify/model/approval options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Partial reentry-option updates now preserve existing read/write/verify/model defaults and add new explicit roots, so a later read-only command does not erase previously useful write or verification gates.

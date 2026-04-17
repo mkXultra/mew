@@ -47,6 +47,9 @@ When an active work session has working memory, `focus` includes the current
 hypothesis and memory next step so reentry context is visible before opening the
 full resume. If a later tool or model turn made that memory stale, `focus` marks
 it stale and suppresses the old memory next step.
+The same view uses the active session's saved model, permission, approval, and
+verification defaults for its `continue` and `follow` commands, so quiet reentry
+does not lose the cockpit setup.
 
 ## Programmer Loop
 

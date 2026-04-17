@@ -558,6 +558,49 @@ class BriefTests(unittest.TestCase):
         self.assertIn("memory_next: Surface memory in focus.", focus)
         self.assertIn("resume: ./mew work 7 --session --resume --allow-read .", focus)
         self.assertIn("continue: ./mew work 7 --live --allow-read . --max-steps 1", focus)
+        self.assertIn("follow: ./mew work 7 --follow --allow-read . --max-steps 10", focus)
+
+    def test_focus_reentry_commands_reuse_work_session_defaults(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Use saved cockpit defaults")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Use saved cockpit defaults",
+                "goal": "Make focus reentry copy-paste ready.",
+                "created_at": "then",
+                "updated_at": "now",
+                "default_options": {
+                    "auth": "auth.json",
+                    "model_backend": "codex",
+                    "allow_read": ["."],
+                    "allow_write": ["."],
+                    "allow_verify": True,
+                    "verify_command": "uv run pytest -q",
+                    "act_mode": "deterministic",
+                    "compact_live": True,
+                },
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        data = build_focus_data(state, limit=3)
+        session = data["active_work_sessions"][0]
+        focus = format_focus(data)
+
+        expected_continue = (
+            "./mew work 7 --live --auth auth.json --model-backend codex --allow-read . "
+            "--allow-write . --allow-verify --verify-command 'uv run pytest -q' "
+            "--act-mode deterministic --compact-live --max-steps 1"
+        )
+        expected_follow = expected_continue.replace("--live", "--follow").replace("--max-steps 1", "--max-steps 10")
+        self.assertEqual(session["continue_command"], expected_continue)
+        self.assertEqual(session["follow_command"], expected_follow)
+        self.assertIn(f"continue: {expected_continue}", focus)
+        self.assertIn(f"follow: {expected_follow}", focus)
 
     def test_focus_marks_stale_active_work_session_memory(self):
         state = default_state()

@@ -556,6 +556,8 @@ def active_work_session_items(state, limit=3, kind=None):
         resume = build_work_session_resume(session, task=task, limit=3) or {}
         task_id = session.get("task_id")
         task_parts = [task_id] if task_id is not None else []
+        continue_command = _work_session_reentry_command(session, task_parts, max_steps=1)
+        follow_command = _work_session_reentry_command(session, task_parts, max_steps=10, follow=True)
         items.append(
             {
                 "id": session.get("id"),
@@ -564,17 +566,56 @@ def active_work_session_items(state, limit=3, kind=None):
                 "phase": resume.get("phase") or "unknown",
                 "next_action": resume.get("next_action") or "",
                 "working_memory": resume.get("working_memory") or {},
-                "resume_command": mew_command(
-                    "work", *task_parts, "--session", "--resume", "--allow-read", "."
-                ),
-                "continue_command": mew_command(
-                    "work", *task_parts, "--live", "--allow-read", ".", "--max-steps", "1"
-                ),
+                "resume_command": mew_command("work", *task_parts, "--session", "--resume", "--allow-read", "."),
+                "continue_command": continue_command,
+                "follow_command": follow_command,
             }
         )
         if len(items) >= limit:
             break
     return items
+
+
+def _work_session_default_option_parts(session):
+    options = (session or {}).get("default_options") or {}
+    parts = []
+    for key, flag in (
+        ("auth", "--auth"),
+        ("model_backend", "--model-backend"),
+        ("model", "--model"),
+        ("base_url", "--base-url"),
+    ):
+        if options.get(key):
+            parts.extend([flag, options[key]])
+    for root in options.get("allow_read") or []:
+        parts.extend(["--allow-read", root])
+    for root in options.get("allow_write") or []:
+        parts.extend(["--allow-write", root])
+    if options.get("allow_shell"):
+        parts.append("--allow-shell")
+    if options.get("allow_verify"):
+        parts.append("--allow-verify")
+    if options.get("verify_command"):
+        parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("act_mode"):
+        parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("compact_live") and "--compact-live" not in parts:
+        parts.append("--compact-live")
+    if options.get("no_prompt_approval"):
+        parts.append("--no-prompt-approval")
+    elif options.get("prompt_approval"):
+        parts.append("--prompt-approval")
+    return parts
+
+
+def _work_session_reentry_command(session, task_parts, max_steps=1, follow=False):
+    parts = ["work", *task_parts, "--follow" if follow else "--live"]
+    option_parts = _work_session_default_option_parts(session)
+    parts.extend(option_parts)
+    if "--allow-read" not in option_parts:
+        parts.extend(["--allow-read", "."])
+    parts.extend(["--max-steps", str(max_steps)])
+    return mew_command(*parts)
 
 
 def _format_focus_memory_stale(memory):
@@ -646,6 +687,7 @@ def format_focus(data):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
             lines.append(f"  resume: {session.get('resume_command')}")
             lines.append(f"  continue: {session.get('continue_command')}")
+            lines.append(f"  follow: {session.get('follow_command')}")
 
     tasks = data.get("tasks") or []
     if tasks:
