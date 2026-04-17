@@ -279,8 +279,10 @@ def diff_cell(session, call):
     parameters = call.get("parameters") or {}
     path = result.get("path") or parameters.get("path") or ""
     stats = result.get("diff_stats") or diff_line_counts(result.get("diff") or "")
+    task_ref = (session or {}).get("task_id") or "<task-id>"
+    operation = result.get("operation") or call.get("tool") or "write"
     preview = (
-        f"{call.get('tool') or 'write'} {path} "
+        f"{operation} {path} "
         f"+{stats.get('added', 0)} -{stats.get('removed', 0)}"
     ).strip()
     cell = _cell_base(
@@ -293,11 +295,33 @@ def diff_cell(session, call):
         call.get("finished_at"),
         preview,
     )
-    cell["detail"] = format_diff_preview(
+    cell["operation"] = operation
+    cell["target"] = path
+    cell["diff_stats"] = stats
+    cell["changed"] = result.get("changed")
+    cell["dry_run"] = result.get("dry_run")
+    cell["applied"] = result.get("applied")
+    cell["approval_status"] = call.get("approval_status") or ""
+    metadata = "\n".join(
+        line
+        for line in (
+            f"operation: {operation}",
+            f"path: {path}" if path else "",
+            f"changed: {result.get('changed')}",
+            f"dry_run: {result.get('dry_run')}",
+            f"applied: {result.get('applied')}",
+            f"diff_stats: +{stats.get('added', 0)} -{stats.get('removed', 0)}",
+            f"approval_status: {call.get('approval_status')}" if call.get("approval_status") else "",
+            f"full_diff: mew work {task_ref} --diffs",
+        )
+        if line
+    )
+    preview_text = format_diff_preview(
         result.get("diff") or "",
         max_chars=1200,
         diff_stats=result.get("diff_stats"),
     )
+    cell["detail"] = "\n".join(part for part in (metadata, preview_text) if part)
     return cell
 
 

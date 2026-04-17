@@ -275,6 +275,7 @@ Evidence:
 - Command/test cells now include command, cwd, exit status, elapsed time, stdout/stderr line and character counts, output tails, explicit no-output rows, timeout/error metadata, and a `full_output` hint back to `mew work <task-id> --tests` or `--commands`.
 - Approval cells now carry structured `operation`, `target`, and `actions`; pending write/edit approvals expose approve-once, reject, and reject-with-feedback commands, and missing shell/verification gates can surface as required approval cells.
 - Direct `mew work 86 --cells` dogfood verified both approval anchor paths in a real ignored state session: a failed shell-gated command produced a required `shell_command` approval cell, and a dry-run write produced a pending `file_write` approval cell with reject-with-feedback guidance.
+- Diff cells now carry structured `operation`, `target`, `diff_stats`, `dry_run`, `applied`, and `approval_status` metadata plus a `full_diff` hint back to `mew work <task-id> --diffs`, so write previews are no longer just raw clipped patches.
 
 Missing proof:
 
@@ -288,7 +289,7 @@ Missing proof:
 
 Next action:
 
-- Dogfood approval anchors in real resident work, then decide whether the next slice should be cell-native follow rendering or richer diff cells.
+- Use the running human-role agent dogfood feedback to choose the next small slice. If it finds no blocker, move from cell data quality into a more cell-native follow stream.
 
 ## Milestone 3: Persistent Advantage
 
@@ -407,7 +408,7 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `793 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `182 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `183 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
 - `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` current: real Codex Web API dogfood inspected the new cell implementation, produced stable cells after each step, and identified the row-noise polish that was fixed in this session.

@@ -237,6 +237,17 @@ The first useful version only needs:
 - reject with feedback
 - show exact target/path/command
 
+### P2: Diff Cells
+
+Initial implementation status, 2026-04-18:
+
+- Diff cells now include structured `operation`, `target`, `diff_stats`,
+  `changed`, `dry_run`, `applied`, and `approval_status` fields.
+- Text detail includes operation/path metadata, exact add/remove counts, and a
+  `full_diff: mew work <task-id> --diffs` hint.
+- The next useful step is not more diff metadata. It is making follow mode feel
+  like a cell stream instead of old logs plus occasional cells.
+
 ### P1: Interrupt/Steer Semantics
 
 Estimated time: 1 to 2 days after cells exist.
@@ -249,17 +260,6 @@ Rules to make explicit:
 
 The UI must show which route was chosen. Nothing should be silently dropped or
 surprisingly sent.
-
-### P2: Diff Cells
-
-Estimated time: 1 day.
-
-Show:
-
-- files changed
-- lines added/deleted
-- compact hunks
-- full diff detail path or command
 
 ### P2: Resume Live State
 
@@ -277,11 +277,12 @@ Resume should restore:
 
 ## Next Recommended Task
 
-Continue from the landed P0 slice and the first command/test-cell polish into
-approval anchors:
+Continue from the landed P0 cell slice, command/test cells, approval anchors,
+and initial diff-cell metadata into a calmer follow stream:
 
-> Add operation-specific approval cells that point at exact write/shell/network
-> targets and support approve once / reject / reject with feedback.
+> Make `mew work --follow` primarily readable as stable cells, reducing the
+> older thinking/action/result repetition while preserving enough detail for
+> non-TTY logs.
 
 Target duration:
 
