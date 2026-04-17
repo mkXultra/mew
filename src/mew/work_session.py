@@ -1270,6 +1270,41 @@ def build_work_session_resume(session, task=None, limit=8):
     }
 
 
+def recovery_next_action_with_world_state(next_action, world_state):
+    next_action = str(next_action or "").strip()
+    if not next_action:
+        return ""
+    world_state = world_state if isinstance(world_state, dict) else {}
+    git_status = world_state.get("git_status") if isinstance(world_state.get("git_status"), dict) else {}
+    files = list(world_state.get("files") or [])
+    missing_paths = [record.get("path") or "(unknown path)" for record in files if record.get("exists") is False]
+    if missing_paths:
+        return f"{next_action}; first inspect missing touched paths: {', '.join(missing_paths[:2])}"
+
+    git_known = git_status.get("exit_code") == 0
+    git_clean = git_known and not (git_status.get("stdout") or "").strip() and not (
+        git_status.get("stderr") or ""
+    ).strip()
+    if files and git_clean:
+        return f"{next_action}; live world check: git is clean and touched paths still exist"
+    if files or git_status:
+        return f"{next_action}; live world check: review git status and touched paths before retrying"
+    return next_action
+
+
+def attach_work_resume_world_state(resume, world_state):
+    if not resume:
+        return resume
+    resume["world_state"] = world_state or {}
+    recovery_plan = resume.get("recovery_plan") or {}
+    if recovery_plan.get("next_action") and resume.get("phase") in ("interrupted", "idle", "failed"):
+        resume["next_action"] = recovery_next_action_with_world_state(
+            recovery_plan.get("next_action"),
+            resume.get("world_state"),
+        )
+    return resume
+
+
 def format_work_session_resume(resume):
     if not resume:
         return "No active work session."

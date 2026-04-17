@@ -11,6 +11,7 @@ from .work_session import (
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
     WRITE_WORK_TOOLS,
+    attach_work_resume_world_state,
     build_work_session_resume,
     work_turn_guidance_snapshot,
 )
@@ -377,6 +378,7 @@ def build_work_model_context(
         allowed_read_roots or [],
         file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
     )
+    resume = attach_work_resume_world_state(resume, world_state)
     work_context = build_budgeted_work_session_context(
         session,
         task,

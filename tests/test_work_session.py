@@ -1932,6 +1932,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("--auto-recover-safe", stdout.getvalue())
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]), 0)
+                world_resume = json.loads(stdout.getvalue())["resume"]
+                self.assertIn("world_state", world_resume)
+                self.assertIn("live world check: review git status", world_resume["next_action"])
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
                 text_resume = stdout.getvalue()
                 self.assertIn("Recovery plan", text_resume)
@@ -1960,6 +1966,29 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "idle")
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_recovery_next_action_prioritizes_missing_touched_paths(self):
+        from mew.work_session import attach_work_resume_world_state
+
+        resume = {
+            "phase": "interrupted",
+            "next_action": "inspect interrupted work state",
+            "recovery_plan": {"next_action": "retry safe read"},
+        }
+        attach_work_resume_world_state(
+            resume,
+            {
+                "files": [
+                    {"path": "missing.py", "exists": False},
+                    {"path": "present.py", "exists": True},
+                ],
+                "git_status": {"exit_code": 0, "stdout": "", "stderr": ""},
+            },
+        )
+
+        self.assertEqual(resume["world_state"]["files"][0]["path"], "missing.py")
+        self.assertIn("retry safe read", resume["next_action"])
+        self.assertIn("first inspect missing touched paths: missing.py", resume["next_action"])
 
     def test_work_session_resume_auto_recovers_safe_read_tool(self):
         old_cwd = os.getcwd()

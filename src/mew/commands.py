@@ -133,6 +133,7 @@ from .write_tools import edit_file, summarize_write_result, write_file
 from .work_session import (
     active_work_session,
     add_work_session_note,
+    attach_work_resume_world_state,
     build_work_session_resume,
     close_work_session,
     compact_work_tool_summary,
@@ -2929,7 +2930,7 @@ def cmd_work_show_session(args):
                 task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task)
         if resume and getattr(args, "allow_read", None):
-            resume["world_state"] = build_work_world_state(resume, args.allow_read)
+            attach_work_resume_world_state(resume, build_work_world_state(resume, args.allow_read))
         if not resume and not getattr(args, "task_id", None):
             if args.json:
                 payload = {
@@ -7409,7 +7410,7 @@ def chat_work_session(rest, chat_state=None):
                 session = _latest_work_session_for_task(state, task_id)
         resume = build_work_session_resume(session, task=work_session_task(state, session))
         if resume and allow_read:
-            resume["world_state"] = build_work_world_state(resume, allow_read)
+            attach_work_resume_world_state(resume, build_work_world_state(resume, allow_read))
         if not resume and not task_id:
             if auto_recovery is not None:
                 print("Auto recovery")

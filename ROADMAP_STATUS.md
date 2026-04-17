@@ -298,6 +298,7 @@ Evidence:
 - Side-effecting interrupted command/write recovery items now include the original command or path, a review hint, and short review steps; `mew work --recover-session --json` reports the same review context instead of only refusing automatic retry.
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
 - Work-session recovery plan items now carry the interrupted source record's summary, error, and `recovery_hint`, so text and JSON resumes preserve why a retry/replan/review item exists instead of showing only a generic action classification.
+- Work-session resumes that include live world state now refine recovery-driven `next_action` text: missing touched paths are called out first, clean git plus existing touched paths are distinguished from dirty/uncertain world state, and no side-effecting recovery is attempted automatically.
 - `save_state` now rotates the previous `state.json` to `state.json.bak` before replacing it, giving the resident shell a simple recovery point if the current state file is damaged.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
@@ -326,6 +327,7 @@ Evidence:
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
 - Native self-improvement dogfood session #69 used `mew self-improve --start-session` and `mew work --follow` with Codex Web API to implement a small True Recovery slice, then verified it with focused and full tests.
+- Native self-improvement dogfood session #70 used `mew work --follow` with Codex Web API to continue True Recovery work; it exposed malformed JSON and incomplete edit friction, then landed world-aware recovery `next_action` guidance after those cockpit fixes.
 
 Missing proof:
 
@@ -340,7 +342,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `664 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `665 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_work_recovery_next_action_prioritizes_missing_touched_paths tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying` current: `3 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-world-aware-recovery --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `2 passed`.
 - `uv run pytest -q tests/test_runtime.py::RuntimeTests::test_think_phase_retries_malformed_model_json_once tests/test_runtime.py::RuntimeTests::test_think_phase_retries_transient_model_errors` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
