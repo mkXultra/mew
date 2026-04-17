@@ -1652,6 +1652,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "step_count": len((report or {}).get("steps") or []),
         "last_step": step or (((report or {}).get("steps") or [None])[-1]),
         "resume": resume or {},
+        "pending_approvals": (resume or {}).get("pending_approvals") or [],
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args) if session else [],
         "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
@@ -3372,6 +3373,10 @@ def _apply_work_approval(args, approve_tool_id):
         if not session:
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1, None
+        expected_updated_at = getattr(args, "expected_session_updated_at", None)
+        if expected_updated_at and session.get("updated_at") != expected_updated_at:
+            print("mew: reply file was based on a stale work-session snapshot", file=sys.stderr)
+            return 1, None
         task = work_session_task(state, session)
         if not getattr(args, "verify_command", None):
             inferred_verify_command = work_session_default_verify_command(session, task=task)
@@ -3830,6 +3835,16 @@ def _coerce_work_reply_list(value):
     return [str(value).strip()]
 
 
+def _reject_reply_verify_overrides(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    blocked = [key for key in ("verify_command", "verify_cwd", "verify_timeout") if raw.get(key) not in (None, "")]
+    if blocked:
+        raise MewError(
+            "reply approve actions cannot set verification commands; "
+            "use an existing session default or pass CLI --allow-verify/--verify-command"
+        )
+
+
 def _normalize_work_reply_actions(payload):
     actions = []
     raw_actions = payload.get("actions")
@@ -3860,25 +3875,21 @@ def _normalize_work_reply_actions(payload):
                 reason = _coerce_work_reply_text(raw.get("reason") or raw.get("text"))
                 actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
             elif action_type == "approve":
+                _reject_reply_verify_overrides(raw)
                 tool_call_id = raw.get("tool_call_id") or raw.get("tool") or raw.get("id")
                 actions.append(
                     {
                         "type": "approve",
                         "tool_call_id": tool_call_id,
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
-                        "verify_command": _coerce_work_reply_text(raw.get("verify_command")),
-                        "verify_cwd": _coerce_work_reply_text(raw.get("verify_cwd")),
-                        "verify_timeout": raw.get("verify_timeout"),
                     }
                 )
             elif action_type in ("approve_all", "approve-all"):
+                _reject_reply_verify_overrides(raw)
                 actions.append(
                     {
                         "type": "approve_all",
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
-                        "verify_command": _coerce_work_reply_text(raw.get("verify_command")),
-                        "verify_cwd": _coerce_work_reply_text(raw.get("verify_cwd")),
-                        "verify_timeout": raw.get("verify_timeout"),
                     }
                 )
             else:
@@ -3913,46 +3924,32 @@ def _normalize_work_reply_actions(payload):
     approve = payload.get("approve")
     if approve or payload.get("approve_tool"):
         if isinstance(approve, dict):
+            _reject_reply_verify_overrides(approve)
             tool_call_id = approve.get("tool_call_id") or approve.get("tool") or approve.get("id")
             allow_write = _coerce_work_reply_list(approve.get("allow_write") or approve.get("allow_write_roots"))
-            verify_command = _coerce_work_reply_text(approve.get("verify_command"))
-            verify_cwd = _coerce_work_reply_text(approve.get("verify_cwd"))
-            verify_timeout = approve.get("verify_timeout")
         else:
+            _reject_reply_verify_overrides(payload)
             tool_call_id = payload.get("approve_tool") or approve
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
-            verify_command = _coerce_work_reply_text(payload.get("verify_command"))
-            verify_cwd = _coerce_work_reply_text(payload.get("verify_cwd"))
-            verify_timeout = payload.get("verify_timeout")
         actions.append(
             {
                 "type": "approve",
                 "tool_call_id": tool_call_id,
                 "allow_write": allow_write,
-                "verify_command": verify_command,
-                "verify_cwd": verify_cwd,
-                "verify_timeout": verify_timeout,
             }
         )
     if payload.get("approve_all"):
         approve_all = payload.get("approve_all")
         if isinstance(approve_all, dict):
+            _reject_reply_verify_overrides(approve_all)
             allow_write = _coerce_work_reply_list(approve_all.get("allow_write") or approve_all.get("allow_write_roots"))
-            verify_command = _coerce_work_reply_text(approve_all.get("verify_command"))
-            verify_cwd = _coerce_work_reply_text(approve_all.get("verify_cwd"))
-            verify_timeout = approve_all.get("verify_timeout")
         else:
+            _reject_reply_verify_overrides(payload)
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
-            verify_command = _coerce_work_reply_text(payload.get("verify_command"))
-            verify_cwd = _coerce_work_reply_text(payload.get("verify_cwd"))
-            verify_timeout = payload.get("verify_timeout")
         actions.append(
             {
                 "type": "approve_all",
                 "allow_write": allow_write,
-                "verify_command": verify_command,
-                "verify_cwd": verify_cwd,
-                "verify_timeout": verify_timeout,
             }
         )
     for action in actions:
@@ -4017,13 +4014,13 @@ def build_work_reply_schema(session=None):
                 "type": "approve",
                 "description": "approve and apply a pending dry-run write_file/edit_file tool call",
                 "required": ["tool_call_id"],
-                "optional": ["allow_write", "verify_command", "verify_cwd", "verify_timeout"],
+                "optional": ["allow_write"],
             },
             {
                 "type": "approve_all",
                 "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
                 "required": [],
-                "optional": ["allow_write", "verify_command", "verify_cwd", "verify_timeout"],
+                "optional": ["allow_write"],
             },
         ],
         "reply_template": {
@@ -4115,19 +4112,12 @@ def _reply_approval_args(args, session, source_call, action):
     approval_args.verify_command = getattr(args, "verify_command", None)
     approval_args.verify_cwd = getattr(args, "verify_cwd", None) or "."
     approval_args.verify_timeout = getattr(args, "verify_timeout", None)
-    if action.get("verify_command"):
-        approval_args.verify_command = action.get("verify_command")
-        approval_args.allow_verify = True
-    if action.get("verify_cwd"):
-        approval_args.verify_cwd = action.get("verify_cwd")
-    if action.get("verify_timeout") not in (None, ""):
-        approval_args.verify_timeout = action.get("verify_timeout")
     approval_args.progress = False
     approval_args.json = False
     return approval_args
 
 
-def _apply_work_reply_approval_action(args, session_id, action):
+def _apply_work_reply_approval_action(args, session_id, action, expected_updated_at=None):
     approved = []
     with state_lock():
         state = load_state()
@@ -4150,6 +4140,7 @@ def _apply_work_reply_approval_action(args, session_id, action):
                 print(f"mew: {approval_error}", file=sys.stderr)
                 return 1, approved
             approval_args = _reply_approval_args(args, session, source_call, action)
+            approval_args.expected_session_updated_at = expected_updated_at
         code, data = _apply_work_approval(approval_args, approve_id)
         if data is not None:
             tool_call = data["tool_call"]
@@ -4164,6 +4155,10 @@ def _apply_work_reply_approval_action(args, session_id, action):
             )
         if code != 0:
             return code, approved
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            expected_updated_at = (session or {}).get("updated_at")
     if action["type"] == "approve_all":
         return 0, [{"type": "approve_all", "count": len(approved), "approved": approved}]
     return 0, approved
@@ -4208,6 +4203,7 @@ def cmd_work_reply_file(args):
     applied = []
     deferred_approval_actions = []
     session_id = None
+    approval_expected_updated_at = None
     with state_lock():
         state = load_state()
         session = None
@@ -4343,12 +4339,22 @@ def cmd_work_reply_file(args):
                 deferred_approval_actions.append(action)
         save_state(state)
         session_id = session.get("id")
+        approval_expected_updated_at = session.get("updated_at")
 
     for action in deferred_approval_actions:
-        code, approved = _apply_work_reply_approval_action(select_args, session_id, action)
+        code, approved = _apply_work_reply_approval_action(
+            select_args,
+            session_id,
+            action,
+            expected_updated_at=approval_expected_updated_at,
+        )
         applied.extend(approved)
         if code != 0:
             return code
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            approval_expected_updated_at = (session or {}).get("updated_at")
 
     with state_lock():
         state = load_state()

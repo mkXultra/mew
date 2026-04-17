@@ -11,6 +11,7 @@ The snapshot is a local contract for another model or UI. It includes:
 - `session_id` and `task_id`
 - `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
+- `pending_approvals`: top-level pending dry-run write approvals for observers
 - `reply_command`: where to submit a reply file
 - `reply_template`: a minimal safe reply payload
 
@@ -69,9 +70,11 @@ Example:
 }
 ```
 
-Approval actions may include `allow_write`, `verify_command`, `verify_cwd`, and
-`verify_timeout`. If `allow_write` is omitted, mew reuses the work-session
-write gates and then falls back to the pending write path.
+Approval actions may include `allow_write`. If `allow_write` is omitted, mew
+reuses the work-session write gates and then falls back to the pending write
+path. Reply files cannot set verification commands; verification must come from
+the existing work-session defaults or explicit trusted CLI flags passed to
+`mew work --reply-file`.
 
 `--reply-file` fails with a nonzero status when there is no matching active
 session, when `schema_version` is not `1`, or when

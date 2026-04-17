@@ -8635,6 +8635,53 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_snapshot_surfaces_top_level_pending_approvals(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import write_work_follow_snapshot
+                from mew.work_session import build_work_session_resume
+
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Approval snapshot",
+                    "updated_at": "2026-04-18T00:00:00Z",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "started_at": "2026-04-18T00:00:00Z",
+                            "finished_at": "2026-04-18T00:00:01Z",
+                            "parameters": {"path": "notes.md", "old": "before", "new": "after"},
+                            "result": {
+                                "path": "notes.md",
+                                "dry_run": True,
+                                "changed": True,
+                                "diff": "--- notes.md\n+++ notes.md\n@@\n-before\n+after\n",
+                            },
+                        }
+                    ],
+                }
+                resume = build_work_session_resume(session, task={"id": 1, "title": "Approval snapshot"})
+                path = write_work_follow_snapshot(
+                    SimpleNamespace(live=True, follow=True),
+                    {"steps": [], "stop_reason": "approval_required"},
+                    session,
+                    {"id": 1, "title": "Approval snapshot"},
+                    resume,
+                    force=True,
+                )
+
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["pending_approvals"][0]["tool_call_id"], 3)
+                self.assertEqual(data["pending_approvals"], data["resume"]["pending_approvals"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_max_steps_note_replaces_older_boundary_notes(self):
         from mew.commands import record_max_steps_reentry_note
 
@@ -9431,7 +9478,21 @@ class WorkSessionTests(unittest.TestCase):
                     add_coding_task(state)
                     save_state(state)
                 with redirect_stdout(StringIO()):
-                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
                     self.assertEqual(
                         main(
                             [
@@ -9483,7 +9544,6 @@ class WorkSessionTests(unittest.TestCase):
                                 {
                                     "type": "approve_all",
                                     "allow_write": ".",
-                                    "verify_command": verify_command,
                                 }
                             ],
                         }
@@ -9503,6 +9563,143 @@ class WorkSessionTests(unittest.TestCase):
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve_all")
                 self.assertEqual(snapshot["last_step"]["applied"][0]["count"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_approve_rejects_verify_command_override(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-write", "."]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [
+                                {
+                                    "type": "approve",
+                                    "tool_call_id": 1,
+                                    "verify_command": "true",
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                self.assertIn("reply approve actions cannot set verification commands", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("approval_status", session["tool_calls"][0])
+                self.assertEqual(len(session["tool_calls"]), 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_approve_rechecks_stale_snapshot_before_applying(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import _apply_work_approval
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                verify_command = f"{sys.executable} -c \"import sys; sys.exit(0)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                approval_args = SimpleNamespace(
+                    task_id="1",
+                    allow_write=["."],
+                    allow_read=[],
+                    allow_verify=True,
+                    verify_command=verify_command,
+                    verify_cwd=".",
+                    verify_timeout=300.0,
+                    progress=False,
+                    json=False,
+                    expected_session_updated_at="older-than-current",
+                )
+                with redirect_stderr(StringIO()) as stderr:
+                    code, data = _apply_work_approval(approval_args, 1)
+                self.assertEqual(code, 1)
+                self.assertIsNone(data)
+                self.assertIn("stale work-session snapshot", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+                session = load_state()["work_sessions"][0]
+                self.assertNotEqual(session["tool_calls"][0].get("approval_status"), "applying")
+                self.assertEqual(len(session["tool_calls"]), 1)
             finally:
                 os.chdir(old_cwd)
 

@@ -1226,7 +1226,19 @@ def run_work_session_scenario(workspace, env=None):
     interrupt_submit_result = run(["work", "6", "--interrupt-submit", "dogfood interrupt submit", "--json"])
     interrupt_resume_result = run(["work", "6", "--session", "--resume", "--json"])
     run(["task", "add", "Reply approve task", "--kind", "coding"])
-    reply_approve_start_result = run(["work", "7", "--start-session", "--json"])
+    reply_approve_start_result = run(
+        [
+            "work",
+            "7",
+            "--start-session",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            "true",
+            "--json",
+        ]
+    )
     reply_approve_write_result = run(
         [
             "work",
@@ -1260,7 +1272,6 @@ def run_work_session_scenario(workspace, env=None):
                         "type": "approve",
                         "tool_call_id": reply_approve_tool_id,
                         "allow_write": ".",
-                        "verify_command": "true",
                     }
                 ],
             }

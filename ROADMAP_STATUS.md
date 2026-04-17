@@ -77,6 +77,9 @@ Claude review then identified the highest-leverage external-observer gap:
 That gap is now closed with `approve` and `approve_all` reply actions, plus
 schema/docs/dogfood coverage, so another model watching `.mew/follow/latest.json`
 can drive a dry-run write through approval without a separate human CLI command.
+The same follow snapshot now also exposes top-level `pending_approvals`, so an
+observer does not have to dig through the nested resume bundle just to find the
+approval tool ids.
 
 ## Milestone 1: Native Hands
 
@@ -311,6 +314,7 @@ Evidence:
 - `mew code --help` now includes direct reentry examples for reviewing a work-session resume and reopening coding-scoped work-mode chat.
 - `mew work --cells --cell-tail-lines N` provides configurable command/test tail output, reducing noisy cell panes without changing the full `--commands`/`--tests` detail views.
 - `mew work --reply-file` now supports `approve` and `approve_all` observer actions for pending dry-run writes, reusing existing write/verify gates and rewriting the follow snapshot after completion.
+- `.mew/follow/latest.json` now includes top-level `pending_approvals` for external observer UIs and models.
 
 Missing proof:
 
