@@ -211,6 +211,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("chat_work_respects_kind_scope", text)
             self.assertIn("chat_transcript_records_inputs", text)
             self.assertIn("code_entrypoint_starts_work_mode_chat", text)
+            self.assertIn("code_startup_controls_stay_short", text)
 
     def test_run_dogfood_work_session_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

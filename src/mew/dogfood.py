@@ -650,6 +650,20 @@ def run_chat_cockpit_scenario(workspace, env=None):
         observed=command_result_tail(code_result),
         expected="mew code --read-only --no-verify does not inherit stale write/shell/verify controls",
     )
+    _scenario_check(
+        checks,
+        "code_startup_controls_stay_short",
+        code_result.get("exit_code") == 0
+        and "- /c" in code_controls
+        and "- /follow" in code_controls
+        and "- /continue <guidance>" in code_controls
+        and "--auth" not in code_controls
+        and "--model-backend" not in code_controls
+        and "--allow-read" not in code_controls
+        and "--act-mode" not in code_controls,
+        observed=command_result_tail(code_result),
+        expected="mew code startup keeps primary controls short and leaves full flags behind /help work",
+    )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 
 
