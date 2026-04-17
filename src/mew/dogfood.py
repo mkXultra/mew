@@ -1187,6 +1187,27 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    run(["task", "add", "Reply file task", "--kind", "coding"])
+    reply_start_result = run(["work", "5", "--start-session", "--json"])
+    reply_start_data = _json_stdout(reply_start_result)
+    reply_session = reply_start_data.get("work_session") or {}
+    reply_path = workspace / "follow-reply.json"
+    reply_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "session_id": reply_session.get("id"),
+                "task_id": 5,
+                "actions": [
+                    {"type": "steer", "text": "dogfood observer steer"},
+                    {"type": "note", "text": "dogfood observer note"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reply_file_result = run(["work", "--reply-file", str(reply_path), "--json"])
+    reply_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -1201,6 +1222,7 @@ def run_work_session_scenario(workspace, env=None):
     approve_all_first_data = _json_stdout(approve_all_first_result)
     approve_all_second_data = _json_stdout(approve_all_second_result)
     approve_all_data = _json_stdout(approve_all_result)
+    reply_file_data = _json_stdout(reply_file_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1339,6 +1361,20 @@ def run_work_session_scenario(workspace, env=None):
             "approval": approve_all_data,
         },
         expected="approve-all applies multiple pending dry-run writes with one command",
+    )
+    _scenario_check(
+        checks,
+        "work_reply_file_updates_follow_snapshot",
+        reply_start_result.get("exit_code") == 0
+        and reply_file_result.get("exit_code") == 0
+        and any(action.get("type") == "steer" for action in reply_file_data.get("applied") or [])
+        and reply_snapshot_data.get("mode") == "reply_file"
+        and reply_snapshot_data.get("session_id") == reply_session.get("id")
+        and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("source") == "reply_file"
+        and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("text")
+        == "dogfood observer steer",
+        observed={"reply": reply_file_data, "snapshot": reply_snapshot_data},
+        expected="reply-file applies observer actions and rewrites the follow snapshot",
     )
     _scenario_check(
         checks,

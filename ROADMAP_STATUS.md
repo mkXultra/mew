@@ -422,6 +422,7 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `811 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_dogfood.py` current: `33 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `201 passed`.
@@ -433,8 +434,8 @@ Next action:
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_cli_controls_include_steer_command tests/test_work_session.py::WorkSessionTests::test_work_session_start_can_seed_reentry_options` current: `2 passed`.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_help_describes_native_work_flow tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `2 passed`.
 - `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 41 commands.
-- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 41 commands, including CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 44 commands and the structured reply-file snapshot check.
+- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 44 commands, including CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, structured reply-file snapshot acknowledgement, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
 - `uv run python -m py_compile src/mew/commands.py src/mew/cli.py src/mew/work_session.py src/mew/dogfood.py` current: pass.
 - `uv run pytest -q` last observed before the steer lane: `802 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` last observed before the steer lane: `192 passed`.
@@ -643,6 +644,7 @@ Next action:
 - `mew work --reply-file reply.json` now applies safe structured observer replies back into an active work session, covering `steer`, `note`, `stop`, and dry-run write `reject` actions while leaving approval gates explicit.
 - The follow snapshot contract now includes `schema_version`, heartbeat/process metadata, `session_updated_at`, `reply_command`, and `reply_template`; applying a reply file rewrites the snapshot with `mode=reply_file`, and no-active reply files fail nonzero instead of silently succeeding.
 - `docs/FOLLOW_REPLY_SCHEMA.md` documents the local snapshot/reply contract for another model or UI.
+- `dogfood --scenario work-session` now covers a deterministic structured reply-file loop and verifies the follow snapshot acknowledgement, so the observer interface is part of recurring dogfood.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
 ## Current Roadmap Focus
