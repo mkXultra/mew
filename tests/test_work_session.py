@@ -5409,7 +5409,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(call_model.call_count, 1)
                 self.assertIn("progress: step=1/1", output)
                 self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
+                self.assertIn("max_steps_note: Follow reached max_steps=1", output)
                 self.assertNotIn("Work live step #2", output)
+                session = load_state()["work_sessions"][0]
+                self.assertIn("Follow reached max_steps=1", session["notes"][-1]["text"])
+                self.assertIn("Last action: read_file", session["notes"][-1]["text"])
             finally:
                 os.chdir(old_cwd)
 

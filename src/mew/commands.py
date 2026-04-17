@@ -674,6 +674,8 @@ def format_work_ai_report(report, compact=False):
         lines.append(f"interrupted_step: {report.get('interrupted_step')}")
     if report.get("interrupt_note"):
         lines.append(f"interrupt_note: {report.get('interrupt_note')}")
+    if report.get("max_steps_note"):
+        lines.append(f"max_steps_note: {report.get('max_steps_note')}")
     return "\n".join(lines)
 
 
@@ -1493,6 +1495,37 @@ def pause_work_session_after_user_interrupt(session_id, step_index):
     return {"repairs": repairs, "note": note_text}
 
 
+def record_follow_max_steps_note(session_id, report):
+    steps = list((report or {}).get("steps") or [])
+    if not steps:
+        return ""
+    last_step = steps[-1]
+    action = last_step.get("action") or {}
+    action_type = action.get("type") or action.get("tool") or "unknown"
+    summary = last_step.get("summary") or last_step.get("error") or action.get("reason") or ""
+    tool_call = last_step.get("tool_call") or {}
+    if tool_call:
+        summary = summary or compact_work_tool_summary(tool_call)
+    if not summary and last_step.get("tool_calls"):
+        summaries = [compact_work_tool_summary(call) for call in last_step.get("tool_calls") or [] if call]
+        summary = "; ".join(item for item in summaries if item)
+    note_text = (
+        f"Follow reached max_steps={report.get('max_steps')} after {len(steps)} step(s). "
+        f"Last action: {action_type}."
+    )
+    if summary:
+        note_text += f" Last result: {clip_output(str(summary), 500)}"
+    note_text += " Resume with /c, /continue, or the printed Next CLI controls to interpret this state."
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        if not session:
+            return note_text
+        add_work_session_note(session, note_text, source="system")
+        save_state(state)
+    return note_text
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -2017,6 +2050,9 @@ def cmd_work_ai(args):
         if error:
             report["stop_reason"] = "tool_failed"
             break
+
+    if getattr(args, "follow", False) and report.get("stop_reason") == "max_steps":
+        report["max_steps_note"] = record_follow_max_steps_note(session_id, report)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

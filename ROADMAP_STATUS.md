@@ -119,6 +119,7 @@ Evidence:
 - `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines continue with cached options, and `/c` is a short continue alias.
 - `mew work --follow` and chat `/follow` provide a compact continuous live loop that defaults to 10 steps, streams model progress, and stops at existing resident boundaries such as finish, failures, stop requests, pending approvals, or user interrupt.
 - Ctrl+C during `--follow` marks the current running model turn/tool as interrupted, records a durable resume note, and preserves chat continue options instead of leaving the next `/c` blocked by a stop request.
+- When `--follow` reaches `--max-steps`, mew records a system work-session note with the final action/result and reentry hint, so bounded loops leave a durable explanation even if the model spent the final step observing.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
 - Successful `run_tests` and write verification results now refresh the session default verification command, preventing reentry controls from preserving a known-stale verifier after a better command succeeds.

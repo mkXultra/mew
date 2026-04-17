@@ -336,6 +336,9 @@ show what was found without opening the full session details.
 `mew work --follow` uses compact live mode and streams model text deltas into
 the progress output when the backend supports it, so a bounded autonomous run is
 observable while it is thinking instead of only after each step completes.
+If a follow run reaches `--max-steps`, mew records a system work-session note
+with the last action/result and the reentry command hint, so the next session can
+tell the loop hit its bound rather than silently stopping.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set
