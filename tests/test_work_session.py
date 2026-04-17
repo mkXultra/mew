@@ -7407,9 +7407,9 @@ class WorkSessionTests(unittest.TestCase):
                             )
 
                 output = stdout.getvalue()
-                self.assertIn("model_summary_delta: THINK Inspect roadmap", output)
-                self.assertIn("model_reason_delta: THINK Done now", output)
-                self.assertIn("model_action_delta: THINK finish", output)
+                self.assertIn("summary_delta: THINK Inspect roadmap", output)
+                self.assertIn("reason_delta: THINK Done now", output)
+                self.assertIn("action_delta: THINK finish", output)
                 self.assertNotIn('model_delta: THINK {"summary"', output)
             finally:
                 os.chdir(old_cwd)

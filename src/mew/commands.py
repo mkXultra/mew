@@ -1098,7 +1098,7 @@ def _extract_json_string_field_prefix(text, field):
 
 def _compact_live_model_delta_lines(phase, total_text, rendered_lengths):
     lines = []
-    for field, label in (("summary", "model_summary_delta"), ("reason", "model_reason_delta")):
+    for field, label in (("summary", "summary_delta"), ("reason", "reason_delta")):
         value = _extract_json_string_field_prefix(total_text, field)
         previous = rendered_lengths.get((phase, field), 0)
         if len(value) <= previous:
@@ -1111,7 +1111,7 @@ def _compact_live_model_delta_lines(phase, total_text, rendered_lengths):
     action_type = _extract_json_string_field_prefix(total_text, "type")
     if action_type and not rendered_lengths.get((phase, "action_type")):
         rendered_lengths[(phase, "action_type")] = len(action_type)
-        lines.append(f"model_action_delta: {phase} {clip_output(action_type, 120)}")
+        lines.append(f"action_delta: {phase} {clip_output(action_type, 120)}")
     return lines
 
 

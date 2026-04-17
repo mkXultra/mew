@@ -343,8 +343,8 @@ summaries instead of replaying stdout/stderr after the result pane.
 compact run can show what was found without opening the full session details or
 making the model infer too much from a single matched line.
 `mew work --follow` uses compact live mode and renders plan-shaped model streams
-as readable `model_summary_delta`, `model_reason_delta`, and `model_action_delta`
-lines when the backend supports deltas, so a bounded autonomous run is
+as readable `summary_delta`, `reason_delta`, and `action_delta` lines when the
+backend supports deltas, so a bounded autonomous run is
 observable while it is thinking instead of only after each step completes.
 Compact follow keeps duplicate delta progress off stderr, then keeps only
 model-stream metrics in the planning summary when live deltas were already
