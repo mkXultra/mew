@@ -1924,6 +1924,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
 
 def cmd_work(args):
+    if getattr(args, "reply_file", None):
+        return cmd_work_reply_file(args)
     if getattr(args, "live", False) or getattr(args, "follow", False):
         args.ai = True
     if getattr(args, "ai", False):
@@ -3576,6 +3578,195 @@ def cmd_work_session_note(args):
         print(json.dumps({"work_note": note, "work_session": session}, ensure_ascii=False, indent=2))
     else:
         print(f"recorded work session note #{session['id']}: {note['text']}")
+    return 0
+
+
+def _coerce_work_reply_text(value):
+    if isinstance(value, dict):
+        value = value.get("text") or value.get("guidance") or value.get("reason") or ""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_work_reply_actions(payload):
+    actions = []
+    raw_actions = payload.get("actions")
+    if raw_actions is not None:
+        if not isinstance(raw_actions, list):
+            raise MewError("reply actions must be a list")
+        for raw in raw_actions:
+            if not isinstance(raw, dict):
+                raise MewError("reply action entries must be objects")
+            action_type = str(raw.get("type") or raw.get("action") or "").strip()
+            if action_type in ("steer", "guidance"):
+                text = _coerce_work_reply_text(raw.get("text") or raw.get("guidance"))
+                actions.append({"type": "steer", "text": text})
+            elif action_type in ("note", "session_note"):
+                text = _coerce_work_reply_text(raw.get("text") or raw.get("note"))
+                actions.append({"type": "note", "text": text})
+            elif action_type == "stop":
+                reason = _coerce_work_reply_text(raw.get("reason") or raw.get("text"))
+                actions.append({"type": "stop", "reason": reason})
+            elif action_type == "reject":
+                tool_call_id = raw.get("tool_call_id") or raw.get("tool") or raw.get("id")
+                reason = _coerce_work_reply_text(raw.get("reason") or raw.get("text"))
+                actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
+            else:
+                raise MewError(f"unsupported reply action type: {action_type or '(missing)'}")
+    steer = _coerce_work_reply_text(payload.get("steer") or payload.get("pending_steer"))
+    if steer:
+        actions.append({"type": "steer", "text": steer})
+    note = _coerce_work_reply_text(payload.get("note") or payload.get("session_note"))
+    if note:
+        actions.append({"type": "note", "text": note})
+    if payload.get("stop") or payload.get("stop_reason"):
+        stop_value = payload.get("stop_reason") if payload.get("stop_reason") is not None else payload.get("stop")
+        reason = "" if stop_value is True else _coerce_work_reply_text(stop_value)
+        actions.append({"type": "stop", "reason": reason})
+    reject = payload.get("reject")
+    if reject or payload.get("reject_tool"):
+        if isinstance(reject, dict):
+            tool_call_id = reject.get("tool_call_id") or reject.get("tool") or reject.get("id")
+            reason = _coerce_work_reply_text(reject.get("reason") or reject.get("text"))
+        else:
+            tool_call_id = payload.get("reject_tool") or reject
+            reason = _coerce_work_reply_text(payload.get("reject_reason"))
+        actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
+    for action in actions:
+        if action["type"] in ("steer", "note") and not action.get("text"):
+            raise MewError(f"reply {action['type']} action requires text")
+        if action["type"] == "reject":
+            try:
+                action["tool_call_id"] = int(action.get("tool_call_id"))
+            except (TypeError, ValueError) as exc:
+                raise MewError("reply reject action requires tool_call_id") from exc
+    if not actions:
+        raise MewError("reply file has no supported actions")
+    return actions
+
+
+def _active_work_sessions_for_reply(state):
+    sessions = []
+    for candidate in state.get("work_sessions", []):
+        task = work_session_task(state, candidate)
+        if candidate.get("status") == "active" and (not task or task.get("status") != "done"):
+            sessions.append(candidate)
+    return sessions
+
+
+def cmd_work_reply_file(args):
+    path = Path(getattr(args, "reply_file", "") or "")
+    if not path.exists():
+        print(f"mew: reply file not found: {path}", file=sys.stderr)
+        return 1
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"mew: invalid reply file: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(payload, dict):
+        print("mew: reply file must contain a JSON object", file=sys.stderr)
+        return 1
+    try:
+        actions = _normalize_work_reply_actions(payload)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
+    reply_task_id = payload.get("task_id")
+    cli_task_id = getattr(args, "task_id", None)
+    if cli_task_id and reply_task_id is not None and str(cli_task_id) != str(reply_task_id):
+        print("mew: reply task_id does not match command task_id", file=sys.stderr)
+        return 1
+    select_args = SimpleNamespace(**vars(args))
+    if not getattr(select_args, "task_id", None) and reply_task_id is not None:
+        select_args.task_id = str(reply_task_id)
+
+    with state_lock():
+        state = load_state()
+        if not getattr(select_args, "task_id", None):
+            active_sessions = _active_work_sessions_for_reply(state)
+            if len(active_sessions) > 1:
+                if getattr(args, "json", False):
+                    print(
+                        json.dumps(
+                            {
+                                "error": "multiple_active_work_sessions",
+                                "active_work_sessions": [
+                                    {"session_id": item.get("id"), "task_id": item.get("task_id")}
+                                    for item in active_sessions[-5:]
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print("Multiple active work sessions; include task_id in the reply file or command:")
+                    for item in active_sessions[-5:]:
+                        print(f"- {mew_command('work', item.get('task_id'), '--reply-file', str(path))}")
+                return 1
+        session = _select_active_work_session_for_args(state, select_args)
+        if not session:
+            print("No active work session.")
+            return 0
+
+        for action in actions:
+            if action["type"] != "reject":
+                continue
+            source_call = find_work_tool_call(session, action["tool_call_id"])
+            if not source_call:
+                print(f"mew: work tool call not found: {action['tool_call_id']}", file=sys.stderr)
+                return 1
+            if source_call.get("tool") not in ("write_file", "edit_file"):
+                print("mew: only write_file/edit_file tool calls can be rejected", file=sys.stderr)
+                return 1
+            if source_call.get("approval_status") in ("applying", "applied"):
+                print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
+                return 1
+
+        applied = []
+        for action in actions:
+            if action["type"] == "steer":
+                steer = queue_work_session_steer(session, action["text"], source="reply_file")
+                applied.append({"type": "steer", "text": steer.get("text")})
+            elif action["type"] == "note":
+                note = add_work_session_note(session, action["text"], source="reply_file")
+                applied.append({"type": "note", "text": note.get("text")})
+            elif action["type"] == "stop":
+                request_work_session_stop(session, reason=action.get("reason") or "reply file requested stop")
+                applied.append({"type": "stop", "reason": session.get("stop_reason") or ""})
+            elif action["type"] == "reject":
+                source_call = find_work_tool_call(session, action["tool_call_id"])
+                source_call["approval_status"] = "rejected"
+                source_call["rejected_at"] = now_iso()
+                source_call["rejection_reason"] = action.get("reason") or ""
+                applied.append(
+                    {
+                        "type": "reject",
+                        "tool_call_id": source_call.get("id"),
+                        "reason": source_call.get("rejection_reason") or "",
+                    }
+                )
+        save_state(state)
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {"work_session_id": session.get("id"), "applied": applied, "work_session": session},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(f"applied reply file to work session #{session['id']}:")
+        for action in applied:
+            if action["type"] == "reject":
+                print(f"- rejected tool #{action['tool_call_id']}: {action.get('reason') or '(no reason)'}")
+            elif action["type"] == "stop":
+                print(f"- stop: {action.get('reason') or '(no reason)'}")
+            else:
+                print(f"- {action['type']}: {action.get('text') or ''}")
     return 0
 
 

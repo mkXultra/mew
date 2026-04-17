@@ -291,6 +291,10 @@ Initial implementation status, 2026-04-18:
   `.mew/follow/latest.json` plus `.mew/follow/session-<id>.json` with the
   latest step, resume bundle, cells, and next controls. This gives another
   model or UI a structured observation point without parsing terminal output.
+- `mew work --reply-file reply.json` applies the first safe structured reply
+  path back into an active session. The supported actions are `steer`, `note`,
+  `stop`, and dry-run write `reject`; approvals stay out of this path until
+  the gate/verification semantics are explicit enough.
 
 Remaining:
 

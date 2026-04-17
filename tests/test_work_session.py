@@ -8851,6 +8851,76 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_file_can_queue_safe_follow_actions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                reply_path = Path("reply.json")
+                reply_path.write_text(
+                    json.dumps(
+                        {
+                            "task_id": 1,
+                            "actions": [
+                                {"type": "steer", "text": "inspect the rejected diff before continuing"},
+                                {"type": "note", "text": "observer saw a risky edit preview"},
+                                {"type": "reject", "tool_call_id": 1, "reason": "wrong direction"},
+                                {"type": "stop", "reason": "pause after observer reply"},
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("applied reply file to work session #1", output)
+                self.assertIn("- steer: inspect the rejected diff before continuing", output)
+                self.assertIn("- note: observer saw a risky edit preview", output)
+                self.assertIn("- rejected tool #1: wrong direction", output)
+                self.assertIn("- stop: pause after observer reply", output)
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["pending_steer"]["text"], "inspect the rejected diff before continuing")
+                self.assertEqual(session["pending_steer"]["source"], "reply_file")
+                self.assertEqual(session["notes"][0]["text"], "observer saw a risky edit preview")
+                self.assertEqual(session["notes"][0]["source"], "reply_file")
+                self.assertEqual(session["stop_reason"], "pause after observer reply")
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "rejected")
+                self.assertEqual(session["tool_calls"][0]["rejection_reason"], "wrong direction")
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_approve_and_reject_tool_changes(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

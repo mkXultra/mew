@@ -554,6 +554,9 @@ stream keeps completed cells compact; use `mew work --cells` or
 Live and follow runs also write `.mew/follow/latest.json` plus
 `.mew/follow/session-<id>.json`, containing the latest step, resume, cells, and
 next controls for another model or UI to observe without scraping terminal text.
+That observer can write a JSON reply file and apply it with
+`mew work --reply-file reply.json`; supported safe actions are `steer`, `note`,
+`stop`, and `reject`.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
