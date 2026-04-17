@@ -3687,10 +3687,20 @@ class WorkSessionTests(unittest.TestCase):
                             "new": "new text",
                         },
                     },
+                    {
+                        "summary": "should not rerun rejected edit",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "README.md",
+                            "old": "old text",
+                            "new": "new text",
+                            "apply": True,
+                        },
+                    },
                 ]
                 verify_command = f"{sys.executable} -c \"print('verify ok')\""
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
                         with patch("sys.stdin", StringIO("n\n")):
                             with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
                                 self.assertEqual(
@@ -3710,7 +3720,7 @@ class WorkSessionTests(unittest.TestCase):
                                             verify_command,
                                             "--prompt-approval",
                                             "--max-steps",
-                                            "1",
+                                            "2",
                                             "--act-mode",
                                             "deterministic",
                                         ]
@@ -3727,6 +3737,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("README.md? [y/N/q]:", output)
                 self.assertIn("rejected work tool #1", output)
                 self.assertIn("inline_approval=rejected", output)
+                self.assertIn("stop=approval_rejected", output)
+                self.assertEqual(call_model.call_count, 1)
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
                 rejected = load_state()["work_sessions"][0]["tool_calls"][0]
                 self.assertEqual(rejected["approval_status"], "rejected")

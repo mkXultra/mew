@@ -2457,7 +2457,8 @@ def cmd_work_ai(args):
                     )
                     cmd_work_reject_tool(reject_args)
                     report["steps"][-1]["inline_approval"] = "rejected"
-                    continue
+                    report["stop_reason"] = "approval_rejected"
+                    break
                 if approval == "quit":
                     report["stop_reason"] = "user_quit"
                     break
