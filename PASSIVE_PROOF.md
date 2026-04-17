@@ -320,3 +320,41 @@ Judgment:
   runtime chose `wait_for_user` rather than sending a new proactive message.
 - This reinforces the remaining proof gap: mew needs one controlled no-input
   scenario where `autonomy-level=propose` creates a user-visible outbox proposal.
+
+## 2026-04-18 Controlled Passive Outbox Proof
+
+Workspace:
+
+```text
+/tmp/mew-passive-outbox-proof.tgg0Oo
+```
+
+Setup:
+
+- One ready coding task.
+- No stale inbox messages.
+- No open questions before the passive tick.
+
+Command:
+
+```bash
+mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --echo-effects --echo-outbox --focus "Controlled passive outbox proof: no user input and one ready coding task. If useful, create a concise user-visible proposal."
+```
+
+Observed result:
+
+```text
+processed 1 event(s) reason=passive_tick
+effect #1 [applied] event=#1 reason=passive_tick actions=record_memory,ask_user,self_review,plan_task
+outcome=Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?
+outbox #1 [question]: Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?
+```
+
+Judgment:
+
+- A clean no-input passive tick can create a user-visible outbox proposal under
+  `autonomy-level=propose`.
+- The production repo's final check did not emit a new outbox message because
+  existing unanswered questions caused the runtime to wait for user input.
+- The remaining product work is not "can passive output happen at all"; it is
+  prioritization and cadence when older unanswered questions are already open.
