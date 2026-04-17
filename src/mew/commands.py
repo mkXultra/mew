@@ -745,9 +745,13 @@ def _format_live_tool_call_result(call):
         duration_text = f" duration={max(0.0, (finished_at - started_at).total_seconds()):.1f}s"
     target_text = f" {target}" if target else ""
     lines = [f"tool #{call.get('id')} [{call.get('status')}] {tool}{exit_text}{duration_text}{target_text}"]
-    summary = _format_live_tool_summary(call)
-    if summary:
-        lines.append(f"summary: {clip_output(summary, 500)}")
+    if command:
+        if result.get("cwd"):
+            lines.append(f"cwd: {result.get('cwd')}")
+    else:
+        summary = _format_live_tool_summary(call)
+        if summary:
+            lines.append(f"summary: {clip_output(summary, 500)}")
     if result.get("stdout"):
         lines.extend(_format_live_output_preview("stdout", result.get("stdout")))
     if result.get("stderr"):

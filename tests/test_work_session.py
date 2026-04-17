@@ -70,6 +70,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("tools:\n  tool #7 [completed] run_command exit=0 duration=2.0s echo hi", text)
         self.assertIn("\n  cwd: .", text)
         self.assertNotIn("\ncwd: .", text)
+        self.assertNotIn("summary: command:", text)
         self.assertIn("stdout:\n    hi", text)
         self.assertIn("session:\n  phase: idle", text)
 
@@ -4051,7 +4052,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("tool #1 [completed] run_command exit=0", output)
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
                 self.assertIn("tools:", result_block)
-                self.assertEqual(result_block.count("summary: command:"), 1)
+                self.assertNotIn("summary: command:", result_block)
+                self.assertIn("cwd:", result_block)
                 self.assertIn("stdout:", result_block)
                 self.assertEqual(result_block.count("  live stdout"), 1)
                 self.assertIn("stderr:", result_block)

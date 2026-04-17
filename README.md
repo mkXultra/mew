@@ -327,8 +327,9 @@ pane after each step, and a resume after each completed tool step. The thinking
 pane includes `step/max`, session, task id, phase, and elapsed time, so a longer
 live run has a stable progress anchor. The result pane separates outcome, tools,
 and session state, includes tool duration when start/finish timestamps are
-available, and read results stay summarized in the result pane and final step
-report so large files do not flood the cockpit. Add `--compact-live`
+available, and places command cwd/stdout/stderr directly under the tool result.
+Read results stay summarized in the result pane and final step report so large
+files do not flood the cockpit. Add `--compact-live`
 when you want only thinking/action/result panes during a longer run and will
 open `mew work --session --resume` separately if you need the full reentry
 bundle; compact mode also keeps the final step report to command/cwd/exit
