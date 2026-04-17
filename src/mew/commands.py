@@ -3822,6 +3822,14 @@ def _coerce_work_reply_text(value):
     return str(value).strip()
 
 
+def _coerce_work_reply_list(value):
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
+
+
 def _normalize_work_reply_actions(payload):
     actions = []
     raw_actions = payload.get("actions")
@@ -3851,6 +3859,28 @@ def _normalize_work_reply_actions(payload):
                 tool_call_id = raw.get("tool_call_id") or raw.get("tool") or raw.get("id")
                 reason = _coerce_work_reply_text(raw.get("reason") or raw.get("text"))
                 actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
+            elif action_type == "approve":
+                tool_call_id = raw.get("tool_call_id") or raw.get("tool") or raw.get("id")
+                actions.append(
+                    {
+                        "type": "approve",
+                        "tool_call_id": tool_call_id,
+                        "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
+                        "verify_command": _coerce_work_reply_text(raw.get("verify_command")),
+                        "verify_cwd": _coerce_work_reply_text(raw.get("verify_cwd")),
+                        "verify_timeout": raw.get("verify_timeout"),
+                    }
+                )
+            elif action_type in ("approve_all", "approve-all"):
+                actions.append(
+                    {
+                        "type": "approve_all",
+                        "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
+                        "verify_command": _coerce_work_reply_text(raw.get("verify_command")),
+                        "verify_cwd": _coerce_work_reply_text(raw.get("verify_cwd")),
+                        "verify_timeout": raw.get("verify_timeout"),
+                    }
+                )
             else:
                 raise MewError(f"unsupported reply action type: {action_type or '(missing)'}")
     steer = _coerce_work_reply_text(payload.get("steer") or payload.get("pending_steer"))
@@ -3880,14 +3910,59 @@ def _normalize_work_reply_actions(payload):
             tool_call_id = payload.get("reject_tool") or reject
             reason = _coerce_work_reply_text(payload.get("reject_reason"))
         actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
+    approve = payload.get("approve")
+    if approve or payload.get("approve_tool"):
+        if isinstance(approve, dict):
+            tool_call_id = approve.get("tool_call_id") or approve.get("tool") or approve.get("id")
+            allow_write = _coerce_work_reply_list(approve.get("allow_write") or approve.get("allow_write_roots"))
+            verify_command = _coerce_work_reply_text(approve.get("verify_command"))
+            verify_cwd = _coerce_work_reply_text(approve.get("verify_cwd"))
+            verify_timeout = approve.get("verify_timeout")
+        else:
+            tool_call_id = payload.get("approve_tool") or approve
+            allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
+            verify_command = _coerce_work_reply_text(payload.get("verify_command"))
+            verify_cwd = _coerce_work_reply_text(payload.get("verify_cwd"))
+            verify_timeout = payload.get("verify_timeout")
+        actions.append(
+            {
+                "type": "approve",
+                "tool_call_id": tool_call_id,
+                "allow_write": allow_write,
+                "verify_command": verify_command,
+                "verify_cwd": verify_cwd,
+                "verify_timeout": verify_timeout,
+            }
+        )
+    if payload.get("approve_all"):
+        approve_all = payload.get("approve_all")
+        if isinstance(approve_all, dict):
+            allow_write = _coerce_work_reply_list(approve_all.get("allow_write") or approve_all.get("allow_write_roots"))
+            verify_command = _coerce_work_reply_text(approve_all.get("verify_command"))
+            verify_cwd = _coerce_work_reply_text(approve_all.get("verify_cwd"))
+            verify_timeout = approve_all.get("verify_timeout")
+        else:
+            allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
+            verify_command = _coerce_work_reply_text(payload.get("verify_command"))
+            verify_cwd = _coerce_work_reply_text(payload.get("verify_cwd"))
+            verify_timeout = payload.get("verify_timeout")
+        actions.append(
+            {
+                "type": "approve_all",
+                "allow_write": allow_write,
+                "verify_command": verify_command,
+                "verify_cwd": verify_cwd,
+                "verify_timeout": verify_timeout,
+            }
+        )
     for action in actions:
         if action["type"] in ("steer", "followup", "interrupt_submit", "note") and not action.get("text"):
             raise MewError(f"reply {action['type']} action requires text")
-        if action["type"] == "reject":
+        if action["type"] in ("reject", "approve"):
             try:
                 action["tool_call_id"] = int(action.get("tool_call_id"))
             except (TypeError, ValueError) as exc:
-                raise MewError("reply reject action requires tool_call_id") from exc
+                raise MewError(f"reply {action['type']} action requires tool_call_id") from exc
     if not actions:
         raise MewError("reply file has no supported actions")
     return actions
@@ -3937,6 +4012,18 @@ def build_work_reply_schema(session=None):
                 "type": "reject",
                 "description": "reject a pending dry-run write_file/edit_file tool call",
                 "required": ["tool_call_id"],
+            },
+            {
+                "type": "approve",
+                "description": "approve and apply a pending dry-run write_file/edit_file tool call",
+                "required": ["tool_call_id"],
+                "optional": ["allow_write", "verify_command", "verify_cwd", "verify_timeout"],
+            },
+            {
+                "type": "approve_all",
+                "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
+                "required": [],
+                "optional": ["allow_write", "verify_command", "verify_cwd", "verify_timeout"],
             },
         ],
         "reply_template": {
@@ -3991,6 +4078,97 @@ def cmd_work_reply_schema(args):
     return 0
 
 
+def _work_approve_error(source_call):
+    if not source_call:
+        return "work tool call not found"
+    if source_call.get("tool") not in ("write_file", "edit_file"):
+        return "only write_file/edit_file tool calls can be approved"
+    result = source_call.get("result") or {}
+    if not result.get("dry_run"):
+        return "only dry-run write/edit tool calls can be approved"
+    if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+        return f"tool call is already {source_call.get('approval_status')}"
+    if not result.get("changed"):
+        return "dry-run tool call has no changes to approve"
+    return ""
+
+
+def _reply_approval_write_roots(session, source_call, action):
+    roots = list(action.get("allow_write") or [])
+    if roots:
+        return roots
+    roots = list(((session or {}).get("default_options") or {}).get("allow_write") or [])
+    if roots:
+        return roots
+    result = (source_call or {}).get("result") or {}
+    parameters = (source_call or {}).get("parameters") or {}
+    path = result.get("path") or parameters.get("path") or ""
+    return [path] if path else []
+
+
+def _reply_approval_args(args, session, source_call, action):
+    approval_args = SimpleNamespace(**vars(args))
+    approval_args.task_id = str(session.get("task_id")) if session and session.get("task_id") is not None else None
+    approval_args.allow_write = _reply_approval_write_roots(session, source_call, action)
+    approval_args.allow_read = getattr(args, "allow_read", None) or []
+    approval_args.allow_verify = bool(getattr(args, "allow_verify", False))
+    approval_args.verify_command = getattr(args, "verify_command", None)
+    approval_args.verify_cwd = getattr(args, "verify_cwd", None) or "."
+    approval_args.verify_timeout = getattr(args, "verify_timeout", None)
+    if action.get("verify_command"):
+        approval_args.verify_command = action.get("verify_command")
+        approval_args.allow_verify = True
+    if action.get("verify_cwd"):
+        approval_args.verify_cwd = action.get("verify_cwd")
+    if action.get("verify_timeout") not in (None, ""):
+        approval_args.verify_timeout = action.get("verify_timeout")
+    approval_args.progress = False
+    approval_args.json = False
+    return approval_args
+
+
+def _apply_work_reply_approval_action(args, session_id, action):
+    approved = []
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        if not session or session.get("status") != "active":
+            print("mew: no active work session for reply approval", file=sys.stderr)
+            return 1, approved
+        if action["type"] == "approve_all":
+            approve_ids = _pending_approval_tool_ids(session)
+        else:
+            approve_ids = [action["tool_call_id"]]
+
+    for approve_id in approve_ids:
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            source_call = find_work_tool_call(session, approve_id)
+            approval_error = _work_approve_error(source_call)
+            if approval_error:
+                print(f"mew: {approval_error}", file=sys.stderr)
+                return 1, approved
+            approval_args = _reply_approval_args(args, session, source_call, action)
+        code, data = _apply_work_approval(approval_args, approve_id)
+        if data is not None:
+            tool_call = data["tool_call"]
+            approved.append(
+                {
+                    "type": "approve",
+                    "tool_call_id": approve_id,
+                    "applied_tool_call_id": tool_call.get("id"),
+                    "status": tool_call.get("status"),
+                    "summary": tool_call.get("summary") or tool_call.get("error") or "",
+                }
+            )
+        if code != 0:
+            return code, approved
+    if action["type"] == "approve_all":
+        return 0, [{"type": "approve_all", "count": len(approved), "approved": approved}]
+    return 0, approved
+
+
 def cmd_work_reply_file(args):
     path = Path(getattr(args, "reply_file", "") or "")
     if not path.exists():
@@ -4027,6 +4205,9 @@ def cmd_work_reply_file(args):
     if not getattr(select_args, "task_id", None) and reply_task_id is not None:
         select_args.task_id = str(reply_task_id)
 
+    applied = []
+    deferred_approval_actions = []
+    session_id = None
     with state_lock():
         state = load_state()
         session = None
@@ -4106,18 +4287,22 @@ def cmd_work_reply_file(args):
             return 1
 
         for action in actions:
-            if action["type"] != "reject":
-                continue
-            source_call = find_work_tool_call(session, action["tool_call_id"])
-            if not source_call:
-                print(f"mew: work tool call not found: {action['tool_call_id']}", file=sys.stderr)
-                return 1
-            reject_error = _work_reject_error(source_call)
-            if reject_error:
-                print(f"mew: {reject_error}", file=sys.stderr)
-                return 1
+            if action["type"] == "reject":
+                source_call = find_work_tool_call(session, action["tool_call_id"])
+                if not source_call:
+                    print(f"mew: work tool call not found: {action['tool_call_id']}", file=sys.stderr)
+                    return 1
+                reject_error = _work_reject_error(source_call)
+                if reject_error:
+                    print(f"mew: {reject_error}", file=sys.stderr)
+                    return 1
+            elif action["type"] == "approve":
+                source_call = find_work_tool_call(session, action["tool_call_id"])
+                approval_error = _work_approve_error(source_call)
+                if approval_error:
+                    print(f"mew: {approval_error}", file=sys.stderr)
+                    return 1
 
-        applied = []
         for action in actions:
             if action["type"] == "steer":
                 steer = queue_work_session_steer(session, action["text"], source="reply_file")
@@ -4154,25 +4339,38 @@ def cmd_work_reply_file(args):
                         "reason": source_call.get("rejection_reason") or "",
                     }
                 )
+            elif action["type"] in ("approve", "approve_all"):
+                deferred_approval_actions.append(action)
         save_state(state)
+        session_id = session.get("id")
+
+    for action in deferred_approval_actions:
+        code, approved = _apply_work_reply_approval_action(select_args, session_id, action)
+        applied.extend(approved)
+        if code != 0:
+            return code
+
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
         task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task)
-        snapshot_step = {
-            "status": "completed",
-            "action": {"type": "reply_file", "path": str(path)},
-            "summary": f"applied {len(applied)} reply action(s)",
-            "applied": applied,
-        }
-        write_work_follow_snapshot(
-            select_args,
-            {"stop_reason": "reply_file", "steps": [snapshot_step]},
-            session,
-            task,
-            resume,
-            step=snapshot_step,
-            force=True,
-            mode="reply_file",
-        )
+    snapshot_step = {
+        "status": "completed",
+        "action": {"type": "reply_file", "path": str(path)},
+        "summary": f"applied {len(applied)} reply action(s)",
+        "applied": applied,
+    }
+    write_work_follow_snapshot(
+        select_args,
+        {"stop_reason": "reply_file", "steps": [snapshot_step]},
+        session,
+        task,
+        resume,
+        step=snapshot_step,
+        force=True,
+        mode="reply_file",
+    )
     if getattr(args, "json", False):
         print(
             json.dumps(
@@ -4186,6 +4384,13 @@ def cmd_work_reply_file(args):
         for action in applied:
             if action["type"] == "reject":
                 print(f"- rejected tool #{action['tool_call_id']}: {action.get('reason') or '(no reason)'}")
+            elif action["type"] == "approve":
+                print(
+                    f"- approved tool #{action['tool_call_id']} -> "
+                    f"#{action.get('applied_tool_call_id')} [{action.get('status')}]"
+                )
+            elif action["type"] == "approve_all":
+                print(f"- approve_all: approved {action.get('count', 0)} tool(s)")
             elif action["type"] == "stop":
                 print(f"- stop: {action.get('reason') or '(no reason)'}")
             else:

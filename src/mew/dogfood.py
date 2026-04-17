@@ -1225,6 +1225,49 @@ def run_work_session_scenario(workspace, env=None):
     interrupt_start_result = run(["work", "6", "--start-session", "--json"])
     interrupt_submit_result = run(["work", "6", "--interrupt-submit", "dogfood interrupt submit", "--json"])
     interrupt_resume_result = run(["work", "6", "--session", "--resume", "--json"])
+    run(["task", "add", "Reply approve task", "--kind", "coding"])
+    reply_approve_start_result = run(["work", "7", "--start-session", "--json"])
+    reply_approve_write_result = run(
+        [
+            "work",
+            "7",
+            "--tool",
+            "write_file",
+            "--path",
+            "reply-approved.md",
+            "--content",
+            "reply approved\n",
+            "--create",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    reply_approve_write_data_for_reply = _json_stdout(reply_approve_write_result)
+    reply_approve_tool_id = (reply_approve_write_data_for_reply.get("tool_call") or {}).get("id")
+    reply_approve_session_result = run(["work", "7", "--session", "--json"])
+    reply_approve_session = (_json_stdout(reply_approve_session_result).get("work_session") or {})
+    reply_approve_path = workspace / "follow-approve-reply.json"
+    reply_approve_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "session_id": reply_approve_session.get("id"),
+                "task_id": 7,
+                "observed_session_updated_at": reply_approve_session.get("updated_at"),
+                "actions": [
+                    {
+                        "type": "approve",
+                        "tool_call_id": reply_approve_tool_id,
+                        "allow_write": ".",
+                        "verify_command": "true",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reply_approve_result = run(["work", "--reply-file", str(reply_approve_path), "--json"])
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -1242,6 +1285,8 @@ def run_work_session_scenario(workspace, env=None):
     reply_file_data = _json_stdout(reply_file_result)
     interrupt_submit_data = _json_stdout(interrupt_submit_result)
     interrupt_resume_data = _json_stdout(interrupt_resume_result)
+    reply_approve_write_data = _json_stdout(reply_approve_write_result)
+    reply_approve_data = _json_stdout(reply_approve_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1400,6 +1445,18 @@ def run_work_session_scenario(workspace, env=None):
         == "dogfood observer follow-up",
         observed={"schema": reply_schema_data, "reply": reply_file_data, "snapshot": reply_snapshot_data},
         expected="reply-schema is session-specific and reply-file rewrites steer/follow-up snapshot state",
+    )
+    _scenario_check(
+        checks,
+        "work_reply_file_approves_pending_write",
+        reply_approve_start_result.get("exit_code") == 0
+        and reply_approve_write_result.get("exit_code") == 0
+        and reply_approve_result.get("exit_code") == 0
+        and ((reply_approve_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and any(action.get("type") == "approve" for action in reply_approve_data.get("applied") or [])
+        and (workspace / "reply-approved.md").read_text(encoding="utf-8") == "reply approved\n",
+        observed={"write": reply_approve_write_data.get("tool_call"), "reply": reply_approve_data},
+        expected="reply-file approve applies a pending dry-run write without a separate CLI approval command",
     )
     _scenario_check(
         checks,

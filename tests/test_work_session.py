@@ -9337,6 +9337,175 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_file_can_approve_pending_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert Path('notes.md').read_text() == 'after\\n'\""
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "approve", "tool_call_id": 1}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("applied reply file to work session #1", output)
+                self.assertIn("- approved tool #1 -> #2 [completed]", output)
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "applied")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve")
+                self.assertEqual(snapshot["last_step"]["applied"][0]["tool_call_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_can_approve_all_pending_writes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("a.txt").write_text("old a\n", encoding="utf-8")
+                Path("b.txt").write_text("old b\n", encoding="utf-8")
+                verify_command = f"{sys.executable} -c \"import sys; sys.exit(0)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "a.txt",
+                                "--old",
+                                "old a",
+                                "--new",
+                                "new a",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "b.txt",
+                                "--old",
+                                "old b",
+                                "--new",
+                                "new b",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [
+                                {
+                                    "type": "approve_all",
+                                    "allow_write": ".",
+                                    "verify_command": verify_command,
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("- approve_all: approved 2 tool(s)", output)
+                self.assertEqual(Path("a.txt").read_text(encoding="utf-8"), "new a\n")
+                self.assertEqual(Path("b.txt").read_text(encoding="utf-8"), "new b\n")
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call.get("approval_status") for call in session["tool_calls"][:2]], ["applied", "applied"])
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve_all")
+                self.assertEqual(snapshot["last_step"]["applied"][0]["count"], 2)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_can_interrupt_submit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -9424,6 +9593,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
                 self.assertEqual(data["reply_template"]["observed_session_updated_at"], session["updated_at"])
                 self.assertTrue(any(action["type"] == "reject" for action in data["supported_actions"]))
+                self.assertTrue(any(action["type"] == "approve" for action in data["supported_actions"]))
+                self.assertTrue(any(action["type"] == "approve_all" for action in data["supported_actions"]))
                 self.assertTrue(any(action["type"] == "followup" for action in data["supported_actions"]))
                 self.assertTrue(any(action["type"] == "interrupt_submit" for action in data["supported_actions"]))
             finally:

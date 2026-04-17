@@ -50,6 +50,8 @@ Supported actions:
 - `note`: record durable session memory from the observer.
 - `stop`: request a stop at the next model/tool boundary.
 - `reject`: reject a pending dry-run `write_file` or `edit_file` tool call.
+- `approve`: approve and apply a pending dry-run `write_file` or `edit_file` tool call.
+- `approve_all`: approve and apply all pending dry-run `write_file` or `edit_file` tool calls.
 
 Example:
 
@@ -66,6 +68,10 @@ Example:
   ]
 }
 ```
+
+Approval actions may include `allow_write`, `verify_command`, `verify_cwd`, and
+`verify_timeout`. If `allow_write` is omitted, mew reuses the work-session
+write gates and then falls back to the pending write path.
 
 `--reply-file` fails with a nonzero status when there is no matching active
 session, when `schema_version` is not `1`, or when

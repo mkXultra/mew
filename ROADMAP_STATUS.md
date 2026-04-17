@@ -72,6 +72,11 @@ Native self-improve dogfood then picked a small discoverability fix: `mew code
 Cell cockpit pacing has one more concrete control: `mew work --cells
 --cell-tail-lines N` now caps command/test stdout/stderr tails for calmer
 inspection while leaving failure expansion as the default when no cap is set.
+Claude review then identified the highest-leverage external-observer gap:
+`--reply-file` could reject or steer pending writes but could not approve them.
+That gap is now closed with `approve` and `approve_all` reply actions, plus
+schema/docs/dogfood coverage, so another model watching `.mew/follow/latest.json`
+can drive a dry-run write through approval without a separate human CLI command.
 
 ## Milestone 1: Native Hands
 
@@ -305,6 +310,7 @@ Evidence:
 - Idle `interrupt_submit` sessions now render "submit pending interrupt" controls instead of generic pause controls, while still waiting at a boundary when a model/tool step is actually running.
 - `mew code --help` now includes direct reentry examples for reviewing a work-session resume and reopening coding-scoped work-mode chat.
 - `mew work --cells --cell-tail-lines N` provides configurable command/test tail output, reducing noisy cell panes without changing the full `--commands`/`--tests` detail views.
+- `mew work --reply-file` now supports `approve` and `approve_all` observer actions for pending dry-run writes, reusing existing write/verify gates and rewriting the follow snapshot after completion.
 
 Missing proof:
 
