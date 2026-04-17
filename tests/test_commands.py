@@ -4223,6 +4223,18 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_text_argument_suggests_task_add(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["code", "read README first line", "--timeout", "0"]), 1)
+                self.assertIn("code expects an existing task id", stderr.getvalue())
+                self.assertIn("mew task add 'read README first line' --kind coding", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_hides_unread_by_default_and_can_show_it(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

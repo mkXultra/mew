@@ -1784,6 +1784,16 @@ def code_default_update_args(args, session):
     )
 
 
+def format_code_task_not_found(task_id):
+    text = str(task_id or "")
+    if text and not text.lstrip("#").isdigit():
+        return (
+            "mew: code expects an existing task id; create one with "
+            f"`{mew_command('task', 'add', text, '--kind', 'coding')}`"
+        )
+    return f"mew: task not found: {task_id}"
+
+
 def cmd_code(args):
     task_id = getattr(args, "task_id", None)
     if task_id:
@@ -1813,7 +1823,7 @@ def cmd_code(args):
             state = load_state()
             task = select_workbench_task(state, task_id)
             if not task:
-                print(f"mew: task not found: {task_id}", file=sys.stderr)
+                print(format_code_task_not_found(task_id), file=sys.stderr)
                 return 1
             if task.get("status") == "done":
                 print(done_task_work_session_error(task), file=sys.stderr)
