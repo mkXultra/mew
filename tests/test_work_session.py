@@ -5079,6 +5079,40 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_continue_does_not_cache_failed_live_options(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                chat_state = {"work_continue_options": "--allow-read ."}
+                with patch("mew.commands.load_model_auth", side_effect=MewError("auth file not found: bad.json")):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                run_chat_slash_command("/continue --auth bad.json --allow-read .", chat_state),
+                                "continue",
+                            )
+
+                call_model.assert_not_called()
+                self.assertEqual(chat_state["work_continue_options"], "--allow-read .")
+                output = stdout.getvalue()
+                self.assertIn("Next controls", output)
+                self.assertIn("/continue --allow-read .", output)
+                self.assertNotIn("bad.json", output)
+                self.assertIn("auth file not found: bad.json", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_continue_accepts_options_followed_by_plain_guidance(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

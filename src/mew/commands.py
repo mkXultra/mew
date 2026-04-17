@@ -6157,8 +6157,6 @@ def _chat_continue_rest(rest, chat_state):
         return cached
     if _looks_like_work_continue_options(rest):
         options, guidance_text = _split_continue_options_and_guidance(rest)
-        if chat_state is not None:
-            chat_state["work_continue_options"] = _strip_work_guidance_options(options)
         if guidance_text:
             guidance = "--work-guidance " + shlex.quote(guidance_text)
             return " ".join(part for part in (options, guidance) if part)
@@ -6454,7 +6452,6 @@ def chat_work_session(rest, chat_state=None):
         if action == "live":
             args.live = True
             args.suppress_cli_controls = True
-            _remember_work_continue_options(parts, chat_state)
             state = load_state()
             if scope_kind and not args.task_id:
                 session = active_work_session_for_kind(state, scope_kind)
@@ -6464,8 +6461,10 @@ def chat_work_session(rest, chat_state=None):
                 args.task_id = session.get("task_id")
             session = _select_active_work_session_for_args(state, args)
             live_session_id = session.get("id") if session else None
-        cmd_work_ai(args)
+        work_exit_code = cmd_work_ai(args)
         if action == "live":
+            if work_exit_code == 0:
+                _remember_work_continue_options(parts, chat_state)
             state = load_state()
             session = find_work_session(state, live_session_id) if live_session_id else None
             if session is None and args.task_id:
