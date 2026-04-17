@@ -60,6 +60,16 @@ Core risk: low if kept isolated.
 
 Goal: Morning and evening reports generated from mew state.
 
+Status:
+- First isolated prototype exists under `experiments/mew-journal`.
+- Dogfood task #79 used work session #105 and `mew work --ai` planning to pick
+  the smallest slice.
+- The prototype generates one `.mew/journal/YYYY-MM-DD.md` file with Morning
+  and Evening sections from tasks, done-task notes, open questions, active work
+  sessions, and runtime effects.
+- Latest validation: `uv run pytest -q experiments/mew-journal` passed with
+  `5 passed`.
+
 Scope:
 - Write `.mew/journal/YYYY-MM-DD.md`.
 - Morning: yesterday, today's top tasks, and one short mew note.
@@ -272,8 +282,9 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be `mew-dream` or `mew-journal`.
+The next side project should probably be `mew-mood` or `mew-morning-paper`.
 
-Reason: both are close to the passive AI thesis, safe to implement in isolation,
-and likely to expose whether mew can remember, summarize, and continue itself
-over time.
+Reason: `mew-dream`, `mew-bond`, and `mew-journal` now cover memory,
+self-continuity, and daily continuity in isolated form. The next useful slice
+should either make passive state easier to perceive (`mew-mood`) or test
+overnight research and preference learning (`mew-morning-paper`).

@@ -1,0 +1,49 @@
+{
+  "date": "2026-04-17",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Prototype mew-journal",
+      "status": "ready",
+      "priority": "high",
+      "kind": "coding"
+    },
+    {
+      "id": 2,
+      "title": "Finish mew-dream learnings",
+      "status": "done",
+      "priority": "normal",
+      "kind": "coding",
+      "notes": "Created\n2026-04-17T12:00:00Z done: Added dream learnings and active work-session continuity."
+    }
+  ],
+  "work_sessions": [
+    {
+      "id": 105,
+      "task_id": 1,
+      "status": "active",
+      "goal": "Build a daily journal generator",
+      "phase": "idle",
+      "next_action": "write tests"
+    }
+  ],
+  "outbox": [
+    {
+      "id": 9,
+      "question_id": 3,
+      "related_task_id": 1,
+      "requires_reply": true,
+      "answered_at": null,
+      "text": "Should I generate a morning and evening report in one file?"
+    }
+  ],
+  "runtime_effects": [
+    {
+      "id": 7,
+      "reason": "passive_tick",
+      "status": "applied",
+      "action_types": ["update_memory", "self_review"],
+      "summary": "Mew noticed the journal side project and preserved the next coding step."
+    }
+  ]
+}
