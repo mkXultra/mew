@@ -47,6 +47,9 @@ cockpit papercuts that are now fixed: unclipped diff stats for huge single-line
 edits, explicit cleanup-skipped reporting for user-provided dogfood workspaces,
 and visible `work cwd` output for native self-improvement sessions started
 outside the repository.
+The remaining scoped-resume ambiguity from that dogfood is also reduced:
+implicit `/work-session resume` now names the selected active task when more
+than one scoped session matches.
 
 ## Milestone 1: Native Hands
 
@@ -250,6 +253,7 @@ Evidence:
 - Compact follow/live model stream labels are now shorter (`summary_delta`, `reason_delta`, `action_delta`), reducing mechanical cockpit noise while keeping streamed THINK progress visible.
 - Diff previews now use full, unclipped diff stats even when the stored diff body is clipped, so huge single-line edits no longer appear as false `+0 -0` changes.
 - `mew dogfood --cleanup --workspace ...` now reports `cleanup_skipped_reason=explicit_workspace` instead of silently keeping the user-provided path, and native self-improvement output now prints the resolved `work cwd`.
+- When scoped chat has multiple active matching work sessions, implicit `/work-session resume` now names the selected task and points to `/work-session resume <task-id>` for explicit selection.
 
 Missing proof:
 
@@ -379,7 +383,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `699 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `700 passed, 6 subtests passed`.
+- `claude-ultra` review of `b18880d..5a6f3fd` current: no blockers for compact labels, unclipped diff stats, explicit dogfood cleanup skip reasons, and self-improve cwd output; minor notes were schema/memory/test-coupling caveats.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; temporary workspace removed.
 - `codex-ultra` human-role dogfood on current HEAD current: deterministic dogfood `all` and `trace-smoke`, temp self-improve/work-session/chat probes, and targeted `tests/test_self_improve.py tests/test_work_session.py tests/test_dogfood.py` passed; reported diff-stat, cleanup, cwd, and scoped resume frictions.
 - `uv run pytest -q tests/test_work_session.py` current: `177 passed`.
