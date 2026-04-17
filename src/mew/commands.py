@@ -756,13 +756,21 @@ def _format_live_tool_call_result(call):
     return lines
 
 
+def _append_live_section(lines, title, items):
+    items = [item for item in (items or []) if str(item).strip()]
+    if not items:
+        return
+    lines.append(f"{title}:")
+    lines.extend(f"  {item}" for item in items)
+
+
 def format_work_live_step_result(step, resume=None):
     action = step.get("action") or {}
     status = step.get("status") or "unknown"
     tool_calls = list(step.get("tool_calls") or [])
     if step.get("tool_call"):
         tool_calls.append(step.get("tool_call"))
-    lines = [
+    outcome_lines = [
         f"status: {status}",
         f"action: {action.get('type') or action.get('tool') or 'unknown'}",
     ]
@@ -773,22 +781,27 @@ def format_work_live_step_result(step, resume=None):
         tool_summaries.add(str(call.get("summary") or "").strip())
         tool_summaries.add(str(_format_live_tool_summary(call) or "").strip())
     if summary and str(summary).strip() not in tool_summaries:
-        lines.append(f"summary: {clip_output(summary, 700)}")
+        outcome_lines.append(f"summary: {clip_output(summary, 700)}")
+    lines = []
+    _append_live_section(lines, "outcome", outcome_lines)
+    tool_lines = []
     for call in tool_calls:
-        lines.extend(_format_live_tool_call_result(call or {}))
+        tool_lines.extend(_format_live_tool_call_result(call or {}))
+    _append_live_section(lines, "tools", tool_lines)
     if resume:
         context = resume.get("context") or {}
-        lines.append(f"phase: {resume.get('phase') or 'unknown'}")
+        session_lines = [f"phase: {resume.get('phase') or 'unknown'}"]
         if context:
-            lines.append(
+            session_lines.append(
                 f"context: pressure={context.get('pressure')} "
                 f"tool_calls={context.get('tool_calls')} model_turns={context.get('model_turns')}"
             )
         if resume.get("pending_approvals"):
             ids = ", ".join(f"#{item.get('tool_call_id')}" for item in resume.get("pending_approvals") or [])
-            lines.append(f"pending_approvals: {ids}")
+            session_lines.append(f"pending_approvals: {ids}")
         if resume.get("next_action"):
-            lines.append(f"next: {resume.get('next_action')}")
+            session_lines.append(f"next: {resume.get('next_action')}")
+        _append_live_section(lines, "session", session_lines)
     return "\n".join(lines)
 
 

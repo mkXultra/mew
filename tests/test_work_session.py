@@ -3789,6 +3789,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("reason: read README", output)
                 self.assertIn("path: README.md", output)
                 self.assertIn("Work live step #1 result", output)
+                self.assertIn("outcome:", output)
+                self.assertIn("tools:", output)
+                self.assertIn("session:", output)
                 self.assertIn("tool #1 [completed] read_file", output)
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
                 self.assertIn("summary: Read file", result_block)
@@ -4016,6 +4019,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 result", output)
                 self.assertIn("tool #1 [completed] run_command exit=0", output)
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
+                self.assertIn("tools:", result_block)
                 self.assertEqual(result_block.count("summary: command:"), 1)
                 self.assertIn("stdout:", result_block)
                 self.assertEqual(result_block.count("  live stdout"), 1)
