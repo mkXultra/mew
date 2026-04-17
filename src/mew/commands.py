@@ -1677,9 +1677,26 @@ def detect_default_verify_command():
     return ""
 
 
+def positive_max_steps(value, default=1):
+    if value is None:
+        value = default
+    try:
+        max_steps = int(value)
+    except (TypeError, ValueError) as exc:
+        raise MewError("--max-steps must be an integer") from exc
+    if max_steps < 1:
+        raise MewError("--max-steps must be >= 1")
+    return max_steps
+
+
 def cmd_do(args):
     verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
     allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
+    try:
+        max_steps = positive_max_steps(getattr(args, "max_steps", None), default=3)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     work_args = SimpleNamespace(
         task_id=getattr(args, "task_id", None),
         ai=True,
@@ -1691,7 +1708,7 @@ def cmd_do(args):
         model=getattr(args, "model", None),
         base_url=getattr(args, "base_url", None),
         model_timeout=getattr(args, "model_timeout", 60.0),
-        max_steps=max(1, int(getattr(args, "max_steps", 3) or 3)),
+        max_steps=max_steps,
         act_mode=getattr(args, "act_mode", None) or "deterministic",
         work_guidance=getattr(args, "work_guidance", None),
         progress=True,
@@ -1877,6 +1894,11 @@ def cmd_work_ai(args):
     if getattr(args, "live", False) and getattr(args, "json", False):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
         return 1
+    try:
+        max_steps = positive_max_steps(getattr(args, "max_steps", None), default=1)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     args.act_mode = resolved_work_act_mode(args)
     try:
         model_backend = normalize_model_backend(args.model_backend)
@@ -1892,7 +1914,6 @@ def cmd_work_ai(args):
         print(f"mew: {exc}", file=sys.stderr)
         return 1
 
-    max_steps = max(1, int(getattr(args, "max_steps", 1) or 1))
     progress = work_ai_progress(args)
     with state_lock():
         state = load_state()

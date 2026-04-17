@@ -6741,6 +6741,39 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_follow_rejects_zero_max_steps_without_model_call(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                chat_state = {"work_continue_options": "--allow-read ."}
+                with patch("mew.commands.load_model_auth") as load_auth:
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --max-steps 0 inspect without acting",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                load_auth.assert_not_called()
+                call_model.assert_not_called()
+                self.assertIn("mew: --max-steps must be >= 1", stderr.getvalue())
+                self.assertEqual(load_state()["work_sessions"][0]["status"], "active")
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

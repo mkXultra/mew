@@ -82,6 +82,15 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(captured[0].no_prompt_approval)
 
+    def test_do_rejects_zero_max_steps(self):
+        with patch("mew.commands.cmd_work_ai") as work_ai:
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                code = main(["do", "7", "--max-steps", "0"])
+
+        self.assertEqual(code, 1)
+        work_ai.assert_not_called()
+        self.assertIn("mew: --max-steps must be >= 1", stderr.getvalue())
+
     def test_live_approval_prompt_defaults_to_interactive_tty(self):
         from mew.commands import live_approval_prompt_enabled
 
