@@ -526,6 +526,29 @@ def run_chat_cockpit_scenario(workspace, env=None):
     chat_output = chat_result.get("stdout") or ""
     chat_log_result = run(["chat-log", "--limit", "20"])
     chat_log_output = chat_log_result.get("stdout") or ""
+    code_task_result = run(["task", "add", "Code entrypoint task", "--kind", "coding"])
+    code_seed_result = run(
+        [
+            "work",
+            "3",
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-write",
+            ".",
+            "--allow-shell",
+            "--allow-verify",
+            "--verify-command",
+            "python -m pytest -q",
+        ]
+    )
+    code_close_result = run(["work", "3", "--close-session"])
+    code_result = run(
+        ["code", "3", "--timeout", "0", "--no-brief", "--no-unread", "--read-only", "--no-verify"],
+        timeout=15,
+    )
+    code_output = code_result.get("stdout") or ""
+    code_controls = code_output.split("Next controls", 1)[1] if "Next controls" in code_output else code_output
 
     _scenario_check(
         checks,
@@ -603,6 +626,29 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "slash kind=coding: /exit" in chat_log_output,
         observed=command_result_tail(chat_log_result),
         expected="chat-log records recent scoped slash inputs outside the runtime activity log",
+    )
+    _scenario_check(
+        checks,
+        "code_entrypoint_starts_work_mode_chat",
+        code_task_result.get("exit_code") == 0
+        and code_seed_result.get("exit_code") == 0
+        and code_close_result.get("exit_code") == 0
+        and code_result.get("exit_code") == 0
+        and "mew chat. Type /help" in code_output
+        and "scope: coding" in code_output
+        and "work-mode: on" in code_output,
+        observed=command_result_tail(code_result),
+        expected="mew code <task-id> starts/reuses a coding work session and enters work-mode chat",
+    )
+    _scenario_check(
+        checks,
+        "code_read_only_clears_side_effect_defaults",
+        code_result.get("exit_code") == 0
+        and "--allow-write" not in code_controls
+        and "--allow-shell" not in code_controls
+        and "--allow-verify" not in code_controls,
+        observed=command_result_tail(code_result),
+        expected="mew code --read-only --no-verify does not inherit stale write/shell/verify controls",
     )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 

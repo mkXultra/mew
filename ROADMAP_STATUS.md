@@ -337,9 +337,9 @@ Next action:
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, scoped `/work-session`, `/follow` discoverability, `/work-mode` toggles, and chat transcript logging.
+- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, scoped `/work-session`, `/follow` discoverability, `/work-mode` toggles, chat transcript logging, `mew code` entry, and read-only default clearing.
 - `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
-- `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` with transcript logging and `work-session`.
+- `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` with transcript logging and `mew code` entry checks, plus `work-session`.
 - `uv run mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
 - `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
