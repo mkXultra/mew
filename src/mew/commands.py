@@ -2788,6 +2788,13 @@ def active_work_session_for_kind(state, kind=None):
             return session
     return None
 
+def active_work_sessions_for_kind(state, kind=None):
+    return [
+        session
+        for session in state.get("work_sessions", [])
+        if session.get("status") == "active" and _work_session_matches_kind(state, session, kind=kind)
+    ]
+
 
 def _latest_work_session_for_task(state, task_id):
     latest = None
@@ -7605,6 +7612,14 @@ def chat_work_session(rest, chat_state=None):
             print("Auto recovery")
             print_work_recovery_report(auto_recovery)
             print("")
+        if resume and not task_id:
+            active_matches = active_work_sessions_for_kind(state, scope_kind)
+            if len(active_matches) > 1:
+                selected_task_id = session.get("task_id") if session else ""
+                print(
+                    f"selected active work session for task #{selected_task_id}; "
+                    "choose another with /work-session resume <task-id>"
+                )
         print(format_work_session_resume(resume))
         if resume:
             continue_options = (chat_state or {}).get("work_continue_options", "") or work_chat_continue_options(session)

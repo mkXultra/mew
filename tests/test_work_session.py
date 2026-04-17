@@ -6306,6 +6306,36 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_resume_names_selected_session_when_multiple_match_scope(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    first = add_coding_task(state)
+                    second = dict(first)
+                    second["id"] = 2
+                    second["title"] = "Second coding task"
+                    state["tasks"].append(second)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "2", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session resume", {"kind": "coding"}), "continue")
+
+                output = stdout.getvalue()
+                self.assertIn("selected active work session for task #2", output)
+                self.assertIn("choose another with /work-session resume <task-id>", output)
+                self.assertIn("Work resume #2 [active] task=#2", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_accepts_task_first_resume_order(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
