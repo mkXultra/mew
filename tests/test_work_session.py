@@ -702,6 +702,29 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_uses_session_default_shell_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = f"{sys.executable} -c \"print('shell default')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-shell"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tool", "run_command", "--command", command]), 0)
+
+                self.assertIn("shell default", stdout.getvalue())
+                result = load_state()["work_sessions"][0]["tool_calls"][0]["result"]
+                self.assertEqual(result["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_allows_read_only_review_probe_on_closed_done_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -752,6 +775,49 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_allows_read_only_review_probe_on_closed_open_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("still-open review\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "README.md",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["tool_call"]["review_probe"])
+                self.assertIn("still-open review", data["tool_call"]["summary"])
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "todo")
+                self.assertEqual(state["work_sessions"][0]["status"], "closed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_explains_write_tool_on_closed_done_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -794,6 +860,70 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("review: mew work 1 --session --resume --allow-read .", error)
                 self.assertIn("read-only review tools:", error)
                 self.assertFalse(Path("generated.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_explains_write_tool_on_closed_open_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "generated.md",
+                                "--content",
+                                "generated\n",
+                                "--create",
+                            ]
+                        ),
+                        1,
+                    )
+
+                error = stderr.getvalue()
+                self.assertIn("no active work session for task #1", error)
+                self.assertIn("review: mew work 1 --session --resume --allow-read .", error)
+                self.assertIn("read-only review tools:", error)
+                self.assertFalse(Path("generated.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_explains_missing_task_and_missing_prior_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "99", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 1)
+                self.assertIn("task not found: 99", stderr.getvalue())
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", "."]), 1)
+                error = stderr.getvalue()
+                self.assertIn("no active work session for task #1", error)
+                self.assertIn("mew work 1 --start-session", error)
+                self.assertNotIn("read-only review tools:", error)
             finally:
                 os.chdir(old_cwd)
 
@@ -1273,6 +1403,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(applied["tool_call"]["result"]["verification_exit_code"], 0)
                 self.assertEqual(target.read_text(encoding="utf-8"), "new text\n")
 
+                command_probe = f"{sys.executable} -c \"print('command ok')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "run_tests", "--command", command_probe, "--allow-verify"]),
+                        0,
+                    )
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
                 details = stdout.getvalue()
@@ -1322,6 +1459,16 @@ class WorkSessionTests(unittest.TestCase):
                 tests_data = json.loads(stdout.getvalue())
                 self.assertEqual(tests_data["tests"][0]["kind"], "edit_file_verification")
                 self.assertEqual(tests_data["tests"][0]["exit_code"], 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tests", "--commands", "--diffs"]), 0)
+                combined = stdout.getvalue()
+                self.assertIn("Work diffs #1 [active] task=#1", combined)
+                self.assertIn("Work tests #1 [active] task=#1", combined)
+                self.assertIn("Work commands #1 [active] task=#1", combined)
+                self.assertIn("Diff preview (+1 -1)", combined)
+                self.assertIn("verify ok", combined)
+                self.assertIn("command ok", combined)
             finally:
                 os.chdir(old_cwd)
 

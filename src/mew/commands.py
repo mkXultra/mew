@@ -1153,6 +1153,7 @@ def _work_args_have_tool_gates(args):
 
 def _work_tool_gate_options(args, session=None):
     defaults = (session or {}).get("default_options") or {}
+    verify_disabled = bool(defaults.get("verify_disabled"))
 
     def merged_list(name):
         merged = []
@@ -1167,13 +1168,16 @@ def _work_tool_gate_options(args, session=None):
             return value
         return defaults.get(name, fallback)
 
-    return {
+    options = {
         "allow_read": merged_list("allow_read"),
         "allow_write": merged_list("allow_write"),
         "allow_shell": bool(defaults.get("allow_shell") or getattr(args, "allow_shell", False)),
-        "allow_verify": bool(defaults.get("allow_verify") or getattr(args, "allow_verify", False)),
+        "allow_verify": bool((not verify_disabled and defaults.get("allow_verify")) or getattr(args, "allow_verify", False)),
         "verify_command": explicit_or_default("verify_command", ""),
     }
+    if verify_disabled and not getattr(args, "verify_command", ""):
+        options["verify_command"] = ""
+    return options
 
 
 def remember_work_session_default_options(session, args):
@@ -3106,17 +3110,17 @@ def cmd_work_show_session(args):
     else:
         if not session and not getattr(args, "task_id", None):
             print(format_no_active_work_session(state))
-        elif getattr(args, "timeline", False):
-            print(format_work_session_timeline(session, task=task, limit=getattr(args, "limit", 20)))
-            print(format_work_cli_controls(session, args))
-        elif getattr(args, "diffs", False):
-            print(format_work_session_diffs(session, task=task, limit=getattr(args, "limit", 8)))
-            print(format_work_cli_controls(session, args))
-        elif getattr(args, "tests", False):
-            print(format_work_session_tests(session, task=task, limit=getattr(args, "limit", 8)))
-            print(format_work_cli_controls(session, args))
-        elif getattr(args, "commands", False):
-            print(format_work_session_commands(session, task=task, limit=getattr(args, "limit", 8)))
+        elif any(getattr(args, name, False) for name in ("timeline", "diffs", "tests", "commands")):
+            panes = []
+            if getattr(args, "timeline", False):
+                panes.append(format_work_session_timeline(session, task=task, limit=getattr(args, "limit", 20)))
+            if getattr(args, "diffs", False):
+                panes.append(format_work_session_diffs(session, task=task, limit=getattr(args, "limit", 8)))
+            if getattr(args, "tests", False):
+                panes.append(format_work_session_tests(session, task=task, limit=getattr(args, "limit", 8)))
+            if getattr(args, "commands", False):
+                panes.append(format_work_session_commands(session, task=task, limit=getattr(args, "limit", 8)))
+            print("\n\n".join(panes))
             print(format_work_cli_controls(session, args))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
@@ -3368,10 +3372,10 @@ def _work_tool_parameters(args, session=None):
         "apply": getattr(args, "apply", False),
         "cwd": getattr(args, "cwd", None),
         "timeout": getattr(args, "timeout", None),
-        "allowed_write_roots": options.get("allow_write") or getattr(args, "allow_write", None) or [],
-        "allow_shell": options.get("allow_shell") or getattr(args, "allow_shell", False),
-        "allow_verify": options.get("allow_verify") or getattr(args, "allow_verify", False),
-        "verify_command": options.get("verify_command") or getattr(args, "verify_command", None),
+        "allowed_write_roots": options.get("allow_write") or [],
+        "allow_shell": options.get("allow_shell"),
+        "allow_verify": options.get("allow_verify"),
+        "verify_command": options.get("verify_command"),
         "verify_cwd": getattr(args, "verify_cwd", None),
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
@@ -3393,6 +3397,7 @@ def cmd_work_tool(args):
         if not session:
             print(format_no_work_tool_session(state, args), file=sys.stderr)
             return 1
+        gate_options = _work_tool_gate_options(args, session)
         parameters = _work_tool_parameters(args, session=session)
         tool_call = start_work_tool_call(state, session, args.tool, parameters)
         if review_probe:
@@ -3407,7 +3412,7 @@ def cmd_work_tool(args):
         result = execute_work_tool_with_output(
             args.tool,
             parameters,
-            _work_tool_gate_options(args, session).get("allow_read") or [],
+            gate_options.get("allow_read") or [],
             work_tool_output_progress(progress, tool_call_id),
         )
         error = work_tool_result_error(args.tool, result)
