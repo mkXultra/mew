@@ -245,6 +245,8 @@ def render_morning_paper_markdown(view_model: dict[str, Any]) -> str:
     lines = [
         f"# Mew Morning Paper {view_model['date']}",
         "",
+        f"Top pick: {top_picks[0]['title']}" if top_picks else "Top pick: none",
+        "",
         "## Interests",
     ]
     if view_model["interests"]:
