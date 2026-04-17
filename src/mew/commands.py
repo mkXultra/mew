@@ -6261,30 +6261,35 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
             lines.append(f"- {approval.get('reject_hint')}")
 
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
+    lines.append("Primary")
     if cached:
-        lines.append(f"- /continue {cached}")
         lines.append(f"- /c {cached}")
         lines.append(f"- /follow {_work_options_with_max_steps(cached, 10)}")
         lines.append("- /continue <guidance>")
-        lines.append(f"- /work-session live {cached}")
-        lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
-        lines.append("- /continue --allow-read .")
         lines.append("- /c --allow-read .")
         lines.append("- /follow --allow-read . --max-steps 10")
-        lines.append("- /work-session live --allow-read . --max-steps 3")
+        lines.append("- /continue --allow-read .")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
+    lines.append("Inspect")
     lines.append("- /work-session resume")
     lines.append("- /work-session resume --allow-read .")
-    lines.append("- /work-session timeline")
+    lines.append("- /work-session details")
     lines.append("- /work-session diffs")
     lines.append("- /work-session tests")
     lines.append("- /work-session commands")
-    lines.append("- /work-session details")
+    lines.append("- /work-session timeline")
+    lines.append("Manage")
     lines.append("- /work-session note <remember this>")
-    lines.append("- /work-session recover --allow-read .")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
+    lines.append("Advanced")
+    if cached:
+        lines.append(f"- /continue {cached}")
+        lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
+    else:
+        lines.append("- /work-session live --allow-read . --max-steps 3")
+    lines.append("- /work-session recover --allow-read .")
     return "\n".join(lines)
 
 
