@@ -4814,7 +4814,24 @@ class WorkSessionTests(unittest.TestCase):
                                 {"created_at": "now", "source": "user", "text": "Use the workbench first."},
                                 {"created_at": "now", "source": "model", "text": "Resume from the latest evidence."},
                             ],
-                            "tool_calls": [],
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "tool": "run_tests",
+                                    "status": "failed",
+                                    "parameters": {"command": "uv run pytest -q"},
+                                    "result": {"command": "uv run pytest -q", "exit_code": 1, "stderr": "same failure\n"},
+                                    "error": "verification failed with exit_code=1",
+                                },
+                                {
+                                    "id": 2,
+                                    "tool": "run_tests",
+                                    "status": "failed",
+                                    "parameters": {"command": "uv run pytest -q"},
+                                    "result": {"command": "uv run pytest -q", "exit_code": 1, "stderr": "same failure\n"},
+                                    "error": "verification failed with exit_code=1",
+                                },
+                            ],
                             "model_turns": [
                                 {
                                     "id": 1,
@@ -4850,6 +4867,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("next_step: Continue from the workbench without hunting through details.", output)
                 self.assertIn("note[user]: Use the workbench first.", output)
                 self.assertIn("note[model]: Resume from the latest evidence.", output)
+                self.assertIn("repeat: run_tests uv run pytest -q failed 2x", output)
                 self.assertIn("latest_decision: #1 remember recorded reentry guidance", output)
                 self.assertIn("guidance: Keep this visible on reentry.", output)
                 self.assertIn("latest task note", output)

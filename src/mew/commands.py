@@ -534,6 +534,16 @@ def _format_workbench_reentry(resume, task):
             source = note.get("source") or "note"
             lines.append(f"note[{source}]: {text}")
 
+    recurring = resume.get("recurring_failures") or []
+    if recurring:
+        item = recurring[-1]
+        target = f" {item.get('target')}" if item.get("target") else ""
+        lines.append(
+            f"repeat: {item.get('tool')}{target} failed {item.get('count')}x "
+            f"(same error: {clip_inline_text(item.get('error'), 180)}); "
+            f"last_tool=#{item.get('last_tool_call_id')}"
+        )
+
     decisions = resume.get("recent_decisions") or []
     if decisions:
         decision = decisions[-1]
