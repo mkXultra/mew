@@ -5318,6 +5318,56 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_streams_model_deltas_by_default(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("follow stream content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(
+                    model_backend,
+                    model_auth,
+                    prompt,
+                    model,
+                    base_url,
+                    timeout,
+                    log_prefix=None,
+                    on_text_delta=None,
+                ):
+                    if on_text_delta:
+                        on_text_delta("follow model delta")
+                    return {"summary": "done", "action": {"type": "finish", "reason": "stream observed"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                progress = stderr.getvalue()
+                self.assertIn("THINK delta follow model delta", progress)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_honors_explicit_one_step_bound(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

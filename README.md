@@ -333,6 +333,9 @@ bundle; compact mode also keeps the final step report to command/cwd/exit
 summaries instead of replaying stdout/stderr after the result pane.
 `search_text` live results include a short matches preview, so a compact run can
 show what was found without opening the full session details.
+`mew work --follow` uses compact live mode and streams model text deltas into
+the progress output when the backend supports it, so a bounded autonomous run is
+observable while it is thinking instead of only after each step completes.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set
@@ -445,7 +448,7 @@ Inside `mew chat`, use `/work-session details`, `/work-session diffs`,
 `/work-session live --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q"`,
 `/continue --allow-read .` to advance the active work session by one live step,
 `/c --allow-read .` as the short alias,
-`/follow --allow-read .` for a compact bounded live loop,
+`/follow --allow-read .` for a compact bounded live loop with model progress,
 `/continue focus on README.md` to reuse the previous or persisted live options with new guidance,
 `/work-mode on` or `mew chat --work-mode` to make text act as `/continue <guidance>` and blank lines continue,
 `/work-session note prefer small verified steps`,

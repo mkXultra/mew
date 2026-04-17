@@ -705,7 +705,7 @@ def build_parser():
     work_parser.add_argument(
         "--follow",
         action="store_true",
-        help="run a compact continuous live loop; defaults to 10 steps unless --max-steps is higher",
+        help="run a compact continuous live loop with model streaming; defaults to 10 steps unless --max-steps is set",
     )
     work_parser.add_argument("--auth", help="model auth file for --ai; defaults to ./auth.json then ~/.codex/auth.json")
     work_parser.add_argument("--model-backend", default="codex", help="model backend for --ai")

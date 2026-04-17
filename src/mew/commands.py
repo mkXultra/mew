@@ -1497,6 +1497,7 @@ def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
         args.compact_live = True
+        args.stream_model = True
         if getattr(args, "max_steps", None) is None:
             args.max_steps = 10
     if getattr(args, "live", False) and getattr(args, "json", False):

@@ -90,7 +90,7 @@ Evidence:
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
-- Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--live` enables the same model-delta stream when the backend supports it.
+- Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--follow` enables the same model-delta stream by default when the backend supports it.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
 - Live thinking panes now include a stable progress anchor (`step/max`, session id, and task id), improving orientation during multi-step resident work.
 - `mew work --live --compact-live` and `/work-session live --compact-live` skip full per-step resume blocks, leaving a lighter thinking/action/result stream for longer supervised runs.
@@ -117,7 +117,8 @@ Evidence:
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines continue with cached options, and `/c` is a short continue alias.
-- `mew work --follow` and chat `/follow` provide a compact continuous live loop that defaults to 10 steps and stops at existing resident boundaries such as finish, failures, stop requests, or pending approvals.
+- `mew work --follow` and chat `/follow` provide a compact continuous live loop that defaults to 10 steps, streams model progress, and stops at existing resident boundaries such as finish, failures, stop requests, pending approvals, or user interrupt.
+- Ctrl+C during `--follow` marks the current running model turn/tool as interrupted, records a durable resume note, and preserves chat continue options instead of leaving the next `/c` blocked by a stop request.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
 - Successful `run_tests` and write verification results now refresh the session default verification command, preventing reentry controls from preserving a known-stale verifier after a better command succeeds.
