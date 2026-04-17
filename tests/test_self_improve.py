@@ -158,6 +158,7 @@ class SelfImproveTests(unittest.TestCase):
         self.assertIn("Native work-session flow:", output)
         self.assertIn("mew self-improve --start-session --focus", output)
         self.assertIn("mew work <task-id> --live --allow-read . --max-steps 1", output)
+        self.assertIn("mew work <task-id> --follow --quiet --allow-read . --max-steps 3", output)
         self.assertIn("prepare native mew work instead of a programmer-", output)
         self.assertIn("plan/ai-cli dispatch", output)
 
@@ -279,6 +280,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertNotIn("native work: mew work 1 --start-session", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(state["work_sessions"][0]["task_id"], 1)

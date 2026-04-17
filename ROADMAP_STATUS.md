@@ -398,6 +398,7 @@ Evidence:
 - Native self-improvement dogfood session #88 exposed a work-tool bug while looking for `--limit`: `search_text` treated a query beginning with `--status` as an `rg` flag. The read tool now inserts `--` before the query so dash-prefixed literal searches work.
 - `codex-ultra` human-role dogfood reported noisy quick chat startup; `mew chat --quiet` now starts without the brief, unread backlog, runtime activity, or startup controls while preserving existing `--no-brief`/`--no-unread` behavior.
 - Native self-improvement dogfood session #90 returned to the long task-list friction; `mew task list` now accepts `--limit N`, preserving existing default output while allowing bounded done/status listings.
+- Native self-improvement task #89/session #114 used `mew work --follow` with Codex Web API after the one-time steer slice; it recommended making the native self-improve entrypoint show a bounded follow command, and the CLI/help output now does.
 - `codex-ultra` human-role dogfood reported that `mew work <task> --tests/--commands/--diffs` looked like inert flags unless `--session` was also passed; these flags now route directly to their focused work-session panes.
 - `codex-ultra` human-role dogfood on HEAD `600bb1a` verified persisted read, shell, write, and verify gates; read-only review probes on closed/done sessions; and combined `--tests --commands --diffs` panes using temporary tasks #66/#67, then closed the sessions and left tracked git status clean.
 - Direct work tools now reuse session default gates while merging explicit per-call roots, and sensitive write roots such as `.mew/...` are filtered from persisted session defaults and generated controls so copy-paste follow-ups do not advertise roots the write tool will refuse.
@@ -419,6 +420,8 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `805 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_help_describes_native_work_flow tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `2 passed`.
+- `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 41 commands, including CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
 - `uv run python -m py_compile src/mew/commands.py src/mew/cli.py src/mew/work_session.py src/mew/dogfood.py` current: pass.
 - `uv run pytest -q` last observed before the steer lane: `802 passed, 6 subtests passed`.

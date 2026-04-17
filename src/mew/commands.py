@@ -5937,6 +5937,7 @@ def cmd_self_improve(args):
     if native:
         print(f"work cwd: {resolved_task_cwd_text(task)}")
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
+        print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']}")
