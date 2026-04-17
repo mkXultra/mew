@@ -7686,6 +7686,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work active cell step #1", output)
                 self.assertIn("- model_turn [running] planning: planning work step", output)
                 self.assertIn("- tool_call [running] read_file", output)
+                self.assertIn("plan: read_file - read README", output)
+                self.assertNotIn("planned_action: read_file", output)
                 self.assertIn("Work cells after step #1", output)
                 self.assertIn("compact: details available with mew work 1 --cells", output)
                 self.assertIn("- model_turn [completed] read_file: read README", output)

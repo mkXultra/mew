@@ -280,6 +280,7 @@ Evidence:
 - `codex-ultra` human-role cells dogfood then found and drove fixes for pending-approval CLI controls, concrete verifier hints in approval cells, resolved shell/verify gate cells, failed verify-gate visibility in `--tests`, and unavailable approval actions on closed sessions.
 - Follow mode now prints a `Work active cell` for the running model turn and running tool call before completion, then prints the durable completed cells after the step finishes.
 - Real Codex Web API dogfood tasks #87 and #88 exercised the cell stream itself: #87 identified noisy completed-cell dumps after batch actions, then #88 verified compact completed cells with a `--cells` detail hint after that fix.
+- Follow planning output now uses a compact `plan: <action>` line plus model-stream stats instead of repeating the full live planning summary/reason block.
 
 Missing proof:
 

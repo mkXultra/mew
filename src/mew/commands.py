@@ -1083,6 +1083,23 @@ def format_work_planning(planned, include_stream_preview=True):
     return "\n".join(lines) or "(no planning summary)"
 
 
+def format_work_follow_planning(planned):
+    action = (planned or {}).get("action") or {}
+    decision_plan = (planned or {}).get("decision_plan") or {}
+    action_plan = (planned or {}).get("action_plan") or {}
+    action_type = action.get("type") or action.get("tool") or "unknown"
+    summary = decision_plan.get("summary") or action_plan.get("summary") or action.get("summary") or action.get("reason")
+    lines = [f"plan: {action_type}"]
+    if summary:
+        lines[0] = f"{lines[0]} - {clip_inline_text(summary, 280)}"
+    model_stream = (planned or {}).get("model_stream") or {}
+    for phase in model_stream.get("phases") or []:
+        lines.append(
+            f"model_stream: {phase.get('phase')} chunks={phase.get('chunks')} chars={phase.get('chars')}"
+        )
+    return "\n".join(lines)
+
+
 def format_work_live_progress(index, max_steps, session_id, task_id, phase="thinking", elapsed_seconds=None):
     text = f"progress: step={index}/{max_steps} session=#{session_id} task=#{task_id}"
     if phase:
@@ -2538,7 +2555,9 @@ def cmd_work_ai(args):
                 )
                 live_thinking_open = True
             print(
-                format_work_planning(
+                format_work_follow_planning(planned)
+                if getattr(args, "follow", False)
+                else format_work_planning(
                     planned,
                     include_stream_preview=not (getattr(args, "compact_live", False) and live_model_delta_seen),
                 )

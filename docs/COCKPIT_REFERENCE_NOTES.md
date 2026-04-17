@@ -270,10 +270,12 @@ Initial implementation status, 2026-04-18:
 - Real task dogfood found batch completion dumps too noisy, so follow completed
   cells now omit details/tails/timestamps and point to `mew work <task-id>
   --cells` for the full pane.
+- Follow planning output is now a compact `plan: <action>` line plus model
+  stream stats. The detailed planning summary remains available in non-follow
+  live mode.
 
 Remaining:
 
-- reduce planning prose once the model-turn cell can carry enough summary
 - decide whether a TTY redraw mode should coexist with the line-oriented log
 
 ### P1: Interrupt/Steer Semantics
