@@ -116,7 +116,7 @@ Evidence:
 - Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
-- `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines continue with cached options, and `/c` is a short continue alias.
+- `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines repeat only after a work step has run, and `/c` is a short continue alias.
 - `mew work --follow` and chat `/follow` provide a compact continuous live loop that defaults to 10 steps, streams model progress, and stops at existing resident boundaries such as finish, failures, stop requests, pending approvals, or user interrupt.
 - Ctrl+C during `--follow` marks the current running model turn/tool as interrupted, records a durable resume note, and preserves chat continue options instead of leaving the next `/c` blocked by a stop request.
 - When `--follow` or a multi-step live run reaches `--max-steps`, mew records a system work-session note with the final action/result and reentry hint, so bounded loops leave a durable explanation even if the model spent the final step observing.

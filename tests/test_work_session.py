@@ -5271,6 +5271,36 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_mode_initial_blank_does_not_continue(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("blank safety content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                stdin = StringIO("\n/exit\n")
+                with patch("sys.stdin", stdin):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(["chat", "--work-mode", "--no-brief", "--no-unread", "--no-activity"]),
+                                    0,
+                                )
+
+                self.assertEqual(call_model.call_count, 0)
+                output = stdout.getvalue()
+                self.assertIn("work-mode: blank ignored until one /c, /follow, or text-guided work step runs", output)
+                self.assertEqual(load_state()["work_sessions"][0]["tool_calls"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_runs_compact_multi_step_live_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

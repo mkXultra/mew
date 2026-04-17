@@ -5868,7 +5868,7 @@ CHAT_HELP = """Commands:
 /work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance; /c is alias
 /follow [opts|text]   run compact continuous live steps; defaults to 10 steps
-/work-mode [on|off]   toggle chat mode where text guides /continue and blank lines continue
+/work-mode [on|off]   toggle chat mode where text guides /continue and blank repeats after one work step
 /note <task-id> <txt> append a task note
 /kind <task-id> <kind> set task kind: coding|research|personal|admin|unknown
 /classify [id]        inspect task kind inference; add apply|clear|mismatches
@@ -5954,7 +5954,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session live --no-prompt-approval
                                       disable inline dry-run write prompts for this run
 /continue <guidance>                  reuse prior live options with new guidance
-/work-mode on                         text becomes /continue guidance; blank lines continue
+/work-mode on                         text becomes /continue guidance; blank repeats after one work step
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
 /work-session approve <id> ...        apply a dry-run write after explicit gates
@@ -6342,8 +6342,9 @@ def chat_set_work_mode(rest, chat_state):
         print("usage: /work-mode [on|off]")
         return
     chat_state["work_mode"] = enabled
+    chat_state["blank_continue_ready"] = False
     if enabled:
-        print("work-mode: on; text becomes /continue guidance, blank line continues")
+        print("work-mode: on; text becomes /continue guidance; blank line repeats after one work step")
     else:
         print("work-mode: off; text is sent as user messages")
 
@@ -7884,9 +7885,11 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command in ("continue", "cont", "c"):
         chat_work_session(("live " + _chat_continue_rest(rest, chat_state)).strip(), chat_state)
+        chat_state["blank_continue_ready"] = True
         return "continue"
     if command == "follow":
         chat_work_session(("live " + _chat_follow_rest(rest, chat_state)).strip(), chat_state)
+        chat_state["blank_continue_ready"] = True
         return "continue"
     if command in ("work-mode", "workmode"):
         chat_set_work_mode(rest, chat_state)
@@ -8107,7 +8110,7 @@ def cmd_chat(args):
     if kind:
         print(f"scope: {kind}", flush=True)
     if getattr(args, "work_mode", False):
-        print("work-mode: on; text becomes /continue guidance, blank line continues", flush=True)
+        print("work-mode: on; text becomes /continue guidance; blank line repeats after one work step", flush=True)
     state = load_state()
     if not args.no_brief:
         print(build_brief(state, limit=args.limit, kind=kind), flush=True)
@@ -8126,6 +8129,7 @@ def cmd_chat(args):
         "activity_offset": current_log_offset() if args.activity else None,
         "kind": kind,
         "work_mode": bool(getattr(args, "work_mode", False)),
+        "blank_continue_ready": False,
     }
     prompt_state = {"needed": True}
     deadline = time.monotonic() + max(0.0, args.timeout) if args.timeout is not None else None
@@ -8150,6 +8154,9 @@ def cmd_chat(args):
             text = line.strip()
             if not text:
                 if chat_state.get("work_mode"):
+                    if not chat_state.get("blank_continue_ready"):
+                        print("work-mode: blank ignored until one /c, /follow, or text-guided work step runs", flush=True)
+                        continue
                     result = run_chat_slash_command("/continue", chat_state)
                     if result == "exit":
                         return 0
@@ -8161,6 +8168,7 @@ def cmd_chat(args):
                 continue
             if chat_state.get("work_mode"):
                 result = run_chat_slash_command("/continue " + text, chat_state)
+                chat_state["blank_continue_ready"] = True
                 if result == "exit":
                     return 0
                 continue

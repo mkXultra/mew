@@ -585,7 +585,7 @@ def run_chat_cockpit_scenario(workspace, env=None):
         checks,
         "chat_work_mode_toggles",
         chat_result.get("exit_code") == 0
-        and "work-mode: on; text becomes /continue guidance, blank line continues" in chat_output
+        and "work-mode: on; text becomes /continue guidance; blank line repeats after one work step" in chat_output
         and "work-mode: off; text is sent as user messages" in chat_output,
         observed=command_result_tail(chat_result),
         expected="/work-mode toggles the chat cockpit text routing",
