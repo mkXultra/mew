@@ -491,7 +491,7 @@ def build_work_think_prompt(context):
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
-        "If you can make a small safe edit, use edit_file or write_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
+        "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, read the smallest relevant file window first. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "Use run_tests for the configured verification command or a narrow test command. "
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
@@ -590,6 +590,23 @@ def normalize_work_model_action(action_plan, verify_command=""):
 
     if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
         normalized["summary"] = action_plan.get("summary")
+    if action_type == "edit_file" and (
+        not normalized.get("path") or "old" not in normalized or "new" not in normalized
+    ):
+        if normalized.get("path"):
+            read_action = {
+                "type": "read_file",
+                "path": normalized.get("path"),
+                "reason": "edit_file requires exact old and new strings; read the target window before retrying",
+            }
+            for key in ("line_start", "line_count", "summary"):
+                if normalized.get(key) is not None:
+                    read_action[key] = normalized.get(key)
+            return read_action
+        return {
+            "type": "wait",
+            "reason": "edit_file requires path plus exact old and new strings",
+        }
     if action_type in WRITE_WORK_TOOLS:
         dry_run = action.get("dry_run")
         normalized["apply"] = bool(action.get("apply")) or dry_run is False

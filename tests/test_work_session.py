@@ -3943,6 +3943,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer search_text for symbols or option names before broad read_file", prompt)
         self.assertIn("line_start and line_count", prompt)
         self.assertIn("prefer one batch action", prompt)
+        self.assertIn("exact old and new strings", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)
@@ -4003,6 +4004,28 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(action["type"], "run_tests")
         self.assertEqual(action["command"], "uv run pytest -q")
+
+    def test_work_model_incomplete_edit_reads_target_before_retrying(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "summary": "Patch resume",
+                "action": {
+                    "type": "edit_file",
+                    "path": "src/mew/work_session.py",
+                    "line_start": "988",
+                    "line_count": "80",
+                    "apply": True,
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "read_file")
+        self.assertEqual(action["path"], "src/mew/work_session.py")
+        self.assertEqual(action["line_start"], "988")
+        self.assertEqual(action["line_count"], "80")
+        self.assertIn("exact old and new", action["reason"])
 
     def test_work_model_actions_default_to_small_reads_and_diffstat(self):
         from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action

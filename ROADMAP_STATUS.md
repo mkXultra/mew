@@ -198,6 +198,7 @@ Evidence:
 - Work-mode prompts now tell the resident model that current capability gates are authoritative, reducing stale permission-failure loops where it asks for a flag already present.
 - Work-mode prompts now tell the resident model that `run_command` is shlex-parsed without a shell, reducing failed probes that use `&&`, pipes, or redirection.
 - Work-mode prompts now steer code navigation toward `search_text` before broad `read_file`, then line-window reads from search hits, reducing wasted context in compact live dogfood.
+- Work-mode prompts now require exact `edit_file` old/new strings, and deterministic action normalization turns incomplete `edit_file` attempts with a path into a safe `read_file` re-observation instead of a failed write tool call.
 - Nonzero `run_command` exits now surface in work-session failure summaries and `phase=failed` without treating the command launch itself as a tool crash.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
@@ -339,7 +340,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `663 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `664 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `2 passed`.
 - `uv run pytest -q tests/test_runtime.py::RuntimeTests::test_think_phase_retries_malformed_model_json_once tests/test_runtime.py::RuntimeTests::test_think_phase_retries_transient_model_errors` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-recovery-source-context --json` current: pass, including safe read auto-recovery and side-effect recovery review context across 36 commands.
