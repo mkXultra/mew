@@ -59,6 +59,7 @@ from .model_backends import (
     normalize_model_backend,
 )
 from .model_trace import read_model_traces
+from .passive_bundle import generate_bundle
 from .perception import format_perception, perceive_workspace
 from .project_snapshot import format_project_snapshot, format_snapshot_refresh_report, refresh_project_snapshot
 from .programmer import (
@@ -4734,6 +4735,25 @@ def cmd_focus(args):
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
     print(format_focus(data))
+    return 0
+
+def cmd_passive_bundle(args):
+    result = generate_bundle(
+        Path(args.reports_root).expanduser(),
+        Path(args.output_dir).expanduser(),
+        explicit_date=args.date,
+    )
+    data = {
+        "path": str(result.path),
+        "included": result.included,
+        "missing": result.missing,
+    }
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(result.text, end="")
+    else:
+        print(result.path)
     return 0
 
 def cmd_activity(args):

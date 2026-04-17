@@ -28,6 +28,8 @@ Validation:
   `/tmp/mew-daily/.mew/passive-bundle/2026-04-17.md`.
 - Live bundle included Journal, Mood, and Morning Paper, and reported missing
   Dream and Self Memory.
+- The composer was promoted as the core `mew bundle` command without promoting
+  source report generators or background automation.
 
 Early product learning:
 

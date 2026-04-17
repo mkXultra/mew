@@ -27,6 +27,7 @@ printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew ses
 uv run mew focus
 uv run mew focus --kind coding
 uv run mew daily
+uv run mew bundle --show
 uv run mew digest
 uv run mew brief
 uv run mew next
@@ -43,6 +44,10 @@ when there are no coding tasks, that view suggests a native self-improvement
 session instead of going silent.
 `digest` summarizes activity since the last user interaction without entering
 the chat REPL.
+`bundle` composes already-generated daily report markdown files into one
+`.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
+source reports; use it after journal, mood, dream, self-memory, or morning-paper
+experiments have written files under `.mew`.
 When an active work session has working memory, `focus` includes the current
 hypothesis and memory next step so reentry context is visible before opening the
 full resume. If a later tool or model turn made that memory stale, `focus` marks
@@ -151,6 +156,7 @@ uv run mew focus
 uv run mew focus --json
 uv run mew focus --kind coding
 uv run mew daily
+uv run mew bundle --date 2026-04-17 --show
 uv run mew brief
 uv run mew brief --json
 uv run mew activity

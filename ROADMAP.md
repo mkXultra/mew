@@ -101,6 +101,7 @@ Target:
 - automatic context reconstruction when resuming a task
 - project memory search that affects model behavior
 - user preference memory
+- daily passive bundle for reentry across journal, mood, research, dream, and self-memory artifacts
 - file watcher or git watcher for passive observation
 - passive tick updates that refine the next action without spamming the user
 

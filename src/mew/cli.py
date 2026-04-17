@@ -40,6 +40,7 @@ from .commands import (
     cmd_message,
     cmd_next,
     cmd_outbox,
+    cmd_passive_bundle,
     cmd_perceive,
     cmd_policy_init,
     cmd_policy_show,
@@ -435,6 +436,14 @@ def build_parser():
     daily_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daily_parser.set_defaults(func=cmd_focus)
+
+    bundle_parser = subparsers.add_parser("bundle", help="compose generated daily reports into a passive bundle")
+    bundle_parser.add_argument("--reports-root", default=".", help="root containing generated .mew report files")
+    bundle_parser.add_argument("--output-dir", default=".", help="where to write .mew/passive-bundle/YYYY-MM-DD.md")
+    bundle_parser.add_argument("--date", help="bundle date YYYY-MM-DD; defaults to today")
+    bundle_parser.add_argument("--show", action="store_true", help="print the generated bundle instead of only its path")
+    bundle_parser.add_argument("--json", action="store_true", help="print structured output")
+    bundle_parser.set_defaults(func=cmd_passive_bundle)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)

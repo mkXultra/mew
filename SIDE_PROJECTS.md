@@ -276,6 +276,8 @@ Status:
 - The prototype scans an output root for journal, mood, morning paper, dream,
   and self-memory reports for one date, then writes
   `.mew/passive-bundle/YYYY-MM-DD.md`.
+- The composer is promoted to the core `mew bundle` command. Source report
+  generators remain experimental.
 - Latest validation: `uv run pytest -q experiments/mew-passive-bundle` passed
   with `3 passed`.
 
@@ -321,12 +323,12 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be a tiny `mew-desk` static prototype or
-a core promotion decision for the passive bundle.
+The next side project should probably be a tiny `mew-desk` static prototype.
 
 Reason: `mew-dream`, `mew-bond`, `mew-journal`, `mew-mood`, and
 `mew-morning-paper` now cover memory, self-continuity, daily continuity, passive
 state visibility, and offline research ranking in isolated form.
 `mew-passive-bundle` now proves they can be composed into one reentry artifact.
-The next question is whether to make that bundle a core command or start a
-non-core visual shell that reads it.
+The bundle composer has a core command now, so the next non-core question is
+whether a visual shell can read that artifact without touching the resident
+runtime.
