@@ -846,6 +846,7 @@ def run_work_session_scenario(workspace, env=None):
     task_add_json_result = run(["task", "add", "Native work task", "--kind", "coding", "--json"])
     task_show_json_result = run(["task", "show", "1", "--json"])
     task_list_json_result = run(["task", "list", "--kind", "coding", "--json"])
+    task_update_json_result = run(["task", "update", "1", "--priority", "high", "--json"])
     start_result = run(["work", "1", "--start-session", "--json"])
     read_result = run(
         ["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", ".", "--json"]
@@ -1295,11 +1296,14 @@ def run_work_session_scenario(workspace, env=None):
         encoding="utf-8",
     )
     reply_approve_result = run(["work", "--reply-file", str(reply_approve_path), "--json"])
+    task_done_json_seed_result = run(["task", "add", "Done JSON dogfood task", "--kind", "admin", "--json"])
+    task_done_json_result = run(["task", "done", "8", "--summary", "dogfood verified", "--json"])
 
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
     task_show_json_data = _json_stdout(task_show_json_result)
     task_list_json_data = _json_stdout(task_list_json_result)
+    task_update_json_data = _json_stdout(task_update_json_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
@@ -1318,6 +1322,8 @@ def run_work_session_scenario(workspace, env=None):
     reply_approve_write_data = _json_stdout(reply_approve_write_result)
     reply_approve_status_data = _json_stdout(reply_approve_status_result)
     reply_approve_data = _json_stdout(reply_approve_result)
+    task_done_json_seed_data = _json_stdout(task_done_json_seed_result)
+    task_done_json_data = _json_stdout(task_done_json_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1379,6 +1385,16 @@ def run_work_session_scenario(workspace, env=None):
         and ((task_list_json_data.get("tasks") or [{}])[0]).get("effective_kind") == "coding",
         observed=task_list_json_data,
         expected="task list --json returns matching tasks without text parsing",
+    )
+    _scenario_check(
+        checks,
+        "work_task_update_json_returns_updated_task",
+        task_update_json_result.get("exit_code") == 0
+        and task_update_json_data.get("changed") is True
+        and (task_update_json_data.get("task") or {}).get("id") == 1
+        and (task_update_json_data.get("task") or {}).get("priority") == "high",
+        observed=task_update_json_data,
+        expected="task update --json returns the updated task and changed flag",
     )
     _scenario_check(
         checks,
@@ -1547,6 +1563,18 @@ def run_work_session_scenario(workspace, env=None):
             "reply": reply_approve_data,
         },
         expected="reply-file approve applies a pending dry-run write from a zero-step follow snapshot",
+    )
+    _scenario_check(
+        checks,
+        "work_task_done_json_returns_completed_task",
+        task_done_json_seed_result.get("exit_code") == 0
+        and (task_done_json_seed_data.get("task") or {}).get("id") == 8
+        and task_done_json_result.get("exit_code") == 0
+        and (task_done_json_data.get("task") or {}).get("id") == 8
+        and (task_done_json_data.get("task") or {}).get("status") == "done"
+        and "dogfood verified" in ((task_done_json_data.get("task") or {}).get("notes") or ""),
+        observed={"seed": task_done_json_seed_data, "done": task_done_json_data},
+        expected="task done --json returns the completed task without text parsing",
     )
     _scenario_check(
         checks,

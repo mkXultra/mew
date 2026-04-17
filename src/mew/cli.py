@@ -1449,6 +1449,7 @@ def build_parser():
     done_parser = task_subparsers.add_parser("done", help="mark a task done")
     done_parser.add_argument("task_id")
     done_parser.add_argument("--summary", help="completion summary; passing test reports create a user-reported verification")
+    done_parser.add_argument("--json", action="store_true", help="print the completed task as JSON")
     done_parser.set_defaults(func=cmd_task_done)
 
     run_task_parser = task_subparsers.add_parser("run", help="start an agent run for a task")
@@ -1495,6 +1496,7 @@ def build_parser():
     update_parser.set_defaults(auto_execute=None)
     update_parser.add_argument("--status", choices=("todo", "ready", "running", "blocked", "done"))
     update_parser.add_argument("--priority", choices=("low", "normal", "high"))
+    update_parser.add_argument("--json", action="store_true", help="print the updated task as JSON")
     update_parser.set_defaults(func=cmd_task_update)
 
     agent_parser = subparsers.add_parser("agent", help="manage agent runs")

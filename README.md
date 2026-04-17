@@ -117,6 +117,8 @@ uv run mew task classify <task-id> --apply
 uv run mew task list --kind coding --json
 uv run mew task add "Implement the next small fix" --kind coding --json
 uv run mew task show <task-id> --json
+uv run mew task update <task-id> --status ready --json
+uv run mew task done <task-id> --summary "verified" --json
 uv run mew buddy --task <task-id>
 uv run mew buddy --task <task-id> --dispatch --dry-run
 uv run mew buddy --task <task-id> --dispatch

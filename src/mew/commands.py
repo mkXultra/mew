@@ -4994,6 +4994,9 @@ def cmd_task_done(args):
         record_user_reported_verification(state, None, task, summary, current_time)
         sync_task_done_state(state, task, summary, current_time)
         save_state(state)
+    if getattr(args, "json", False):
+        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
+        return 0
     print(format_task(task))
     return 0
 
@@ -5069,6 +5072,9 @@ def cmd_task_update(args):
         if changed:
             task["updated_at"] = now_iso()
             save_state(state)
+    if getattr(args, "json", False):
+        print(json.dumps({"task": task_json_data(task), "changed": changed}, ensure_ascii=False, indent=2))
+        return 0
     print(format_task(task))
     return 0
 

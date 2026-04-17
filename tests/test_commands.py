@@ -456,6 +456,42 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_update_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Update JSON task", "--kind", "coding"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "update", "1", "--status", "ready", "--priority", "high", "--json"]),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["changed"])
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["task"]["status"], "ready")
+                self.assertEqual(data["task"]["priority"], "high")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_done_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Done JSON task", "--kind", "coding"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "done", "1", "--summary", "verified", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["task"]["status"], "done")
+                self.assertIn("verified", data["task"]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_done_resolves_related_open_questions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
