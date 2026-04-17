@@ -8297,6 +8297,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
                 self.assertEqual(data["reply_template"]["session_id"], 1)
                 self.assertEqual(data["reply_template"]["task_id"], 1)
+                self.assertEqual(data["reply_template"]["observed_session_updated_at"], data["session_updated_at"])
                 self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
             finally:
                 os.chdir(old_cwd)
@@ -8893,11 +8894,13 @@ class WorkSessionTests(unittest.TestCase):
                     )
 
                 reply_path = Path("reply.json")
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
                 reply_path.write_text(
                     json.dumps(
                         {
                             "session_id": 1,
                             "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
                             "actions": [
                                 {"type": "steer", "text": "inspect the rejected diff before continuing"},
                                 {"type": "note", "text": "observer saw a risky edit preview"},
@@ -8931,6 +8934,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(snapshot["stop_reason"], "reply_file")
                 self.assertEqual(snapshot["last_step"]["action"]["type"], "reply_file")
                 self.assertEqual(snapshot["reply_template"]["session_id"], 1)
+                self.assertEqual(snapshot["reply_template"]["observed_session_updated_at"], snapshot["session_updated_at"])
                 self.assertEqual(snapshot["resume"]["pending_steer"]["source"], "reply_file")
                 self.assertEqual(snapshot["resume"]["pending_steer"]["text"], "inspect the rejected diff before continuing")
             finally:
@@ -8949,6 +8953,43 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
                 self.assertIn("no active work session", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_rejects_stale_session_snapshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--session-note", "newer local change"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["updated_at"] = "newer-than-observed"
+                    save_state(state)
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "steer", "text": "stale guidance"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                self.assertIn("stale work-session snapshot", stderr.getvalue())
+                self.assertNotIn("pending_steer", load_state()["work_sessions"][0])
             finally:
                 os.chdir(old_cwd)
 

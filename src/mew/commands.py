@@ -1623,6 +1623,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
             "schema_version": 1,
             "session_id": session_id,
             "task_id": task_id,
+            "observed_session_updated_at": (session or {}).get("updated_at"),
             "actions": [{"type": "steer", "text": "<next-step guidance>"}],
         },
     }
@@ -3694,6 +3695,7 @@ def cmd_work_reply_file(args):
         print("mew: reply task_id does not match command task_id", file=sys.stderr)
         return 1
     reply_session_id = payload.get("session_id")
+    observed_session_updated_at = payload.get("observed_session_updated_at")
     select_args = SimpleNamespace(**vars(args))
     if not getattr(select_args, "task_id", None) and reply_task_id is not None:
         select_args.task_id = str(reply_task_id)
@@ -3757,6 +3759,23 @@ def cmd_work_reply_file(args):
             return 1
         if reply_task_id is not None and str(session.get("task_id")) != str(reply_task_id):
             print("mew: reply session_id does not match reply task_id", file=sys.stderr)
+            return 1
+        if observed_session_updated_at and session.get("updated_at") != observed_session_updated_at:
+            if getattr(args, "json", False):
+                print(
+                    json.dumps(
+                        {
+                            "applied": False,
+                            "reason": "stale_session_snapshot",
+                            "observed_session_updated_at": observed_session_updated_at,
+                            "current_session_updated_at": session.get("updated_at"),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print("mew: reply file was based on a stale work-session snapshot", file=sys.stderr)
             return 1
 
         for action in actions:

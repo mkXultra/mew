@@ -1198,6 +1198,7 @@ def run_work_session_scenario(workspace, env=None):
                 "schema_version": 1,
                 "session_id": reply_session.get("id"),
                 "task_id": 5,
+                "observed_session_updated_at": reply_session.get("updated_at"),
                 "actions": [
                     {"type": "steer", "text": "dogfood observer steer"},
                     {"type": "note", "text": "dogfood observer note"},

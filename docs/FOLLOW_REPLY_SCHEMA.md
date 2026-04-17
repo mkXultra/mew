@@ -9,6 +9,7 @@ The snapshot is a local contract for another model or UI. It includes:
 - `heartbeat_at`: when the snapshot was written
 - `producer.pid`: the process that wrote the snapshot
 - `session_id` and `task_id`
+- `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
 - `reply_command`: where to submit a reply file
 - `reply_template`: a minimal safe reply payload
@@ -28,6 +29,7 @@ Minimal payload:
   "schema_version": 1,
   "session_id": 1,
   "task_id": 1,
+  "observed_session_updated_at": "2026-04-18T00:00:00Z",
   "actions": [
     {"type": "steer", "text": "Inspect the failing test before editing."}
   ]
@@ -48,6 +50,7 @@ Example:
   "schema_version": 1,
   "session_id": 12,
   "task_id": 34,
+  "observed_session_updated_at": "2026-04-18T00:00:00Z",
   "actions": [
     {"type": "note", "text": "Observer saw a risky edit preview."},
     {"type": "reject", "tool_call_id": 7, "reason": "Wrong file."},
@@ -57,6 +60,8 @@ Example:
 ```
 
 `--reply-file` fails with a nonzero status when there is no matching active
-session. After a reply is applied, mew rewrites `.mew/follow/latest.json` and
-`.mew/follow/session-<id>.json` with `mode: "reply_file"` so observers can see
-the acknowledgement without waiting for another live/follow step.
+session, or when `observed_session_updated_at` no longer matches the active
+session's `updated_at`. After a reply is applied, mew rewrites
+`.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with
+`mode: "reply_file"` so observers can see the acknowledgement without waiting
+for another live/follow step.
