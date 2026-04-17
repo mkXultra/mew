@@ -478,6 +478,7 @@ def run_runtime_focus_scenario(workspace, env=None):
     brief_result = run(["brief"], timeout=15)
     doctor_result = run(["doctor"], timeout=15)
     desk_result = run(["desk", "--json"], timeout=15)
+    observe_result = run(["observe", "--allow-read", ".", "--json"], timeout=15)
     bundle_day = now_iso()[:10]
     feed_path = workspace / "morning-feed.json"
     feed_path.write_text(
@@ -520,6 +521,7 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
     desk_data = _json_stdout(desk_result)
+    observe_data = _json_stdout(observe_result)
     journal_data = _json_stdout(journal_result)
     mood_data = _json_stdout(mood_result)
     self_memory_data = _json_stdout(self_memory_result)
@@ -585,6 +587,13 @@ def run_runtime_focus_scenario(workspace, env=None):
         desk_result.get("exit_code") == 0 and bool(desk_data.get("pet_state")),
         observed=desk_data,
         expected="desk --json returns a pet_state view model",
+    )
+    _scenario_check(
+        checks,
+        "observe_alias_json_surfaces_observations",
+        observe_result.get("exit_code") == 0 and isinstance(observe_data.get("observations"), list),
+        observed={"observation_count": len(observe_data.get("observations") or [])},
+        expected="observe --json aliases perceive and returns observations",
     )
     _scenario_check(
         checks,
@@ -1555,6 +1564,7 @@ def run_work_session_scenario(workspace, env=None):
         and ((reply_approve_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
         and reply_approve_snapshot_data.get("stop_reason") == "snapshot_refresh"
         and reply_approve_status_data.get("status") in ("fresh", "working")
+        and (reply_approve_status_data.get("producer_health") or {}).get("state") in ("fresh", "working")
         and isinstance(reply_approve_status_data.get("producer_alive"), bool)
         and isinstance(reply_approve_status_data.get("heartbeat_age_seconds"), (int, float))
         and ((reply_approve_snapshot_data.get("pending_approvals") or [{}])[0]).get("tool_call_id")

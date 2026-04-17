@@ -1665,6 +1665,50 @@ def format_work_cli_controls(session, args):
     return "\n".join(lines)
 
 
+def _work_task_command(task_id, *parts):
+    args = ["work"]
+    if task_id is not None:
+        args.append(task_id)
+    args.extend(parts)
+    return mew_command(*args)
+
+
+def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
+    items = (recovery_plan or {}).get("items") or []
+    if not items:
+        return {}
+    item = items[-1]
+    action = item.get("action") or "review"
+    if action == "retry_tool":
+        kind = "retry_read"
+        command = item.get("auto_hint") or item.get("hint") or _work_task_command(
+            task_id,
+            "--session",
+            "--resume",
+            "--allow-read",
+            ".",
+            "--auto-recover-safe",
+        )
+    elif action == "needs_user_review":
+        kind = "needs_human_review"
+        command = item.get("review_hint") or _work_task_command(task_id, "--session", "--resume", "--allow-read", ".")
+    elif action == "replan":
+        kind = "replannable"
+        command = item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", ".")
+    else:
+        kind = action
+        command = item.get("hint") or item.get("review_hint") or _work_task_command(task_id, "--session", "--resume")
+    return {
+        "kind": kind,
+        "command": command,
+        "reason": (recovery_plan or {}).get("next_action") or item.get("reason") or "",
+        "source_action": action,
+        "source_kind": item.get("kind") or "",
+        "tool_call_id": item.get("tool_call_id"),
+        "model_turn_id": item.get("model_turn_id"),
+    }
+
+
 def write_work_follow_snapshot(args, report, session, task, resume, step=None, force=False, mode=None):
     if not force and not getattr(args, "live", False):
         return None
@@ -1692,6 +1736,10 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "last_step": step or (((report or {}).get("steps") or [None])[-1]),
         "resume": resume or {},
         "pending_approvals": (resume or {}).get("pending_approvals") or [],
+        "suggested_recovery": work_recovery_suggestion_from_plan(
+            (resume or {}).get("recovery_plan") or {},
+            task_id=task_id,
+        ),
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args) if session else [],
         "reply_command": _work_reply_file_command(task_id, reply_path),
@@ -4142,16 +4190,64 @@ def _work_follow_snapshot_path_for_args(args, state):
     return follow_dir / "latest.json"
 
 
-def _work_follow_status_from_snapshot(path):
+def work_follow_producer_health(status, heartbeat_at=None, age=None, producer_pid=None, producer_alive=False):
+    reasons = {
+        "absent": "no follow snapshot exists at the selected path",
+        "fresh": "snapshot heartbeat is recent",
+        "working": "producer process is still alive",
+        "completed": "producer exited after writing a stopped snapshot",
+        "dead": "producer disappeared without a stop reason",
+        "stale": "snapshot heartbeat is old and no active producer is known",
+    }
+    return {
+        "state": status,
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_age_seconds": age,
+        "producer_pid": producer_pid,
+        "producer_alive": bool(producer_alive),
+        "stale": status in ("absent", "dead", "stale"),
+        "terminal": status == "completed",
+        "reason": reasons.get(status, ""),
+    }
+
+
+def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=None):
+    snapshot_data = snapshot_data or {}
+    task_id = snapshot_data.get("task_id") or task_id
+    planned = work_recovery_suggestion_from_plan(
+        ((snapshot_data.get("resume") or {}).get("recovery_plan") or {}),
+        task_id=task_id,
+    )
+    if planned:
+        return planned
+    if status == "absent":
+        return {
+            "kind": "refresh_snapshot",
+            "command": _work_task_command(task_id, "--follow", "--max-steps", "0", "--quiet", "--allow-read", "."),
+            "reason": "write a fresh observer snapshot before replying",
+        }
+    if status in ("dead", "stale"):
+        return {
+            "kind": "inspect_resume",
+            "command": _work_task_command(task_id, "--session", "--resume", "--allow-read", ".", "--auto-recover-safe"),
+            "reason": "producer is not active; inspect the session resume and recover safe interrupted reads if present",
+        }
+    return {}
+
+
+def _work_follow_status_from_snapshot(path, task_id=None):
     if not path.exists():
+        status = "absent"
         return {
             "snapshot_path": str(path),
-            "status": "absent",
+            "status": status,
             "exists": False,
             "heartbeat_at": None,
             "heartbeat_age_seconds": None,
             "producer_pid": None,
             "producer_alive": False,
+            "producer_health": work_follow_producer_health(status),
+            "suggested_recovery": work_follow_status_suggested_recovery(status, task_id=task_id),
         }
     data = json.loads(path.read_text(encoding="utf-8"))
     heartbeat_at = data.get("heartbeat_at") or data.get("generated_at")
@@ -4173,6 +4269,7 @@ def _work_follow_status_from_snapshot(path):
         status = "dead"
     else:
         status = "stale"
+    suggested_recovery = work_follow_status_suggested_recovery(status, snapshot_data=data, task_id=task_id)
     return {
         "snapshot_path": str(path),
         "status": status,
@@ -4185,6 +4282,8 @@ def _work_follow_status_from_snapshot(path):
         "heartbeat_age_seconds": age,
         "producer_pid": producer_pid,
         "producer_alive": producer_alive,
+        "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
+        "suggested_recovery": suggested_recovery,
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
         "pending_approval_count": len(data.get("pending_approvals") or []),
@@ -4199,6 +4298,11 @@ def format_work_follow_status(data):
     ]
     if not data.get("exists"):
         lines.append("snapshot: absent")
+        recovery = data.get("suggested_recovery") or {}
+        if recovery:
+            lines.append(f"recovery: {recovery.get('kind') or '-'}")
+            if recovery.get("command"):
+                lines.append(f"recovery_command: {recovery.get('command')}")
         return "\n".join(lines)
     age = data.get("heartbeat_age_seconds")
     age_text = "-" if age is None else f"{age:.1f}s"
@@ -4211,6 +4315,11 @@ def format_work_follow_status(data):
             f"pending_approvals: {data.get('pending_approval_count', 0)}",
         ]
     )
+    recovery = data.get("suggested_recovery") or {}
+    if recovery:
+        lines.append(f"recovery: {recovery.get('kind') or '-'}")
+        if recovery.get("command"):
+            lines.append(f"recovery_command: {recovery.get('command')}")
     return "\n".join(lines)
 
 
@@ -4218,7 +4327,7 @@ def cmd_work_follow_status(args):
     try:
         state = load_state()
         path = _work_follow_snapshot_path_for_args(args, state)
-        data = _work_follow_status_from_snapshot(path)
+        data = _work_follow_status_from_snapshot(path, task_id=getattr(args, "task_id", None))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"mew: invalid follow snapshot: {exc}", file=sys.stderr)
         return 1

@@ -9202,6 +9202,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
                 self.assertEqual(snapshot["max_steps"], 0)
                 self.assertEqual(snapshot["step_count"], 0)
+                self.assertIn("suggested_recovery", snapshot)
             finally:
                 os.chdir(old_cwd)
 
@@ -9971,6 +9972,8 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "fresh")
                 self.assertTrue(data["producer_alive"])
+                self.assertEqual(data["producer_health"]["state"], "fresh")
+                self.assertEqual(data["suggested_recovery"], {})
                 self.assertEqual(data["pending_approval_count"], 1)
                 self.assertIsInstance(data["heartbeat_age_seconds"], float)
             finally:
@@ -10001,6 +10004,9 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "dead")
                 self.assertFalse(data["producer_alive"])
+                self.assertEqual(data["producer_health"]["state"], "dead")
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
+                self.assertIn("--auto-recover-safe", data["suggested_recovery"]["command"])
             finally:
                 os.chdir(old_cwd)
 
@@ -10030,6 +10036,8 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "completed")
                 self.assertFalse(data["producer_alive"])
+                self.assertTrue(data["producer_health"]["terminal"])
+                self.assertEqual(data["suggested_recovery"], {})
             finally:
                 os.chdir(old_cwd)
 
@@ -10063,6 +10071,51 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_status_prefers_snapshot_recovery_plan(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "producer": {"pid": 999999},
+                            "resume": {
+                                "recovery_plan": {
+                                    "next_action": "retry the safe read",
+                                    "items": [
+                                        {
+                                            "kind": "tool_call",
+                                            "action": "retry_tool",
+                                            "tool_call_id": 4,
+                                            "auto_hint": "mew work 1 --session --resume --allow-read README.md --auto-recover-safe",
+                                        }
+                                    ],
+                                }
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "dead")
+                self.assertEqual(data["suggested_recovery"]["kind"], "retry_read")
+                self.assertEqual(data["suggested_recovery"]["tool_call_id"], 4)
+                self.assertIn("--auto-recover-safe", data["suggested_recovery"]["command"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_status_exits_nonzero_when_snapshot_absent(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10073,6 +10126,9 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "absent")
                 self.assertFalse(data["exists"])
+                self.assertEqual(data["producer_health"]["state"], "absent")
+                self.assertEqual(data["suggested_recovery"]["kind"], "refresh_snapshot")
+                self.assertIn("--follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
             finally:
                 os.chdir(old_cwd)
 

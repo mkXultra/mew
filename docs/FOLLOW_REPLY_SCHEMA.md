@@ -14,6 +14,9 @@ The snapshot is a local contract for another model or UI. It includes:
 - `pending_approvals`: top-level pending dry-run write approvals for observers
   with both chat-style `approve_hint`/`reject_hint` and CLI-style
   `cli_approve_hint`/`cli_reject_hint`
+- `suggested_recovery`: a machine-readable recovery hint when the resume has a
+  retryable interrupted read, side-effecting interruption, or replannable model
+  turn
 - `supported_actions`: the safe reply actions this mew version accepts
 - `reply_command`: where to submit a reply file
 - `reply_template`: a minimal safe reply payload. When pending approvals exist,
@@ -42,11 +45,17 @@ mew work <task-id> --follow-status --json
 
 The command reads `.mew/follow/latest.json`, or the session-specific snapshot
 when a task id maps to a work session, and returns `status`, `producer_alive`,
-`heartbeat_age_seconds`, `pending_approval_count`, and the snapshot path.
+`producer_health`, `heartbeat_age_seconds`, `pending_approval_count`,
+`suggested_recovery`, and the snapshot path.
 `fresh` means the heartbeat is recent, `working` means the producer is still
 alive, `completed` means the producer exited after writing a stopped snapshot,
 and `dead` means an old producer disappeared without a stop reason. It exits
 nonzero when no snapshot exists.
+
+When the snapshot is absent, stale, or dead, `suggested_recovery.command` points
+at the next safe observer command, such as a zero-step refresh or
+`mew work <task-id> --session --resume --allow-read . --auto-recover-safe`.
+When the snapshot resume already has a recovery plan, that plan wins.
 
 ## Reply File
 
