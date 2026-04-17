@@ -4175,6 +4175,54 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_read_only_without_task_updates_active_session_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {"id": 1, "title": "Improve cockpit", "status": "todo", "kind": "coding"}
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {
+                        "model_backend": "codex",
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_verify": True,
+                        "verify_command": "uv run pytest -q",
+                    }
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["code", "--read-only", "--no-verify", "--timeout", "0", "--no-brief", "--no-unread"]),
+                        0,
+                    )
+                self.assertIn("updated work session #1 defaults", stdout.getvalue())
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["default_options"]["allow_read"], ["."])
+                self.assertEqual(session["default_options"]["allow_write"], [])
+                self.assertFalse(session["default_options"]["allow_verify"])
+                self.assertEqual(session["default_options"]["verify_command"], "")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_code_default_flags_without_task_require_active_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["code", "--read-only", "--timeout", "0"]), 1)
+                self.assertIn("require an active coding work session or a task id", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_hides_unread_by_default_and_can_show_it(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

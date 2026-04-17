@@ -709,7 +709,7 @@ def build_parser():
     code_parser = subparsers.add_parser("code", help="enter the persistent coding cockpit")
     code_parser.add_argument("task_id", nargs="?")
     code_parser.add_argument("--auth", help="model auth file; defaults to ./auth.json then ~/.codex/auth.json")
-    code_parser.add_argument("--model-backend", default=DEFAULT_MODEL_BACKEND, choices=SUPPORTED_MODEL_BACKENDS)
+    code_parser.add_argument("--model-backend", choices=SUPPORTED_MODEL_BACKENDS)
     code_parser.add_argument("--model", help="model name")
     code_parser.add_argument("--base-url", help="model API base URL")
     code_parser.add_argument("--allow-read", action="append", default=[], help="read root cached for /continue; defaults to . when task_id is supplied")

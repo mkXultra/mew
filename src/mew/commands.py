@@ -1741,6 +1741,49 @@ def cmd_do(args):
     return cmd_work_ai(work_args)
 
 
+def code_args_request_default_update(args):
+    return bool(
+        getattr(args, "auth", None)
+        or getattr(args, "model_backend", None)
+        or getattr(args, "model", None)
+        or getattr(args, "base_url", None)
+        or getattr(args, "allow_read", None)
+        or getattr(args, "allow_write", None)
+        or getattr(args, "read_only", False)
+        or getattr(args, "verify_command", None)
+        or getattr(args, "no_verify", False)
+        or getattr(args, "compact_live", False)
+        or getattr(args, "prompt_approval", False)
+        or getattr(args, "no_prompt_approval", False)
+    )
+
+
+def code_default_update_args(args, session):
+    current = (session or {}).get("default_options") or {}
+    verify_command = getattr(args, "verify_command", None)
+    if verify_command is None:
+        verify_command = current.get("verify_command") or ""
+    allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
+    return SimpleNamespace(
+        auth=getattr(args, "auth", None),
+        model_backend=getattr(args, "model_backend", None),
+        model=getattr(args, "model", None),
+        base_url=getattr(args, "base_url", None),
+        allow_read=getattr(args, "allow_read", None) or [],
+        allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or []),
+        allow_shell=False,
+        allow_verify=allow_verify,
+        verify_command=verify_command if allow_verify else "",
+        verify_timeout=getattr(args, "verify_timeout", 300),
+        act_mode=None,
+        compact_live=bool(getattr(args, "compact_live", False)),
+        prompt_approval=bool(getattr(args, "prompt_approval", False)),
+        no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
+        read_only=bool(getattr(args, "read_only", False)),
+        no_verify=bool(getattr(args, "no_verify", False)),
+    )
+
+
 def cmd_code(args):
     task_id = getattr(args, "task_id", None)
     if task_id:
@@ -1779,6 +1822,16 @@ def cmd_code(args):
             remember_work_session_default_options(session, start_args)
             save_state(state)
         print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
+    elif code_args_request_default_update(args):
+        with state_lock():
+            state = load_state()
+            session = active_work_session_for_kind(state, kind="coding")
+            if not session:
+                print("mew: code option defaults require an active coding work session or a task id", file=sys.stderr)
+                return 1
+            remember_work_session_default_options(session, code_default_update_args(args, session))
+            save_state(state)
+        print(f"updated work session #{session['id']} defaults")
 
     chat_args = SimpleNamespace(
         poll_interval=getattr(args, "poll_interval", 1.0),
