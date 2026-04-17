@@ -242,3 +242,55 @@ Open blocker before more passive-AI decoration:
   path that reaches a user-visible outbox message without fresh user input.
   Until that proof exists, passive autonomy is observable but not yet clearly
   proactive.
+
+## 2026-04-18 Deterministic Observer Reply-File Proof
+
+Workspace:
+
+```text
+/tmp/mew-observer-proof.9p4cDM
+```
+
+This proof used no model call. It exercised the observer contract as a
+machine-readable control path:
+
+1. Created ready coding task `#1`.
+2. Started work session `#1` with write root `.` and verifier
+   `python3 -m py_compile proof.py`.
+3. Ran a dry-run `write_file` for `proof.py`.
+4. Refreshed `.mew/follow/session-1.json` with
+   `mew work 1 --follow --max-steps 0 --quiet --json`.
+5. Read `mew work 1 --reply-schema --json` and wrote a reply file containing
+   an `approve` action for tool call `#1`.
+6. Applied it with `mew work 1 --reply-file .mew/follow/reply.json --json`.
+7. Refreshed the follow snapshot again and checked follow status.
+
+Result excerpt:
+
+```text
+"type": "approve"
+"tool_call_id": 1
+"applied_tool_call_id": 2
+"status": "completed"
+"verification_exit_code": 0
+"rolled_back": false
+```
+
+Final follow status:
+
+```text
+status: fresh
+pending_approval_count: 0
+producer_health.state: fresh
+suggested_recovery: {}
+```
+
+Learning:
+
+- A non-human observer can now drive the approval lane from JSON snapshot to
+  reply file to verified write application without scraping human text.
+- The first two attempts also proved rollback behavior for bad verification:
+  `python` missing and invalid Python content both failed closed and did not
+  leave the file applied.
+- This closes the smallest observer-contract proof. The remaining passive-AI
+  proof is still user-visible proactive output from a true passive tick.
