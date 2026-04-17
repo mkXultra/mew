@@ -267,6 +267,9 @@ Initial implementation status, 2026-04-18:
 - Follow now also prints a `Work active cell` snapshot for the running model
   turn and running tool call, then prints the durable completed cells after the
   step finishes.
+- Real task dogfood found batch completion dumps too noisy, so follow completed
+  cells now omit details/tails/timestamps and point to `mew work <task-id>
+  --cells` for the full pane.
 
 Remaining:
 

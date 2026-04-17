@@ -2185,12 +2185,28 @@ def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
         return len(cells)
     print("")
     title = (session or {}).get("title") or (task or {}).get("title") or ""
+    compact_follow_cells = getattr(args, "follow", False) and not getattr(args, "cells", False)
+    cell_text = format_work_cells(
+        new_cells,
+        header="",
+        include_detail=not compact_follow_cells,
+        include_tail=not compact_follow_cells,
+        include_timestamps=not compact_follow_cells,
+    )
     if title:
         print(f"Work cells after step #{index}")
         print(f"title: {title}")
-        print(format_work_cells(new_cells, header=""))
+        if compact_follow_cells:
+            print(f"compact: details available with {mew_executable()} work {session.get('task_id')} --cells")
+        print(cell_text)
     else:
-        print(format_work_cells(new_cells, header=f"Work cells after step #{index}"))
+        header = f"Work cells after step #{index}"
+        if compact_follow_cells:
+            print(header)
+            print(f"compact: details available with {mew_executable()} work {session.get('task_id')} --cells")
+            print(cell_text)
+        else:
+            print(format_work_cells(new_cells, header=header))
     return len(cells)
 
 

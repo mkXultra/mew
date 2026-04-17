@@ -279,6 +279,7 @@ Evidence:
 - `mew work --follow` now treats cells as the primary per-step result display: follow still shows thinking/progress, but it suppresses the older action/result panes whenever new cells are available.
 - `codex-ultra` human-role cells dogfood then found and drove fixes for pending-approval CLI controls, concrete verifier hints in approval cells, resolved shell/verify gate cells, failed verify-gate visibility in `--tests`, and unavailable approval actions on closed sessions.
 - Follow mode now prints a `Work active cell` for the running model turn and running tool call before completion, then prints the durable completed cells after the step finishes.
+- Real Codex Web API dogfood tasks #87 and #88 exercised the cell stream itself: #87 identified noisy completed-cell dumps after batch actions, then #88 verified compact completed cells with a `--cells` detail hint after that fix.
 
 Missing proof:
 
@@ -415,6 +416,7 @@ Next action:
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
 - `codex-ultra` human-role cells dogfood current: verified stable CLI/chat cell rendering and exposed five approval/control issues; the current code fixes four directly and narrows the remaining active in-flight cell work.
+- `mew work 88 --follow --auth auth.json --allow-read . --max-steps 2` current: real Codex Web API dogfood verified active cells plus compact completed cells and finished with a less-noisy cockpit assessment.
 - `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` current: real Codex Web API dogfood inspected the new cell implementation, produced stable cells after each step, and identified the row-noise polish that was fixed in this session.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session after the latest cockpit help/resume next-action changes.
 - `uv run pytest -q tests/test_work_session.py` current: `179 passed`, including task-specific idle resume `next_action`.

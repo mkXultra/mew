@@ -537,7 +537,13 @@ def build_work_session_cells(session, limit=20):
     return rendered[-count:]
 
 
-def format_work_cells(cells, header="Work cells"):
+def format_work_cells(
+    cells,
+    header="Work cells",
+    include_detail=True,
+    include_tail=True,
+    include_timestamps=True,
+):
     lines = [header] if header else []
     cells = list(cells or [])
     if not cells:
@@ -553,17 +559,19 @@ def format_work_cells(cells, header="Work cells"):
             lines.append(f"  id: {cell.get('id')}")
         if elapsed:
             lines.append(f"  elapsed: {elapsed}")
-        if time_text:
+        if include_timestamps and time_text:
             lines.append(f"  started_at: {time_text}")
         detail = cell.get("detail") or ""
-        for detail_line in detail.splitlines():
-            if detail_line.strip():
-                lines.append(f"  {detail_line}")
-        for tail in cell.get("tail") or []:
-            stream = tail.get("stream") or "output"
-            tail_lines = tail.get("lines") or []
-            lines.append(f"  {stream}_tail:")
-            lines.extend(f"    {line}" for line in tail_lines)
+        if include_detail:
+            for detail_line in detail.splitlines():
+                if detail_line.strip():
+                    lines.append(f"  {detail_line}")
+        if include_tail:
+            for tail in cell.get("tail") or []:
+                stream = tail.get("stream") or "output"
+                tail_lines = tail.get("lines") or []
+                lines.append(f"  {stream}_tail:")
+                lines.extend(f"    {line}" for line in tail_lines)
     return "\n".join(lines)
 
 
