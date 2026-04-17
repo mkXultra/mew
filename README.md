@@ -138,6 +138,7 @@ uv run mew effects --json
 uv run mew runtime-effects 10
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew run --once --autonomous --autonomy-level act --focus "Take one small verified step"
+uv run mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --focus "Check one passive tick"
 uv run mew stop
 uv run mew -m "今日のタスクは何？" --wait
 uv run mew message "今日のタスクは何？" --wait

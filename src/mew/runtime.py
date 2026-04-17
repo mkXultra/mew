@@ -542,10 +542,10 @@ def run_runtime(args):
                 elif pending_external:
                     reason = "external_event"
                     create_internal_event = False
-                elif first:
+                elif first and not getattr(args, "passive_now", False):
                     reason = "startup"
                     create_internal_event = True
-                elif current_monotonic >= next_passive_at:
+                elif (first and getattr(args, "passive_now", False)) or current_monotonic >= next_passive_at:
                     reason = "passive_tick"
                     create_internal_event = True
                 else:

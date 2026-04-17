@@ -119,3 +119,33 @@ This is a small but real proof that passive ticks work after startup and inbox
 drain. It is not yet proof of useful autonomous work. The next proof should run
 longer with a controlled open coding task and should preserve a structured
 cycle report for every passive tick.
+
+## 2026-04-17 Follow-Up: `--passive-now`
+
+The short loop exposed that `mew run --once` was not a convenient passive proof
+entrypoint because it processed `startup` and exited. A small CLI option was
+added:
+
+```bash
+./mew run --once --passive-now
+```
+
+Behavior:
+
+- Pending user or external events still take priority.
+- If no such event is pending, the first internal cycle is `passive_tick`
+  instead of `startup`.
+- This makes one-shot passive proof and regression checks possible without
+  starting a multi-cycle runtime loop.
+
+Live verification:
+
+```bash
+./mew run --once --passive-now --ai --autonomous --autonomy-level propose --allow-read . --auth auth.json --echo-outbox --max-reflex-rounds 1 --focus "Test --passive-now: process exactly one passive tick without waiting for startup. Do not write files."
+```
+
+Result:
+
+```text
+processed 1 event(s) reason=passive_tick
+```

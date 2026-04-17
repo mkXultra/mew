@@ -114,6 +114,11 @@ def build_parser():
     run_parser = subparsers.add_parser("run", help="start the runtime")
     run_parser.add_argument("--once", action="store_true", help="process one loop and exit")
     run_parser.add_argument(
+        "--passive-now",
+        action="store_true",
+        help="when no user or external event is pending, process passive_tick before startup on the first loop",
+    )
+    run_parser.add_argument(
         "--interval",
         type=float,
         default=DEFAULT_INTERVAL_SECONDS,

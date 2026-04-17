@@ -235,6 +235,33 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_once_passive_now_processes_passive_tick_first(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(["run", "--once", "--passive-now", "--poll-interval", "0.01"])
+
+                self.assertEqual(code, 0)
+                self.assertIn("processed 1 event(s) reason=passive_tick", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                self.assertEqual([event["type"] for event in state["inbox"]], ["passive_tick"])
+                self.assertEqual(state["runtime_status"]["last_cycle_reason"], "passive_tick")
+            finally:
+                os.chdir(old_cwd)
+
     def test_runtime_marks_deferred_effect_when_user_message_arrives_during_planning(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
