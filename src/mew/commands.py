@@ -1709,13 +1709,20 @@ def record_max_steps_reentry_note(session_id, report, mode="follow"):
         f"Last action: {action_type}."
     )
     if summary:
-        note_text += f" Last result: {clip_output(str(summary), 500)}"
-    note_text += " Resume with /c, /continue, or the printed Next CLI controls to interpret this state."
+        note_text += f" Last result: {clip_inline_text(str(summary), 240)}"
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
         if not session:
             return note_text
+        session["notes"] = [
+            note
+            for note in session.get("notes") or []
+            if not (
+                note.get("source") == "system"
+                and str(note.get("text") or "").startswith(("Follow reached max_steps=", "Live run reached max_steps="))
+            )
+        ]
         add_work_session_note(session, note_text, source="system")
         save_state(state)
     return note_text

@@ -75,6 +75,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
         }
     except OSError as exc:
+        stderr = f"executable not found: {argv[0]}" if isinstance(exc, FileNotFoundError) and argv else str(exc)
         return {
             "command": command,
             "argv": argv,
@@ -84,7 +85,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             "exit_code": None,
             "error_type": "executable_not_found" if isinstance(exc, FileNotFoundError) else exc.__class__.__name__,
             "stdout": "",
-            "stderr": str(exc),
+            "stderr": stderr,
         }
 
 
@@ -108,6 +109,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
             env=env,
         )
     except OSError as exc:
+        stderr = f"executable not found: {argv[0]}" if isinstance(exc, FileNotFoundError) and argv else str(exc)
         return {
             "command": command,
             "argv": argv,
@@ -117,7 +119,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
             "exit_code": None,
             "error_type": "executable_not_found" if isinstance(exc, FileNotFoundError) else exc.__class__.__name__,
             "stdout": "",
-            "stderr": str(exc),
+            "stderr": stderr,
         }
 
     chunks = {"stdout": [], "stderr": []}

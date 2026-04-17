@@ -641,6 +641,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("executable not found: mew-missing-test-command", call["error"])
                 self.assertIn("exit_code: unavailable", call["summary"])
                 self.assertIn("failure: executable not found: mew-missing-test-command", call["summary"])
+                self.assertIn("stderr:\nexecutable not found: mew-missing-test-command", call["summary"])
+                self.assertNotIn("[Errno 2]", call["summary"])
                 self.assertIsNone(call["result"]["exit_code"])
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -653,7 +655,9 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--session", "--commands"]), 0)
                 command_text = stdout.getvalue()
                 self.assertIn("exit=unavailable", command_text)
+                self.assertIn("executable not found: mew-missing-test-command", command_text)
                 self.assertNotIn("exit=None", command_text)
+                self.assertNotIn("[Errno 2]", command_text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)
@@ -6033,6 +6037,65 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Follow reached max_steps=1", session["notes"][-1]["text"])
                 self.assertIn("Last action: read_file", session["notes"][-1]["text"])
                 self.assertNotIn("follow one content", session["notes"][-1]["text"])
+                self.assertNotIn("Resume with /c", session["notes"][-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_max_steps_note_replaces_older_boundary_notes(self):
+        from mew.commands import record_max_steps_reentry_note
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Loop",
+                            "goal": "Keep notes calm.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "notes": [
+                                {
+                                    "created_at": "old",
+                                    "source": "system",
+                                    "text": "Follow reached max_steps=1 after 1 step(s). Last action: glob.",
+                                },
+                                {"created_at": "old", "source": "user", "text": "Keep this note."},
+                            ],
+                            "tool_calls": [],
+                            "model_turns": [],
+                        }
+                    ]
+                    save_state(state)
+
+                note_text = record_max_steps_reentry_note(
+                    1,
+                    {
+                        "max_steps": 2,
+                        "steps": [
+                            {
+                                "index": 2,
+                                "action": {"type": "read_file"},
+                                "summary": "observed " + "very long " * 80,
+                            }
+                        ],
+                    },
+                )
+
+                session = load_state()["work_sessions"][0]
+                system_notes = [note for note in session["notes"] if note.get("source") == "system"]
+                self.assertEqual(len(system_notes), 1)
+                self.assertIn("Follow reached max_steps=2", system_notes[0]["text"])
+                self.assertIn("Last action: read_file", system_notes[0]["text"])
+                self.assertNotIn("Resume with /c", system_notes[0]["text"])
+                self.assertLess(len(note_text), 380)
+                self.assertTrue(any(note.get("text") == "Keep this note." for note in session["notes"]))
             finally:
                 os.chdir(old_cwd)
 
