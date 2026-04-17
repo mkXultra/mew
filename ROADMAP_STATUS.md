@@ -114,6 +114,7 @@ Evidence:
 - Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
+- `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines continue with cached options, and `/c` is a short continue alias.
 - Pending write approval hints now reuse the latest session verification command when available, reducing the chance that an approval prompt shows only a placeholder.
 - Write approval execution can now reuse the latest session verification command when `--verify-command` is omitted, while still requiring explicit write roots.
 - Successful `run_tests` and write verification results now refresh the session default verification command, preventing reentry controls from preserving a known-stale verifier after a better command succeeds.

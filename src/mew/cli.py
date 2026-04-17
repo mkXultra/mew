@@ -1094,6 +1094,11 @@ def build_parser():
     chat_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     chat_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
     chat_parser.add_argument("--no-unread", action="store_true", help="do not print unread messages on startup")
+    chat_parser.add_argument(
+        "--work-mode",
+        action="store_true",
+        help="treat chat text as work-session continue guidance and blank lines as continue",
+    )
     chat_parser.add_argument("--timeout", type=float, help="leave chat after this many seconds")
     chat_parser.set_defaults(activity=True)
     chat_parser.set_defaults(func=cmd_chat)

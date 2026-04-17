@@ -5115,6 +5115,47 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_mode_treats_text_and_blank_as_continue(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("work mode content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    if len(prompts) == 1:
+                        return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+                    return {"summary": "done", "action": {"type": "finish", "reason": "blank continued"}}
+
+                stdin = StringIO("inspect README from work mode\n\n/exit\n")
+                with patch("sys.stdin", stdin):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model) as call_model:
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(["chat", "--work-mode", "--no-brief", "--no-unread", "--no-activity"]),
+                                    0,
+                                )
+
+                output = stdout.getvalue()
+                self.assertEqual(call_model.call_count, 2)
+                self.assertIn("work-mode: on", output)
+                self.assertIn("Work live step #1 action", output)
+                self.assertIn("work mode content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
+                self.assertIn("inspect README from work mode", prompts[0])
+                self.assertIn("Work session finished: blank continued", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
