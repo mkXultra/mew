@@ -2649,6 +2649,56 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_no_verify_suppresses_stale_verification_inference(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{sys.executable} -c \"print('verified')\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--tool", "run_tests", "--command", command, "--allow-verify"]), 0)
+                    self.assertEqual(main(["code", "1", "--no-verify", "--timeout", "0", "--no-brief"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--approve-tool", "2", "--allow-write", "."]), 1)
+
+                self.assertIn("applied writes require --allow-verify", stdout.getvalue() + stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+                defaults = load_state()["work_sessions"][0]["default_options"]
+                self.assertFalse(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "")
+                self.assertTrue(defaults["verify_disabled"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_reuses_default_verification_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

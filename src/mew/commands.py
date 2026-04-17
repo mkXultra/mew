@@ -1174,6 +1174,11 @@ def remember_work_session_default_options(session, args):
     prompt_approval = bool(current.get("prompt_approval") or options.get("prompt_approval"))
     if no_prompt_approval:
         prompt_approval = False
+    verify_disabled = bool(current.get("verify_disabled"))
+    if clear_verify_defaults:
+        verify_disabled = True
+    elif options.get("allow_verify") or options.get("verify_command"):
+        verify_disabled = False
 
     session["default_options"] = {
         "auth": merged_scalar("auth"),
@@ -1185,6 +1190,7 @@ def remember_work_session_default_options(session, args):
         "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
         "allow_verify": False if clear_verify_defaults else bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": "" if clear_verify_defaults else merged_scalar("verify_command"),
+        "verify_disabled": verify_disabled,
         "act_mode": merged_scalar("act_mode"),
         "compact_live": bool(current.get("compact_live") or options.get("compact_live")),
         "prompt_approval": prompt_approval,
@@ -1206,10 +1212,13 @@ def remember_successful_work_verification(session, tool, result):
     defaults = session.setdefault("default_options", {})
     defaults["allow_verify"] = True
     defaults["verify_command"] = command
+    defaults["verify_disabled"] = False
 
 
 def work_session_default_verify_command(session, task=None):
     defaults = (session or {}).get("default_options") or {}
+    if defaults.get("verify_disabled"):
+        return ""
     return defaults.get("verify_command") or latest_work_verify_command(
         (session or {}).get("tool_calls") or [],
         task=task,
