@@ -4075,6 +4075,30 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_observe_alias_supports_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch(
+                    "mew.perception.run_command_record",
+                    return_value={
+                        "cwd": str(Path(tmp).resolve()),
+                        "exit_code": 0,
+                        "stdout": "## main\n M file.py\n",
+                        "stderr": "",
+                    },
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["observe", "--allow-read", ".", "--json"])
+
+                self.assertEqual(code, 0)
+                data = json.loads(stdout.getvalue())
+                git = next(item for item in data["observations"] if item["type"] == "git_status")
+                self.assertEqual(git["branch"], "main")
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_handles_slash_commands_and_messages(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

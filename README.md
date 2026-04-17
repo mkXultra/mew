@@ -706,13 +706,14 @@ printf '{"id":"m1","type":"message","text":"今日のタスクは何？"}\n{"id"
 
 ## Safe Tools
 
-`mew perceive` shows the small passive workspace observations that are injected
-into the model context when a read root is allowed. Current observers include
-git status and recent file changes:
+`mew perceive` (or the `mew observe` alias) shows the small passive workspace
+observations that are injected into the model context when a read root is
+allowed. Current observers include git status and recent file changes:
 
 ```sh
 uv run mew perceive --allow-read .
 uv run mew perceive --allow-read . --json
+uv run mew observe --allow-read . --json
 ```
 
 `mew tool` gives AI-facing workspace tools with bounded read, write-preview,

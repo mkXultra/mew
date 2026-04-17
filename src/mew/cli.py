@@ -761,6 +761,17 @@ def build_parser():
     perceive_parser.add_argument("--json", action="store_true", help="print structured JSON")
     perceive_parser.set_defaults(func=cmd_perceive)
 
+    observe_parser = subparsers.add_parser("observe", help="alias for perceive")
+    observe_parser.add_argument("--cwd", default=".", help="workspace directory to observe")
+    observe_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="read root that enables passive workspace observations; can be passed more than once",
+    )
+    observe_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    observe_parser.set_defaults(func=cmd_perceive)
+
     next_parser = subparsers.add_parser("next", help="print the next useful command or move")
     next_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     next_parser.add_argument("--json", action="store_true", help="print structured JSON")
