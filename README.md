@@ -435,6 +435,8 @@ uv run mew work 1 --approve-tool 7 --allow-write . --allow-verify --verify-comma
 uv run mew work 1 --reject-tool 7 --reject-reason "not the right change"
 uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --allow-write . --apply --allow-verify --verify-command "uv run pytest -q"
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
+uv run mew code 1
+uv run mew code 1 --read-only --no-verify
 uv run mew do 1 --work-guidance "make the smallest verified fix"
 uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in the resume bundle"
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
@@ -443,6 +445,14 @@ uv run mew work 1 --follow --auth auth.json --allow-read .
 uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-steps 1
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
+
+`mew code [task-id]` is the quiet coding cockpit. With a task id, it starts or
+reuses that task's native work session, scopes chat to `coding`, enables
+work-mode, and keeps startup controls short: `/c`, `/follow`, and
+`/continue <guidance>`. It hides unread outbox by default so old passive chatter
+does not flood a coding session; use `--show-unread` when you want to review it.
+Use `--read-only --no-verify` to enter without inheriting older write, shell, or
+verification gates from a previous session.
 
 `mew do <task-id>` is the compact supervised coding path. It runs the resident
 work loop live with deterministic ACT, `--allow-read .`, `--allow-write .`, and
