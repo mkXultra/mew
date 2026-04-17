@@ -4094,6 +4094,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session resume --auto-recover-safe", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
+        self.assertIn("/work-session <task-id> live --allow-read .", output)
         self.assertIn("/work-session live --compact-live", output)
         self.assertIn("/work-session live                    prompts inline", output)
         self.assertIn("/work-session live --no-prompt-approval", output)

@@ -388,6 +388,8 @@ Next action:
 
 ## Latest Validation
 
+- `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`, including task-first live help coverage.
+- `mew work 73 --live --auth auth.json --allow-read . --compact-live` current: resident self-improvement buddy session #99 identified the task-first live help gap and finished with a concrete edit recommendation.
 - `uv run pytest -q` current: `703 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands, including no-trailing-newline large edit diff stats.
 - `./mew dogfood --scenario chat-cockpit --cleanup --json` current: pass across 11 commands, including `code_quiet_startup_is_silent`.
@@ -575,6 +577,7 @@ Next action:
 - `mew code` now uses a compact startup brief (`runtime`, task count, unread count, next move, and active session when present) instead of dumping the full general chat brief, keeping coding entry calmer while `/brief` remains available inside chat.
 - `mew next` and `mew focus` now point fresh or active coding work at `mew code <task-id>` as the quiet cockpit entry instead of surfacing `mew work --start-session` or the full flag-heavy `mew work --live ...` command in the primary next-action line.
 - Done-task work sessions no longer capture the default active cockpit, and attempts to start or run a new resident work session on a done task now ask for the task to be reopened first.
+- Mew buddy dogfood session #99 chose the smallest visible cockpit polish: `/help work` now documents task-first live usage (`/work-session <task-id> live --allow-read .`) alongside task-first resume, preserving the accepted command order in the focused chat help.
 
 ## Current Roadmap Focus
 

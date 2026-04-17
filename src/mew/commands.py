@@ -6763,6 +6763,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /follow --allow-read .                run a compact bounded live loop; default max 10
 /work-session live --allow-read . --max-steps 3
                                       run a short bounded resident-model loop
+/work-session <task-id> live --allow-read .
+                                      same as live; task-first order is accepted
 /work-session live --compact-live     show thinking/action/result panes without full per-step resumes
 /work-session live                    prompts inline for dry-run writes in an interactive TTY
 /work-session live --no-prompt-approval
