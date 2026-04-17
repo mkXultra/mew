@@ -149,3 +149,13 @@ Result:
 ```text
 processed 1 event(s) reason=passive_tick
 ```
+
+Validation:
+
+```text
+uv run pytest -q
+717 passed, 6 subtests passed
+
+./mew dogfood --scenario runtime-focus --cleanup --json
+status: pass
+```
