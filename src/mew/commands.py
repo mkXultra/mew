@@ -682,8 +682,24 @@ def _format_live_output_preview(label, text, max_chars=500):
     return lines
 
 
+def _compact_live_path_text(text):
+    text = str(text or "")
+    cwd = str(Path.cwd())
+    variants = [cwd]
+    if cwd.startswith("/var/"):
+        variants.append("/private" + cwd)
+    elif cwd.startswith("/private/var/"):
+        variants.append(cwd.removeprefix("/private"))
+    for root in variants:
+        if text == root:
+            text = "."
+        text = text.replace(root + os.sep, "")
+        text = text.replace(root, ".")
+    return text
+
+
 def _format_live_match_preview(matches, max_items=5, max_chars=700):
-    matches = [str(match) for match in (matches or []) if str(match).strip()]
+    matches = [_compact_live_path_text(match) for match in (matches or []) if str(match).strip()]
     if not matches:
         return []
     text = clip_output("\n".join(matches[:max_items]), max_chars)
@@ -704,7 +720,7 @@ def _format_live_tool_summary(call):
                 f"exit_code: {result.get('exit_code')}",
             ]
         )
-    return compact_work_tool_summary(call)
+    return _compact_live_path_text(compact_work_tool_summary(call))
 
 
 def _format_live_tool_call_result(call):
@@ -712,7 +728,7 @@ def _format_live_tool_call_result(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
     command = result.get("command") or parameters.get("command") or ""
-    path = result.get("path") or parameters.get("path") or ""
+    path = _compact_live_path_text(result.get("path") or parameters.get("path") or "")
     target = command or path
     exit_code = result.get("exit_code", result.get("verification_exit_code"))
     exit_text = "" if exit_code is None else f" exit={exit_code}"
