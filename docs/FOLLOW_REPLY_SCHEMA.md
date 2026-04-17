@@ -60,7 +60,8 @@ Example:
 ```
 
 `--reply-file` fails with a nonzero status when there is no matching active
-session, or when `observed_session_updated_at` no longer matches the active
+session, when `schema_version` is not `1`, or when
+`observed_session_updated_at` is missing or no longer matches the active
 session's `updated_at`. After a reply is applied, mew rewrites
 `.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with
 `mode: "reply_file"` so observers can see the acknowledgement without waiting

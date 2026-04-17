@@ -3701,6 +3701,12 @@ def cmd_work_reply_file(args):
     if not isinstance(payload, dict):
         print("mew: reply file must contain a JSON object", file=sys.stderr)
         return 1
+    if payload.get("schema_version") != 1:
+        print("mew: reply file requires schema_version 1", file=sys.stderr)
+        return 1
+    if not payload.get("observed_session_updated_at"):
+        print("mew: reply file requires observed_session_updated_at", file=sys.stderr)
+        return 1
     try:
         actions = _normalize_work_reply_actions(payload)
     except MewError as exc:

@@ -8898,6 +8898,7 @@ class WorkSessionTests(unittest.TestCase):
                 reply_path.write_text(
                     json.dumps(
                         {
+                            "schema_version": 1,
                             "session_id": 1,
                             "task_id": 1,
                             "observed_session_updated_at": observed_updated_at,
@@ -8946,7 +8947,14 @@ class WorkSessionTests(unittest.TestCase):
             os.chdir(tmp)
             try:
                 Path("reply.json").write_text(
-                    json.dumps({"task_id": 1, "actions": [{"type": "steer", "text": "please continue"}]}),
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": "observed",
+                            "actions": [{"type": "steer", "text": "please continue"}],
+                        }
+                    ),
                     encoding="utf-8",
                 )
 
@@ -8977,6 +8985,7 @@ class WorkSessionTests(unittest.TestCase):
                 Path("reply.json").write_text(
                     json.dumps(
                         {
+                            "schema_version": 1,
                             "session_id": 1,
                             "task_id": 1,
                             "observed_session_updated_at": observed_updated_at,
@@ -9030,6 +9039,7 @@ class WorkSessionTests(unittest.TestCase):
                 Path("reply.json").write_text(
                     json.dumps(
                         {
+                            "schema_version": 1,
                             "session_id": 1,
                             "task_id": 1,
                             "observed_session_updated_at": observed_updated_at,

@@ -647,6 +647,7 @@ Next action:
 - `docs/FOLLOW_REPLY_SCHEMA.md` documents the local snapshot/reply contract for another model or UI.
 - Reply files can now include `observed_session_updated_at`; stale observer replies are rejected before mutation when the active session has moved on.
 - Reply-file `reject` now shares the pending dry-run write/edit guard, rejects replayed reject actions, and bumps the work-session `updated_at` like the other reply actions.
+- Reply files now require `schema_version: 1` and `observed_session_updated_at`, making the observer contract strict rather than best-effort.
 - `dogfood --scenario work-session` now covers a deterministic structured reply-file loop and verifies the follow snapshot acknowledgement, so the observer interface is part of recurring dogfood.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
