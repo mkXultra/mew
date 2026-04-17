@@ -9639,6 +9639,7 @@ def chat_self_improve(rest):
             print(f"native work: {mew_command('work', task['id'], '--start-session')}")
         print(f"work cwd: {resolved_task_cwd_text(task)}")
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
+        print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
     if show_prompt:
         if not plan:
             print("No programmer plan was created for native self-improvement.")

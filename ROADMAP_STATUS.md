@@ -422,6 +422,8 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `810 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `200 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "reply_file_can_queue_safe_follow_actions or follow_writes_round_trip_snapshot or work_session_steer_requires_task_id_when_multiple_sessions_active"` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "work_live_prints_resume_after_step or work_follow_honors_explicit_one_step_bound or work_follow_writes_round_trip_snapshot or work_follow_runs_compact_multi_step_live_loop"` current: `4 passed`.
@@ -637,6 +639,7 @@ Next action:
 - Mid-loop steer now has an explicit CLI/chat lane via `mew work --steer` and `/work-session steer`, with regression coverage for next-step model guidance injection and stop-request precedence.
 - Live/follow work runs now write `.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with the latest step, resume bundle, cells, and next controls, creating the first structured follow cockpit artifact for another model or UI to observe.
 - `mew work --reply-file reply.json` now applies safe structured observer replies back into an active work session, covering `steer`, `note`, `stop`, and dry-run write `reject` actions while leaving approval gates explicit.
+- Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
 ## Current Roadmap Focus
 

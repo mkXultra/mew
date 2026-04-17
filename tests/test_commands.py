@@ -4942,6 +4942,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("started work session #1", output)
                 self.assertNotIn("native work: mew work 1 --start-session", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
 
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["plans"], [])
