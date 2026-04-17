@@ -68,6 +68,8 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("outcome:\n  status: completed", text)
         self.assertIn("tools:\n  tool #7 [completed] run_command exit=0 duration=2.0s echo hi", text)
+        self.assertIn("\n  cwd: .", text)
+        self.assertNotIn("\ncwd: .", text)
         self.assertIn("stdout:\n    hi", text)
         self.assertIn("session:\n  phase: idle", text)
 

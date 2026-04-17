@@ -766,7 +766,8 @@ def _append_live_section(lines, title, items):
     if not items:
         return
     lines.append(f"{title}:")
-    lines.extend(f"  {item}" for item in items)
+    for item in items:
+        lines.extend(f"  {line}" for line in str(item).splitlines())
 
 
 def format_work_live_step_result(step, resume=None):
