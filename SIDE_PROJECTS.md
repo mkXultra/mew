@@ -50,7 +50,7 @@ Status:
 - A second isolated slice renders the same `mew desk --json` view model as a
   tiny terminal pet, proving the UI boundary before a Tauri/desktop shell.
 - Latest validation: `uv run pytest -q experiments/mew-desk` passed with
-  `9 passed`.
+  `11 passed`.
 
 Scope:
 - Menu bar or tray app.

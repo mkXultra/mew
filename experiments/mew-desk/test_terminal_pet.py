@@ -43,6 +43,32 @@ def test_unknown_state_falls_back_to_sleeping() -> None:
     assert "( -.- )" in text
 
 
+def test_long_focus_is_compacted_for_glanceable_output() -> None:
+    long_focus = "A" * 140
+
+    text = terminal_pet.render_terminal_pet({"pet_state": "alerting", "focus": long_focus, "counts": {}})
+
+    focus_line = next(line for line in text.splitlines() if line.startswith("focus: "))
+    assert focus_line.endswith("...")
+    assert len(focus_line.removeprefix("focus: ")) == terminal_pet.MAX_FOCUS_LENGTH
+
+
+def test_bad_counts_fall_back_to_zero() -> None:
+    text = terminal_pet.render_terminal_pet(
+        {
+            "pet_state": "typing",
+            "counts": {
+                "open_tasks": "4",
+                "open_questions": "many",
+                "active_work_sessions": -2,
+                "open_attention": None,
+            },
+        }
+    )
+
+    assert "tasks=4 questions=0 sessions=0 attention=0" in text
+
+
 def test_load_view_model_from_stdin() -> None:
     model = terminal_pet.load_view_model(
         None,

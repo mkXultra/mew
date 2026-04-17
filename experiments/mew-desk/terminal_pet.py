@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, TextIO
 
 
+MAX_FOCUS_LENGTH = 96
+
+
 PET_FRAMES: dict[str, list[str]] = {
     "sleeping": [
         r" /\_/\  z",
@@ -51,17 +54,37 @@ def load_view_model(source: Path | None, stdin: TextIO = sys.stdin) -> dict[str,
     return data
 
 
+def compact_focus(value: Any) -> str:
+    focus = " ".join(str(value or "No focus recorded").split())
+    if len(focus) <= MAX_FOCUS_LENGTH:
+        return focus
+    return focus[: MAX_FOCUS_LENGTH - 3].rstrip() + "..."
+
+
+def safe_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str):
+        try:
+            return max(0, int(value.strip()))
+        except ValueError:
+            return 0
+    return 0
+
+
 def render_terminal_pet(view_model: dict[str, Any]) -> str:
     state = normalize_pet_state(view_model.get("pet_state"))
-    focus = " ".join(str(view_model.get("focus") or "No focus recorded").split())
+    focus = compact_focus(view_model.get("focus"))
     counts = view_model.get("counts")
     if not isinstance(counts, dict):
         counts = {}
     count_line = "tasks={tasks} questions={questions} sessions={sessions} attention={attention}".format(
-        tasks=int(counts.get("open_tasks") or 0),
-        questions=int(counts.get("open_questions") or 0),
-        sessions=int(counts.get("active_work_sessions") or 0),
-        attention=int(counts.get("open_attention") or 0),
+        tasks=safe_count(counts.get("open_tasks")),
+        questions=safe_count(counts.get("open_questions")),
+        sessions=safe_count(counts.get("active_work_sessions")),
+        attention=safe_count(counts.get("open_attention")),
     )
     lines = [
         f"mew desk :: {state}",

@@ -55,10 +55,12 @@ Built:
   instead of starting a GUI/Tauri surface too early.
 - Added tests for alerting, fallback state handling, stdin loading, and file
   rendering.
+- Applied external `codex-ultra` review polish: long focus text is compacted for
+  glanceability and malformed counts degrade to zero instead of crashing.
 
 Validation:
 
-- `uv run pytest -q experiments/mew-desk` -> `9 passed`.
+- `uv run pytest -q experiments/mew-desk` -> `11 passed`.
 
 Product learning:
 
