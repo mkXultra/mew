@@ -32,5 +32,7 @@ Current guiding judgment:
 - The next maintainability frontier is extracting action application from the large agent/command modules so mew can reason about and improve its own execution layer.
 - Native work sessions are now the main evidence for "inside mew": THINK/ACT is journaled before model calls, live work has stop boundaries, resume bundles include world state/recovery plans, older context is digested, and oversized model context is compacted.
 - The current product frontier is a polished REPL-style coding cockpit: calm streaming, clear live output, and daily-use ergonomics that make mew feel preferable to starting a fresh coding CLI.
+- External observer operation is now a serious product surface: task lifecycle commands have JSON output, follow snapshots expose pending approvals and supported reply actions, `--follow-status` reports producer health, and stale/dead/absent snapshots return `suggested_recovery` commands.
+- The remaining observer frontier is not basic legibility; it is making the recommended recovery path feel obvious and trustworthy during real interrupted work, especially side-effecting command/write recovery.
 
 If confidence is low, say what is uncertain. Use `acm run` with another model only when the user explicitly asks for that model, then compare its answer with your own before responding.
