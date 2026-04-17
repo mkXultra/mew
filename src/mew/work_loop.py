@@ -24,6 +24,7 @@ WORK_MODEL_ACTIONS |= WORK_BATCH_ACTIONS
 WORK_RESULT_TEXT_LIMIT = 20000
 WORK_READ_FILE_CONTEXT_TEXT_LIMIT = 12000
 WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS = WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+WORK_MODEL_SEARCH_TEXT_DEFAULT_MAX_MATCHES = 20
 WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT = 1000
 WORK_LIST_CONTEXT_ITEM_LIMIT = 100
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
@@ -648,6 +649,13 @@ def work_tool_parameters_from_action(
             except (TypeError, ValueError):
                 parameters.pop(key, None)
     if action_type == "search_text":
+        try:
+            parameters["max_matches"] = max(
+                1,
+                min(int(parameters.get("max_matches") or WORK_MODEL_SEARCH_TEXT_DEFAULT_MAX_MATCHES), 50),
+            )
+        except (TypeError, ValueError):
+            parameters["max_matches"] = WORK_MODEL_SEARCH_TEXT_DEFAULT_MAX_MATCHES
         try:
             parameters["context_lines"] = max(0, min(int(parameters.get("context_lines") or 3), 5))
         except (TypeError, ValueError):

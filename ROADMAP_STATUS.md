@@ -322,9 +322,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `633 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `634 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `139 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `140 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -385,6 +385,7 @@ Next action:
 - Full `mew work --session --resume` dogfood exposed repeated identical one-shot guidance under every recent decision; resume text now prints the first guidance and references later duplicates as `same as #...`, preserving context without replaying the same paragraph.
 - `codex-ultra` human-role retest after the reentry-noise work found the front-door behavior passing, then flagged `dogfood --json` as too large for practical terminal use; scenario JSON now stores compact command tails and clipped observed values instead of full command stdout/stderr and large diffs.
 - Mew buddy dogfood session #50 exposed that a model-selected `search_text` action with `pattern=*.md` still searched Python files; `search_text` now honors optional glob filters from resident actions and the CLI, reducing noisy false-scope search results in cockpit output.
+- The same session showed that three broad model-selected searches could push resume context to medium pressure; model-selected `search_text` now defaults to 20 matches and caps explicit requests at 50, while manual CLI searches keep their broader defaults.
 
 ## Current Roadmap Focus
 

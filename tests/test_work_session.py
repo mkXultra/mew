@@ -3758,6 +3758,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn('"line_start": "optional 1-based read_file starting line', prompt)
         self.assertIn('"stat": "optional git_diff diffstat', prompt)
 
+    def test_work_model_search_text_defaults_are_bounded(self):
+        from mew.work_loop import work_tool_parameters_from_action
+
+        params = work_tool_parameters_from_action({"type": "search_text", "query": "needle"})
+        self.assertEqual(params["max_matches"], 20)
+        self.assertEqual(params["context_lines"], 3)
+
+        explicit = work_tool_parameters_from_action(
+            {"type": "search_text", "query": "needle", "max_matches": 999, "context_lines": 99}
+        )
+        self.assertEqual(explicit["max_matches"], 50)
+        self.assertEqual(explicit["context_lines"], 5)
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 
