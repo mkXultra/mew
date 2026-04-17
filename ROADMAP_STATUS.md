@@ -347,6 +347,10 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `677 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-specific-recovery-hints --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Pick the next smallest non-UI mew improvement..."` created task #55/session #78; after rejecting an already-covered fallback-memory idea, session #79 identified generic `<path>` interrupted recovery hints as the concrete non-UI recovery slice.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_workbench_surfaces_work_session_reentry_guidance tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_shows_search_matches tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_falls_back_to_search_snippets_without_matches` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-claude-ux-followups --json` current: pass across 36 commands.

@@ -1975,8 +1975,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(interrupted_resume["phase"], "interrupted")
                 self.assertEqual(interrupted_resume["recovery_plan"]["items"][0]["action"], "retry_tool")
                 self.assertIn("recover-session", interrupted_resume["recovery_plan"]["items"][0]["hint"])
+                self.assertIn("--allow-read README.md", interrupted_resume["recovery_plan"]["items"][0]["hint"])
                 self.assertIn("--auto-recover-safe", interrupted_resume["recovery_plan"]["items"][0]["auto_hint"])
                 self.assertIn("--auto-recover-safe", interrupted_resume["recovery_plan"]["items"][0]["chat_auto_hint"])
+                self.assertEqual(interrupted_resume["recovery_plan"]["items"][0]["path"], "README.md")
                 self.assertIn("--auto-recover-safe", stdout.getvalue())
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -1992,8 +1994,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("summary: interrupted work tool call", text_resume)
                 self.assertIn("error: Interrupted before the work tool completed.", text_resume)
                 self.assertIn("recovery_hint: Review work session #1 resume", text_resume)
-                self.assertIn("auto: mew work 1 --session --resume --allow-read <path> --auto-recover-safe", text_resume)
-                self.assertIn("chat_auto: /work-session resume 1 --allow-read <path> --auto-recover-safe", text_resume)
+                self.assertIn("auto: mew work 1 --session --resume --allow-read README.md --auto-recover-safe", text_resume)
+                self.assertIn("chat_auto: /work-session resume 1 --allow-read README.md --auto-recover-safe", text_resume)
+                self.assertIn("path: README.md", text_resume)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)

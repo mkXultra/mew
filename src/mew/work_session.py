@@ -697,6 +697,15 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def work_recovery_read_root(call):
+    path = work_call_path(call)
+    if path:
+        return path
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    return result.get("cwd") or parameters.get("cwd") or "."
+
+
 def parent_path_for_observation(path):
     path = str(path or "").strip()
     if not path:
@@ -1145,11 +1154,15 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "recovery_hint": call.get("recovery_hint") or "",
         }
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
-            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-read <path>"
+            read_root = work_recovery_read_root(call)
+            read_arg = shlex.quote(read_root)
+            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-read {read_arg}"
             item["auto_hint"] = (
-                f"{mew_executable()} work{task_arg} --session --resume --allow-read <path> --auto-recover-safe"
+                f"{mew_executable()} work{task_arg} --session --resume --allow-read {read_arg} --auto-recover-safe"
             )
-            item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read <path> --auto-recover-safe"
+            item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read {read_arg} --auto-recover-safe"
+            if path:
+                item["path"] = path
         if action == "needs_user_review":
             item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read <path>"
             item["review_steps"] = review_steps
