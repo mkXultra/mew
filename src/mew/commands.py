@@ -571,7 +571,10 @@ def _format_workbench_reentry(resume, task):
 
     task_id = resume.get("task_id") or (task or {}).get("id")
     if task_id:
-        lines.append(f"resume: {mew_command('work', task_id, '--session', '--resume')}")
+        lines.append(
+            f"resume: {mew_command('work', task_id, '--session', '--resume')} "
+            f"(chat: /work-session resume {task_id})"
+        )
     return lines
 
 
@@ -868,6 +871,13 @@ def _format_live_search_snippet_preview(snippets, max_items=3, max_chars=900):
     return lines
 
 
+def _format_live_search_context_preview(snippets, max_chars=320):
+    lines = _format_live_search_snippet_preview(snippets, max_items=1, max_chars=max_chars)
+    if lines:
+        lines[0] = "context:"
+    return lines
+
+
 def _format_live_tool_summary(call):
     result = call.get("result") or {}
     if result.get("command"):
@@ -909,10 +919,12 @@ def _format_live_tool_call_result(call):
     if result.get("stderr"):
         lines.extend(_format_live_output_preview("stderr", result.get("stderr")))
     if call.get("tool") == "search_text":
-        lines.extend(
-            _format_live_match_preview(result.get("matches") or [])
-            or _format_live_search_snippet_preview(result.get("snippets") or [])
-        )
+        match_preview = _format_live_match_preview(result.get("matches") or [])
+        if match_preview:
+            lines.extend(match_preview)
+            lines.extend(_format_live_search_context_preview(result.get("snippets") or []))
+        else:
+            lines.extend(_format_live_search_snippet_preview(result.get("snippets") or []))
     if result.get("diff"):
         lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))
     if call.get("tool") in WRITE_WORK_TOOLS and result.get("dry_run") and result.get("changed") and not call.get("approval_status"):
@@ -1317,7 +1329,7 @@ def work_cli_control_items(session, args):
     controls = []
     if session.get("stop_requested_at"):
         return [
-            {"label": "review stop request", "command": _work_resume_command(args, task_id, session=session)},
+            {"label": "resume snapshot", "command": _work_resume_command(args, task_id, session=session)},
             {"label": "open chat", "command": mew_command("chat")},
         ]
     resume = build_work_session_resume(session)

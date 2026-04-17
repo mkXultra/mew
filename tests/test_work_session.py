@@ -1728,6 +1728,8 @@ class WorkSessionTests(unittest.TestCase):
                 controls = stdout.getvalue().split("Next CLI controls", 1)[1]
                 self.assertNotIn("--live", controls)
                 self.assertNotIn("--follow", controls)
+                self.assertIn("resume snapshot: mew work 1 --session --resume --allow-read .", controls)
+                self.assertIn("open chat: mew chat", controls)
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries") as call_model:
@@ -5065,8 +5067,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("matches:", result_block)
                 self.assertIn("README.md:1:alpha needle", result_block)
                 self.assertIn("README.md:3:needle gamma", result_block)
+                self.assertIn("context:", result_block)
+                self.assertIn("  2: beta", result_block)
                 self.assertNotIn("snippets:", result_block)
-                self.assertNotIn("  2: beta", result_block)
             finally:
                 os.chdir(old_cwd)
 
@@ -5542,7 +5545,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("Work session finished: duplicate closure", output)
                 self.assertNotIn("Work session finished: latest closure", output)
                 self.assertIn("resume:", output)
-                self.assertNotIn("chat: /work-session resume 1", output)
+                self.assertIn("resume: mew work 1 --session --resume (chat: /work-session resume 1)", output)
             finally:
                 os.chdir(old_cwd)
 

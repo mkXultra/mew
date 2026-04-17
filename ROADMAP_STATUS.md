@@ -347,6 +347,10 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `677 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_workbench_surfaces_work_session_reentry_guidance tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_shows_search_matches tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_falls_back_to_search_snippets_without_matches` current: `4 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-claude-ux-followups --json` current: pass across 36 commands.
+- `claude-ultra` review of `68bc997`, `94e9a99`, and `713474d` current: no critical or JSON-breaking issues; follow-up addressed chat reentry discoverability, live search context loss, and stop-branch label coverage.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch tests/test_work_session.py::WorkSessionTests::test_work_model_splits_pipe_search_text_queries tests/test_work_session.py::WorkSessionTests::test_work_model_batch_flattens_pipe_search_text_queries` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-pipe-search-normalize --json` current: pass across 36 commands.
