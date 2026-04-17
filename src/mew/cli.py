@@ -961,9 +961,9 @@ def build_parser():
         help="create, plan, or open a mew self-improvement task",
         description=(
             "Create or continue a mew self-improvement task.\n\n"
-            "Default mode creates a programmer-plan task. Use --native to hand the task\n"
-            "to native `mew work` instead, or --start-session to open that native work\n"
-            "session immediately."
+            "Default mode creates a programmer-plan task. Use --native to prepare a\n"
+            "native mew work task without a programmer plan, or --start-session to\n"
+            "open or reuse that work session immediately."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(

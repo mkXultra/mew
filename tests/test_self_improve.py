@@ -153,6 +153,7 @@ class SelfImproveTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         output = stdout.getvalue()
         self.assertIn("Create or continue a mew self-improvement task.", output)
+        self.assertIn("native mew work task without a programmer plan", output)
         self.assertIn("Native work-session flow:", output)
         self.assertIn("mew self-improve --start-session --focus", output)
         self.assertIn("mew work <task-id> --live --allow-read . --max-steps 1", output)
