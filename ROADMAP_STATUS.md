@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-17
+Last updated: 2026-04-18
 
 This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conservative.
 
@@ -16,7 +16,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Current Focus
 
-Milestone 2 is the active focus. Already shipped: readable diff panes,
+Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
+investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
+change the roadmap goal, but it narrows the next implementation target to
+cell-based `mew work --follow` rendering. That should land before approval,
+interrupt, diff, or live-resume work grows further.
+
+Already shipped: readable diff panes,
 command/test output panes, chat work-mode, bounded follow loops, compact live
 result panes, readable compact model-delta previews, phase/elapsed progress
 anchors, chat transcript logging, interrupt/max-step reentry notes, and scoped
@@ -259,6 +265,7 @@ Evidence:
 - Write/edit diff stats now count line replacements from the before/after text rather than parsing unified diff text, covering no-trailing-newline replacements that `difflib` renders on one physical line.
 - `dogfood --scenario chat-cockpit` now covers `mew code --quiet`, preserving the silent scripted cockpit startup path.
 - `mew code --help` now describes the coding-cockpit create/reuse flow and common quiet/read-only entry commands.
+- Read-only `codex-ultra` investigations of Claude Code and Codex CLI, followed by a `claude-ultra` product decision pass, identified stable transcript cells as the next enabling cockpit primitive; the findings are captured in `docs/COCKPIT_REFERENCE_NOTES.md`.
 
 Missing proof:
 
@@ -267,10 +274,11 @@ Missing proof:
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
+- `mew work --follow` still renders too much as stream/log text rather than stable cells with durable ids, statuses, previews, details, and command/test tails.
 
 Next action:
 
-- Dogfood the live cockpit on real repository investigations, then improve the reasoning/status pane and long-session output pacing so a chat work session feels closer to Claude Code / Codex CLI.
+- Implement the P0 cockpit slice from `docs/COCKPIT_REFERENCE_NOTES.md`: build a small cell model over existing work-session state and use it to render stable `mew work --follow` output.
 
 ## Milestone 3: Persistent Advantage
 
