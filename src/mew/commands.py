@@ -4764,12 +4764,19 @@ def cmd_passive_bundle(args):
     if args.morning_feed and not args.generate_core:
         print("mew: --morning-feed requires --generate-core", file=sys.stderr)
         return 1
+    if args.interest and not args.morning_feed:
+        print("mew: --interest requires --morning-feed", file=sys.stderr)
+        return 1
+    if args.limit != 8 and not args.morning_feed:
+        print("mew: --limit requires --morning-feed", file=sys.stderr)
+        return 1
     reports_root = Path(args.reports_root).expanduser()
     output_dir = Path(args.output_dir).expanduser()
     generated = []
     try:
         if args.generate_core:
-            state = load_state()
+            with state_lock():
+                state = load_state()
             journal_view = build_journal_view_model(state, explicit_date=args.date)
             journal_path = write_journal_report(journal_view, reports_root)
             generated.append({"type": "Journal", "path": str(journal_path)})
@@ -4779,7 +4786,11 @@ def cmd_passive_bundle(args):
             generated.append({"type": "Mood", "path": str(mood_path)})
 
             if args.morning_feed:
-                items = load_feed(Path(args.morning_feed).expanduser())
+                try:
+                    items = load_feed(Path(args.morning_feed).expanduser())
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(f"mew: failed to read feed: {exc}", file=sys.stderr)
+                    return 1
                 morning_view = build_morning_paper_view_model(
                     items,
                     state,
@@ -4795,8 +4806,8 @@ def cmd_passive_bundle(args):
             output_dir,
             explicit_date=args.date,
         )
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"mew: failed to read feed: {exc}", file=sys.stderr)
+    except OSError as exc:
+        print(f"mew: failed to write report: {exc}", file=sys.stderr)
         return 1
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
@@ -4849,7 +4860,11 @@ def cmd_mood(args):
         return 1
     written = None
     if args.write:
-        written = write_mood_report(view_model, Path(args.output_dir).expanduser())
+        try:
+            written = write_mood_report(view_model, Path(args.output_dir).expanduser())
+        except OSError as exc:
+            print(f"mew: failed to write report: {exc}", file=sys.stderr)
+            return 1
     if args.json:
         data = dict(view_model)
         if written:
@@ -4875,7 +4890,11 @@ def cmd_journal(args):
         return 1
     written = None
     if args.write:
-        written = write_journal_report(view_model, Path(args.output_dir).expanduser())
+        try:
+            written = write_journal_report(view_model, Path(args.output_dir).expanduser())
+        except OSError as exc:
+            print(f"mew: failed to write report: {exc}", file=sys.stderr)
+            return 1
     if args.json:
         data = {
             "date": view_model["date"],
@@ -4921,7 +4940,11 @@ def cmd_morning_paper(args):
         return 1
     written = None
     if args.write:
-        written = write_morning_paper_report(view_model, Path(args.output_dir).expanduser())
+        try:
+            written = write_morning_paper_report(view_model, Path(args.output_dir).expanduser())
+        except OSError as exc:
+            print(f"mew: failed to write report: {exc}", file=sys.stderr)
+            return 1
     if args.json:
         data = {
             "date": view_model["date"],

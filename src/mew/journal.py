@@ -79,12 +79,27 @@ def active_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(open_tasks_for_desk(state), key=priority_rank)[:MAX_ITEMS]
 
 
-def completed_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
+def timestamp_day(item: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+    return ""
+
+
+def filter_items_for_day(items: list[dict[str, Any]], day: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    if not any(timestamp_day(item, keys) for item in items):
+        return items
+    return [item for item in items if timestamp_day(item, keys) in ("", day)]
+
+
+def completed_tasks(state: dict[str, Any], day: str) -> list[dict[str, Any]]:
     tasks = [
         task
         for task in state.get("tasks", [])
         if isinstance(task, dict) and normalize_text(task.get("status")).casefold() == "done"
     ]
+    tasks = filter_items_for_day(tasks, day, ("done_at", "completed_at", "updated_at"))
     return list(reversed(tasks))[:MAX_ITEMS]
 
 
@@ -150,14 +165,17 @@ def open_question_lines(state: dict[str, Any]) -> list[str]:
     return unique(lines)
 
 
-def runtime_effect_lines(state: dict[str, Any]) -> list[str]:
+def runtime_effect_lines(state: dict[str, Any], day: str) -> list[str]:
     lines = []
     effects = state.get("runtime_effects")
     if not isinstance(effects, list):
         return lines
+    effects = filter_items_for_day(
+        [effect for effect in effects if isinstance(effect, dict)],
+        day,
+        ("finished_at", "updated_at", "started_at"),
+    )
     for effect in reversed(effects):
-        if not isinstance(effect, dict):
-            continue
         effect_id = effect.get("id", "?")
         reason = normalize_text(effect.get("reason")) or "unknown"
         status = normalize_text(effect.get("status")) or "unknown"
@@ -205,7 +223,7 @@ def render_list(lines: list[str], fallback: str) -> list[str]:
 def build_journal_view_model(state: dict[str, Any], explicit_date: str | None = None) -> dict[str, Any]:
     day = resolve_journal_date(explicit_date)
     completed = []
-    for task in completed_tasks(state):
+    for task in completed_tasks(state, day):
         note = task_done_note(task)
         line = task_ref(task)
         if note:
@@ -215,7 +233,7 @@ def build_journal_view_model(state: dict[str, Any], explicit_date: str | None = 
     active = [task_ref(task) for task in active_tasks(state)]
     questions = open_question_lines(state)
     sessions = work_session_lines(state)
-    effects = runtime_effect_lines(state)
+    effects = runtime_effect_lines(state, day)
     hints = tomorrow_hints(state)
 
     return {

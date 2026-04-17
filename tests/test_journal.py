@@ -72,6 +72,23 @@ class JournalTests(unittest.TestCase):
 
         self.assertEqual(view["sessions"], [])
 
+    def test_journal_filters_dated_completed_work_and_effects_to_report_day(self):
+        state = {
+            "tasks": [
+                {"id": 1, "title": "Old done", "status": "done", "updated_at": "2026-04-16T00:00:00Z"},
+                {"id": 2, "title": "Today done", "status": "done", "updated_at": "2026-04-17T00:00:00Z"},
+            ],
+            "runtime_effects": [
+                {"id": 1, "status": "applied", "reason": "passive_tick", "finished_at": "2026-04-16T00:00:00Z"},
+                {"id": 2, "status": "applied", "reason": "passive_tick", "finished_at": "2026-04-17T00:00:00Z"},
+            ],
+        }
+
+        view = build_journal_view_model(state, explicit_date="2026-04-17")
+
+        self.assertEqual(view["completed"], ["#2 Today done [done]"])
+        self.assertEqual(view["runtime_effects"], ["effect #2 [applied/passive_tick] actions=-"])
+
     def test_journal_command_outputs_json_and_can_write_report(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,6 +124,16 @@ class JournalTests(unittest.TestCase):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
             self.assertEqual(main(["journal", "--json", "--show"]), 1)
         self.assertIn("--json and --show cannot be used together", stderr.getvalue())
+
+    def test_journal_command_reports_write_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_file = Path(tmp) / "not-a-dir"
+            output_file.write_text("", encoding="utf-8")
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                self.assertEqual(main(["journal", "--write", "--output-dir", str(output_file)]), 1)
+
+        self.assertIn("failed to write report", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -103,6 +103,16 @@ class MoodTests(unittest.TestCase):
             self.assertEqual(main(["mood", "--json", "--show"]), 1)
         self.assertIn("--json and --show cannot be used together", stderr.getvalue())
 
+    def test_mood_command_reports_write_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_file = Path(tmp) / "not-a-dir"
+            output_file.write_text("", encoding="utf-8")
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                self.assertEqual(main(["mood", "--write", "--output-dir", str(output_file)]), 1)
+
+        self.assertIn("failed to write report", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

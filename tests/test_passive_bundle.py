@@ -175,6 +175,29 @@ class PassiveBundleTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--morning-feed requires --generate-core", stderr.getvalue())
 
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            code = main(["bundle", "--generate-core", "--interest", "ai"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--interest requires --morning-feed", stderr.getvalue())
+
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            code = main(["bundle", "--generate-core", "--limit", "3"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--limit requires --morning-feed", stderr.getvalue())
+
+    def test_bundle_command_reports_invalid_morning_feed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = Path(tmp) / "feed.json"
+            feed.write_text("{not json", encoding="utf-8")
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                code = main(["bundle", "--generate-core", "--morning-feed", str(feed)])
+
+        self.assertEqual(code, 1)
+        self.assertIn("failed to read feed", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -134,7 +134,8 @@ The command composes existing reports only. It does not generate dream or
 self-memory reports. `mew journal --write`, `mew mood --write`, and
 `mew morning-paper ... --write` can generate core source reports.
 `--generate-core` can generate journal and mood first; `--morning-feed` adds the
-static morning-paper source report before composing.
+static morning-paper source report before composing. Generated source reports
+are written under `--reports-root`, then composed into `--output-dir`.
 
 ## Experiments
 
@@ -176,7 +177,7 @@ promotions and review fixes:
 
 ```text
 uv run pytest -q
-775 passed, 6 subtests passed
+781 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

@@ -10,6 +10,20 @@ from typing import Any
 
 MAX_ITEMS = 8
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+PREFERENCE_STOP_WORDS = {
+    "about",
+    "and",
+    "for",
+    "from",
+    "interest",
+    "interested",
+    "like",
+    "likes",
+    "prefer",
+    "prefers",
+    "the",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,19 @@ def unique(items: list[str], limit: int = MAX_ITEMS) -> list[str]:
     return result
 
 
+def preference_keywords(value: Any) -> list[str]:
+    text = normalize_text(value)
+    if not text:
+        return []
+    if ": " in text:
+        text = text.split(": ", 1)[1]
+    keywords = [text]
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}", text):
+        if token.casefold() not in PREFERENCE_STOP_WORDS:
+            keywords.append(token)
+    return unique(keywords, limit=20)
+
+
 def collect_interest_tags(state: dict[str, Any], explicit_interests: list[str] | None = None) -> list[str]:
     interests = []
     interests.extend(string_items(explicit_interests or []))
@@ -101,6 +128,8 @@ def collect_interest_tags(state: dict[str, Any], explicit_interests: list[str] |
         deep = memory.get("deep")
         if isinstance(deep, dict):
             interests.extend(string_items(deep.get("interests")))
+            for preference in string_items(deep.get("preferences")):
+                interests.extend(preference_keywords(preference))
     return unique(interests)
 
 

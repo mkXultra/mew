@@ -61,7 +61,9 @@ source reports; use it after `mew journal --write`, `mew mood --write`,
 written files under `.mew`.
 Use `mew bundle --generate-core` to generate journal and mood before composing;
 add `--morning-feed feed.json --interest TAG` to include the static morning
-paper in the same command.
+paper in the same command. Generated source reports are written under
+`--reports-root`; pass the same path to `--reports-root` and `--output-dir` when
+you want sources and bundle under a separate root.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`

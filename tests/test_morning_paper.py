@@ -73,6 +73,16 @@ class MorningPaperTests(unittest.TestCase):
         self.assertEqual(view["interests"], ["local-first"])
         self.assertEqual(view["top_picks"][0]["score"], 4)
 
+    def test_learned_preferences_feed_interests(self):
+        items = [{"title": "Passive AI shell", "source": "Blog", "tags": ["passive-ai"], "summary": "agent shell"}]
+        state = {"memory": {"deep": {"preferences": ["2026-04-17T00:00:00Z: interested in passive-ai and agents"]}}}
+
+        view = build_morning_paper_view_model(items, state, explicit_date="2026-04-17")
+
+        self.assertIn("passive-ai", view["interests"])
+        self.assertIn("agents", view["interests"])
+        self.assertEqual(view["top_picks"][0]["score"], 10)
+
     def test_limit_must_be_positive(self):
         with self.assertRaises(ValueError):
             build_morning_paper_view_model([], {}, explicit_date="2026-04-17", limit=0)
@@ -126,6 +136,22 @@ class MorningPaperTests(unittest.TestCase):
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                 self.assertEqual(main(["morning-paper", str(feed), "--json", "--show"]), 1)
             self.assertIn("--json and --show cannot be used together", stderr.getvalue())
+
+    def test_morning_paper_command_reports_write_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feed = root / "feed.json"
+            write_feed(feed)
+            output_file = root / "not-a-dir"
+            output_file.write_text("", encoding="utf-8")
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                self.assertEqual(
+                    main(["morning-paper", str(feed), "--write", "--output-dir", str(output_file)]),
+                    1,
+                )
+
+        self.assertIn("failed to write report", stderr.getvalue())
 
 
 if __name__ == "__main__":
