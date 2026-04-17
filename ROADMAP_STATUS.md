@@ -69,6 +69,9 @@ Native self-improve dogfood then picked a small discoverability fix: `mew code
 --help` now documents both external resume (`mew work <task-id> --session
 --resume --allow-read .`) and scoped chat reentry (`mew chat --kind coding
 --work-mode`).
+Cell cockpit pacing has one more concrete control: `mew work --cells
+--cell-tail-lines N` now caps command/test stdout/stderr tails for calmer
+inspection while leaving failure expansion as the default when no cap is set.
 
 ## Milestone 1: Native Hands
 
@@ -301,6 +304,7 @@ Evidence:
 - Queued follow-ups are surfaced in consumption order, with total/truncation metadata, so a long queue does not mislead the next-step preview.
 - Idle `interrupt_submit` sessions now render "submit pending interrupt" controls instead of generic pause controls, while still waiting at a boundary when a model/tool step is actually running.
 - `mew code --help` now includes direct reentry examples for reviewing a work-session resume and reopening coding-scoped work-mode chat.
+- `mew work --cells --cell-tail-lines N` provides configurable command/test tail output, reducing noisy cell panes without changing the full `--commands`/`--tests` detail views.
 
 Missing proof:
 
@@ -310,7 +314,7 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- TTY redraw, cell-level collapse/expand, hard mid-stream cancellation, and configurable command/test tail controls are not implemented.
+- TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 

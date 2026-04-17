@@ -1975,6 +1975,11 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
 
 def cmd_work(args):
+    try:
+        args.cell_tail_lines = positive_int_option(getattr(args, "cell_tail_lines", None), "--cell-tail-lines")
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
     if getattr(args, "reply_schema", False):
         return cmd_work_reply_schema(args)
     if getattr(args, "reply_file", None):
@@ -2053,6 +2058,18 @@ def positive_max_steps(value, default=1):
     if max_steps < 1:
         raise MewError("--max-steps must be >= 1")
     return max_steps
+
+
+def positive_int_option(value, flag):
+    if value is None:
+        return None
+    try:
+        option = int(value)
+    except (TypeError, ValueError) as exc:
+        raise MewError(f"{flag} must be an integer") from exc
+    if option < 1:
+        raise MewError(f"{flag} must be >= 1")
+    return option
 
 
 def cmd_do(args):
@@ -2444,7 +2461,7 @@ def record_max_steps_reentry_note(session_id, report, mode="follow"):
 def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
     if not (getattr(args, "follow", False) or getattr(args, "cells", False)):
         return seen_count
-    cells = build_work_session_cells(session, limit=None)
+    cells = build_work_session_cells(session, limit=None, tail_max_lines=getattr(args, "cell_tail_lines", None))
     new_cells = cells[seen_count:] if seen_count < len(cells) else []
     if not new_cells:
         return len(cells)
@@ -2478,7 +2495,7 @@ def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
 def maybe_print_work_active_cell(args, session, task, index, source, source_id):
     if not getattr(args, "follow", False):
         return
-    for cell in build_work_session_cells(session, limit=None):
+    for cell in build_work_session_cells(session, limit=None, tail_max_lines=getattr(args, "cell_tail_lines", None)):
         if (
             cell.get("source") == source
             and str(cell.get("source_id")) == str(source_id)
@@ -3689,7 +3706,11 @@ def cmd_work_show_session(args):
             if getattr(args, "commands", False):
                 payload["commands"] = build_work_session_command_entries(session, limit=getattr(args, "limit", 8))
             if getattr(args, "cells", False):
-                payload["cells"] = build_work_session_cells(session, limit=getattr(args, "limit", 20))
+                payload["cells"] = build_work_session_cells(
+                    session,
+                    limit=getattr(args, "limit", 20),
+                    tail_max_lines=getattr(args, "cell_tail_lines", None),
+                )
             payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -3716,7 +3737,14 @@ def cmd_work_show_session(args):
                     )
                 )
             if getattr(args, "cells", False):
-                panes.append(format_work_session_cells(session, task=task, limit=getattr(args, "limit", 20)))
+                panes.append(
+                    format_work_session_cells(
+                        session,
+                        task=task,
+                        limit=getattr(args, "limit", 20),
+                        tail_max_lines=getattr(args, "cell_tail_lines", None),
+                    )
+                )
             print("\n\n".join(panes))
             print(format_work_cli_controls(session, args))
         else:

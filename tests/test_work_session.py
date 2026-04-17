@@ -311,6 +311,43 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("output_tail:\n    (no output)", text)
         self.assertIn("full_output: mew work 10 --commands", text)
 
+    def test_work_session_command_cell_tail_lines_are_configurable(self):
+        session = {
+            "id": 16,
+            "task_id": 20,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"command": "python noisy.py", "cwd": "."},
+                    "result": {
+                        "command": "python noisy.py",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "stdout": "\n".join(f"out {index}" for index in range(1, 6)),
+                        "stderr": "",
+                    },
+                }
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None, tail_max_lines=2)
+        text = format_work_session_cells(session, limit=None, tail_max_lines=2)
+
+        self.assertEqual(cells[0]["tail"][0]["lines"], ["[...snip...]", "out 4", "out 5"])
+        self.assertIn("stdout_tail:\n    [...snip...]\n    out 4\n    out 5", text)
+        self.assertNotIn("out 1", text)
+
+    def test_work_session_cells_tail_lines_requires_positive_value(self):
+        with redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["work", "--cells", "--cell-tail-lines", "0"]), 1)
+
+        self.assertIn("mew: --cell-tail-lines must be >= 1", stderr.getvalue())
+
     def test_work_session_cells_anchor_missing_shell_gate(self):
         session = {
             "id": 5,

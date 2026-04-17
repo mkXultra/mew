@@ -978,6 +978,11 @@ def build_parser():
     work_parser.add_argument("--tests", action="store_true", help="show recent work-session test and verification output")
     work_parser.add_argument("--commands", action="store_true", help="show recent work-session command output")
     work_parser.add_argument("--cells", action="store_true", help="show stable work-session cockpit cells")
+    work_parser.add_argument(
+        "--cell-tail-lines",
+        type=int,
+        help="maximum stdout/stderr tail lines per command/test cell in --cells output",
+    )
     work_parser.add_argument("--json", action="store_true", help="print structured JSON")
     work_parser.set_defaults(func=cmd_work)
 

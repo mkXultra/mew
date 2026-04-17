@@ -125,6 +125,8 @@ def _tail_lines(text, max_lines=TAIL_MAX_LINES, max_chars=TAIL_MAX_CHARS):
     text = str(text or "")
     if not text:
         return []
+    max_lines = max(1, int(max_lines))
+    max_chars = max(1, int(max_chars))
     clipped = clip_output(text, max_chars)
     lines = clipped.splitlines()
     if len(lines) > max_lines:
@@ -147,9 +149,13 @@ def _command_cell_failed(call):
     return False
 
 
-def _command_tail(result, expanded=False):
+def _command_tail(result, expanded=False, tail_max_lines=None):
     tail = []
-    max_lines = FAILURE_TAIL_MAX_LINES if expanded else TAIL_MAX_LINES
+    max_lines = (
+        int(tail_max_lines)
+        if tail_max_lines is not None
+        else (FAILURE_TAIL_MAX_LINES if expanded else TAIL_MAX_LINES)
+    )
     max_chars = FAILURE_TAIL_MAX_CHARS if expanded else TAIL_MAX_CHARS
     for stream in ("stdout", "stderr"):
         lines = _tail_lines((result or {}).get(stream) or "", max_lines=max_lines, max_chars=max_chars)
@@ -230,7 +236,7 @@ def _command_detail(session, call, kind):
     return "\n".join(lines)
 
 
-def command_or_test_cell(session, call):
+def command_or_test_cell(session, call, tail_max_lines=None):
     tool = call.get("tool") or "unknown"
     kind = _command_cell_kind(tool)
     cell = _cell_base(
@@ -244,7 +250,11 @@ def command_or_test_cell(session, call):
         _command_preview(call),
     )
     cell["detail"] = _command_detail(session, call, kind)
-    cell["tail"] = _command_tail(_command_result(call), expanded=_command_cell_failed(call))
+    cell["tail"] = _command_tail(
+        _command_result(call),
+        expanded=_command_cell_failed(call),
+        tail_max_lines=tail_max_lines,
+    )
     if not cell["tail"] and call.get("status") == "completed":
         cell["tail"] = [{"stream": "output", "lines": ["(no output)"]}]
     return cell
@@ -521,11 +531,11 @@ def permission_approval_cell(session, call):
     return cell
 
 
-def cells_for_tool_call(session, call):
+def cells_for_tool_call(session, call, tail_max_lines=None):
     tool = call.get("tool") or ""
     cells = []
     if tool in COMMAND_CELL_TOOLS or tool in TEST_CELL_TOOLS:
-        cells.append(command_or_test_cell(session, call))
+        cells.append(command_or_test_cell(session, call, tail_max_lines=tail_max_lines))
     elif tool in WRITE_WORK_TOOLS and (call.get("result") or {}).get("diff"):
         cells.append(diff_cell(session, call))
     else:
@@ -545,7 +555,7 @@ def _cell_sort_key(index, cell):
     )
 
 
-def build_work_session_cells(session, limit=20):
+def build_work_session_cells(session, limit=20, tail_max_lines=None):
     if not session:
         return []
     cells = []
@@ -554,7 +564,7 @@ def build_work_session_cells(session, limit=20):
         order += 1
         cells.append((order, model_turn_cell(session, turn)))
     for call in session.get("tool_calls") or []:
-        for cell in cells_for_tool_call(session, call):
+        for cell in cells_for_tool_call(session, call, tail_max_lines=tail_max_lines):
             order += 1
             cells.append((order, cell))
     cells.sort(key=lambda item: _cell_sort_key(item[0], item[1]))
@@ -605,7 +615,7 @@ def format_work_cells(
     return "\n".join(lines)
 
 
-def format_work_session_cells(session, task=None, limit=20, header=None):
+def format_work_session_cells(session, task=None, limit=20, header=None, tail_max_lines=None):
     if not session:
         return "No active work session."
     title = (session or {}).get("title") or (task or {}).get("title") or ""
@@ -615,7 +625,10 @@ def format_work_session_cells(session, task=None, limit=20, header=None):
     lines = [header or default_header]
     if title:
         lines.append(f"title: {title}")
-    cell_text = format_work_cells(build_work_session_cells(session, limit=limit), header="")
+    cell_text = format_work_cells(
+        build_work_session_cells(session, limit=limit, tail_max_lines=tail_max_lines),
+        header="",
+    )
     if cell_text:
         lines.append(cell_text)
     return "\n".join(lines)
