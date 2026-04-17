@@ -5414,6 +5414,7 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertIn("Follow reached max_steps=1", session["notes"][-1]["text"])
                 self.assertIn("Last action: read_file", session["notes"][-1]["text"])
+                self.assertNotIn("follow one content", session["notes"][-1]["text"])
             finally:
                 os.chdir(old_cwd)
 
@@ -5460,6 +5461,7 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertIn("Live run reached max_steps=2", session["notes"][-1]["text"])
                 self.assertIn("Last action: read_file", session["notes"][-1]["text"])
+                self.assertNotIn("live max note content", session["notes"][-1]["text"])
             finally:
                 os.chdir(old_cwd)
 

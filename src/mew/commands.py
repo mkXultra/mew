@@ -1502,13 +1502,15 @@ def record_max_steps_reentry_note(session_id, report, mode="follow"):
     last_step = steps[-1]
     action = last_step.get("action") or {}
     action_type = action.get("type") or action.get("tool") or "unknown"
-    summary = last_step.get("summary") or last_step.get("error") or action.get("reason") or ""
     tool_call = last_step.get("tool_call") or {}
+    summary = ""
     if tool_call:
-        summary = summary or compact_work_tool_summary(tool_call)
-    if not summary and last_step.get("tool_calls"):
+        summary = compact_work_tool_summary(tool_call)
+    elif last_step.get("tool_calls"):
         summaries = [compact_work_tool_summary(call) for call in last_step.get("tool_calls") or [] if call]
         summary = "; ".join(item for item in summaries if item)
+    if not summary:
+        summary = last_step.get("summary") or last_step.get("error") or action.get("reason") or ""
     label = "Follow" if mode == "follow" else "Live run"
     note_text = (
         f"{label} reached max_steps={report.get('max_steps')} after {len(steps)} step(s). "
