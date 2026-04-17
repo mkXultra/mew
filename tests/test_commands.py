@@ -292,6 +292,60 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_effect_commands_accept_positional_limit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path(".mew").mkdir()
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["runtime_effects"] = [
+                        {"id": 1, "status": "verified", "event_id": 1, "reason": "old"},
+                        {"id": 2, "status": "verified", "event_id": 2, "reason": "new"},
+                    ]
+                    save_state(state)
+                Path(".mew/effects.jsonl").write_text(
+                    "\n".join(
+                        [
+                            json.dumps(
+                                {
+                                    "saved_at": "old",
+                                    "type": "state_save",
+                                    "state_sha256": "a" * 64,
+                                    "counts": {"tasks": 1, "inbox": 1, "outbox": 1},
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "saved_at": "new",
+                                    "type": "state_save",
+                                    "state_sha256": "b" * 64,
+                                    "counts": {"tasks": 2, "inbox": 2, "outbox": 2},
+                                }
+                            ),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["effects", "1"]), 0)
+                effects_output = stdout.getvalue()
+                self.assertIn("new state_save", effects_output)
+                self.assertNotIn("old state_save", effects_output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["runtime-effects", "1"]), 0)
+                runtime_output = stdout.getvalue()
+                self.assertIn("#2 [verified]", runtime_output)
+                self.assertNotIn("#1 [verified]", runtime_output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_without_subcommand_lists_tasks(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

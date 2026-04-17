@@ -133,7 +133,9 @@ uv run mew repair
 uv run mew repair --json
 uv run mew repair --force
 uv run mew effects
+uv run mew effects 10
 uv run mew effects --json
+uv run mew runtime-effects 10
 uv run mew start -- --autonomous --autonomy-level propose
 uv run mew run --once --autonomous --autonomy-level act --focus "Take one small verified step"
 uv run mew stop
@@ -210,9 +212,10 @@ the latest checkpoint hash. `mew archive --apply` also compacts old effect log
 entries into `.mew/archive/`.
 Runtime cycles also append a bounded `runtime_effects` journal in state. Each
 entry records the selected event, lifecycle status, action types, user-visible
-outcome, and linked verification/write runs. Use `mew runtime-effects` for the
-recent journal; `mew doctor` flags unfinished effects and `mew repair` can mark
-them interrupted after a crashed runtime with a recovery hint for the next cycle.
+outcome, and linked verification/write runs. Use `mew runtime-effects` or
+`mew runtime-effects 10` for the recent journal; `mew doctor` flags unfinished
+effects and `mew repair` can mark them interrupted after a crashed runtime with
+a recovery hint for the next cycle.
 Runtime cycles select and persist the next event under `.mew/state.lock`, then
 release the lock while the resident model runs THINK/ACT. The runtime reacquires
 the lock only to commit the resulting action plan, so `mew chat`, `mew message`,

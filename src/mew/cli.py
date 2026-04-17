@@ -1125,11 +1125,13 @@ def build_parser():
     trace_parser.set_defaults(func=cmd_trace)
 
     effects_parser = subparsers.add_parser("effects", help="show recent state effect checkpoints")
+    effects_parser.add_argument("limit_arg", nargs="?", type=int, help="maximum effect records")
     effects_parser.add_argument("--limit", type=int, default=20, help="maximum effect records")
     effects_parser.add_argument("--json", action="store_true", help="print structured JSON")
     effects_parser.set_defaults(func=cmd_effects)
 
     runtime_effects_parser = subparsers.add_parser("runtime-effects", help="show recent runtime effect journal entries")
+    runtime_effects_parser.add_argument("limit_arg", nargs="?", type=int, help="maximum runtime effects")
     runtime_effects_parser.add_argument("--limit", type=int, default=20, help="maximum runtime effects")
     runtime_effects_parser.add_argument("--json", action="store_true", help="print structured JSON")
     runtime_effects_parser.set_defaults(func=cmd_runtime_effects)

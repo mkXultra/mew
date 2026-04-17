@@ -8389,7 +8389,8 @@ def read_effect_records(limit=20):
     return records[-limit:]
 
 def cmd_effects(args):
-    records = read_effect_records(limit=args.limit)
+    limit = getattr(args, "limit_arg", None)
+    records = read_effect_records(limit=limit if limit is not None else args.limit)
     if args.json:
         print(json.dumps({"effects": records}, ensure_ascii=False, indent=2))
         return 0
@@ -8428,7 +8429,9 @@ def format_runtime_effect(effect):
 
 def cmd_runtime_effects(args):
     state = load_state()
-    effects = list(reversed(state.get("runtime_effects", [])[-args.limit:]))
+    limit = getattr(args, "limit_arg", None)
+    limit = max(0, int(limit if limit is not None else args.limit))
+    effects = list(reversed(state.get("runtime_effects", [])[-limit:])) if limit else []
     if args.json:
         print(json.dumps({"runtime_effects": effects}, ensure_ascii=False, indent=2))
         return 0
