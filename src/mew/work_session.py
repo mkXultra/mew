@@ -1694,7 +1694,19 @@ def format_work_action(action, parameters=None, tool_call_id=None):
         for index, tool in enumerate(tools[:5], start=1):
             tool_type = tool.get("type") or tool.get("tool") or "unknown"
             details = []
-            for key in ("path", "query", "pattern", "command", "cwd", "base", "offset", "limit"):
+            for key in (
+                "path",
+                "query",
+                "pattern",
+                "command",
+                "cwd",
+                "base",
+                "offset",
+                "limit",
+                "line_start",
+                "line_count",
+                "max_chars",
+            ):
                 value = tool.get(key)
                 if value is not None and value != "":
                     details.append(f"{key}={clip_output(str(value), 120)}")

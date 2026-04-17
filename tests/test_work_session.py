@@ -15,6 +15,7 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
+from mew.work_session import format_work_action
 
 
 def add_coding_task(state):
@@ -107,6 +108,27 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("memory_hypothesis: Command output proves the tool path works.", text)
         self.assertIn("memory_next: Continue with the focused verifier.", text)
         self.assertIn("memory_verified: echo passed", text)
+
+    def test_work_action_batch_displays_read_window_fields(self):
+        text = format_work_action(
+            {
+                "type": "batch",
+                "tools": [
+                    {
+                        "type": "read_file",
+                        "path": "src/mew/work_session.py",
+                        "line_start": 42,
+                        "line_count": 12,
+                        "max_chars": 12000,
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("read_file path=src/mew/work_session.py", text)
+        self.assertIn("line_start=42", text)
+        self.assertIn("line_count=12", text)
+        self.assertIn("max_chars=12000", text)
 
     def test_work_live_step_result_marks_stale_working_memory(self):
         text = format_work_live_step_result(
