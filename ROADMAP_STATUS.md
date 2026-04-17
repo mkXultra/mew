@@ -86,8 +86,8 @@ Evidence:
 - `mew work --session --resume` and `/work-session resume` produce a compact reentry bundle with touched files, commands, failures, pending approvals, recent decisions, and next action.
 - The same resume bundle is included in work-mode model context so the resident model sees reentry state without reconstructing it from raw tool history.
 - Work-session resume bundles now include compact `working_memory` when available, giving humans and future model turns a short hypothesis, next step, open questions, and latest verification state.
-- Work-session working memory now also surfaces the latest tool observation and marks itself stale when a tool result landed after the memory was written, preventing pre-tool `next_step` text from looking current after a live step.
-- `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and the same bounded world-state summary is injected into future work-model context when read access is allowed.
+- Work-session working memory now also surfaces the latest tool observation and marks itself stale when a tool result landed after the memory was written; human-facing resumes label old plans as `stale_next_step`, preventing pre-tool `next_step` text from looking current after a live step.
+- `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and before any file is touched they show a shallow allowed-root snapshot for non-git workspaces. The same bounded world-state summary is injected into future work-model context when read access is allowed.
 - Resume world-state git status now probes allowed read roots before falling back to the current directory, so reentry from a disposable cwd can still report the actual project repo state.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
@@ -129,6 +129,7 @@ Evidence:
 - Work-session resume next-action text now points at `/continue` and `mew work --live`, matching the current cockpit path instead of older `/work-session ai` guidance.
 - `mew chat --help` now includes the slash-command reference, and `/help work` prints focused work-session reentry/continue commands.
 - `mew chat` appends local input transcript entries to `.mew/chat.jsonl`, and `mew chat-log` plus `/transcript` expose recent chat inputs without mixing them into runtime activity output.
+- `mew effects 10` and `mew runtime-effects 10` now accept positional limits like the chat command forms, reducing CLI/chat grammar mismatch.
 - `mew do <task-id>` now provides a compact supervised resident coding entrypoint over `mew work --live`, defaulting to deterministic ACT, read/write roots at `.`, and an auto-detected verification command when available.
 - Model-selected `run_tests` now refuses resident mew loops such as `mew do`, `mew chat`, `mew run`, and `mew work --live`, preventing a supervised session from treating another resident loop as its verifier.
 - `mew work --session`, `mew work --session --resume`, and `/work-session` now fall back to recent work sessions when no session is active, including exact CLI and chat resume hints.
@@ -303,8 +304,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `613 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `122 passed`.
+- `uv run pytest -q` current: `615 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `123 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
@@ -345,6 +346,7 @@ Next action:
 - `claude-ultra` review after the follow interrupt/streaming/max-step work judged mew coherent but not yet preferred over Claude Code/Codex CLI; top blockers were thin streaming UX, shallow interrupt cancellation, and max-step note scope.
 - `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
 - Mew dogfood task #46 used `mew work --follow` with Codex Web API as a resident buddy after the 2026-04-17 cockpit changes; it verified grouped result panes with duration output and recorded that the remaining live-output gap was dense tool-result rendering, which led to multiline section indentation and direct command cwd/stdout/stderr rendering.
+- `codex-ultra` human-role retest after the 2026-04-17 cockpit transcript work found three issues: non-git initial world-state resume showed `(no files)`, stale working memory rendered an old `next_step` too strongly, and `effects 10` / `runtime-effects 10` failed despite analogous chat grammar. Follow-up retest verified all three fixed with no repo edits.
 
 ## Current Roadmap Focus
 
