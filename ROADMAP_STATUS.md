@@ -383,6 +383,7 @@ Next action:
 - Focused dogfood of `mew work <task-id>` after the recurring-failure slice exposed old system max-step boundary notes crowding the front-door reentry block; workbench reentry now prefers user/model notes and hides those boundary notes while full resumes keep the audit trail.
 - Follow-up dogfood of `mew work 46` exposed repeated `Work session finished:` task notes crowding the same front-door reentry block; workbench reentry now collapses older finish notes and keeps the latest one visible.
 - Full `mew work --session --resume` dogfood exposed repeated identical one-shot guidance under every recent decision; resume text now prints the first guidance and references later duplicates as `same as #...`, preserving context without replaying the same paragraph.
+- `codex-ultra` human-role retest after the reentry-noise work found the front-door behavior passing, then flagged `dogfood --json` as too large for practical terminal use; scenario JSON now stores compact command tails and clipped observed values instead of full command stdout/stderr and large diffs.
 
 ## Current Roadmap Focus
 

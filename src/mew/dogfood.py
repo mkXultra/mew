@@ -42,6 +42,9 @@ DOGFOOD_SCENARIOS = (
     "chat-cockpit",
     "work-session",
 )
+DOGFOOD_OBSERVED_TEXT_LIMIT = 400
+DOGFOOD_OBSERVED_LIST_LIMIT = 5
+DOGFOOD_OBSERVED_DICT_LIMIT = 40
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -252,7 +255,7 @@ def _scenario_check(checks, name, passed, observed=None, expected=None):
         {
             "name": name,
             "passed": bool(passed),
-            "observed": observed,
+            "observed": compact_dogfood_value(observed),
             "expected": expected,
         }
     )
@@ -265,7 +268,7 @@ def _scenario_report(name, workspace, commands, checks):
         "status": "pass" if passed else "fail",
         "workspace": str(workspace),
         "command_count": len(commands),
-        "commands": commands,
+        "commands": [compact_command_result(command) for command in commands],
         "checks": checks,
     }
 
@@ -1277,6 +1280,44 @@ def command_result_tail(result, limit=20):
         "stdout_tail": tail_lines(result.get("stdout"), limit=limit),
         "stderr_tail": tail_lines(result.get("stderr"), limit=limit),
     }
+
+
+def compact_command_result(result, limit=5):
+    summary = {
+        "command": result.get("command", []),
+        "exit_code": result.get("exit_code"),
+        "stdout_tail": tail_lines(result.get("stdout"), limit=limit, max_line_chars=160),
+        "stderr_tail": tail_lines(result.get("stderr"), limit=limit, max_line_chars=160),
+    }
+    summary["stdout_chars"] = len(result.get("stdout") or "")
+    summary["stderr_chars"] = len(result.get("stderr") or "")
+    return summary
+
+
+def compact_dogfood_value(value, *, depth=0):
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if len(value) <= DOGFOOD_OBSERVED_TEXT_LIMIT:
+            return value
+        omitted = len(value) - DOGFOOD_OBSERVED_TEXT_LIMIT
+        return value[:DOGFOOD_OBSERVED_TEXT_LIMIT] + f"\n... truncated {omitted} char(s) ..."
+    if depth >= 6:
+        return repr(value)[:DOGFOOD_OBSERVED_TEXT_LIMIT]
+    if isinstance(value, (list, tuple)):
+        items = [compact_dogfood_value(item, depth=depth + 1) for item in list(value)[:DOGFOOD_OBSERVED_LIST_LIMIT]]
+        if len(value) > DOGFOOD_OBSERVED_LIST_LIMIT:
+            items.append({"omitted_items": len(value) - DOGFOOD_OBSERVED_LIST_LIMIT})
+        return items
+    if isinstance(value, dict):
+        compacted = {}
+        items = list(value.items())
+        for key, item in items[:DOGFOOD_OBSERVED_DICT_LIMIT]:
+            compacted[key] = compact_dogfood_value(item, depth=depth + 1)
+        if len(items) > DOGFOOD_OBSERVED_DICT_LIMIT:
+            compacted["omitted_keys"] = len(items) - DOGFOOD_OBSERVED_DICT_LIMIT
+        return compacted
+    return compact_dogfood_value(str(value), depth=depth + 1)
 
 
 def active_agent_run_ids(workspace):

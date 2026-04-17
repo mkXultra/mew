@@ -224,6 +224,11 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "work-session")
             self.assertIn("work-session: pass", text)
+            command = report["scenarios"][0]["commands"][0]
+            self.assertIn("stdout_tail", command)
+            self.assertIn("stdout_chars", command)
+            self.assertNotIn("stdout", command)
+            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 120_000)
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:
