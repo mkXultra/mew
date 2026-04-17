@@ -383,6 +383,44 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_add_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Observer flow", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["task"]["title"], "Observer flow")
+                self.assertEqual(data["task"]["status"], "ready")
+                self.assertEqual(data["task"]["kind"], "coding")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_show_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Show JSON task", "--kind", "coding", "--notes", "keep full"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "show", "1", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["task"]["title"], "Show JSON task")
+                self.assertEqual(data["task"]["kind"], "coding")
+                self.assertEqual(data["task"]["effective_kind"], "coding")
+                self.assertEqual(data["task"]["notes"], "keep full")
+                self.assertEqual(data["task"]["plan_count"], 0)
+                self.assertEqual(data["task"]["run_count"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_done_resolves_related_open_questions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

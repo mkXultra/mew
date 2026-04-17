@@ -9225,7 +9225,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 load_auth.assert_not_called()
                 call_model.assert_not_called()
-                self.assertIn("mew work ai: 0/0 step(s) stop=snapshot_refresh", stdout.getvalue())
+                self.assertEqual(stdout.getvalue(), "")
                 self.assertNotIn("Next CLI controls", stdout.getvalue())
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["mode"], "live")
@@ -9910,6 +9910,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["session_id"], 1)
                 self.assertEqual(data["task_id"], 1)
                 self.assertEqual(data["observed_session_updated_at"], session["updated_at"])
+                self.assertTrue(data["submit_ready"])
+                self.assertFalse(data["schema_only"])
                 self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
                 self.assertEqual(data["reply_template"]["observed_session_updated_at"], session["updated_at"])
                 self.assertTrue(any(action["type"] == "reject" for action in data["supported_actions"]))
@@ -9932,6 +9934,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIsNone(data["session_id"])
                 self.assertIsNone(data["task_id"])
                 self.assertIsNone(data["observed_session_updated_at"])
+                self.assertFalse(data["submit_ready"])
+                self.assertTrue(data["schema_only"])
                 self.assertEqual(data["reply_command"], "mew work --reply-file .mew/follow/reply.json")
                 self.assertTrue(data["docs_path"].endswith("docs/FOLLOW_REPLY_SCHEMA.md"))
                 self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
@@ -9996,6 +10000,35 @@ class WorkSessionTests(unittest.TestCase):
                         self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "dead")
+                self.assertFalse(data["producer_alive"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_marks_stopped_snapshot_completed_when_pid_missing(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "stop_reason": "snapshot_refresh",
+                            "producer": {"pid": 999999},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "completed")
                 self.assertFalse(data["producer_alive"])
             finally:
                 os.chdir(old_cwd)

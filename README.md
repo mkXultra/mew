@@ -114,6 +114,8 @@ the implementation run command before starting anything:
 ```sh
 uv run mew task classify --mismatches
 uv run mew task classify <task-id> --apply
+uv run mew task add "Implement the next small fix" --kind coding --json
+uv run mew task show <task-id> --json
 uv run mew buddy --task <task-id>
 uv run mew buddy --task <task-id> --dispatch --dry-run
 uv run mew buddy --task <task-id> --dispatch
@@ -568,8 +570,8 @@ That observer can write a JSON reply file and apply it with
 `pending_approvals`, and a context-aware `reply_template` so observers can
 approve pending dry-run writes without scraping terminal text. See
 `docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and reply contract, including
-the stale-snapshot guard, or run `mew work <task-id> --reply-schema --json` to
-print a session-specific template.
+the stale-snapshot guard and `mew work <task-id> --follow-status --json`, or run
+`mew work <task-id> --reply-schema --json` to print a session-specific template.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

@@ -843,7 +843,8 @@ def run_work_session_scenario(workspace, env=None):
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
     (workspace / "large_no_newline.py").write_text("x" * 120000 + " old_call()", encoding="utf-8")
 
-    run(["task", "add", "Native work task", "--kind", "coding"])
+    task_add_json_result = run(["task", "add", "Native work task", "--kind", "coding", "--json"])
+    task_show_json_result = run(["task", "show", "1", "--json"])
     start_result = run(["work", "1", "--start-session", "--json"])
     read_result = run(
         ["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", ".", "--json"]
@@ -1295,6 +1296,8 @@ def run_work_session_scenario(workspace, env=None):
     reply_approve_result = run(["work", "--reply-file", str(reply_approve_path), "--json"])
 
     start_data = _json_stdout(start_result)
+    task_add_json_data = _json_stdout(task_add_json_result)
+    task_show_json_data = _json_stdout(task_show_json_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
@@ -1345,6 +1348,26 @@ def run_work_session_scenario(workspace, env=None):
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
 
+    _scenario_check(
+        checks,
+        "work_task_add_json_returns_created_task",
+        task_add_json_result.get("exit_code") == 0
+        and (task_add_json_data.get("task") or {}).get("id") == 1
+        and (task_add_json_data.get("task") or {}).get("title") == "Native work task"
+        and (task_add_json_data.get("task") or {}).get("kind") == "coding",
+        observed=task_add_json_data,
+        expected="task add --json returns the created task without text parsing",
+    )
+    _scenario_check(
+        checks,
+        "work_task_show_json_returns_task",
+        task_show_json_result.get("exit_code") == 0
+        and (task_show_json_data.get("task") or {}).get("id") == 1
+        and (task_show_json_data.get("task") or {}).get("title") == "Native work task"
+        and (task_show_json_data.get("task") or {}).get("effective_kind") == "coding",
+        observed=task_show_json_data,
+        expected="task show --json returns the selected task without text parsing",
+    )
     _scenario_check(
         checks,
         "work_session_starts",
@@ -1478,6 +1501,8 @@ def run_work_session_scenario(workspace, env=None):
         reply_approve_start_result.get("exit_code") == 0
         and reply_approve_write_result.get("exit_code") == 0
         and reply_approve_snapshot_result.get("exit_code") == 0
+        and not (reply_approve_snapshot_result.get("stdout") or "")
+        and not (reply_approve_snapshot_result.get("stderr") or "")
         and "Next CLI controls" not in (reply_approve_snapshot_result.get("stdout") or "")
         and reply_approve_status_result.get("exit_code") == 0
         and reply_approve_result.get("exit_code") == 0

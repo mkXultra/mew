@@ -1415,6 +1415,7 @@ def build_parser():
     )
     add_parser.add_argument("--ready", action="store_true", help="create the task in ready status")
     add_parser.add_argument("--priority", choices=("low", "normal", "high"), default="normal")
+    add_parser.add_argument("--json", action="store_true", help="print the created task as JSON")
     add_parser.set_defaults(func=cmd_task_add)
 
     list_parser = task_subparsers.add_parser("list", help="list tasks")
@@ -1440,6 +1441,7 @@ def build_parser():
 
     show_parser = task_subparsers.add_parser("show", help="show a task")
     show_parser.add_argument("task_id")
+    show_parser.add_argument("--json", action="store_true", help="print the task as JSON")
     show_parser.set_defaults(func=cmd_task_show)
 
     done_parser = task_subparsers.add_parser("done", help="mark a task done")

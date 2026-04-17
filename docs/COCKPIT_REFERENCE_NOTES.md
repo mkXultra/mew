@@ -280,7 +280,8 @@ Initial implementation status, 2026-04-18:
   stream stats. The detailed planning summary remains available in non-follow
   live mode.
 - `mew work --follow --quiet` hides default progress stderr while preserving
-  stdout cells. Passing `--progress` keeps the explicit progress stream.
+  stdout cells during live work; zero-step snapshot refreshes are fully quiet.
+  Passing `--progress` keeps the explicit progress stream.
 - Chat `/follow --quiet` uses the same behavior and keeps `--quiet` in cached
   continue options.
 - Failed command/test cells use expanded tails so the first error view is more

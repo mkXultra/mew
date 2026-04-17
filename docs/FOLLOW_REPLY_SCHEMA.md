@@ -27,8 +27,8 @@ follow with zero steps:
 mew work <task-id> --follow --max-steps 0 --quiet --allow-read .
 ```
 
-`--quiet` is optional; it only keeps the refresh command's terminal output
-compact.
+`--quiet` is optional; it suppresses the refresh command's terminal output while
+still writing the snapshot files.
 
 ## Inspecting Freshness
 
@@ -42,8 +42,11 @@ mew work <task-id> --follow-status --json
 
 The command reads `.mew/follow/latest.json`, or the session-specific snapshot
 when a task id maps to a work session, and returns `status`, `producer_alive`,
-`heartbeat_age_seconds`, `pending_approval_count`, and the snapshot path. It
-exits nonzero when no snapshot exists.
+`heartbeat_age_seconds`, `pending_approval_count`, and the snapshot path.
+`fresh` means the heartbeat is recent, `working` means the producer is still
+alive, `completed` means the producer exited after writing a stopped snapshot,
+and `dead` means an old producer disappeared without a stop reason. It exits
+nonzero when no snapshot exists.
 
 ## Reply File
 
@@ -61,8 +64,10 @@ mew work <task-id> --reply-schema --json
 
 Without an active session, `mew work --reply-schema --json` prints the generic
 schema with `session_id`, `task_id`, and `observed_session_updated_at` set to
-null. The JSON includes both `docs` and `docs_path`; `docs_path` is useful when
-mew is launched from a temporary directory outside the repository.
+null, `submit_ready: false`, and `schema_only: true`; use it as documentation,
+not as a reply payload. The JSON includes both `docs` and `docs_path`;
+`docs_path` is useful when mew is launched from a temporary directory outside
+the repository.
 
 Minimal payload:
 

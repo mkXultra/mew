@@ -235,6 +235,9 @@ def cmd_task_add(args):
         }
         state["tasks"].append(task)
         save_state(state)
+    if getattr(args, "json", False):
+        print(json.dumps({"task": task}, ensure_ascii=False, indent=2))
+        return 0
     print(format_task(task))
     return 0
 
@@ -343,6 +346,14 @@ def cmd_task_show(args):
     if not task:
         print(f"mew: task not found: {args.task_id}", file=sys.stderr)
         return 1
+
+    if getattr(args, "json", False):
+        task_data = dict(task)
+        task_data["effective_kind"] = task_kind(task)
+        task_data["plan_count"] = len(task.get("plans") or [])
+        task_data["run_count"] = len(task.get("runs") or [])
+        print(json.dumps({"task": task_data}, ensure_ascii=False, indent=2))
+        return 0
 
     print(format_task(task))
     print(f"description: {task.get('description') or ''}")
@@ -2597,7 +2608,8 @@ def cmd_work_ai(args):
                 task = work_session_task(state, session)
             resume = build_work_session_resume(session, task=task)
             write_work_follow_snapshot(args, report, session, task, resume, force=True)
-        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
+        if not getattr(args, "quiet", False):
+            print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
         if (
             getattr(args, "live", False)
             and not getattr(args, "quiet", False)
@@ -4069,6 +4081,7 @@ def build_work_reply_schema(session=None, resume=None):
     task_id = (session or {}).get("task_id")
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
+    submit_ready = bool(session_id and observed)
     reply_path = STATE_DIR / "follow" / "reply.json"
     docs_path = Path(__file__).resolve().parents[2] / "docs" / "FOLLOW_REPLY_SCHEMA.md"
     return {
@@ -4080,6 +4093,8 @@ def build_work_reply_schema(session=None, resume=None):
         "session_id": session_id,
         "task_id": task_id,
         "observed_session_updated_at": observed,
+        "submit_ready": submit_ready,
+        "schema_only": not submit_ready,
         "supported_actions": _work_reply_supported_actions(),
         "reply_template": _work_reply_template(session, resume=resume),
     }
@@ -4125,6 +4140,8 @@ def _work_follow_status_from_snapshot(path):
         status = "fresh"
     elif producer_alive:
         status = "working"
+    elif has_producer and not producer_alive and data.get("stop_reason"):
+        status = "completed"
     elif has_producer and not producer_alive:
         status = "dead"
     else:
@@ -4194,6 +4211,7 @@ def format_work_reply_schema(data):
         f"session_id: {data.get('session_id') or '-'}",
         f"task_id: {data.get('task_id') or '-'}",
         f"observed_session_updated_at: {data.get('observed_session_updated_at') or '-'}",
+        f"submit_ready: {bool(data.get('submit_ready'))}",
         "",
         "Supported actions",
     ]
