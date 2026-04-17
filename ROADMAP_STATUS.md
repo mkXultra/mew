@@ -322,13 +322,14 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `637 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `638 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `142 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
-- `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed` (last combined run before the latest focus-coding-line test).
+- `uv run pytest -q tests/test_brief.py` current: `36 passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `32 passed`.
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
@@ -391,6 +392,7 @@ Next action:
 - Mew buddy dogfood session #51 found a suspected `search_text.truncated` edge case during read-only retest; focused regression coverage now proves overflow beyond `max_matches` reports `truncated=True`, turning the dogfood concern into a preserved contract.
 - The same retest exposed that a workbench whose only recent note was a system max-step boundary note could still show that note because of a fallback path; boundary-only system notes now stay hidden in the front-door Reentry block.
 - Empty work-session front-door summaries no longer render `last_tool=#`; the field appears only when a real latest tool call exists.
+- Default `mew focus` now surfaces a `Coding:` next-move line when coding work exists, so stale non-coding questions no longer completely hide the native coding cockpit entrypoint; `--kind coding` remains the scoped quiet view.
 
 ## Current Roadmap Focus
 

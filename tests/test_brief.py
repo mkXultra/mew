@@ -114,6 +114,22 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", next_move(state))
         self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `./mew work 2 --start-session`")
 
+    def test_focus_global_surfaces_coding_next_move(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Research grants", kind="research")
+        add_task(state, task_id=2, title="Improve cockpit", kind="coding")
+        add_question(state, "Which city?", related_task_id=1)
+
+        data = build_focus_data(state, limit=3)
+        focus = format_focus(data)
+
+        self.assertIn("mew reply", data["next_move"])
+        self.assertEqual(
+            data["coding_next_move"],
+            "start native work session for task #2 with `./mew work 2 --start-session`",
+        )
+        self.assertIn("Coding: start native work session for task #2", focus)
+
     def test_brief_kind_filter_scopes_tasks_questions_and_messages(self):
         state = default_state()
         add_task(state, task_id=1, title="Research grants", kind="research")

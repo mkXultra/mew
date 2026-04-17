@@ -511,6 +511,9 @@ def filter_messages_for_tasks(messages, tasks, kind=None):
 
 def build_focus_data(state, limit=3, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    coding_tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind="coding") if not kind else []
+    coding_active_work = active_work_session_items(state, limit=1, kind="coding") if not kind else []
+    coding_next_move = next_move(state, kind="coding") if not kind and (coding_tasks or coding_active_work) else ""
     questions = filter_questions_for_tasks(
         [question for question in state.get("questions", []) if question.get("status") == "open"],
         tasks,
@@ -524,6 +527,7 @@ def build_focus_data(state, limit=3, kind=None):
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     return {
         "next_move": next_move(state, kind=kind),
+        "coding_next_move": coding_next_move,
         "kind": kind or "",
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
@@ -643,6 +647,8 @@ def format_focus(data):
     if data.get("kind"):
         title += f" ({data.get('kind')})"
     lines = [title, f"Next: {data.get('next_move')}"]
+    if data.get("coding_next_move"):
+        lines.append(f"Coding: {data.get('coding_next_move')}")
     unread = data.get("unread_outbox_count") or 0
     if unread:
         lines.append(f"Unread: {unread}")
