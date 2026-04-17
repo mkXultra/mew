@@ -138,6 +138,18 @@ def _command_tail(result):
     return tail
 
 
+def _line_count(text):
+    text = str(text or "")
+    if not text:
+        return 0
+    return len(text.splitlines())
+
+
+def _stream_metric(stream, text):
+    text = str(text or "")
+    return f"{stream}: {_line_count(text)} lines {len(text)} chars"
+
+
 def _command_cell_kind(tool):
     if tool in TEST_CELL_TOOLS:
         return "test"
@@ -162,19 +174,34 @@ def _command_preview(call):
     return " ".join(parts)
 
 
-def _command_detail(call):
+def _command_detail(session, call, kind):
     result = _command_result(call)
     parameters = (call or {}).get("parameters") or {}
     lines = []
+    command = _command_text(call)
+    if command:
+        lines.append(f"command: {command}")
     cwd = result.get("cwd") or parameters.get("cwd")
     if cwd:
         lines.append(f"cwd: {cwd}")
+    exit_text = _exit_text(result)
+    if exit_text:
+        lines.append(exit_text)
     if result.get("timed_out"):
         lines.append("timeout: yes")
     if result.get("error_type"):
         lines.append(f"error_type: {result.get('error_type')}")
-    if not result.get("stdout") and not result.get("stderr") and call.get("status") == "completed":
-        lines.append("(no output)")
+    stdout = result.get("stdout") or ""
+    stderr = result.get("stderr") or ""
+    if stdout or stderr:
+        lines.append(_stream_metric("stdout", stdout))
+        lines.append(_stream_metric("stderr", stderr))
+    elif call.get("status") == "completed":
+        lines.append("output: (no output)")
+    task_id = (session or {}).get("task_id")
+    pane = "--tests" if kind == "test" else "--commands"
+    task_part = f" {task_id}" if task_id is not None else ""
+    lines.append(f"full_output: mew work{task_part} {pane}")
     if call.get("error"):
         lines.append(f"error: {clip_inline_text(call.get('error'), 240)}")
     return "\n".join(lines)
@@ -193,8 +220,10 @@ def command_or_test_cell(session, call):
         call.get("finished_at"),
         _command_preview(call),
     )
-    cell["detail"] = _command_detail(call)
+    cell["detail"] = _command_detail(session, call, kind)
     cell["tail"] = _command_tail(_command_result(call))
+    if not cell["tail"] and call.get("status") == "completed":
+        cell["tail"] = [{"stream": "output", "lines": ["(no output)"]}]
     return cell
 
 
@@ -381,10 +410,7 @@ def format_work_cells(cells, header="Work cells"):
             stream = tail.get("stream") or "output"
             tail_lines = tail.get("lines") or []
             lines.append(f"  {stream}_tail:")
-            if tail_lines:
-                lines.extend(f"    {line}" for line in tail_lines)
-            else:
-                lines.append("    (no output)")
+            lines.extend(f"    {line}" for line in tail_lines)
     return "\n".join(lines)
 
 

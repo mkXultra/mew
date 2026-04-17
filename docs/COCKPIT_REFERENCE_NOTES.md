@@ -188,6 +188,15 @@ Do not include in the first slice:
 
 ### P1: Command/Test Renderer
 
+Initial implementation status, 2026-04-18:
+
+- Command/test cells include command, cwd, exit status, elapsed time,
+  stdout/stderr line and character counts, output tails, explicit no-output
+  rows, timeout/error metadata, and a `full_output` hint back to the focused
+  pane.
+- The remaining work is pacing and control: configurable tails, collapse/expand,
+  and a cleaner cell-native follow stream.
+
 Estimated time: 0.5 to 1 day after P0.
 
 Show:
@@ -260,10 +269,11 @@ Resume should restore:
 
 ## Next Recommended Task
 
-Continue from the landed P0 slice into P1:
+Continue from the landed P0 slice and the first command/test-cell polish into
+approval anchors:
 
-> Improve command/test cell rendering and output pacing on top of the new stable
-> cell model.
+> Add operation-specific approval cells that point at exact write/shell/network
+> targets and support approve once / reject / reject with feedback.
 
 Target duration:
 

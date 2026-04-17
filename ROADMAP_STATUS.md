@@ -272,6 +272,7 @@ Evidence:
 - `mew work --follow` now prints newly added cells after each live step, so follow-mode output has stable model/tool anchors instead of only transient stream text.
 - Real read-only `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` dogfood used the new cells, found that leading raw ids/timestamps made rows noisy, and the formatter was then adjusted to put stable ids and timing in metadata lines.
 - `dogfood --scenario work-session` now checks both CLI and chat cell panes, including model, test, diff, and pending approval rows.
+- Command/test cells now include command, cwd, exit status, elapsed time, stdout/stderr line and character counts, output tails, explicit no-output rows, timeout/error metadata, and a `full_output` hint back to `mew work <task-id> --tests` or `--commands`.
 
 Missing proof:
 
@@ -281,11 +282,11 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, but it still renders alongside the older thinking/action/result logs rather than as a fully cell-native stream.
-- TTY redraw, cell-level collapse/expand, and richer command/test tail controls are not implemented.
+- TTY redraw, cell-level collapse/expand, and configurable command/test tail controls are not implemented.
 
 Next action:
 
-- Build the next cockpit slice on top of cells: improve command/test cell rendering and output pacing before redesigning approvals, interrupts, diffs, or live-resume state.
+- Dogfood the new command/test cells in real resident work, then build approval anchors on top of the same cell model before redesigning interrupts, diffs, or live-resume state.
 
 ## Milestone 3: Persistent Advantage
 
@@ -403,7 +404,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `791 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `792 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `182 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
 - `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` current: real Codex Web API dogfood inspected the new cell implementation, produced stable cells after each step, and identified the row-noise polish that was fixed in this session.

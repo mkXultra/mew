@@ -198,6 +198,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("- test [completed] run_tests exit=0 duration=3.0s uv run pytest -q", text)
         self.assertIn("id: s3:test:2", text)
         self.assertIn("elapsed: 3.0s", text)
+        self.assertIn("command: uv run pytest -q", text)
+        self.assertIn("exit=0", text)
+        self.assertIn("stdout: 2 lines", text)
+        self.assertIn("stderr: 0 lines 0 chars", text)
+        self.assertIn("full_output: mew work 9 --tests", text)
         self.assertIn("stdout_tail:", text)
         self.assertIn("- approval [pending] approval needed", text)
         self.assertIn("id: s3:approval:3", text)
@@ -258,6 +263,37 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next CLI controls", output)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_session_command_cell_marks_no_output(self):
+        session = {
+            "id": 4,
+            "task_id": 10,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"command": "true", "cwd": "."},
+                    "result": {
+                        "command": "true",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "stdout": "",
+                        "stderr": "",
+                    },
+                }
+            ],
+        }
+
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertIn("- command [completed] run_command exit=0 duration=1.0s true", text)
+        self.assertIn("output: (no output)", text)
+        self.assertIn("output_tail:\n    (no output)", text)
+        self.assertIn("full_output: mew work 10 --commands", text)
 
     def test_diff_preview_can_use_unclipped_diff_stats(self):
         clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
