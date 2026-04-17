@@ -3111,6 +3111,9 @@ def cmd_work_show_session(args):
         if not session and not getattr(args, "task_id", None):
             print(format_no_active_work_session(state))
         elif any(getattr(args, name, False) for name in ("timeline", "diffs", "tests", "commands")):
+            if not session:
+                print(format_no_active_work_session(state))
+                return 0
             panes = []
             if getattr(args, "timeline", False):
                 panes.append(format_work_session_timeline(session, task=task, limit=getattr(args, "limit", 20)))
@@ -3353,9 +3356,9 @@ def cmd_work_recover_session(args):
     return code
 
 
-def _work_tool_parameters(args, session=None):
+def _work_tool_parameters(args, session=None, gate_options=None):
     path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file"}
-    options = _work_tool_gate_options(args, session)
+    options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
     parameters = {
         "path": args.path if getattr(args, "tool", "") in path_tools else None,
         "query": getattr(args, "query", None),
@@ -3398,7 +3401,7 @@ def cmd_work_tool(args):
             print(format_no_work_tool_session(state, args), file=sys.stderr)
             return 1
         gate_options = _work_tool_gate_options(args, session)
-        parameters = _work_tool_parameters(args, session=session)
+        parameters = _work_tool_parameters(args, session=session, gate_options=gate_options)
         tool_call = start_work_tool_call(state, session, args.tool, parameters)
         if review_probe:
             tool_call["review_probe"] = True

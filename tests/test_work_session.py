@@ -2237,6 +2237,28 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_multi_pane_without_task_session_prints_single_hint(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tests", "--commands", "--diffs"]), 0)
+
+                output = stdout.getvalue()
+                self.assertEqual(output.count("No active work session."), 1)
+                self.assertIn("mew work <task-id> --start-session", output)
+                self.assertNotIn("Work tests #", output)
+                self.assertNotIn("Work commands #", output)
+                self.assertNotIn("Work diffs #", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_show_active_includes_next_cli_controls(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
