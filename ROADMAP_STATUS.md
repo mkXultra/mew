@@ -657,6 +657,7 @@ Next action:
 - Reply files now require `schema_version: 1` and `observed_session_updated_at`, making the observer contract strict rather than best-effort.
 - `dogfood --scenario work-session` now covers a deterministic structured reply-file loop, session-specific reply schema, FIFO queued follow-up path, and boundary-safe interrupt-submit path, so the observer interface is part of recurring dogfood.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
+- Real `mew code` dogfood task #94/session #120 used saved coding-cockpit gates, followed the resident model through a 4-step loop, applied a tiny help-text polish, and verified it with `uv run pytest -q tests/test_work_session.py -k interrupt_submit`.
 
 ## Current Roadmap Focus
 

@@ -9137,7 +9137,7 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("queued follow-up for work session #1: check this after current step", output)
                 self.assertIn("Next controls", output)
-                self.assertIn("/work-session queue <later follow-up>", output)
+                self.assertIn("/work-session queue <follow-up for a later step>", output)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["queued_followups"][0]["text"], "check this after current step")
                 self.assertEqual(session["queued_followups"][0]["source"], "user")
