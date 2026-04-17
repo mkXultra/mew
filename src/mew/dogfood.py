@@ -995,6 +995,12 @@ def run_work_session_scenario(workspace, env=None):
     )
     stop_result = run(["work", "1", "--stop-session", "--stop-reason", "dogfood pause", "--json"])
     note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
+    steer_result = run(["work", "1", "--steer", "dogfood steer", "--json"])
+    chat_steer_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session steer dogfood chat steer\n",
+    )
 
     state_path = workspace / STATE_FILE
     state = migrate_state(read_json_file(state_path, default_state()))
@@ -1198,6 +1204,7 @@ def run_work_session_scenario(workspace, env=None):
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
+    steer_data = _json_stdout(steer_result)
     resume_data = _json_stdout(resume_result)
     verification_ledger_data = _json_stdout(verification_ledger_result, [])
     writes_ledger_data = _json_stdout(writes_ledger_result, [])
@@ -1383,6 +1390,23 @@ def run_work_session_scenario(workspace, env=None):
         and any((note or {}).get("text") == "dogfood note" for note in (resume_data.get("resume") or {}).get("notes") or []),
         observed={"note": note_data.get("work_note"), "resume_notes": (resume_data.get("resume") or {}).get("notes")},
         expected="session note is recorded and surfaced in resume",
+    )
+    _scenario_check(
+        checks,
+        "work_session_steer_queues_pending_guidance",
+        steer_result.get("exit_code") == 0
+        and (steer_data.get("pending_steer") or {}).get("text") == "dogfood steer"
+        and chat_steer_result.get("exit_code") == 0
+        and "queued steer for work session #1: dogfood chat steer" in (chat_steer_result.get("stdout") or "")
+        and (session.get("pending_steer") or {}).get("text") == "dogfood chat steer"
+        and ((resume_data.get("resume") or {}).get("pending_steer") or {}).get("text") == "dogfood chat steer",
+        observed={
+            "cli": steer_data,
+            "chat": command_result_tail(chat_steer_result),
+            "pending_steer": session.get("pending_steer"),
+            "resume_pending_steer": (resume_data.get("resume") or {}).get("pending_steer"),
+        },
+        expected="CLI and chat can queue one-time steer guidance for the active session",
     )
     _scenario_check(
         checks,

@@ -429,7 +429,11 @@ durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
 `/work-session note`. With an explicit task id, `mew work <task-id>
 --session-note ...` can also annotate the latest closed task session after
-review. Approving a dry-run write can reuse the latest session
+review. For mid-loop steering that should not become permanent memory, use
+`mew work --steer "..."` or `/work-session steer ...`; mew queues that text for
+the next live/follow step, records the consumed steer as a note, and then clears
+it. Resume and live result panes show the queued steer while it is still
+pending. Approving a dry-run write can reuse the latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
 or write verification refreshes the session's default verification command, so
@@ -475,6 +479,7 @@ uv run mew work --cells
 uv run mew work --session --resume
 uv run mew work --session --resume --allow-read .
 uv run mew work --session-note "prefer small verified steps"
+uv run mew work --steer "inspect README before editing"
 uv run mew work 1 --recover-session --allow-read .
 uv run mew work 1 --session --resume --allow-read . --auto-recover-safe
 uv run mew work --stop-session --stop-reason "pause after this step"
@@ -559,6 +564,7 @@ Inside `mew chat`, use `/work-session details`, `/work-session diffs`,
 `/continue focus on README.md` to reuse the previous or persisted live options with new guidance,
 `/work-mode on` or `mew chat --work-mode` to make text act as `/continue <guidance>` and let blank lines repeat after one work step,
 `/work-session note prefer small verified steps`,
+`/work-session steer inspect README before editing`,
 `/work-session stop pause after this step`,
 `/work-session ai 1 --allow-read . --max-steps 1`,
 `/work-session approve 7 --allow-write . --verify-command "uv run pytest -q"`,

@@ -1386,6 +1386,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "failures": failures[-limit:],
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
+        "pending_steer": session.get("pending_steer") or {},
         "approve_all_hint": approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
@@ -1494,6 +1495,14 @@ def format_work_session_resume(resume):
                 lines.append(f"  reject: {approval.get('reject_hint')}")
     else:
         lines.append("(none)")
+
+    pending_steer = resume.get("pending_steer") or {}
+    if pending_steer.get("text"):
+        lines.extend(["", "Pending steer"])
+        source = pending_steer.get("source") or "user"
+        created_at = pending_steer.get("created_at") or ""
+        prefix = f"{created_at} " if created_at else ""
+        lines.append(f"- {prefix}[{source}] {clip_inline_text(pending_steer.get('text'), 500)}")
 
     lines.extend(["", "Failures"])
     failures = resume.get("failures") or []

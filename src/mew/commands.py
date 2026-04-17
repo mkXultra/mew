@@ -1042,6 +1042,9 @@ def format_work_live_step_result(step, resume=None):
         if resume.get("pending_approvals"):
             ids = ", ".join(f"#{item.get('tool_call_id')}" for item in resume.get("pending_approvals") or [])
             session_lines.append(f"pending_approvals: {ids}")
+        pending_steer = resume.get("pending_steer") or {}
+        if pending_steer.get("text"):
+            session_lines.append(f"pending_steer: {clip_inline_text(pending_steer.get('text'), 280)}")
         memory = resume.get("working_memory") or {}
         if memory:
             if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
@@ -1905,6 +1908,8 @@ def cmd_work(args):
         return cmd_work_show_session(args)
     if getattr(args, "close_session", False):
         return cmd_work_close_session(args)
+    if getattr(args, "steer", None):
+        return cmd_work_steer(args)
     if getattr(args, "session_note", None):
         return cmd_work_session_note(args)
     if getattr(args, "recover_session", False):
@@ -2128,6 +2133,26 @@ def work_ai_step_guidance(args, index, max_steps):
         )
         return "\n\n".join(part for part in (guidance, final_guidance) if part)
     return guidance
+
+
+def queue_work_session_steer(session, text, source="user"):
+    text = str(text or "").strip()
+    if not session or not text:
+        return None
+    current_time = now_iso()
+    steer = {"text": text, "source": source, "created_at": current_time}
+    session["pending_steer"] = steer
+    session["updated_at"] = current_time
+    return steer
+
+
+def consume_work_session_steer(session, step_index):
+    steer = (session or {}).pop("pending_steer", None)
+    text = str((steer or {}).get("text") or "").strip()
+    if not text:
+        return ""
+    add_work_session_note(session, f"steer for step {step_index}: {text}", source=steer.get("source") or "user")
+    return text
 
 
 def pause_work_session_after_user_interrupt(session_id, step_index):
@@ -2366,7 +2391,6 @@ def cmd_work_ai(args):
         live_delta_buffers = {}
         live_delta_totals = {}
         live_delta_rendered_lengths = {}
-        step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
         with state_lock():
@@ -2380,7 +2404,11 @@ def cmd_work_ai(args):
             state = load_state()
             session = find_work_session(state, session_id)
             stop_request = consume_work_session_stop(session)
-            if stop_request:
+            pending_steer = ""
+            if not stop_request:
+                pending_steer = consume_work_session_steer(session, index)
+            task = work_session_task(state, session)
+            if stop_request or pending_steer:
                 save_state(state)
         if stop_request:
             report["stop_reason"] = "stop_requested"
@@ -2388,6 +2416,13 @@ def cmd_work_ai(args):
             if progress:
                 progress(f"step #{index}: stop requested")
             break
+        step_guidance = work_ai_step_guidance(args, index, max_steps)
+        if pending_steer:
+            step_guidance = "\n\n".join(
+                part for part in (step_guidance, f"User steer for this step:\n{pending_steer}") if part
+            )
+            if progress:
+                progress(f"step #{index}: consumed steer")
 
         prompt_state = state
         prompt_session = session
@@ -3468,6 +3503,26 @@ def cmd_work_session_note(args):
         print(json.dumps({"work_note": note, "work_session": session}, ensure_ascii=False, indent=2))
     else:
         print(f"recorded work session note #{session['id']}: {note['text']}")
+    return 0
+
+
+def cmd_work_steer(args):
+    text = (getattr(args, "steer", None) or "").strip()
+    if not text:
+        print("mew: --steer requires text", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        steer = queue_work_session_steer(session, text)
+        save_state(state)
+    if getattr(args, "json", False):
+        print(json.dumps({"work_session_id": session.get("id"), "pending_steer": steer}, ensure_ascii=False, indent=2))
+    else:
+        print(f"queued steer for work session #{session['id']}: {steer['text']}")
     return 0
 
 
@@ -7181,7 +7236,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/note/recover/ai/live/resume/timeline/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/steer/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance; /c is alias
 /follow [opts|text]   run compact continuous live steps; defaults to 10 steps
 /work-mode [on|off]   toggle chat mode where text guides /continue and blank repeats after one work step
@@ -7278,6 +7333,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-mode on                         text becomes /continue guidance; blank repeats after one work step
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
+/work-session steer <text>            queue one-time guidance for the next live/follow step
 /work-session approve <id> ...        apply a dry-run write after explicit gates
 /work-session reject <id> <reason>    reject a pending write"""
 
@@ -7889,6 +7945,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     lines.append("- /work-session timeline")
     lines.append("Manage")
     lines.append("- /work-session note <remember this>")
+    lines.append("- /work-session steer <next-step guidance>")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     lines.append("Advanced")
@@ -7915,6 +7972,7 @@ def chat_work_session(rest, chat_state=None):
         "close",
         "stop",
         "note",
+        "steer",
         "recover",
         "ai",
         "step",
@@ -7926,7 +7984,9 @@ def chat_work_session(rest, chat_state=None):
         "commands",
         "cells",
     }
+    task_first = False
     if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
+        task_first = True
         parts = [parts[1], parts[0], *parts[2:]]
     action = parts[0].casefold() if parts else "show"
     task_id = parts[1] if len(parts) > 1 else None
@@ -7936,6 +7996,7 @@ def chat_work_session(rest, chat_state=None):
         "close",
         "stop",
         "note",
+        "steer",
         "recover",
         "ai",
         "step",
@@ -8016,6 +8077,10 @@ def chat_work_session(rest, chat_state=None):
 
     if action == "note":
         scoped_task_id = None
+        note_parts = parts[1:]
+        if task_first:
+            scoped_task_id = task_id
+            note_parts = parts[2:]
         if scope_kind:
             state = load_state()
             session = active_work_session_for_kind(state, scope_kind)
@@ -8023,8 +8088,34 @@ def chat_work_session(rest, chat_state=None):
                 print(format_no_active_work_session(state, kind=scope_kind))
                 return
             scoped_task_id = session.get("task_id")
-        args = SimpleNamespace(task_id=scoped_task_id, session_note=" ".join(parts[1:]), json=False)
+        args = SimpleNamespace(task_id=scoped_task_id, session_note=" ".join(note_parts), json=False)
         cmd_work_session_note(args)
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
+        return
+
+    if action == "steer":
+        scoped_task_id = None
+        steer_parts = parts[1:]
+        if task_first:
+            scoped_task_id = task_id
+            steer_parts = parts[2:]
+        if scope_kind:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            scoped_task_id = session.get("task_id")
+        args = SimpleNamespace(task_id=scoped_task_id, steer=" ".join(steer_parts), json=False)
+        cmd_work_steer(args)
         state = load_state()
         session = active_work_session_for_kind(state, scope_kind)
         print(

@@ -91,6 +91,7 @@ class WorkSessionTests(unittest.TestCase):
             resume={
                 "phase": "idle",
                 "context": {"pressure": "low", "tool_calls": 1, "model_turns": 1},
+                "pending_steer": {"text": "inspect README before edits", "source": "user"},
                 "working_memory": {
                     "hypothesis": "Command output proves the tool path works.",
                     "next_step": "Continue with the focused verifier.",
@@ -106,6 +107,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("summary: command:", text)
         self.assertIn("stdout:\n    hi", text)
         self.assertIn("session:\n  phase: idle", text)
+        self.assertIn("pending_steer: inspect README before edits", text)
         self.assertIn("memory_hypothesis: Command output proves the tool path works.", text)
         self.assertIn("memory_next: Continue with the focused verifier.", text)
         self.assertIn("memory_verified: echo passed", text)
@@ -2678,6 +2680,113 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
                 self.assertIn("[user] reviewed after close", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_steer_is_consumed_by_next_model_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("steer me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--steer", "prefer reading README first", "--json"]), 0)
+                queued = json.loads(stdout.getvalue())
+                self.assertEqual(queued["pending_steer"]["text"], "prefer reading README first")
+                self.assertEqual(load_state()["work_sessions"][0]["pending_steer"]["source"], "user")
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("User steer for this step:", prompts[0])
+                self.assertIn("prefer reading README first", prompts[0])
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("pending_steer", session)
+                self.assertEqual(session["notes"][0]["text"], "steer for step 1: prefer reading README first")
+                self.assertEqual(session["notes"][0]["source"], "user")
+                self.assertIn("User steer for this step:", session["model_turns"][0]["guidance_snapshot"])
+                self.assertIn("prefer reading README first", session["model_turns"][0]["guidance_snapshot"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_stop_preserves_pending_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--steer", "keep this for later"]), 0)
+                    self.assertEqual(main(["work", "1", "--stop-session", "--stop-reason", "pause first"]), 0)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                call_model.assert_not_called()
+                from mew.work_session import build_work_session_resume, format_work_session_resume
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["pending_steer"]["text"], "keep this for later")
+                self.assertNotIn("steer for step", "\n".join(note.get("text", "") for note in session.get("notes", [])))
+                resume = build_work_session_resume(session, task=state["tasks"][0])
+                self.assertEqual(resume["pending_steer"]["text"], "keep this for later")
+                resume_text = format_work_session_resume(resume)
+                self.assertIn("Pending steer", resume_text)
+                self.assertIn("keep this for later", resume_text)
             finally:
                 os.chdir(old_cwd)
 
@@ -8548,6 +8657,32 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("recorded work session note #1: keep edits tiny", output)
                 self.assertIn("Next controls", output)
                 self.assertEqual(load_state()["work_sessions"][0]["notes"][0]["text"], "keep edits tiny")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_can_queue_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session steer inspect README before edits", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("queued steer for work session #1: inspect README before edits", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/work-session steer <next-step guidance>", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["pending_steer"]["text"], "inspect README before edits")
+                self.assertEqual(session["pending_steer"]["source"], "user")
             finally:
                 os.chdir(old_cwd)
 

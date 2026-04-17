@@ -283,6 +283,10 @@ Initial implementation status, 2026-04-18:
   papercuts: resume approval hints reuse known verifier defaults, failed
   approval verification cells are marked retryable instead of pending, and
   compact final reports summarize write diff stats without raw diff headers.
+- `mew work --steer "..."` and `/work-session steer ...` now provide the first
+  explicit mid-loop steer lane: text is queued for the next live/follow step,
+  exposed in resume/live session output while pending, injected into that step
+  guidance, journaled as consumed, and cleared.
 
 Remaining:
 
@@ -294,7 +298,7 @@ Estimated time: 1 to 2 days after cells exist.
 
 Rules to make explicit:
 
-- user message becomes pending steer
+- user message becomes pending steer (CLI/chat command lane exists)
 - user message becomes queued follow-up
 - user message interrupts current turn and submits immediately
 
