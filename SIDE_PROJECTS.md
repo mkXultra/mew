@@ -77,6 +77,9 @@ Status:
 - The prototype generates one `.mew/journal/YYYY-MM-DD.md` file with Morning
   and Evening sections from tasks, done-task notes, open questions, active work
   sessions, and runtime effects.
+- The generator is promoted to the core `mew journal` command. Use
+  `mew journal --write` to generate the source report that `mew bundle`
+  composes.
 - Latest validation: `uv run pytest -q experiments/mew-journal` passed with
   `5 passed`.
 

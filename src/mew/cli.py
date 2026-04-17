@@ -35,6 +35,7 @@ from .commands import (
     cmd_focus,
     cmd_guidance_init,
     cmd_guidance_show,
+    cmd_journal,
     cmd_listen,
     cmd_log,
     cmd_memory,
@@ -438,6 +439,14 @@ def build_parser():
     daily_parser.add_argument("--kind", choices=["coding", "research", "personal", "admin", "unknown"], help="filter tasks and related questions by kind")
     daily_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daily_parser.set_defaults(func=cmd_focus)
+
+    journal_parser = subparsers.add_parser("journal", help="generate a daily mew journal")
+    journal_parser.add_argument("--date", help="journal date YYYY-MM-DD; defaults to today")
+    journal_parser.add_argument("--write", action="store_true", help="write .mew/journal/YYYY-MM-DD.md")
+    journal_parser.add_argument("--output-dir", default=".", help="where to write .mew/journal files with --write")
+    journal_parser.add_argument("--show", action="store_true", help="print the markdown report")
+    journal_parser.add_argument("--json", action="store_true", help="print structured output")
+    journal_parser.set_defaults(func=cmd_journal)
 
     bundle_parser = subparsers.add_parser("bundle", help="compose generated daily reports into a passive bundle")
     bundle_parser.add_argument("--reports-root", default=".", help="root containing generated .mew report files")

@@ -27,6 +27,7 @@ printf '{"id":"1","type":"status"}\n{"id":"2","type":"stop"}\n' | uv run mew ses
 uv run mew focus
 uv run mew focus --kind coding
 uv run mew daily
+uv run mew journal --write
 uv run mew bundle --show
 uv run mew desk --json
 uv run mew mood --write
@@ -46,10 +47,13 @@ when there are no coding tasks, that view suggests a native self-improvement
 session instead of going silent.
 `digest` summarizes activity since the last user interaction without entering
 the chat REPL.
+`journal` writes a morning/evening `.mew/journal/YYYY-MM-DD.md` from tasks,
+questions, active work sessions, and runtime effects.
 `bundle` composes already-generated daily report markdown files into one
 `.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
-source reports; use it after `mew mood --write` or after journal, dream,
-self-memory, or morning-paper experiments have written files under `.mew`.
+source reports; use it after `mew journal --write`, `mew mood --write`, or after
+dream, self-memory, or morning-paper experiments have written files under
+`.mew`.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`
@@ -164,6 +168,8 @@ uv run mew focus
 uv run mew focus --json
 uv run mew focus --kind coding
 uv run mew daily
+uv run mew journal --date 2026-04-17 --write
+uv run mew journal --show
 uv run mew bundle --date 2026-04-17 --show
 uv run mew desk --json
 uv run mew desk --write

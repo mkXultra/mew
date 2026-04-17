@@ -52,6 +52,12 @@ from .dogfood import (
     summarize_dogfood_scenario_json,
 )
 from .errors import MewError
+from .journal import (
+    build_journal_view_model,
+    format_journal_view,
+    render_journal_markdown,
+    write_journal_report,
+)
 from .memory import add_deep_memory, compact_memory, search_memory
 from .model_backends import (
     load_model_auth,
@@ -4814,6 +4820,42 @@ def cmd_mood(args):
         print(render_mood_markdown(view_model), end="")
     else:
         print(format_mood_view(view_model))
+        if written:
+            print(f"written_markdown: {written}")
+    return 0
+
+def cmd_journal(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
+    state = load_state()
+    try:
+        view_model = build_journal_view_model(state, explicit_date=args.date)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    written = None
+    if args.write:
+        written = write_journal_report(view_model, Path(args.output_dir).expanduser())
+    if args.json:
+        data = {
+            "date": view_model["date"],
+            "counts": {
+                "completed": len(view_model["completed"]),
+                "active": len(view_model["active"]),
+                "questions": len(view_model["questions"]),
+                "sessions": len(view_model["sessions"]),
+                "runtime_effects": len(view_model["runtime_effects"]),
+            },
+            "mew_note": view_model["mew_note"],
+        }
+        if written:
+            data["path"] = str(written)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(render_journal_markdown(view_model), end="")
+    else:
+        print(format_journal_view(view_model))
         if written:
             print(f"written_markdown: {written}")
     return 0

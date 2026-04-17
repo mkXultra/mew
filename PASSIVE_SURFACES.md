@@ -66,6 +66,26 @@ Outputs:
 - compact signals from open tasks, open questions, and runtime effects
 - optional `.mew/mood/YYYY-MM-DD.md` report for `mew bundle`
 
+### `mew journal`
+
+Purpose: generate a morning/evening daily report from local state.
+
+Useful commands:
+
+```bash
+uv run mew journal
+uv run mew journal --show
+uv run mew journal --json
+uv run mew journal --write
+```
+
+Outputs:
+
+- yesterday/progress from completed tasks and runtime effects
+- today/tomorrow hints from active tasks
+- stuck points from open questions and active work sessions
+- optional `.mew/journal/YYYY-MM-DD.md` report for `mew bundle`
+
 ### `mew bundle`
 
 Purpose: compose generated daily report markdown files into one reentry
@@ -87,9 +107,9 @@ Current source report paths:
 - `.mew/dreams/YYYY-MM-DD.md`
 - `.mew/self/learned-YYYY-MM-DD.md`
 
-The command composes existing reports only. It does not generate journal,
-morning-paper, dream, or self-memory reports. `mew mood --write` can generate
-the mood source report.
+The command composes existing reports only. It does not generate morning-paper,
+dream, or self-memory reports. `mew journal --write` and `mew mood --write` can
+generate core source reports.
 
 ## Experiments
 
@@ -115,21 +135,22 @@ Promoted:
 - passive bundle composition
 - desk view model
 - mood scoring
+- journal generation
 
 Not promoted yet:
 
-- journal generation
 - morning-paper feed collection or ranking
 - dream/self-memory generation
 - any visual desktop shell
 
 ## Latest Verification
 
-After the core `desk`, `mood`, and `bundle` promotions and review fixes:
+After the core `desk`, `journal`, `mood`, and `bundle` promotions and review
+fixes:
 
 ```text
 uv run pytest -q
-762 passed, 6 subtests passed
+767 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

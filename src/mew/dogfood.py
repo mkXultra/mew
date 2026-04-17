@@ -479,12 +479,11 @@ def run_runtime_focus_scenario(workspace, env=None):
     doctor_result = run(["doctor"], timeout=15)
     desk_result = run(["desk", "--json"], timeout=15)
     bundle_day = now_iso()[:10]
-    journal_path = workspace / ".mew" / "journal" / f"{bundle_day}.md"
-    journal_path.parent.mkdir(parents=True, exist_ok=True)
-    journal_path.write_text(f"# Mew Journal {bundle_day}\n\nDogfood journal hint.\n", encoding="utf-8")
+    journal_result = run(["journal", "--date", bundle_day, "--write", "--json"], timeout=15)
     mood_result = run(["mood", "--date", bundle_day, "--write", "--json"], timeout=15)
     bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
     desk_data = _json_stdout(desk_result)
+    journal_data = _json_stdout(journal_result)
     mood_data = _json_stdout(mood_result)
     bundle_data = _json_stdout(bundle_result)
 
@@ -546,6 +545,15 @@ def run_runtime_focus_scenario(workspace, env=None):
         desk_result.get("exit_code") == 0 and bool(desk_data.get("pet_state")),
         observed=desk_data,
         expected="desk --json returns a pet_state view model",
+    )
+    _scenario_check(
+        checks,
+        "journal_json_writes_report",
+        journal_result.get("exit_code") == 0
+        and bool(journal_data.get("mew_note"))
+        and (workspace / ".mew" / "journal" / f"{bundle_day}.md").exists(),
+        observed=journal_data,
+        expected="journal --write --json returns summary counts and writes a journal report",
     )
     _scenario_check(
         checks,
