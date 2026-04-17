@@ -5554,7 +5554,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("model_delta: THINK follow model delta", output)
                 self.assertEqual(output.count("model_delta: THINK"), 1)
                 self.assertIn("model_stream: THINK chunks=3", output)
-                self.assertIn("stream_preview: follow model delta", output)
+                self.assertNotIn("stream_preview: follow model delta", output)
                 self.assertLess(output.index("model_delta: THINK"), output.index("model_stream: THINK"))
             finally:
                 os.chdir(old_cwd)

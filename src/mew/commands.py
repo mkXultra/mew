@@ -846,7 +846,7 @@ def _planning_value_text(value):
     return str(value)
 
 
-def format_work_planning(planned):
+def format_work_planning(planned, include_stream_preview=True):
     decision_plan = (planned or {}).get("decision_plan") or {}
     action_plan = (planned or {}).get("action_plan") or {}
     action = (planned or {}).get("action") or {}
@@ -862,7 +862,7 @@ def format_work_planning(planned):
         lines.append(
             f"model_stream: {phase.get('phase')} chunks={phase.get('chunks')} chars={phase.get('chars')}"
         )
-        if phase.get("preview"):
+        if include_stream_preview and phase.get("preview"):
             lines.append(f"stream_preview: {phase.get('preview')}")
     reason = action.get("reason") or (action_plan.get("action") or {}).get("reason")
     if reason and reason != summary:
@@ -1659,6 +1659,7 @@ def cmd_work_ai(args):
     for index in range(1, max_steps + 1):
         step_started = time.monotonic()
         live_thinking_open = False
+        live_model_delta_seen = False
         live_delta_buffers = {}
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
@@ -1701,9 +1702,10 @@ def cmd_work_ai(args):
                     print(format_work_live_model_delta(current_phase, rendered), flush=True)
 
         def live_model_delta(phase, text):
-            nonlocal live_thinking_open
+            nonlocal live_thinking_open, live_model_delta_seen
             if not getattr(args, "live", False):
                 return
+            live_model_delta_seen = True
             if not live_thinking_open:
                 print("")
                 print(f"Work live step #{index} thinking")
@@ -1857,7 +1859,12 @@ def cmd_work_ai(args):
                     )
                 )
                 live_thinking_open = True
-            print(format_work_planning(planned))
+            print(
+                format_work_planning(
+                    planned,
+                    include_stream_preview=not (getattr(args, "compact_live", False) and live_model_delta_seen),
+                )
+            )
         if action_type == "batch":
             if getattr(args, "live", False):
                 print("")

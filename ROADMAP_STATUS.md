@@ -94,6 +94,7 @@ Evidence:
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
 - Codex Web API SSE text deltas are forwarded even when the response omits a `content-type` header; `--follow` enables batched live `model_delta` thinking-pane output by default when the backend supports it.
 - Compact follow mode suppresses duplicate stderr delta progress while still preserving the model stream in the thinking pane and final preview, reducing token-by-token noise during real Codex Web API dogfood.
+- Compact follow mode now suppresses the duplicate raw `stream_preview` when live model deltas were already shown, keeping the planning summary to model-stream metrics, summary, action, and reason.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
 - Live thinking panes now include a stable progress anchor (`step/max`, session id, task id, phase, and elapsed time), improving orientation during multi-step resident work.
 - `mew work --live --compact-live` and `/work-session live --compact-live` skip full per-step resume blocks, leaving a lighter thinking/action/result stream for longer supervised runs.
@@ -351,6 +352,7 @@ Next action:
 - `codex-ultra` human-role retest after the 2026-04-17 cockpit transcript work found three issues: non-git initial world-state resume showed `(no files)`, stale working memory rendered an old `next_step` too strongly, and `effects 10` / `runtime-effects 10` failed despite analogous chat grammar. Follow-up retest verified all three fixed with no repo edits.
 - Live Codex Web API dogfood on task #46 exposed that SSE responses can omit `content-type`, causing final text to work while live deltas were dropped; after the fix, session #40 showed batched `model_delta` lines in the thinking pane with no stderr token spam.
 - Mew buddy dogfood on task #46 exposed that one-line `search_text` hits could make the resident model misread ROADMAP_STATUS; after adding bounded context snippets and clarifying the status wording, session #44 correctly distinguished shipped cockpit panes from the remaining live reasoning/status-pane gap.
+- Live Codex Web API dogfood on task #46 session #45 verified compact follow no longer repeats the same raw JSON in both `model_delta` and `stream_preview`; the planning summary kept `model_stream` metrics plus summary/reason.
 
 ## Current Roadmap Focus
 

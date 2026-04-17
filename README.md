@@ -345,8 +345,8 @@ making the model infer too much from a single matched line.
 deltas into the live thinking pane when the backend supports it, so a bounded
 autonomous run is observable while it is thinking instead of only after each
 step completes. Compact follow keeps duplicate delta progress off stderr, then
-includes a clipped model-stream preview separated from tool/progress lines when
-deltas are available.
+keeps only model-stream metrics in the planning summary when live deltas were
+already shown, avoiding a second raw JSON preview of the same model turn.
 If a follow run or multi-step live run reaches `--max-steps`, mew records a
 system work-session note with the last action/result and the reentry command
 hint, so the next session can tell the loop hit its bound rather than silently
