@@ -173,13 +173,13 @@ Current source report paths:
 - `.mew/self/learned-YYYY-MM-DD.md`
 
 The command composes existing reports only.
-`mew journal --write`, `mew mood --write`, `mew self-memory --write`, and
+`mew journal --write`, `mew mood --write`, `mew self-memory --write`,
 `mew dream --write`, and `mew morning-paper ... --write` can generate core
 source reports.
-`--generate-core` can generate journal and mood first; `--morning-feed` adds the
-static morning-paper source report before composing. It also generates
-dream and self-memory. Generated source reports are written under
-`--reports-root`, then composed into `--output-dir`.
+`--generate-core` generates journal, mood, dream, and self-memory first;
+`--morning-feed` adds the static morning-paper source report before composing.
+Generated source reports are written under `--reports-root`, then composed into
+`--output-dir`.
 When a generated report would overwrite different existing content, mew writes
 a sibling `.bak` file first.
 
@@ -232,5 +232,5 @@ status: pass
 
 Review:
 
-- `codex-ultra`: no blocking findings remain.
-- `claude-ultra`: no blocking findings remain.
+- `codex-ultra` and `claude-ultra` found no blocking issues in the report
+  surface review; follow-up hardening was applied for their non-blocking notes.

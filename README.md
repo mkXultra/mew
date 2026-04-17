@@ -64,12 +64,13 @@ sessions, and recent learnings.
 `.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
 source reports; use it after `mew journal --write`, `mew mood --write`,
 `mew self-memory --write`, `mew dream --write`, or `mew morning-paper ... --write`.
-Use `mew bundle --generate-core` to generate journal and mood before composing;
-add `--morning-feed feed.json --interest TAG` to include the static morning
-paper in the same command. It also generates dream and self-memory. Generated source reports are written under
-`--reports-root`; pass the same path to `--reports-root` and `--output-dir` when
-you want sources and bundle under a separate root. If generated reports would
-overwrite different existing content, mew writes a sibling `.bak` first.
+Use `mew bundle --generate-core` to generate journal, mood, dream, and
+self-memory before composing; add `--morning-feed feed.json --interest TAG` to
+include the static morning paper in the same command. Generated source reports
+are written under `--reports-root`; pass the same path to `--reports-root` and
+`--output-dir` when you want sources and bundle under a separate root. If
+generated reports would overwrite different existing content, mew writes a
+sibling `.bak` first.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`
