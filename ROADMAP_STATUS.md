@@ -346,7 +346,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `678 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `679 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_batch_reports_truncated_pipe_search_text_queries tests/test_work_session.py::WorkSessionTests::test_work_model_batch_flattens_pipe_search_text_queries tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_recovery_plan_includes_side_effect_review_context tests/test_work_session.py::WorkSessionTests::test_work_recover_session_reports_review_context_for_side_effects` current: `5 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `308 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-claude-review-fixes --json` current: pass across 36 commands.
+- `claude-ultra` review of `bb5ec1a`, `68cb9ee`, and `d729264` current: no critical issues; follow-up addressed silent batch truncation, stop-request label clarity, and remaining concrete review hints.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_rejects_dispatch_and_cycle tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_native_rejects_dispatch tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_native_rejects_cycle tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `4 passed, 2 subtests passed`.
 - `uv run pytest -q tests/test_self_improve.py tests/test_brief.py tests/test_commands.py` current: `199 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-self-improve-alias-tests --json` current: pass across 36 commands.

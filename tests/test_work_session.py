@@ -1728,7 +1728,7 @@ class WorkSessionTests(unittest.TestCase):
                 controls = stdout.getvalue().split("Next CLI controls", 1)[1]
                 self.assertNotIn("--live", controls)
                 self.assertNotIn("--follow", controls)
-                self.assertIn("resume snapshot: mew work 1 --session --resume --allow-read .", controls)
+                self.assertIn("stop requested snapshot: mew work 1 --session --resume --allow-read .", controls)
                 self.assertIn("open chat: mew chat", controls)
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
@@ -2627,7 +2627,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("git status/diff", " ".join(items[1]["review_steps"]))
 
         text = format_work_session_resume(resume)
-        self.assertIn("review: ./mew work 1 --session --resume --allow-read <path>", text)
+        self.assertIn("review: ./mew work 1 --session --resume --allow-read .", text)
+        self.assertIn("review: ./mew work 1 --session --resume --allow-read README.md", text)
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
 
@@ -2678,7 +2679,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--recover-session"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("command: python mutate.py", text)
-                self.assertIn("review: mew work 1 --session --resume --allow-read <path>", text)
+                self.assertIn("review: mew work 1 --session --resume --allow-read .", text)
             finally:
                 os.chdir(old_cwd)
 
@@ -4296,6 +4297,29 @@ class WorkSessionTests(unittest.TestCase):
                 ("read_file", "README.md"),
             ],
         )
+
+    def test_work_model_batch_reports_truncated_pipe_search_text_queries(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "search_text", "path": "src", "query": "one|two|three|four|five|six"},
+                        {"type": "read_file", "path": "README.md"},
+                    ],
+                    "reason": "collect context",
+                }
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(len(action["tools"]), 5)
+        self.assertEqual([tool["query"] for tool in action["tools"]], ["one", "two", "three", "four", "five"])
+        self.assertEqual(action["truncated_tools"], 2)
+        self.assertIn("dropped 2 additional tool", action["reason"])
+        self.assertIn("collect context", action["reason"])
 
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result

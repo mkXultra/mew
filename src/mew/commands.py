@@ -1329,7 +1329,7 @@ def work_cli_control_items(session, args):
     controls = []
     if session.get("stop_requested_at"):
         return [
-            {"label": "resume snapshot", "command": _work_resume_command(args, task_id, session=session)},
+            {"label": "stop requested snapshot", "command": _work_resume_command(args, task_id, session=session)},
             {"label": "open chat", "command": mew_command("chat")},
         ]
     resume = build_work_session_resume(session)

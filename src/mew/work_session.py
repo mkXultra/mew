@@ -1164,7 +1164,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             if path:
                 item["path"] = path
         if action == "needs_user_review":
-            item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read <path>"
+            review_arg = shlex.quote(work_recovery_read_root(call))
+            item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read {review_arg}"
             item["review_steps"] = review_steps
             if path:
                 item["path"] = path

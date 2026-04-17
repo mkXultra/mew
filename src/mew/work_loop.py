@@ -540,21 +540,31 @@ def normalize_work_model_action(action_plan, verify_command=""):
     if action_type == "batch":
         raw_tools = action.get("tools") or action.get("actions") or []
         normalized_tools = []
-        for item in raw_tools[:5]:
+        dropped_tool_count = 0
+        for item in raw_tools:
             if not isinstance(item, dict):
                 continue
             sub_action = normalize_work_model_action({"action": item}, verify_command=verify_command)
-            sub_actions = sub_action.get("tools") if sub_action.get("type") == "batch" else [sub_action]
+            dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
+            if sub_action.get("type") == "batch":
+                sub_actions = sub_action.get("tools") or []
+            else:
+                sub_actions = [sub_action]
             for candidate in sub_actions:
-                if len(normalized_tools) >= 5:
-                    break
                 if candidate.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(candidate):
+                    if len(normalized_tools) >= 5:
+                        dropped_tool_count += 1
+                        continue
                     normalized_tools.append(candidate)
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
         normalized = {"type": "batch", "tools": normalized_tools}
         if action.get("reason") is not None:
             normalized["reason"] = action.get("reason")
+        if dropped_tool_count:
+            normalized["truncated_tools"] = dropped_tool_count
+            suffix = f"batch is limited to 5 tools; dropped {dropped_tool_count} additional tool(s)"
+            normalized["reason"] = f"{normalized.get('reason')}; {suffix}" if normalized.get("reason") else suffix
         if action_plan.get("summary"):
             normalized["summary"] = action_plan.get("summary")
         return normalized
@@ -594,7 +604,8 @@ def normalize_work_model_action(action_plan, verify_command=""):
                 normalized["line_start"] = action.get(alias)
                 break
     if action_type == "search_text":
-        split_queries = split_pipe_search_query(normalized.get("query"))
+        all_split_queries = split_pipe_search_query(normalized.get("query"), limit=None)
+        split_queries = all_split_queries[:5]
         if split_queries:
             tools = []
             for query in split_queries:
@@ -613,6 +624,13 @@ def normalize_work_model_action(action_plan, verify_command=""):
             }
             if normalized.get("summary"):
                 result["summary"] = normalized.get("summary")
+            dropped_tool_count = len(all_split_queries) - len(split_queries)
+            if dropped_tool_count:
+                result["truncated_tools"] = dropped_tool_count
+                result["reason"] = (
+                    f"{result.get('reason')}; batch is limited to 5 tools; "
+                    f"dropped {dropped_tool_count} additional search(es)"
+                )
             return result
 
     if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
@@ -659,7 +677,7 @@ def split_pipe_search_query(query, limit=5):
     parts = [part.strip() for part in query.split("|") if part.strip()]
     if len(parts) < 2:
         return []
-    return parts[:limit]
+    return parts if limit is None else parts[:limit]
 
 
 def valid_batch_sub_action(action):
