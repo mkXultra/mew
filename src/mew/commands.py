@@ -1313,6 +1313,8 @@ def work_cli_control_commands(session, args):
     if session.get("status") != "active":
         return [_work_resume_command(args, task_id, session=session), mew_command("work", task_id, "--start-session")]
     controls = []
+    if session.get("stop_requested_at"):
+        return [_work_resume_command(args, task_id, session=session), mew_command("chat")]
     resume = build_work_session_resume(session)
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):

@@ -1723,6 +1723,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["phase"], "stop_requested")
                 self.assertEqual(resume["stop_request"]["reason"], "pause after this boundary")
 
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                controls = stdout.getvalue().split("Next CLI controls", 1)[1]
+                self.assertNotIn("--live", controls)
+                self.assertNotIn("--follow", controls)
+
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries") as call_model:
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
@@ -1975,7 +1981,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["model_turns"][0]["recovered_by_tool_call_id"], 2)
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
-                self.assertEqual(json.loads(stdout.getvalue())["resume"]["phase"], "idle")
+                recovered_resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(recovered_resume["phase"], "idle")
+                self.assertEqual(recovered_resume["failures"][0]["recovery_status"], "superseded")
+                self.assertEqual(recovered_resume["failures"][0]["recovered_by_tool_call_id"], 2)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                self.assertIn("recovery=superseded by=#2", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

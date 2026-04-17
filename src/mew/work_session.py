@@ -1147,6 +1147,8 @@ def build_work_session_resume(session, task=None, limit=8):
                     "error": call.get("error") or "",
                     "summary": call.get("summary") or "",
                     "exit_code": (failure_record or result).get("exit_code"),
+                    "recovery_status": call.get("recovery_status") or "",
+                    "recovered_by_tool_call_id": call.get("recovered_by_tool_call_id"),
                 }
             )
 
@@ -1363,9 +1365,15 @@ def format_work_session_resume(resume):
     failures = resume.get("failures") or []
     if failures:
         for failure in failures:
+            recovered = ""
+            if failure.get("recovery_status"):
+                recovered = f" recovery={failure.get('recovery_status')}"
+                if failure.get("recovered_by_tool_call_id") is not None:
+                    recovered += f" by=#{failure.get('recovered_by_tool_call_id')}"
             lines.append(
                 f"#{failure.get('tool_call_id')} {failure.get('tool')} "
-                f"exit={format_exit_code(failure.get('exit_code'))} {failure.get('error') or failure.get('summary') or ''}"
+                f"exit={format_exit_code(failure.get('exit_code'))}{recovered} "
+                f"{failure.get('error') or failure.get('summary') or ''}"
             )
     else:
         lines.append("(none)")

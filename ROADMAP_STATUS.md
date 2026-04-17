@@ -193,6 +193,7 @@ Evidence:
 - Stop requests are checked again after THINK/ACT, immediately before a selected tool starts, and between batch subtools, so a pause request prevents the next tool call at real execution boundaries.
 - CLI `mew work --live` runs now end with `Next CLI controls`, showing continue, stop, resume, and chat commands for the current session.
 - `dogfood --scenario work-session` now covers stop request recording and `phase=stop_requested` resume output.
+- Stop-requested sessions now suppress live/follow continue commands in `Next CLI controls`, so the controls no longer contradict a resume whose next action is to stay paused.
 - `dogfood --scenario work-session` now also covers user session notes appearing in resume output.
 - Model-selected `read_file` now defaults to a smaller 12,000-character page, and model-selected `git_diff` defaults to diffstat unless full diff is explicitly requested, reducing the chance that a broad read-only batch bloats a resident session.
 - Work-mode prompts now tell the resident model that current capability gates are authoritative, reducing stale permission-failure loops where it asks for a flag already present.
@@ -299,6 +300,7 @@ Evidence:
 - Interrupted command summaries now fall back to stored parameters when no result exists, non-JSON recovery output prints command/path review context, and pending stop requests appear directly in resume JSON/text.
 - Work-session recovery plan items now carry the interrupted source record's summary, error, and `recovery_hint`, so text and JSON resumes preserve why a retry/replan/review item exists instead of showing only a generic action classification.
 - Work-session resumes that include live world state now refine recovery-driven `next_action` text: missing touched paths are called out first, clean git plus existing touched paths are distinguished from dirty/uncertain world state, and no side-effecting recovery is attempted automatically.
+- Recovered interrupted tools remain in the failure history for audit, but resume JSON/text now labels them with `recovery_status` and the recovering tool call id.
 - `save_state` now rotates the previous `state.json` to `state.json.bak` before replacing it, giving the resident shell a simple recovery point if the current state file is damaged.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
@@ -343,6 +345,8 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `665 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `2 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-reentry-controls --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_note_records_user_note` current: `1 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_work_recovery_next_action_prioritizes_missing_touched_paths tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying` current: `3 passed`.
@@ -395,6 +399,7 @@ Next action:
 - `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 - `codex-ultra` focused retest after live-gate preflight, inline approval, interrupted recovery context, active-focus surfacing, and state backup found no concrete regressions in that scope.
 - `claude-ultra` review of the 2026-04-17 recovery/cockpit commits found no crash-level issues; follow-up fixes made empty `edit_file.old` re-observe instead of failing and changed world-state recovery wording from touched paths to observed paths.
+- `codex-ultra` human-role recovery dogfood verified focus/next/code routing, terse `mew code` cockpit controls, conservative side-effect recovery review after repair, safe read/git auto-recovery, recent-session listing, and work-session dogfood pass; it found stop-request control conflict and recovered-failure presentation issues, both now fixed.
 - `codex-ultra` human-role retest after the follow/work-mode slice verified four targeted fixes: explicit `--follow --max-steps 1` is honored, chat `/follow` controls include `--max-steps 10`, world-state git status uses allowed repo roots from disposable cwd, and `glob` skips cache/venv directories. Repo status stayed clean.
 - `claude-ultra` review after the follow interrupt/streaming/max-step work judged mew coherent but not yet preferred over Claude Code/Codex CLI; top blockers were thin streaming UX, shallow interrupt cancellation, and max-step note scope.
 - `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
