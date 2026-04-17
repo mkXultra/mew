@@ -878,6 +878,13 @@ def format_work_live_step_result(step, resume=None):
         tool_summaries.add(str(_format_live_tool_summary(call) or "").strip())
     if summary and str(summary).strip() not in tool_summaries:
         outcome_lines.append(f"summary: {clip_output(summary, 700)}")
+    for item in (resume or {}).get("recurring_failures") or []:
+        target = f" {item.get('target')}" if item.get("target") else ""
+        outcome_lines.append(
+            f"repeat: {item.get('tool')}{target} failed {item.get('count')}x "
+            f"(same error: {clip_inline_text(item.get('error'), 180)}); "
+            f"last_tool=#{item.get('last_tool_call_id')}"
+        )
     lines = []
     _append_live_section(lines, "outcome", outcome_lines)
     tool_lines = []

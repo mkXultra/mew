@@ -125,6 +125,67 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stale_memory_next: Use the old plan.", text)
         self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 
+    def test_work_live_step_result_surfaces_recurring_failure_ribbon(self):
+        text = format_work_live_step_result(
+            {"status": "failed", "action": {"type": "run_tests"}, "summary": "verification failed"},
+            resume={
+                "phase": "failed",
+                "recurring_failures": [
+                    {
+                        "tool": "run_tests",
+                        "target": "uv run pytest -q",
+                        "error": "verification failed with exit_code=1",
+                        "count": 3,
+                        "last_tool_call_id": 9,
+                    }
+                ],
+            },
+        )
+
+        self.assertIn(
+            "repeat: run_tests uv run pytest -q failed 3x "
+            "(same error: verification failed with exit_code=1); last_tool=#9",
+            text,
+        )
+
+    def test_work_session_resume_detects_recurring_failures(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repeat",
+            "goal": "Detect repeated failures.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "uv run pytest -q"},
+                    "result": {"command": "uv run pytest -q", "exit_code": 1, "stderr": "same failure\n"},
+                    "error": "verification failed with exit_code=1",
+                },
+                {
+                    "id": 2,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "uv run pytest -q"},
+                    "result": {"command": "uv run pytest -q", "exit_code": 1, "stderr": "same failure\n"},
+                    "error": "verification failed with exit_code=1",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["recurring_failures"][0]["count"], 2)
+        self.assertEqual(resume["recurring_failures"][0]["last_tool_call_id"], 2)
+        text = format_work_session_resume(resume)
+        self.assertIn("Recurring failures", text)
+        self.assertIn("run_tests uv run pytest -q failed 2x", text)
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

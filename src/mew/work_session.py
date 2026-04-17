@@ -689,6 +689,62 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def _work_call_repeat_target(call):
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    if call.get("tool") in COMMAND_WORK_TOOLS:
+        return result.get("command") or parameters.get("command") or ""
+    if call.get("tool") in GIT_WORK_TOOLS:
+        return result.get("command") or parameters.get("cwd") or result.get("cwd") or ""
+    return work_call_path(call)
+
+
+def _work_call_error_signature(call):
+    result = call.get("result") or {}
+    failure_record = work_tool_failure_record(call) or {}
+    text = (
+        call.get("error")
+        or failure_record.get("stderr")
+        or result.get("stderr")
+        or call.get("summary")
+        or ""
+    )
+    return clip_inline_text(text, 180)
+
+
+def build_recurring_work_failures(calls, limit=3):
+    groups = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        failure_record = work_tool_failure_record(call)
+        if call.get("status") not in ("failed", "interrupted") and not failure_record:
+            continue
+        tool = call.get("tool") or "unknown"
+        target = _work_call_repeat_target(call)
+        signature = _work_call_error_signature(call)
+        if not signature:
+            continue
+        key = (tool, target, signature)
+        item = groups.setdefault(
+            key,
+            {
+                "tool": tool,
+                "target": target,
+                "error": signature,
+                "count": 0,
+                "tool_call_ids": [],
+                "last_tool_call_id": None,
+            },
+        )
+        item["count"] += 1
+        item["tool_call_ids"].append(call.get("id"))
+        item["last_tool_call_id"] = call.get("id")
+    repeated = [item for item in groups.values() if item.get("count", 0) >= 2]
+    repeated.sort(key=lambda item: item.get("last_tool_call_id") or 0)
+    return repeated[-limit:]
+
+
 def latest_work_verify_command(calls, task=None):
     command = (task or {}).get("command") or ""
     for call in calls:
@@ -1163,6 +1219,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "files_touched": paths[-limit:],
         "commands": commands[-limit:],
         "failures": failures[-limit:],
+        "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
@@ -1244,6 +1301,16 @@ def format_work_session_resume(resume):
             )
     else:
         lines.append("(none)")
+
+    recurring = resume.get("recurring_failures") or []
+    if recurring:
+        lines.extend(["", "Recurring failures"])
+        for item in recurring:
+            target = f" {item.get('target')}" if item.get("target") else ""
+            lines.append(
+                f"- {item.get('tool')}{target} failed {item.get('count')}x "
+                f"(same error: {item.get('error')}); last_tool=#{item.get('last_tool_call_id')}"
+            )
 
     lines.extend(["", "Work notes"])
     notes = resume.get("notes") or []

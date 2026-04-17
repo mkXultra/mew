@@ -102,6 +102,7 @@ Evidence:
 - Compact live mode also keeps the final step report to command/cwd/exit summaries, avoiding stdout/stderr replay after the result pane.
 - `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
 - Live result panes now surface compact work-session memory (`memory_hypothesis`, `memory_next`/`stale_memory_next`, and verification state), so compact follow keeps the resident model's current belief and next intended step visible without opening a full resume.
+- Live result panes now include a recurring-failure ribbon when the same tool/target/error repeats, making loops visible before the resident blindly retries the same broken action again.
 - Live result panes now group `outcome`, `tools`, and `session`, include per-tool duration when timestamps are available, indent multiline command metadata consistently, and place command cwd/stdout/stderr directly under the tool result instead of a duplicate `summary: command` line.
 - Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
 - Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
@@ -321,9 +322,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `631 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `633 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `137 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `139 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -377,7 +378,7 @@ Next action:
 - `codex-ultra` focused retest of chat scoped resume controls and missing-executable panes passed against the current implementation: scoped slash-command resume printed `sample` controls, no `.` controls appeared in that command block, and resume/commands/tests panes used `exit=unavailable` plus normalized `executable not found` text. The agent noted its final clean-tree check saw concurrent local edits from this session, not test-created changes.
 - Mew dogfood session #48 used Codex Web API as a read-only buddy after the front-door workbench change; it reentered task #46, inspected `ROADMAP_STATUS.md`, and recorded the next non-duplicative Milestone 2 slice as stabilizing the continuous reasoning/status pane and reducing repeated reentry material during long sessions.
 - `codex-ultra` cockpit evaluation recommended the smallest next slice as surfacing active work-session `working_memory` inside the live result cockpit; this is now implemented in `format_work_live_step_result` with stale-memory labeling.
-- `claude-ultra` cockpit evaluation recommended a future recurring-failure ribbon for repeated tool failures; this remains a candidate next slice after the live working-memory improvement.
+- `claude-ultra` cockpit evaluation recommended a recurring-failure ribbon for repeated tool failures; this is now implemented by deriving repeated tool/target/error groups from existing work-session history and surfacing them in resume/live result views.
 
 ## Current Roadmap Focus
 
