@@ -394,11 +394,14 @@ compact run can show what was found without opening the full session details or
 making the model infer too much from a single matched line.
 `mew work --follow` uses compact live mode and renders plan-shaped model streams
 as readable `summary_delta`, `reason_delta`, and `action_delta` lines when the
-backend supports deltas, so a bounded autonomous run is
-observable while it is thinking instead of only after each step completes.
-Compact follow keeps duplicate delta progress off stderr, then keeps only
-model-stream metrics in the planning summary when live deltas were already
-shown, avoiding a second raw JSON preview of the same model turn.
+backend supports deltas, so a bounded autonomous run is observable while it is
+thinking instead of only after each step completes. Follow mode now also prints
+the active running model/tool cell before completion, then prints compact
+completed cells with durable ids and a `mew work <task-id> --cells` hint for
+details. Its planning summary is a short `plan: <action>` line plus model-stream
+metrics. Use `--quiet` when you want the stdout cell stream without default
+`mew work ai:` progress lines on stderr; pass `--progress` to force those lines
+back on.
 If a follow run or multi-step live run reaches `--max-steps`, mew records a
 system work-session note with the last action/result and the reentry command
 hint, so the next session can tell the loop hit its bound rather than silently
@@ -498,6 +501,7 @@ uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in t
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 uv run mew work 1 --follow --auth auth.json --allow-read .
+uv run mew work 1 --follow --quiet --auth auth.json --allow-read . --max-steps 3
 uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-steps 1
 uv run mew work 1 --ai --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 ```
@@ -533,11 +537,12 @@ step is visible before any tool runs.
 They also print a compact `result` pane after each step, combining action
 status, key tool output, phase, context pressure, pending approvals, and the
 next action before the full resume block.
-`mew work --follow` also emits newly added stable cockpit cells after each step.
-Cells give model turns, tools, commands, tests, diffs, and pending approvals
-durable ids such as `s1:model_turn:2` or `s1:test:7`, so a human or future UI
-can point at the same work item instead of reconstructing it from raw logs. Use
-`mew work --cells` or `/work-session cells` to inspect the same cell view later.
+`mew work --follow` also emits active and completed stable cockpit cells. Cells
+give model turns, tools, commands, tests, diffs, and pending approvals durable
+ids such as `s1:model_turn:2` or `s1:test:7`, so a human or future UI can point
+at the same work item instead of reconstructing it from raw logs. The follow
+stream keeps completed cells compact; use `mew work --cells` or
+`/work-session cells` to inspect the full cell view later.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
