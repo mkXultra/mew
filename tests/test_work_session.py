@@ -1507,6 +1507,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("-old text", diffs)
                 self.assertIn("+new text", diffs)
                 self.assertIn("verification_exit_code=0", diffs)
+                self.assertIn("Diffs (historical tool-call records)", diffs)
+                self.assertIn("recorded_at=", diffs)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--diffs"]), 0)
@@ -1519,6 +1521,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "1", "--session", "--diffs", "--json"]), 0)
                 diff_data = json.loads(stdout.getvalue())
                 self.assertEqual(diff_data["diffs"][0]["diff_stats"], {"added": 1, "removed": 1})
+                self.assertIn("finished_at", diff_data["diffs"][0])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)

@@ -1856,6 +1856,7 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
                 "rolled_back": result.get("rolled_back"),
                 "verification_exit_code": result.get("verification_exit_code"),
                 "approval_status": call.get("approval_status") or "",
+                "finished_at": call.get("finished_at") or "",
                 "diff_stats": diff_line_counts(diff),
                 "diff_preview": format_diff_preview(diff, max_chars=max_chars),
             }
@@ -1870,7 +1871,7 @@ def format_work_session_diffs(session, task=None, limit=8):
         f"Work diffs #{session.get('id')} [{session.get('status')}] task=#{session.get('task_id')}",
         f"title: {session.get('title') or (task or {}).get('title') or ''}",
         "",
-        "Diffs",
+        "Diffs (historical tool-call records)",
     ]
     entries = build_work_session_diff_entries(session, limit=limit)
     if not entries:
@@ -1883,11 +1884,12 @@ def format_work_session_diffs(session, task=None, limit=8):
             else ""
         )
         approval = f" approval={entry.get('approval_status')}" if entry.get("approval_status") else ""
+        recorded = f" recorded_at={entry.get('finished_at')}" if entry.get("finished_at") else ""
         lines.append(
             f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
             f"{entry.get('path') or ''} changed={entry.get('changed')} "
             f"written={entry.get('written')} dry_run={entry.get('dry_run')} "
-            f"rolled_back={entry.get('rolled_back')}{verification}{approval}"
+            f"rolled_back={entry.get('rolled_back')}{verification}{approval}{recorded}"
         )
         if entry.get("diff_preview"):
             lines.append(entry["diff_preview"])
