@@ -948,6 +948,8 @@ class CommandTests(unittest.TestCase):
         self.assertIn("creates or reuses that task's native work session", output)
         self.assertIn("Common flows:", output)
         self.assertIn("mew code <task-id> --quiet --timeout 0", output)
+        self.assertIn("mew work <task-id> --session --resume --allow-read .", output)
+        self.assertIn("mew chat --kind coding --work-mode", output)
 
     def test_chat_activity_slash_uses_kind_scope(self):
         old_cwd = os.getcwd()

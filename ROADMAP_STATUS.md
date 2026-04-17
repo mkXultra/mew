@@ -65,6 +65,10 @@ human-loop issues: queued follow-ups are now shown in FIFO order even when the
 resume view is truncated, idle `interrupt_submit` sessions now point directly
 at the continue command that will submit the pending interrupt, and reply-file
 help no longer under-documents supported observer actions.
+Native self-improve dogfood then picked a small discoverability fix: `mew code
+--help` now documents both external resume (`mew work <task-id> --session
+--resume --allow-read .`) and scoped chat reentry (`mew chat --kind coding
+--work-mode`).
 
 ## Milestone 1: Native Hands
 
@@ -296,6 +300,7 @@ Evidence:
 - `Next CLI controls` now include the `mew work <task-id> --steer <guidance>` lane, making the mid-loop control discoverable from live/follow output instead of only from chat help.
 - Queued follow-ups are surfaced in consumption order, with total/truncation metadata, so a long queue does not mislead the next-step preview.
 - Idle `interrupt_submit` sessions now render "submit pending interrupt" controls instead of generic pause controls, while still waiting at a boundary when a model/tool step is actually running.
+- `mew code --help` now includes direct reentry examples for reviewing a work-session resume and reopening coding-scoped work-mode chat.
 
 Missing proof:
 

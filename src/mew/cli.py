@@ -813,7 +813,9 @@ def build_parser():
             "Common flows:\n"
             "  mew code <task-id>\n"
             "  mew code <task-id> --read-only --no-verify\n"
-            "  mew code <task-id> --quiet --timeout 0"
+            "  mew code <task-id> --quiet --timeout 0\n"
+            "  mew work <task-id> --session --resume --allow-read .\n"
+            "  mew chat --kind coding --work-mode"
         ),
     )
     code_parser.add_argument("task_id", nargs="?")
