@@ -2834,6 +2834,40 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_steer_requires_task_id_when_multiple_sessions_active(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    first = add_coding_task(state)
+                    second = dict(first)
+                    second["id"] = 2
+                    second["title"] = "Second active task"
+                    state["tasks"].append(second)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "2", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--steer", "ambiguous steer"]), 1)
+                output = stdout.getvalue()
+                self.assertIn("Multiple active work sessions; pass a task id:", output)
+                self.assertIn("mew work 1 --steer <guidance>", output)
+                self.assertIn("mew work 2 --steer <guidance>", output)
+                state = load_state()
+                self.assertFalse(any(session.get("pending_steer") for session in state["work_sessions"]))
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "2", "--steer", "specific steer"]), 0)
+                state = load_state()
+                self.assertNotIn("pending_steer", state["work_sessions"][0])
+                self.assertEqual(state["work_sessions"][1]["pending_steer"]["text"], "specific steer")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_show_without_active_lists_recent_sessions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

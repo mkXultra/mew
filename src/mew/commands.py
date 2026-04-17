@@ -3545,6 +3545,32 @@ def cmd_work_steer(args):
         return 1
     with state_lock():
         state = load_state()
+        if not getattr(args, "task_id", None):
+            active_sessions = []
+            for candidate in state.get("work_sessions", []):
+                task = work_session_task(state, candidate)
+                if candidate.get("status") == "active" and (not task or task.get("status") != "done"):
+                    active_sessions.append(candidate)
+            if len(active_sessions) > 1:
+                if getattr(args, "json", False):
+                    print(
+                        json.dumps(
+                            {
+                                "error": "multiple_active_work_sessions",
+                                "active_work_sessions": [
+                                    {"session_id": item.get("id"), "task_id": item.get("task_id")}
+                                    for item in active_sessions[-5:]
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print("Multiple active work sessions; pass a task id:")
+                    for item in active_sessions[-5:]:
+                        print(f"- {mew_command('work', item.get('task_id'), '--steer')} <guidance>")
+                return 1
         session = _select_active_work_session_for_args(state, args)
         if not session:
             print("No active work session.")

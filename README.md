@@ -434,7 +434,9 @@ review. For mid-loop steering that should not become permanent memory, use
 the next live/follow step, records the consumed steer as a note, and then clears
 it. Session, resume, and live result panes show the queued steer while it is
 still pending; model/API failures preserve it for the next real step instead of
-silently dropping it. Approving a dry-run write can reuse the latest session
+silently dropping it. If more than one work session is active, `--steer` asks
+for an explicit task id before queuing. Approving a dry-run write can reuse the
+latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
 or write verification refreshes the session's default verification command, so

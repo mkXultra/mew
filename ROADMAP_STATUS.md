@@ -287,6 +287,7 @@ Evidence:
 - Chat `/follow --quiet` now accepts the same quiet flag as the CLI and preserves it in cached continue options, making attach-style chat probes less noisy.
 - Failed command/test cells now expand their stderr/stdout tails instead of using the success-path 8-line clip, reducing the need to open `--tests` just to see the actual failure.
 - `mew work --steer "..."` and `/work-session steer ...` queue one-time guidance for the next live/follow step; pending steer is exposed in session/resume/live output, then injected into model guidance, recorded as a work-session note, and cleared only after model planning succeeds. Stop requests and model/API errors preserve pending steer for the next actual step.
+- `mew work --steer` now refuses ambiguous taskless routing when multiple work sessions are active and prints task-qualified steer commands instead, preventing a queued instruction from landing in the wrong resident session.
 - `Next CLI controls` now include the `mew work <task-id> --steer <guidance>` lane, making the mid-loop control discoverable from live/follow output instead of only from chat help.
 
 Missing proof:
@@ -420,9 +421,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `807 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `197 passed`.
+- `uv run pytest -q` current: `808 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `198 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_steer_is_consumed_by_next_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_model_error_preserves_pending_steer tests/test_work_session.py::WorkSessionTests::test_work_session_stop_preserves_pending_steer` current: `3 passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_steer_requires_task_id_when_multiple_sessions_active tests/test_work_session.py::WorkSessionTests::test_work_session_steer_is_consumed_by_next_model_step` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_cli_controls_include_steer_command tests/test_work_session.py::WorkSessionTests::test_work_session_start_can_seed_reentry_options` current: `2 passed`.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_help_describes_native_work_flow tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `2 passed`.
 - `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.
