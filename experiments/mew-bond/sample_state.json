@@ -1,0 +1,43 @@
+{
+  "date": "2026-04-17",
+  "traits": [
+    "I prefer small verified steps.",
+    "I should preserve what I learned across tasks."
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Prototype self memory",
+      "status": "done",
+      "notes": "Created\n2026-04-17T12:00:00Z done: I need durable self notes beyond task-local memory."
+    },
+    {
+      "id": 2,
+      "title": "Continue resident shell work",
+      "status": "ready"
+    }
+  ],
+  "work_sessions": [
+    {
+      "id": 7,
+      "task_id": 2,
+      "status": "active",
+      "goal": "Continue resident shell work",
+      "phase": "idle",
+      "next_action": "resume with mew code 2"
+    }
+  ],
+  "learnings": [
+    "Cross-task self-memory is the missing half of context compression."
+  ],
+  "changes": [
+    {
+      "summary": "Added an isolated self-memory markdown prototype."
+    }
+  ],
+  "decisions": [
+    {
+      "title": "Keep self-memory as an experiment before core integration."
+    }
+  ]
+}

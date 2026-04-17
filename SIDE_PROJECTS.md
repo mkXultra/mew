@@ -176,6 +176,14 @@ Core risk: low to medium.
 
 Goal: Give each mew instance a durable personality and relationship memory.
 
+Status:
+- First isolated prototype exists under `experiments/mew-bond`.
+- Dogfood task #77 added a self-memory markdown generator that extracts durable
+  traits, recent self learnings, and active work-session continuity cues from
+  local state JSON.
+- Latest validation: `uv run pytest -q experiments/mew-bond` passed with
+  `6 passed`.
+
 Scope:
 - Store personality parameters and successful interaction examples.
 - Provide `mew whois` style identity output.
