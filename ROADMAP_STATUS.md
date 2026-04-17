@@ -388,6 +388,7 @@ Next action:
 
 ## Latest Validation
 
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session after the latest cockpit help/resume next-action changes.
 - `uv run pytest -q tests/test_work_session.py` current: `179 passed`, including task-specific idle resume `next_action`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands after task-specific live resume next-action changes.
 - `mew work 74 --live --auth auth.json --allow-read . --compact-live` current: resident self-improvement buddy session #100 traced the taskless live next-action wording to `build_work_session_resume`.
