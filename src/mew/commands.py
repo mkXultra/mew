@@ -1435,6 +1435,17 @@ def cmd_do(args):
     return cmd_work_ai(work_args)
 
 
+def work_ai_step_guidance(args, index, max_steps):
+    guidance = (getattr(args, "work_guidance", None) or "").strip()
+    if getattr(args, "follow", False) and index == max_steps:
+        final_guidance = (
+            "This is the final allowed --follow step. If you have enough evidence, prefer a "
+            "remember, ask_user, or finish action over another observation so reentry has a durable note."
+        )
+        return "\n\n".join(part for part in (guidance, final_guidance) if part)
+    return guidance
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -1500,6 +1511,7 @@ def cmd_work_ai(args):
         return 1
 
     for index in range(1, max_steps + 1):
+        step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
         with state_lock():
@@ -1534,7 +1546,7 @@ def cmd_work_ai(args):
                 {"summary": "planning work step"},
                 {"summary": "planning work step"},
                 {"type": "planning", "reason": "THINK/ACT in progress"},
-                guidance=args.work_guidance or "",
+                guidance=step_guidance,
             )
             planning_turn_id = planning_turn.get("id")
             save_state(state)
@@ -1554,7 +1566,7 @@ def cmd_work_ai(args):
                 allow_shell=args.allow_shell,
                 allow_verify=args.allow_verify,
                 verify_command=args.verify_command or "",
-                guidance=args.work_guidance or "",
+                guidance=step_guidance,
                 progress=progress,
                 act_mode=getattr(args, "act_mode", "model") or "model",
                 stream_model=bool(getattr(args, "stream_model", False)),

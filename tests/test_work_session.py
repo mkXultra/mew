@@ -5363,6 +5363,58 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_final_step_adds_reentry_guidance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("follow final guidance content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "pause with context", "action": {"type": "wait", "reason": "bounded pause"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model) as call_model:
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--max-steps",
+                                        "1",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--work-guidance",
+                                        "base guidance",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(call_model.call_count, 1)
+                prompt_context = json.loads(prompts[0].split("Context JSON:\n", 1)[1])
+                self.assertIn("base guidance", prompt_context["guidance"])
+                self.assertIn("final allowed --follow step", prompt_context["guidance"])
+                self.assertIn("durable note", prompt_context["guidance"])
+                turn_guidance = load_state()["work_sessions"][0]["model_turns"][0]["guidance_snapshot"]
+                self.assertIn("base guidance", turn_guidance)
+                self.assertIn("final allowed --follow step", turn_guidance)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_follow_runs_bounded_live_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
