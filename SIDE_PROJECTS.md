@@ -116,6 +116,14 @@ Core risk: medium unless isolated and gated.
 
 Goal: Present overnight self-improvement as "dreams" that mew remembers.
 
+Status:
+- First isolated prototype exists under `experiments/mew-dream`.
+- Dogfood task #75 added dream `## Learnings` output from explicit
+  `learnings`/`changes`/`decisions` and recent done-task notes.
+- Dogfood task #76 added active work-session continuity output.
+- Latest validation: `uv run pytest -q` passed with `707 passed, 6 subtests
+  passed`.
+
 Scope:
 - Write `.mew/dreams/YYYY-MM-DD.md`.
 - Summarize what mew attempted, learned, changed, or decided not to change.
