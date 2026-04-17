@@ -125,7 +125,7 @@ from .tasks import (
     task_sort_key,
 )
 from .thoughts import format_thought_entry
-from .timeutil import now_iso
+from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, summarize_write_result, write_file
@@ -738,8 +738,13 @@ def _format_live_tool_call_result(call):
     target = command or path
     exit_code = result.get("exit_code", result.get("verification_exit_code"))
     exit_text = "" if exit_code is None else f" exit={exit_code}"
+    started_at = parse_time(call.get("started_at"))
+    finished_at = parse_time(call.get("finished_at"))
+    duration_text = ""
+    if started_at and finished_at:
+        duration_text = f" duration={max(0.0, (finished_at - started_at).total_seconds()):.1f}s"
     target_text = f" {target}" if target else ""
-    lines = [f"tool #{call.get('id')} [{call.get('status')}] {tool}{exit_text}{target_text}"]
+    lines = [f"tool #{call.get('id')} [{call.get('status')}] {tool}{exit_text}{duration_text}{target_text}"]
     summary = _format_live_tool_summary(call)
     if summary:
         lines.append(f"summary: {clip_output(summary, 500)}")

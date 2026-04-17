@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mew.cli import main
+from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
 
 
@@ -42,6 +43,34 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_work_live_step_result_groups_sections_and_tool_duration(self):
+        text = format_work_live_step_result(
+            {
+                "status": "completed",
+                "action": {"type": "run_command"},
+                "tool_call": {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "started_at": "2026-04-17T00:00:00Z",
+                    "finished_at": "2026-04-17T00:00:02Z",
+                    "parameters": {"command": "echo hi"},
+                    "result": {
+                        "command": "echo hi",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "stdout": "hi\n",
+                    },
+                },
+            },
+            resume={"phase": "idle", "context": {"pressure": "low", "tool_calls": 1, "model_turns": 1}},
+        )
+
+        self.assertIn("outcome:\n  status: completed", text)
+        self.assertIn("tools:\n  tool #7 [completed] run_command exit=0 duration=2.0s echo hi", text)
+        self.assertIn("stdout:\n    hi", text)
+        self.assertIn("session:\n  phase: idle", text)
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
