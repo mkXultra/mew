@@ -565,7 +565,7 @@ def _format_workbench_reentry(resume, task):
         if guidance:
             lines.append(f"guidance: {clip_inline_text(guidance, 360)}")
 
-    task_notes = format_task_notes_display((task or {}).get("notes") or "", max_lines=3, max_chars=800)
+    task_notes = _format_workbench_task_notes((task or {}).get("notes") or "")
     if task_notes:
         lines.append("task_notes:")
         lines.extend(f"  {line}" for line in task_notes.splitlines())
@@ -575,6 +575,31 @@ def _format_workbench_reentry(resume, task):
         lines.append(f"resume: {mew_command('work', task_id, '--session', '--resume')}")
         lines.append(f"chat: /work-session resume {task_id}")
     return lines
+
+
+def _format_workbench_task_notes(notes):
+    task_notes = format_task_notes_display(notes, max_lines=3, max_chars=800)
+    if not task_notes:
+        return ""
+
+    lines = task_notes.splitlines()
+    finish_indices = [index for index, line in enumerate(lines) if line.startswith("Work session finished:")]
+    if len(finish_indices) <= 1:
+        return task_notes
+
+    latest_finish_index = finish_indices[-1]
+    omitted = len(finish_indices) - 1
+    omitted_indices = set(finish_indices[:-1])
+    compacted = []
+    marker_inserted = False
+    for index, line in enumerate(lines):
+        if index in omitted_indices:
+            if not marker_inserted:
+                compacted.append(f"[...{omitted} older work-session finish notes omitted...]")
+                marker_inserted = True
+            continue
+        compacted.append(line)
+    return clip_output("\n".join(compacted), 800)
 
 
 def format_workbench(data):

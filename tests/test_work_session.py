@@ -4800,7 +4800,14 @@ class WorkSessionTests(unittest.TestCase):
                 with state_lock():
                     state = load_state()
                     task = add_coding_task(state)
-                    task["notes"] = "older note\nlatest task note"
+                    task["notes"] = "\n".join(
+                        [
+                            "older note",
+                            "Work session finished: stale closure",
+                            "Work session finished: duplicate closure",
+                            "Work session finished: latest closure",
+                        ]
+                    )
                     state["work_sessions"] = [
                         {
                             "id": 1,
@@ -4876,7 +4883,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("repeat: run_tests uv run pytest -q failed 2x", output)
                 self.assertIn("latest_decision: #1 remember recorded reentry guidance", output)
                 self.assertIn("guidance: Keep this visible on reentry.", output)
-                self.assertIn("latest task note", output)
+                self.assertIn("[...2 older work-session finish notes omitted...]", output)
+                self.assertNotIn("Work session finished: stale closure", output)
+                self.assertNotIn("Work session finished: duplicate closure", output)
+                self.assertIn("Work session finished: latest closure", output)
                 self.assertIn("resume:", output)
                 self.assertIn("chat: /work-session resume 1", output)
             finally:
