@@ -95,6 +95,11 @@ chat cockpit hints, so external observer agents do not have to translate
 `mew work --follow-status` now gives observers a read-only freshness/producer
 liveness check over `.mew/follow/latest.json` or the session snapshot, closing
 the read-side loop around the reply-file observer contract.
+Observer automation is now less text-dependent: task add/list/show/update/done
+have JSON surfaces with top-level aliases, `mew observe` aliases the passive
+workspace perception view, zero-step follow refresh supports `--json`, and
+`follow-status` returns `producer_health` plus `suggested_recovery` commands
+for absent, stale, dead, or recovery-plan-bearing snapshots.
 
 ## Milestone 1: Native Hands
 
@@ -333,6 +338,9 @@ Evidence:
 - `mew work --live/--follow --max-steps 0` refreshes `.mew/follow/latest.json` without spending a model turn, so observers can publish pending approval state on demand.
 - Pending approval snapshots now include `cli_approve_hint` and `cli_reject_hint` alongside chat-style hints for external observer agents.
 - `mew work --follow-status --json` reports snapshot freshness, heartbeat age, producer PID liveness, and pending approval count without requiring observers to parse raw snapshot files.
+- `mew work --follow-status --json` now includes `producer_health` and `suggested_recovery`, pointing observers at task selection, zero-step snapshot refresh, resume inspection, safe read auto-recovery, human review, or replanning as appropriate.
+- `mew work --live/--follow --max-steps 0 --json` can refresh a snapshot and print a structured refresh report without spending a model turn.
+- `mew task add/list/show/update/done --json` provide task lifecycle data without text parsing, and `mew observe --json` aliases passive workspace perception for observer-oriented naming.
 - `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
 
 Missing proof:
@@ -410,6 +418,7 @@ Evidence:
 - `save_state` now rotates the previous `state.json` to `state.json.bak` before replacing it, giving the resident shell a simple recovery point if the current state file is damaged.
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
+- Follow-status recovery hints now expose the read-side next command for absent/stale/dead snapshots and prefer the session recovery plan when it contains a retryable read, side-effect review, or replannable model turn.
 
 Missing proof:
 
@@ -466,6 +475,8 @@ Next action:
 
 ## Latest Validation
 
+- `uv run pytest -q` current: `854 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; runtime-focus includes `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `33 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
