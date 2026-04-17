@@ -559,6 +559,59 @@ class BriefTests(unittest.TestCase):
         self.assertIn("resume: ./mew work 7 --session --resume --allow-read .", focus)
         self.assertIn("continue: ./mew work 7 --live --allow-read . --max-steps 1", focus)
 
+    def test_focus_marks_stale_active_work_session_memory(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Recheck stale memory")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Recheck stale memory",
+                "goal": "Avoid treating old memory_next as current.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "README.md"},
+                        "result": {"path": "README.md", "content": "new evidence"},
+                        "summary": "read README",
+                    }
+                ],
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "tool_call_id": 1,
+                        "decision_plan": {
+                            "working_memory": {
+                                "hypothesis": "README still needs inspection.",
+                                "next_step": "Read README.md next.",
+                            }
+                        },
+                        "action_plan": {},
+                        "action": {"type": "read_file", "path": "README.md"},
+                        "summary": "read README",
+                    }
+                ],
+            }
+        )
+
+        data = build_focus_data(state, limit=3)
+        focus = format_focus(data)
+
+        memory = data["active_work_sessions"][0]["working_memory"]
+        self.assertEqual(memory["stale_after_tool_call_id"], 1)
+        self.assertIn("memory: README still needs inspection. (stale)", focus)
+        self.assertIn(
+            "memory_stale: tool #1 read_file ran after this memory; refresh before relying on next step",
+            focus,
+        )
+        self.assertNotIn("memory_next: Read README.md next.", focus)
+
     def test_focus_ignores_active_work_session_for_done_task(self):
         state = default_state()
         add_task(state, task_id=7, title="Implemented already", status="done", kind="coding")

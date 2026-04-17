@@ -45,7 +45,8 @@ session instead of going silent.
 the chat REPL.
 When an active work session has working memory, `focus` includes the current
 hypothesis and memory next step so reentry context is visible before opening the
-full resume.
+full resume. If a later tool or model turn made that memory stale, `focus` marks
+it stale and suppresses the old memory next step.
 
 ## Programmer Loop
 

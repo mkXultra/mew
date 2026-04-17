@@ -577,6 +577,26 @@ def active_work_session_items(state, limit=3, kind=None):
     return items
 
 
+def _format_focus_memory_stale(memory):
+    if not memory:
+        return ""
+    if memory.get("stale_after_tool_call_id"):
+        tool = memory.get("stale_after_tool") or "tool"
+        return (
+            f"tool #{memory.get('stale_after_tool_call_id')} {tool} ran after this memory; "
+            "refresh before relying on next step"
+        )
+    if memory.get("stale_after_model_turn_id"):
+        stale_turns = memory.get("stale_turns")
+        if stale_turns is None:
+            stale_turns = "some"
+        return (
+            f"{stale_turns} later model turn(s) after memory; "
+            "refresh before relying on next step"
+        )
+    return ""
+
+
 def format_focus(data):
     title = "Mew focus"
     if data.get("kind"):
@@ -616,9 +636,13 @@ def format_focus(data):
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
             memory = session.get("working_memory") or {}
+            stale_memory = _format_focus_memory_stale(memory)
             if memory.get("hypothesis"):
-                lines.append(f"  memory: {memory.get('hypothesis')}")
-            if memory.get("next_step"):
+                suffix = " (stale)" if stale_memory else ""
+                lines.append(f"  memory: {memory.get('hypothesis')}{suffix}")
+            if stale_memory:
+                lines.append(f"  memory_stale: {stale_memory}")
+            elif memory.get("next_step"):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
             lines.append(f"  resume: {session.get('resume_command')}")
             lines.append(f"  continue: {session.get('continue_command')}")
