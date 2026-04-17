@@ -1253,6 +1253,11 @@ def build_parser():
     list_parser = task_subparsers.add_parser("list", help="list tasks")
     list_parser.add_argument("--all", action="store_true", help="include done tasks")
     list_parser.add_argument("--kind", choices=("coding", "research", "personal", "admin", "unknown"), help="filter by task kind")
+    list_parser.add_argument(
+        "--status",
+        choices=("todo", "ready", "running", "blocked", "done", "pending", "open"),
+        help="filter by task status; pending/open means not done",
+    )
     list_parser.set_defaults(func=cmd_task_list)
 
     classify_parser = task_subparsers.add_parser("classify", help="inspect or update task kind inference")

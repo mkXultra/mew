@@ -210,9 +210,15 @@ def cmd_task_add(args):
 
 def cmd_task_list(args):
     state = load_state()
-    tasks = state["tasks"] if getattr(args, "all", False) else open_tasks(state)
+    status = getattr(args, "status", None)
+    tasks = state["tasks"] if (status or getattr(args, "all", False)) else open_tasks(state)
     if getattr(args, "kind", None):
         tasks = [task for task in tasks if task_kind(task) == args.kind]
+    if status:
+        if status in ("pending", "open"):
+            tasks = [task for task in tasks if task.get("status") != "done"]
+        else:
+            tasks = [task for task in tasks if task.get("status") == status]
     tasks = sorted(tasks, key=task_sort_key)
     if not tasks:
         print("No tasks.")

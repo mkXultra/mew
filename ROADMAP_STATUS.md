@@ -335,6 +335,7 @@ Evidence:
 - Native self-improvement dogfood session #81 used `mew self-improve --start-session` and `mew work --live` with Codex Web API to identify redundant `--start-session` output; the follow-up implementation now keeps plain `--native` start guidance while showing only the actionable continue hint after a session is already started.
 - Native self-improvement dogfood session #82 used `mew work --follow` with Codex Web API plus write/verify gates to apply a real edit: chat `/self ... start` now matches CLI behavior by suppressing the redundant native-work start hint after the session already exists.
 - Native self-improvement dogfood session #83 used `mew work --follow` with Codex Web API plus write/verify gates to apply a cockpit cleanup: non-compact work controls now show only the scoped `/work-session resume --allow-read ...` hint instead of also showing a generic duplicate resume line.
+- Native self-improvement dogfood session #84 targeted a real friction from this session (`mew task list --status pending`); mew found the parser but needed manual assist to locate the imported handler, after which task list gained `--status` with `pending`/`open` aliases.
 
 Missing proof:
 
@@ -349,7 +350,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `679 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `680 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_commands.py::CommandTests::test_task_list_can_filter_by_kind tests/test_commands.py::CommandTests::test_task_list_can_filter_by_status` current: `2 passed`.
+- `uv run pytest -q tests/test_commands.py` current: `146 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-task-list-status --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_scripted_chat_defers_startup_controls_to_scoped_work_command` current: `1 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `163 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-cockpit-resume-controls --json` current: pass across 36 commands.

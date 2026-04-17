@@ -1533,6 +1533,40 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_list_can_filter_by_status(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Draft plan"]), 0)
+                    self.assertEqual(main(["task", "add", "Ready task", "--ready"]), 0)
+                    self.assertEqual(main(["task", "add", "Finished task"]), 0)
+                    self.assertEqual(main(["task", "done", "3"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "ready"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Ready task", output)
+                self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Finished task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "done"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Finished task", output)
+                self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Ready task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "pending"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Draft plan", output)
+                self.assertIn("Ready task", output)
+                self.assertNotIn("Finished task", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_classify_can_report_and_apply_mismatches(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
