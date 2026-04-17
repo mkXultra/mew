@@ -861,6 +861,74 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_activity_slash_uses_kind_scope(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {"id": 1, "title": "Research grants", "status": "todo", "kind": "research"},
+                            {"id": 2, "title": "Improve cockpit", "status": "todo", "kind": "coding"},
+                        ]
+                    )
+                    state["thought_journal"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "event_id": 1,
+                                "event_type": "passive_tick",
+                                "summary": "Research activity",
+                                "actions": [{"type": "record_memory", "task_id": 1}],
+                                "counts": {"actions": 1},
+                            },
+                            {
+                                "id": 2,
+                                "event_id": 2,
+                                "event_type": "passive_tick",
+                                "summary": "Coding activity",
+                                "actions": [{"type": "record_memory", "task_id": 2}],
+                                "counts": {"actions": 1},
+                            },
+                        ]
+                    )
+                    _, _ = create_work_session(
+                        state,
+                        {"id": 2, "title": "Improve cockpit", "status": "todo", "kind": "coding"},
+                        current_time="2026-04-17T00:00:00Z",
+                    )
+                    state["work_sessions"][0].setdefault("notes", []).append(
+                        {
+                            "created_at": "2026-04-17T00:01:00Z",
+                            "source": "model",
+                            "text": "Scoped chat activity note",
+                        }
+                    )
+                    save_state(state)
+
+                stdin = StringIO("/activity\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()) as stderr,
+                ):
+                    code = main(["chat", "--kind", "coding", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                self.assertEqual(stderr.getvalue(), "")
+                output = stdout.getvalue()
+                self.assertIn("Mew activity (coding)", output)
+                self.assertIn("Scoped chat activity note", output)
+                self.assertIn("Coding activity", output)
+                self.assertNotIn("Research activity", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_listen_kind_filter_scopes_unread_messages(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

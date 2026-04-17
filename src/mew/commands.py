@@ -6359,7 +6359,7 @@ CHAT_HELP = """Commands:
 /mode <level>         override autonomy level: observe|propose|act|default
 /ack all|routine|<ids...> mark outbox messages as read
 /reply <id> <text>    answer an open question
-/activity on|off      toggle runtime activity lines
+/activity [kind|on|off] show scoped activity; on/off toggles runtime lines
 /history              print all outbox messages
 /transcript [n]       print recent chat input transcript
 /exit                 leave chat
@@ -8611,7 +8611,9 @@ def run_chat_slash_command(line, chat_state):
         return "continue"
     if command == "activity":
         value = rest.casefold()
-        if value in ("on", "true", "1"):
+        if not rest:
+            print(format_activity(load_state(), kind=chat_state.get("kind")))
+        elif value in ("on", "true", "1"):
             chat_state["activity"] = True
             chat_state["activity_offset"] = current_log_offset()
             print("activity: on")
@@ -8619,7 +8621,15 @@ def run_chat_slash_command(line, chat_state):
             chat_state["activity"] = False
             print("activity: off")
         else:
-            print("usage: /activity on|off")
+            kind, error = chat_kind_filter(
+                rest,
+                default_kind=chat_state.get("kind"),
+                usage="usage: /activity [coding|research|personal|admin|unknown|--kind <kind>|on|off]",
+            )
+            if error:
+                print(error)
+            else:
+                print(format_activity(load_state(), kind=kind))
         return "continue"
     if command == "ack":
         if not rest:
