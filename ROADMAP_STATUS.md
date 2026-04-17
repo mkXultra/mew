@@ -322,12 +322,15 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `638 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `641 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
+- Focused regression tests for default `next` coding surfacing, workbench generated-focus elision, and closed-session restart guidance current: `3 passed`.
+- Focused regression tests for `mew code` session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `142 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
-- `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py` current: `134 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed` (last combined run before the latest focus-coding-line test).
 - `uv run pytest -q tests/test_brief.py` current: `36 passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `32 passed`.
@@ -393,9 +396,13 @@ Next action:
 - The same retest exposed that a workbench whose only recent note was a system max-step boundary note could still show that note because of a fallback path; boundary-only system notes now stay hidden in the front-door Reentry block.
 - Empty work-session front-door summaries no longer render `last_tool=#`; the field appears only when a real latest tool call exists.
 - Default `mew focus` now surfaces a `Coding:` next-move line when coding work exists, so stale non-coding questions no longer completely hide the native coding cockpit entrypoint; `--kind coding` remains the scoped quiet view.
+- Default `mew next` now also prints a secondary `Coding:` move when coding work exists but the global next action is blocked by unrelated non-coding work, preserving the single primary next action while keeping the coding cockpit discoverable.
+- `mew work <task-id>` now elides embedded generated `Current coding focus` blocks from long self-improvement task descriptions, leaving the real focus and constraints without replaying a nested `Mew focus` view.
+- Closed task-specific work-session resumes now suggest the task-specific restart command, such as `./mew work 46 --start-session`, instead of a generic `mew work --ai` path.
+- `mew code [task-id]` now provides a single coding-cockpit entrypoint that starts or reuses a task work session, scopes chat to coding, enables work-mode, and caches safe `/continue` defaults. `--read-only --no-verify` clears cloned write/shell/verify defaults, so a read-only cockpit cannot inherit stale side-effect gates from an older session.
 
 ## Current Roadmap Focus
 
 Milestone 2: Interactive Parity.
 
-The next implementation should make the new `mew chat --work-mode` / `/follow` path calmer in longer real coding sessions: improve the live reasoning/status pane, reduce repeated reentry material further, and keep dogfooding against repository tasks until the cockpit feels preferable to delegating back to Claude Code or Codex CLI.
+The next implementation should make the `mew chat --work-mode` / `/follow` path calmer in longer real coding sessions: improve the live reasoning/status pane, keep the front doors aligned with task-specific restart commands, and keep dogfooding against repository tasks until the cockpit feels preferable to delegating back to Claude Code or Codex CLI.

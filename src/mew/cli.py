@@ -21,6 +21,7 @@ from .commands import (
     cmd_buddy,
     cmd_chat,
     cmd_chat_log,
+    cmd_code,
     cmd_context,
     cmd_digest,
     cmd_do,
@@ -702,6 +703,36 @@ def build_parser():
     do_parser.add_argument("--no-verify", action="store_true", help="do not grant run_tests verification")
     do_parser.add_argument("--verify-timeout", type=int, default=300)
     do_parser.set_defaults(func=cmd_do)
+
+    code_parser = subparsers.add_parser("code", help="enter the persistent coding cockpit")
+    code_parser.add_argument("task_id", nargs="?")
+    code_parser.add_argument("--auth", help="model auth file; defaults to ./auth.json then ~/.codex/auth.json")
+    code_parser.add_argument("--model-backend", default=DEFAULT_MODEL_BACKEND, choices=SUPPORTED_MODEL_BACKENDS)
+    code_parser.add_argument("--model", help="model name")
+    code_parser.add_argument("--base-url", help="model API base URL")
+    code_parser.add_argument("--allow-read", action="append", default=[], help="read root cached for /continue; defaults to . when task_id is supplied")
+    code_parser.add_argument("--allow-write", action="append", default=[], help="write root cached for /continue; defaults to . unless --read-only")
+    code_parser.add_argument("--read-only", action="store_true", help="do not cache write roots for /continue")
+    code_parser.add_argument("--verify-command", help="verification command cached for /continue; auto-detected for common projects")
+    code_parser.add_argument("--no-verify", action="store_true", help="do not cache run_tests verification")
+    code_parser.add_argument("--verify-timeout", type=int, default=300)
+    code_parser.add_argument("--compact-live", action="store_true", help="cache compact live output for /continue")
+    code_parser.add_argument("--prompt-approval", action="store_true", help="cache forced inline approval prompts")
+    code_parser.add_argument("--no-prompt-approval", action="store_true", help="cache disabled inline approval prompts")
+    code_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_ATTACH_POLL_INTERVAL_SECONDS,
+        help=f"chat poll interval in seconds; default {DEFAULT_ATTACH_POLL_INTERVAL_SECONDS:g}",
+    )
+    code_parser.add_argument("--limit", type=int, default=5, help="maximum items in the startup brief")
+    code_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
+    code_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
+    code_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
+    code_parser.add_argument("--no-unread", action="store_true", help="do not print unread messages on startup")
+    code_parser.add_argument("--timeout", type=float, help="leave chat after this many seconds")
+    code_parser.set_defaults(activity=True)
+    code_parser.set_defaults(func=cmd_code)
 
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")
     work_parser.add_argument("task_id", nargs="?")

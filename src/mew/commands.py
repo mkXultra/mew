@@ -1127,6 +1127,8 @@ def remember_work_session_default_options(session, args):
     if not session:
         return
     options = _work_control_options(args, session=None)
+    clear_write_defaults = bool(getattr(args, "read_only", False))
+    clear_verify_defaults = bool(getattr(args, "no_verify", False))
     has_meaningful_defaults = any(
         (
             options.get("allow_read"),
@@ -1140,6 +1142,8 @@ def remember_work_session_default_options(session, args):
             options.get("compact_live"),
             options.get("prompt_approval"),
             options.get("no_prompt_approval"),
+            clear_write_defaults,
+            clear_verify_defaults,
         )
     )
     if not has_meaningful_defaults:
@@ -1173,10 +1177,10 @@ def remember_work_session_default_options(session, args):
         "model": merged_scalar("model"),
         "base_url": merged_scalar("base_url"),
         "allow_read": merged_list("allow_read"),
-        "allow_write": merged_list("allow_write"),
-        "allow_shell": bool(current.get("allow_shell") or options.get("allow_shell")),
-        "allow_verify": bool(current.get("allow_verify") or options.get("allow_verify")),
-        "verify_command": merged_scalar("verify_command"),
+        "allow_write": [] if clear_write_defaults else merged_list("allow_write"),
+        "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
+        "allow_verify": False if clear_verify_defaults else bool(current.get("allow_verify") or options.get("allow_verify")),
+        "verify_command": "" if clear_verify_defaults else merged_scalar("verify_command"),
         "act_mode": merged_scalar("act_mode"),
         "compact_live": bool(current.get("compact_live") or options.get("compact_live")),
         "prompt_approval": prompt_approval,
@@ -1714,6 +1718,49 @@ def cmd_do(args):
         reject_reason=None,
     )
     return cmd_work_ai(work_args)
+
+
+def cmd_code(args):
+    task_id = getattr(args, "task_id", None)
+    if task_id:
+        verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+        allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
+        start_args = SimpleNamespace(
+            task_id=task_id,
+            json=False,
+            auth=getattr(args, "auth", None),
+            model_backend=getattr(args, "model_backend", None) or DEFAULT_MODEL_BACKEND,
+            model=getattr(args, "model", None),
+            base_url=getattr(args, "base_url", None),
+            allow_read=getattr(args, "allow_read", None) or ["."],
+            allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or ["."]),
+            allow_shell=False,
+            allow_verify=allow_verify,
+            verify_command=verify_command if allow_verify else "",
+            verify_timeout=getattr(args, "verify_timeout", 300),
+            act_mode="deterministic",
+            compact_live=bool(getattr(args, "compact_live", False)),
+            prompt_approval=bool(getattr(args, "prompt_approval", False)),
+            no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
+            read_only=bool(getattr(args, "read_only", False)),
+            no_verify=bool(getattr(args, "no_verify", False)),
+        )
+        code = cmd_work_start_session(start_args)
+        if code:
+            return code
+
+    chat_args = SimpleNamespace(
+        poll_interval=getattr(args, "poll_interval", 1.0),
+        limit=getattr(args, "limit", 5),
+        kind="coding",
+        mark_read=bool(getattr(args, "mark_read", False)),
+        activity=bool(getattr(args, "activity", True)),
+        no_brief=bool(getattr(args, "no_brief", False)),
+        no_unread=bool(getattr(args, "no_unread", False)),
+        work_mode=True,
+        timeout=getattr(args, "timeout", None),
+    )
+    return cmd_chat(chat_args)
 
 
 def work_ai_step_guidance(args, index, max_steps):
@@ -6319,6 +6366,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session resume --auto-recover-safe --allow-read .
                                       retry one interrupted read/git tool before showing resume
 /work-session start <task-id>         start or reuse a native work session
+/outside chat: mew code <task-id>     enter coding scoped work-mode chat
 /outside chat: mew do <task-id>       run the common supervised coding loop
 /continue --allow-read .              run one live resident-model step
 /c --allow-read .                     short alias for /continue

@@ -3699,6 +3699,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("/work-session diffs", output)
         self.assertIn("/work-session tests", output)
         self.assertIn("/work-session commands", output)
+        self.assertIn("mew code <task-id>", output)
         self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
         self.assertIn("/work-session resume --auto-recover-safe", output)
@@ -3720,6 +3721,110 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(args.compact_live)
         self.assertTrue(args.prompt_approval)
         self.assertTrue(args.no_prompt_approval)
+
+    def test_code_command_starts_task_and_enters_coding_work_mode(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Improve cockpit", "--kind", "coding"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "code",
+                                "1",
+                                "--timeout",
+                                "0",
+                                "--no-brief",
+                                "--no-unread",
+                                "--allow-read",
+                                "src",
+                                "--read-only",
+                            ]
+                        ),
+                        0,
+                    )
+                output = stdout.getvalue()
+
+                self.assertIn("created work session #1 for task #1", output)
+                self.assertIn("mew chat. Type /help", output)
+                self.assertIn("scope: coding", output)
+                self.assertIn("work-mode: on", output)
+
+                from mew.state import load_state
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["task_id"], 1)
+                self.assertEqual(session["default_options"]["allow_read"], ["src"])
+                self.assertEqual(session["default_options"].get("allow_write"), [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_code_read_only_clears_cloned_side_effect_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Improve cockpit", "--kind", "coding"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                                "--allow-shell",
+                                "--allow-verify",
+                                "--verify-command",
+                                "python -m pytest -q",
+                            ]
+                        ),
+                        0,
+                    )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "code",
+                                "1",
+                                "--timeout",
+                                "0",
+                                "--no-brief",
+                                "--no-unread",
+                                "--read-only",
+                                "--no-verify",
+                            ]
+                        ),
+                        0,
+                    )
+                output = stdout.getvalue()
+
+                controls = output.split("Next controls", 1)[1]
+                self.assertNotIn("--allow-write", controls)
+                self.assertNotIn("--allow-shell", controls)
+                self.assertNotIn("--allow-verify", controls)
+
+                from mew.state import load_state
+
+                session = load_state()["work_sessions"][-1]
+                defaults = session["default_options"]
+                self.assertEqual(defaults["allow_write"], [])
+                self.assertFalse(defaults["allow_shell"])
+                self.assertFalse(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "")
+            finally:
+                os.chdir(old_cwd)
 
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):
         from mew.commands import run_chat_slash_command
