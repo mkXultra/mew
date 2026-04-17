@@ -274,6 +274,7 @@ Evidence:
 - `dogfood --scenario work-session` now checks both CLI and chat cell panes, including model, test, diff, and pending approval rows.
 - Command/test cells now include command, cwd, exit status, elapsed time, stdout/stderr line and character counts, output tails, explicit no-output rows, timeout/error metadata, and a `full_output` hint back to `mew work <task-id> --tests` or `--commands`.
 - Approval cells now carry structured `operation`, `target`, and `actions`; pending write/edit approvals expose approve-once, reject, and reject-with-feedback commands, and missing shell/verification gates can surface as required approval cells.
+- Direct `mew work 86 --cells` dogfood verified both approval anchor paths in a real ignored state session: a failed shell-gated command produced a required `shell_command` approval cell, and a dry-run write produced a pending `file_write` approval cell with reject-with-feedback guidance.
 
 Missing proof:
 
