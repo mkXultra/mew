@@ -4338,6 +4338,18 @@ class WorkSessionTests(unittest.TestCase):
             summary = summarize_read_result("search_text", result)
             self.assertIn("matches=2 (truncated)", summary)
 
+    def test_search_text_accepts_query_that_starts_with_dash(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cli.txt").write_text("mew task list --status pending\n", encoding="utf-8")
+
+            result = search_text("--status", str(root), [str(root)], max_matches=5, context_lines=0)
+
+            self.assertEqual(len(result["matches"]), 1)
+            self.assertIn("--status pending", result["matches"][0])
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 

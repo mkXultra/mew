@@ -300,7 +300,7 @@ def search_text(
     include_patterns = _normalize_search_patterns(pattern)
     for include_pattern in include_patterns:
         command.extend(["--glob", include_pattern])
-    command.extend([str(query), str(resolved)])
+    command.extend(["--", str(query), str(resolved)])
     env = os.environ.copy()
     env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     try:

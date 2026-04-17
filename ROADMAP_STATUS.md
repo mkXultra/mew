@@ -337,6 +337,7 @@ Evidence:
 - Native self-improvement dogfood session #83 used `mew work --follow` with Codex Web API plus write/verify gates to apply a cockpit cleanup: non-compact work controls now show only the scoped `/work-session resume --allow-read ...` hint instead of also showing a generic duplicate resume line.
 - Native self-improvement dogfood session #84 targeted a real friction from this session (`mew task list --status pending`); mew found the parser but needed manual assist to locate the imported handler, after which task list gained `--status` with `pending`/`open` aliases and Claude review follow-up coverage for `todo`, `running`, `blocked`, `open`, `--kind`, and `--all --status`.
 - Native self-improvement dogfood session #85 followed up on #84's handler-location friction; `mew work` THINK guidance now tells the resident model to search the broader project tree or allowed read root when a symbol is imported but not defined in the current file, rather than repeating same-file searches.
+- Native self-improvement dogfood session #88 exposed a work-tool bug while looking for `--limit`: `search_text` treated a query beginning with `--status` as an `rg` flag. The read tool now inserts `--` before the query so dash-prefixed literal searches work.
 
 Missing proof:
 
@@ -351,7 +352,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `680 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `681 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_search_text_accepts_query_that_starts_with_dash tests/test_work_session.py::WorkSessionTests::test_search_text_marks_truncated_when_more_matches_exist` current: `2 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `164 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-dash-query-search --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_commands.py::CommandTests::test_task_list_can_filter_by_status` current: `1 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `146 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `1 passed`.
