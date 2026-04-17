@@ -1337,8 +1337,8 @@ def build_work_session_resume(session, task=None, limit=8):
         )
     )
 
+    task_id = session.get("task_id") or (task or {}).get("id")
     if session.get("status") == "closed":
-        task_id = session.get("task_id") or (task or {}).get("id")
         if task_id:
             start_command = mew_command("work", task_id, "--start-session")
         else:
@@ -1357,7 +1357,11 @@ def build_work_session_resume(session, task=None, limit=8):
     elif latest_failed:
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
     else:
-        next_action = f"continue the work session with /continue in chat or {mew_command('work', '--live')}"
+        if task_id:
+            live_command = mew_command("work", task_id, "--live")
+        else:
+            live_command = mew_command("work", "--live")
+        next_action = f"continue the work session with /continue in chat or {live_command}"
 
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
     if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):

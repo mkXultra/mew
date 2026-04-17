@@ -388,6 +388,9 @@ Next action:
 
 ## Latest Validation
 
+- `uv run pytest -q tests/test_work_session.py` current: `179 passed`, including task-specific idle resume `next_action`.
+- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands after task-specific live resume next-action changes.
+- `mew work 74 --live --auth auth.json --allow-read . --compact-live` current: resident self-improvement buddy session #100 traced the taskless live next-action wording to `build_work_session_resume`.
 - `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`, including task-first live help coverage.
 - `mew work 73 --live --auth auth.json --allow-read . --compact-live` current: resident self-improvement buddy session #99 identified the task-first live help gap and finished with a concrete edit recommendation.
 - `uv run pytest -q` current: `703 passed, 6 subtests passed`.
@@ -578,6 +581,7 @@ Next action:
 - `mew next` and `mew focus` now point fresh or active coding work at `mew code <task-id>` as the quiet cockpit entry instead of surfacing `mew work --start-session` or the full flag-heavy `mew work --live ...` command in the primary next-action line.
 - Done-task work sessions no longer capture the default active cockpit, and attempts to start or run a new resident work session on a done task now ask for the task to be reopened first.
 - Mew buddy dogfood session #99 chose the smallest visible cockpit polish: `/help work` now documents task-first live usage (`/work-session <task-id> live --allow-read .`) alongside task-first resume, preserving the accepted command order in the focused chat help.
+- Mew buddy dogfood session #100 then inspected README/help/test command wording and exposed that idle resume `next_action` still pointed at a taskless `mew work --live`; resume now points at `mew work <task-id> --live` when the task id is known.
 
 ## Current Roadmap Focus
 

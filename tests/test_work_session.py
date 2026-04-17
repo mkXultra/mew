@@ -3273,7 +3273,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(len(resume["failures"]), 1)
                 self.assertEqual(
                     resume["next_action"],
-                    "continue the work session with /continue in chat or mew work --live",
+                    "continue the work session with /continue in chat or mew work 1 --live",
                 )
             finally:
                 os.chdir(old_cwd)
