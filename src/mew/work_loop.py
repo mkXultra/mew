@@ -422,13 +422,13 @@ def _work_action_schema_text():
         '    "tools": ['
         '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", '
         '"path": "required for read_file/glob/search_text", '
-        '"query": "required for search_text", '
+        '"query": "required for search_text; literal fixed-string, so use batch for OR searches", '
         '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
         '"line_start": "optional 1-based read_file starting line from search_text results", '
         '"line_count": "optional read_file line count"}],\n'
         '    "path": "optional path",\n'
-        '    "query": "search_text query",\n'
+        '    "query": "search_text literal fixed-string query",\n'
         '    "pattern": "glob pattern",\n'
         '    "max_chars": "optional read_file cap",\n'
         '    "line_start": "optional 1-based read_file starting line from search_text results",\n'
@@ -544,8 +544,12 @@ def normalize_work_model_action(action_plan, verify_command=""):
             if not isinstance(item, dict):
                 continue
             sub_action = normalize_work_model_action({"action": item}, verify_command=verify_command)
-            if sub_action.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(sub_action):
-                normalized_tools.append(sub_action)
+            sub_actions = sub_action.get("tools") if sub_action.get("type") == "batch" else [sub_action]
+            for candidate in sub_actions:
+                if len(normalized_tools) >= 5:
+                    break
+                if candidate.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(candidate):
+                    normalized_tools.append(candidate)
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
         normalized = {"type": "batch", "tools": normalized_tools}
@@ -589,6 +593,27 @@ def normalize_work_model_action(action_plan, verify_command=""):
             if action.get(alias) is not None:
                 normalized["line_start"] = action.get(alias)
                 break
+    if action_type == "search_text":
+        split_queries = split_pipe_search_query(normalized.get("query"))
+        if split_queries:
+            tools = []
+            for query in split_queries:
+                tool = {
+                    key: value
+                    for key, value in normalized.items()
+                    if key not in ("reason", "summary")
+                }
+                tool["query"] = query
+                tools.append(tool)
+            result = {
+                "type": "batch",
+                "tools": tools,
+                "reason": normalized.get("reason")
+                or "search_text uses literal fixed-string queries; split pipe-separated query into separate searches",
+            }
+            if normalized.get("summary"):
+                result["summary"] = normalized.get("summary")
+            return result
 
     if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
         normalized["summary"] = action_plan.get("summary")
@@ -626,6 +651,15 @@ def normalize_work_model_action(action_plan, verify_command=""):
                 "reason": "run_tests cannot invoke a resident mew loop; use the configured verifier, finish, remember, or ask_user",
             }
     return normalized
+
+
+def split_pipe_search_query(query, limit=5):
+    if not isinstance(query, str) or "|" not in query:
+        return []
+    parts = [part.strip() for part in query.split("|") if part.strip()]
+    if len(parts) < 2:
+        return []
+    return parts[:limit]
 
 
 def valid_batch_sub_action(action):

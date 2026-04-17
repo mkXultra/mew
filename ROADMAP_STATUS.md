@@ -346,7 +346,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `675 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `677 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch tests/test_work_session.py::WorkSessionTests::test_work_model_splits_pipe_search_text_queries tests/test_work_session.py::WorkSessionTests::test_work_model_batch_flattens_pipe_search_text_queries` current: `3 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-pipe-search-normalize --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Pick the next smallest mew improvement that is not about..."` created task #53/session #76; read-only `./mew work 53 --live ...` exposed model misuse of pipe-separated `search_text` queries against fixed-string search.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_show_active_includes_next_cli_controls tests/test_work_session.py::WorkSessionTests::test_work_session_controls_prefer_local_mew_executable tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `305 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-labeled-cli-controls --json` current: pass across 36 commands.

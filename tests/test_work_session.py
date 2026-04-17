@@ -4228,6 +4228,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn('"max_chars": "optional read_file cap"', prompt)
         self.assertIn('"line_start": "optional 1-based read_file starting line', prompt)
         self.assertIn('"stat": "optional git_diff diffstat', prompt)
+        self.assertIn("literal fixed-string", prompt)
+        self.assertIn("use batch for OR searches", prompt)
 
     def test_work_model_search_text_defaults_are_bounded(self):
         from mew.work_loop import work_tool_parameters_from_action
@@ -4241,6 +4243,54 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(explicit["max_matches"], 50)
         self.assertEqual(explicit["context_lines"], 5)
+
+    def test_work_model_splits_pipe_search_text_queries(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "summary": "search several terms",
+                "action": {
+                    "type": "search_text",
+                    "path": "src",
+                    "query": "reentry|context|cockpit",
+                    "pattern": "*.py",
+                    "reason": "find related code",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual([tool["query"] for tool in action["tools"]], ["reentry", "context", "cockpit"])
+        self.assertTrue(all(tool["path"] == "src" for tool in action["tools"]))
+        self.assertTrue(all(tool["pattern"] == "*.py" for tool in action["tools"]))
+        self.assertIn("find related code", action["reason"])
+
+    def test_work_model_batch_flattens_pipe_search_text_queries(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "search_text", "path": "src", "query": "alpha|beta|gamma"},
+                        {"type": "read_file", "path": "README.md"},
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(
+            [(tool["type"], tool.get("query") or tool.get("path")) for tool in action["tools"]],
+            [
+                ("search_text", "alpha"),
+                ("search_text", "beta"),
+                ("search_text", "gamma"),
+                ("read_file", "README.md"),
+            ],
+        )
 
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result
