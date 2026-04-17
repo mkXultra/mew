@@ -729,9 +729,11 @@ def build_parser():
     code_parser.add_argument("--mark-read", action="store_true", help="mark printed messages as read")
     code_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     code_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
-    code_parser.add_argument("--no-unread", action="store_true", help="do not print unread messages on startup")
+    code_parser.add_argument("--show-unread", dest="no_unread", action="store_false", help="print unread messages on startup")
+    code_parser.add_argument("--no-unread", dest="no_unread", action="store_true", help=argparse.SUPPRESS)
     code_parser.add_argument("--timeout", type=float, help="leave chat after this many seconds")
     code_parser.set_defaults(activity=True)
+    code_parser.set_defaults(no_unread=True)
     code_parser.set_defaults(func=cmd_code)
 
     work_parser = subparsers.add_parser("work", help="show a task coding workbench")

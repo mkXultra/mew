@@ -3826,6 +3826,53 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_hides_unread_by_default_and_can_show_it(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Improve cockpit",
+                            "kind": "coding",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    add_outbox_message(state, "assistant", "stale coding chatter", related_task_id=1)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["code", "--timeout", "0", "--no-brief"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("scope: coding", output)
+                self.assertNotIn("stale coding chatter", output)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["code", "--timeout", "0", "--no-brief", "--show-unread"]), 0)
+                self.assertIn("stale coding chatter", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_health_slash_commands_delegate_to_existing_commands(self):
         from mew.commands import run_chat_slash_command
 

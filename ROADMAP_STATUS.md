@@ -322,15 +322,15 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `641 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `642 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
 - Focused regression tests for default `next` coding surfacing, workbench generated-focus elision, and closed-session restart guidance current: `3 passed`.
-- Focused regression tests for `mew code` session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.
+- Focused regression tests for `mew code` quiet unread defaults, session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `142 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
-- `uv run pytest -q tests/test_commands.py` current: `134 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_commands.py` current: `135 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py tests/test_brief.py` current: `162 passed, 4 subtests passed` (last combined run before the latest focus-coding-line test).
 - `uv run pytest -q tests/test_brief.py` current: `36 passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `32 passed`.
@@ -399,7 +399,7 @@ Next action:
 - Default `mew next` now also prints a secondary `Coding:` move when coding work exists but the global next action is blocked by unrelated non-coding work, preserving the single primary next action while keeping the coding cockpit discoverable.
 - `mew work <task-id>` now elides embedded generated `Current coding focus` blocks from long self-improvement task descriptions, leaving the real focus and constraints without replaying a nested `Mew focus` view.
 - Closed task-specific work-session resumes now suggest the task-specific restart command, such as `./mew work 46 --start-session`, instead of a generic `mew work --ai` path.
-- `mew code [task-id]` now provides a single coding-cockpit entrypoint that starts or reuses a task work session, scopes chat to coding, enables work-mode, and caches safe `/continue` defaults. `--read-only --no-verify` clears cloned write/shell/verify defaults, so a read-only cockpit cannot inherit stale side-effect gates from an older session.
+- `mew code [task-id]` now provides a single coding-cockpit entrypoint that starts or reuses a task work session, scopes chat to coding, enables work-mode, hides unread outbox by default, and caches safe `/continue` defaults. `--read-only --no-verify` clears cloned write/shell/verify defaults, so a read-only cockpit cannot inherit stale side-effect gates from an older session.
 
 ## Current Roadmap Focus
 
