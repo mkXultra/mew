@@ -2060,6 +2060,38 @@ def format_dogfood_scenario_report(report):
     return "\n".join(lines)
 
 
+def summarize_dogfood_scenario_json(report):
+    scenarios = []
+    for scenario in report.get("scenarios") or []:
+        checks = []
+        for check in scenario.get("checks") or []:
+            item = {
+                "name": check.get("name"),
+                "passed": bool(check.get("passed")),
+            }
+            if not check.get("passed"):
+                item["observed"] = compact_dogfood_value(check.get("observed"))
+                item["expected"] = compact_dogfood_value(check.get("expected"))
+            checks.append(item)
+        scenarios.append(
+            {
+                "name": scenario.get("name"),
+                "status": scenario.get("status"),
+                "workspace": scenario.get("workspace"),
+                "command_count": scenario.get("command_count"),
+                "checks": checks,
+            }
+        )
+    return {
+        "generated_at": report.get("generated_at"),
+        "workspace": report.get("workspace"),
+        "kept": report.get("kept"),
+        "scenario": report.get("scenario"),
+        "status": report.get("status"),
+        "scenarios": scenarios,
+    }
+
+
 def seed_ready_coding_task(workspace, title=DOGFOOD_READY_CODING_TASK_TITLE):
     workspace = Path(workspace).resolve()
     state_path = workspace / STATE_FILE

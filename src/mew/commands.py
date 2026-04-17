@@ -48,6 +48,7 @@ from .dogfood import (
     run_dogfood,
     run_dogfood_loop,
     run_dogfood_scenario,
+    summarize_dogfood_scenario_json,
 )
 from .errors import MewError
 from .memory import add_deep_memory, compact_memory, search_memory
@@ -4508,7 +4509,7 @@ def cmd_dogfood(args):
     if getattr(args, "scenario", ""):
         report_path = write_report_if_requested(args, report)
         if args.json:
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            print(json.dumps(summarize_dogfood_scenario_json(report), ensure_ascii=False, indent=2))
         else:
             print(format_dogfood_scenario_report(report))
             if report_path:

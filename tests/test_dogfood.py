@@ -28,6 +28,7 @@ from mew.dogfood import (
     run_dogfood_scenario,
     run_post_wait_agent_reflex,
     seed_ready_coding_task,
+    summarize_dogfood_scenario_json,
     suppress_processed_injected_dropped_threads,
     tail_lines,
     wait_for_active_agent_runs,
@@ -229,6 +230,36 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("stdout_chars", command)
             self.assertNotIn("stdout", command)
             self.assertLess(len(json.dumps(report, ensure_ascii=False)), 120_000)
+
+    def test_summarize_dogfood_scenario_json_omits_passing_details(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "kept": False,
+            "scenario": "work-session",
+            "status": "fail",
+            "scenarios": [
+                {
+                    "name": "work-session",
+                    "status": "fail",
+                    "workspace": "/tmp/dog",
+                    "command_count": 2,
+                    "commands": [{"stdout_tail": ["x" * 1000], "stdout_chars": 1000}],
+                    "checks": [
+                        {"name": "passes", "passed": True, "observed": {"large": "x" * 5000}},
+                        {"name": "fails", "passed": False, "observed": {"large": "x" * 5000}, "expected": "small"},
+                    ],
+                }
+            ],
+        }
+
+        summary = summarize_dogfood_scenario_json(report)
+
+        scenario = summary["scenarios"][0]
+        self.assertNotIn("commands", scenario)
+        self.assertNotIn("observed", scenario["checks"][0])
+        self.assertIn("observed", scenario["checks"][1])
+        self.assertLess(len(json.dumps(summary, ensure_ascii=False)), 2000)
 
     def test_copy_source_workspace_skips_sensitive_state_and_large_files(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as workspace_tmp:

@@ -646,7 +646,11 @@ def build_parser():
     )
     dogfood_parser.add_argument("--cleanup", action="store_true", help="remove a temporary dogfood workspace after reporting")
     dogfood_parser.add_argument("--report", help="write the structured dogfood report to this JSON file")
-    dogfood_parser.add_argument("--json", action="store_true", help="print structured JSON report")
+    dogfood_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print structured JSON report; scenario mode prints a compact summary, use --report for full details",
+    )
     dogfood_parser.set_defaults(func=cmd_dogfood)
 
     perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")
