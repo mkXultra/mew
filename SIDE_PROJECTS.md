@@ -232,6 +232,15 @@ Core risk: high. Defer.
 
 Goal: Make mew's internal state visible as mood.
 
+Status:
+- First isolated prototype exists under `experiments/mew-mood`.
+- Dogfood task #80 used work session #106 and `mew work --ai` planning to pick
+  the smallest slice.
+- The prototype generates one `.mew/mood/YYYY-MM-DD.md` file with `energy`,
+  `worry`, and `joy` scores plus reason lines and compact signals.
+- Latest validation: `uv run pytest -q experiments/mew-mood` passed with
+  `6 passed`.
+
 Scope:
 - Track simple axes such as `energy`, `worry`, and `joy`.
 - Update from task completion, verification failures, blocked work, and user
@@ -282,9 +291,9 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be `mew-mood` or `mew-morning-paper`.
+The next side project should probably be `mew-morning-paper`.
 
 Reason: `mew-dream`, `mew-bond`, and `mew-journal` now cover memory,
-self-continuity, and daily continuity in isolated form. The next useful slice
-should either make passive state easier to perceive (`mew-mood`) or test
-overnight research and preference learning (`mew-morning-paper`).
+self-continuity, daily continuity, and passive state visibility in isolated
+form. The next useful slice should test overnight research and preference
+learning without network access first, using static feeds.

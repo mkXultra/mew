@@ -1,0 +1,68 @@
+{
+  "date": "2026-04-17",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Prototype mew-mood",
+      "status": "ready",
+      "priority": "high",
+      "kind": "coding"
+    },
+    {
+      "id": 2,
+      "title": "Ship mew-journal",
+      "status": "done",
+      "priority": "normal",
+      "kind": "coding"
+    },
+    {
+      "id": 3,
+      "title": "Close old research question",
+      "status": "blocked",
+      "priority": "normal",
+      "kind": "research"
+    }
+  ],
+  "work_sessions": [
+    {
+      "id": 106,
+      "task_id": 1,
+      "status": "active",
+      "goal": "Build a mood report generator",
+      "phase": "idle"
+    }
+  ],
+  "outbox": [
+    {
+      "id": 9,
+      "question_id": 3,
+      "requires_reply": true,
+      "answered_at": null,
+      "text": "Should mew keep working on mood or wait?"
+    }
+  ],
+  "attention": {
+    "items": [
+      {
+        "id": 4,
+        "status": "open",
+        "title": "Question #3 needs a reply"
+      }
+    ]
+  },
+  "verification_runs": [
+    {
+      "id": 1,
+      "exit_code": 0
+    }
+  ],
+  "runtime_effects": [
+    {
+      "id": 7,
+      "reason": "passive_tick",
+      "status": "applied",
+      "action_types": ["update_memory"],
+      "summary": "Mew noticed a safe next side project."
+    }
+  ]
+}
