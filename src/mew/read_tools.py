@@ -428,6 +428,7 @@ def summarize_read_result(action_type, result):
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
         pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""
+        match_count = len(result.get("matches") or [])
         snippets = []
         for snippet in (result.get("snippets") or [])[:10]:
             lines = []
@@ -437,7 +438,7 @@ def summarize_read_result(action_type, result):
             if lines:
                 snippets.append(f"{snippet.get('path')}:{snippet.get('start_line')}-{snippet.get('end_line')}\n" + "\n".join(lines))
         body = "\n\n".join(snippets) if snippets else "\n".join(result.get("matches", []))
-        return f"Searched {result.get('path')} for {result.get('query')!r}{pattern}{suffix}\n{body}"
+        return f"Searched {result.get('path')} for {result.get('query')!r}{pattern} matches={match_count}{suffix}\n{body}"
     if action_type == "glob":
         suffix = " (truncated)" if result.get("truncated") else ""
         matches = "\n".join(

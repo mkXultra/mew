@@ -3772,7 +3772,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(explicit["context_lines"], 5)
 
     def test_search_text_marks_truncated_when_more_matches_exist(self):
-        from mew.read_tools import search_text
+        from mew.read_tools import search_text, summarize_read_result
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3783,6 +3783,8 @@ class WorkSessionTests(unittest.TestCase):
 
             self.assertEqual(len(result["matches"]), 2)
             self.assertTrue(result["truncated"])
+            summary = summarize_read_result("search_text", result)
+            self.assertIn("matches=2 (truncated)", summary)
 
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
