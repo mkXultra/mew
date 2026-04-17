@@ -358,3 +358,12 @@ Judgment:
   existing unanswered questions caused the runtime to wait for user input.
 - The remaining product work is not "can passive output happen at all"; it is
   prioritization and cadence when older unanswered questions are already open.
+
+Likely implementation hook:
+
+- `src/mew/agent.py` `append_passive_decisions` checks
+  `pending_question_for_task` before asking a task question. In the real repo
+  state, every open task had an unanswered question, so the passive tick emitted
+  only `wait_for_user` decisions. The next slice should decide when a stale
+  unanswered question should be summarized, deferred, or superseded instead of
+  permanently suppressing new passive output.
