@@ -208,6 +208,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "chat-cockpit")
             self.assertIn("chat-cockpit: pass", text)
             self.assertIn("chat_work_respects_kind_scope", text)
+            self.assertIn("chat_transcript_records_inputs", text)
 
     def test_run_dogfood_work_session_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

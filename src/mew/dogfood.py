@@ -521,6 +521,8 @@ def run_chat_cockpit_scenario(workspace, env=None):
         input_text="/scope\n/tasks\n/work\n/work-session\n/work-mode on\n/work-mode off\n/exit\n",
     )
     chat_output = chat_result.get("stdout") or ""
+    chat_log_result = run(["chat-log", "--limit", "20"])
+    chat_log_output = chat_log_result.get("stdout") or ""
 
     _scenario_check(
         checks,
@@ -589,6 +591,15 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "work-mode: off; text is sent as user messages" in chat_output,
         observed=command_result_tail(chat_result),
         expected="/work-mode toggles the chat cockpit text routing",
+    )
+    _scenario_check(
+        checks,
+        "chat_transcript_records_inputs",
+        chat_log_result.get("exit_code") == 0
+        and "slash kind=coding: /work-session" in chat_log_output
+        and "slash kind=coding: /exit" in chat_log_output,
+        observed=command_result_tail(chat_log_result),
+        expected="chat-log records recent scoped slash inputs outside the runtime activity log",
     )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 
