@@ -3779,6 +3779,8 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Work live step #1 thinking", output)
                 self.assertIn("progress: step=1/1 session=#1 task=#1", output)
+                self.assertIn("phase=thinking", output)
+                self.assertIn("elapsed=", output)
                 self.assertIn("summary: read README", output)
                 self.assertIn("planned_action: read_file", output)
                 self.assertIn("Work live step #1 action", output)

@@ -324,8 +324,8 @@ live run when you want mew to ask inline before applying or rejecting a dry-run
 write.
 `mew work --live` prints the selected action before execution, a compact result
 pane after each step, and a resume after each completed tool step. The thinking
-pane includes `step/max`, session, and task ids, so a longer live run has a
-stable progress anchor. Read results stay summarized in the result pane and
+pane includes `step/max`, session, task id, phase, and elapsed time, so a longer
+live run has a stable progress anchor. Read results stay summarized in the result pane and
 final step report so large files do not flood the cockpit. Add `--compact-live`
 when you want only thinking/action/result panes during a longer run and will
 open `mew work --session --resume` separately if you need the full reentry

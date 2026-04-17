@@ -828,8 +828,13 @@ def format_work_planning(planned):
     return "\n".join(lines) or "(no planning summary)"
 
 
-def format_work_live_progress(index, max_steps, session_id, task_id):
-    return f"progress: step={index}/{max_steps} session=#{session_id} task=#{task_id}"
+def format_work_live_progress(index, max_steps, session_id, task_id, phase="thinking", elapsed_seconds=None):
+    text = f"progress: step={index}/{max_steps} session=#{session_id} task=#{task_id}"
+    if phase:
+        text += f" phase={phase}"
+    if elapsed_seconds is not None:
+        text += f" elapsed={elapsed_seconds:.1f}s"
+    return text
 
 
 def _work_control_options(args, session=None):
@@ -1602,6 +1607,7 @@ def cmd_work_ai(args):
         return 1
 
     for index in range(1, max_steps + 1):
+        step_started = time.monotonic()
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
@@ -1743,7 +1749,16 @@ def cmd_work_ai(args):
         if getattr(args, "live", False):
             print("")
             print(f"Work live step #{index} thinking")
-            print(format_work_live_progress(index, max_steps, session_id, task_id))
+            print(
+                format_work_live_progress(
+                    index,
+                    max_steps,
+                    session_id,
+                    task_id,
+                    phase="thinking",
+                    elapsed_seconds=time.monotonic() - step_started,
+                )
+            )
             print(format_work_planning(planned))
         if action_type == "batch":
             if getattr(args, "live", False):
