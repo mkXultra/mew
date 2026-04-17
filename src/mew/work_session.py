@@ -1217,10 +1217,12 @@ def format_work_session_resume(resume):
     memory = resume.get("working_memory") or {}
     if memory:
         lines.extend(["", "Working memory"])
+        stale_memory = bool(memory.get("stale_after_tool_call_id") or memory.get("stale_after_model_turn_id"))
         if memory.get("hypothesis"):
             lines.append(f"hypothesis: {memory.get('hypothesis')}")
         if memory.get("next_step"):
-            lines.append(f"next_step: {memory.get('next_step')}")
+            label = "stale_next_step" if stale_memory else "next_step"
+            lines.append(f"{label}: {memory.get('next_step')}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append("open_questions:")

@@ -1272,6 +1272,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(memory["stale_turns"], 1)
         text = format_work_session_resume(resume)
         self.assertIn("last_verified_state: last verification failed exit=1: uv run pytest -q", text)
+        self.assertIn("stale_next_step: Ship it.", text)
+        self.assertNotIn("\nnext_step: Ship it.", text)
         self.assertIn("stale_after_model_turn: #1 (1 later turn(s) without working_memory; latest=#2)", text)
 
     def test_work_session_resume_falls_back_to_latest_turn_and_verification_state(self):
@@ -2825,6 +2827,8 @@ class WorkSessionTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Working memory", text)
                 self.assertIn("hypothesis: README is the next evidence source.", text)
+                self.assertIn("stale_next_step: Read README.md before editing.", text)
+                self.assertNotIn("\nnext_step: Read README.md before editing.", text)
                 self.assertIn("latest_tool_state: latest tool #1 completed read_file", text)
                 self.assertIn("stale_after_tool_call: #1", text)
             finally:

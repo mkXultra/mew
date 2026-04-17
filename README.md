@@ -304,7 +304,8 @@ verification results override model-written verification claims, and older
 working memory is marked stale when later model turns did not refresh it.
 The same memory also records the latest tool observation and is marked stale
 when the selected tool ran after that memory was written, so a resume does not
-quietly treat a pre-tool `next_step` as current.
+quietly treat a pre-tool `next_step` as current; stale resume text is labeled
+`stale_next_step`.
 World-state git summaries hide mew's own `.mew/` state noise, keeping the
 reentry signal focused on project files.
 `mew chat` prints active-session controls on startup even when `--no-brief` is
@@ -403,7 +404,8 @@ action without making that old guidance current again. THINK prompts ask the
 resident model to write a compact `working_memory` object for future reentry;
 older sessions fall back to the latest turn summary and verification state, and
 stale memory is marked when newer turns omit the digest or when a tool result
-landed after the memory was written.
+landed after the memory was written; human-facing resumes label that old plan as
+`stale_next_step`.
 
 ```sh
 uv run mew work 1 --start-session
