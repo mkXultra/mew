@@ -33,6 +33,19 @@ WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 
 
+def clip_work_task_notes(notes, limit=WORK_RESULT_TEXT_LIMIT):
+    if not notes:
+        return ""
+    notes = str(notes)
+    if len(notes) <= limit:
+        return notes
+    tail = notes[-limit:]
+    line_break = tail.find("\n")
+    if line_break != -1:
+        tail = tail[line_break + 1 :]
+    return "[...older task notes omitted...]\n" + tail
+
+
 def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -375,7 +388,7 @@ def build_work_model_context(
             "description": task.get("description") if task else session.get("goal"),
             "status": task.get("status") if task else "",
             "kind": task.get("kind") if task else "",
-            "notes": clip_output((task or {}).get("notes") or "", WORK_RESULT_TEXT_LIMIT),
+            "notes": clip_work_task_notes((task or {}).get("notes") or "", WORK_RESULT_TEXT_LIMIT),
             "cwd": (task or {}).get("cwd") or ".",
         },
         "work_session": work_context,

@@ -3544,6 +3544,37 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("secret content 1", knowledge_text)
         self.assertLess(len(knowledge_text), 3000)
 
+    def test_work_model_context_keeps_recent_task_notes_tail(self):
+        from mew.work_loop import build_work_model_context
+
+        old_note = "old recommendation: implement stale command output"
+        recent_note = "recent recommendation: improve live reasoning status"
+        task = {
+            "id": 1,
+            "title": "Improve mew",
+            "description": "Keep recent notes.",
+            "status": "todo",
+            "kind": "coding",
+            "notes": old_note + "\n" + ("filler line\n" * 3000) + recent_note,
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep recent notes.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+
+        context = build_work_model_context({}, session, task, "now")
+
+        notes = context["task"]["notes"]
+        self.assertIn("[...older task notes omitted...]", notes)
+        self.assertNotIn(old_note, notes)
+        self.assertIn(recent_note, notes)
+
     def test_work_model_context_clips_recent_read_file_text_with_resume_offset(self):
         from mew.work_loop import WORK_READ_FILE_CONTEXT_TEXT_LIMIT, build_work_model_context
 
@@ -5556,6 +5587,64 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("model_stream: THINK chunks=3", output)
                 self.assertNotIn("stream_preview: follow model delta", output)
                 self.assertLess(output.index("model_delta: THINK"), output.index("model_stream: THINK"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_renders_json_model_deltas_as_prose(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("json stream content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(
+                    model_backend,
+                    model_auth,
+                    prompt,
+                    model,
+                    base_url,
+                    timeout,
+                    log_prefix=None,
+                    on_text_delta=None,
+                ):
+                    if on_text_delta:
+                        on_text_delta('{"summary":"Inspect')
+                        on_text_delta(' roadmap","action":{"type":"finish","reason":"Done')
+                        on_text_delta(' now"}}')
+                    return {
+                        "summary": "Inspect roadmap",
+                        "action": {"type": "finish", "reason": "Done now"},
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("model_summary_delta: THINK Inspect roadmap", output)
+                self.assertIn("model_reason_delta: THINK Done now", output)
+                self.assertIn("model_action_delta: THINK finish", output)
+                self.assertNotIn('model_delta: THINK {"summary"', output)
             finally:
                 os.chdir(old_cwd)
 

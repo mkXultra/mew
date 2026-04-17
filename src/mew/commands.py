@@ -887,6 +887,60 @@ def format_work_live_model_delta(phase, text):
     return f"model_delta: {phase} {clip_output(text, 500)}"
 
 
+def _extract_json_string_field_prefix(text, field):
+    marker = f'"{field}"'
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    colon = text.find(":", start + len(marker))
+    if colon < 0:
+        return ""
+    quote = text.find('"', colon + 1)
+    if quote < 0:
+        return ""
+
+    chars = []
+    escaped = False
+    for char in text[quote + 1 :]:
+        if escaped:
+            if char == "n":
+                chars.append("\n")
+            elif char == "t":
+                chars.append("\t")
+            elif char in ('"', "\\", "/"):
+                chars.append(char)
+            else:
+                chars.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            break
+        chars.append(char)
+    return "".join(chars)
+
+
+def _compact_live_model_delta_lines(phase, total_text, rendered_lengths):
+    lines = []
+    for field, label in (("summary", "model_summary_delta"), ("reason", "model_reason_delta")):
+        value = _extract_json_string_field_prefix(total_text, field)
+        previous = rendered_lengths.get((phase, field), 0)
+        if len(value) <= previous:
+            continue
+        delta = " ".join(value[previous:].split())
+        rendered_lengths[(phase, field)] = len(value)
+        if delta:
+            lines.append(f"{label}: {phase} {clip_output(delta, 500)}")
+
+    action_type = _extract_json_string_field_prefix(total_text, "type")
+    if action_type and not rendered_lengths.get((phase, "action_type")):
+        rendered_lengths[(phase, "action_type")] = len(action_type)
+        lines.append(f"model_action_delta: {phase} {clip_output(action_type, 120)}")
+    return lines
+
+
 def _work_control_options(args, session=None):
     defaults = (session or {}).get("default_options") or {}
 
@@ -1661,6 +1715,8 @@ def cmd_work_ai(args):
         live_thinking_open = False
         live_model_delta_seen = False
         live_delta_buffers = {}
+        live_delta_totals = {}
+        live_delta_rendered_lengths = {}
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
@@ -1696,8 +1752,17 @@ def cmd_work_ai(args):
                 buffered = live_delta_buffers.get(current_phase) or ""
                 if not buffered:
                     continue
-                rendered = " ".join(buffered.split())
                 live_delta_buffers[current_phase] = ""
+                total = live_delta_totals.get(current_phase) or buffered
+                if getattr(args, "compact_live", False) and total.lstrip().startswith("{"):
+                    for line in _compact_live_model_delta_lines(
+                        current_phase,
+                        total,
+                        live_delta_rendered_lengths,
+                    ):
+                        print(line, flush=True)
+                    continue
+                rendered = " ".join(buffered.split())
                 if rendered:
                     print(format_work_live_model_delta(current_phase, rendered), flush=True)
 
@@ -1720,6 +1785,7 @@ def cmd_work_ai(args):
                     )
                 )
                 live_thinking_open = True
+            live_delta_totals[phase] = f"{live_delta_totals.get(phase, '')}{text or ''}"
             live_delta_buffers[phase] = f"{live_delta_buffers.get(phase, '')}{text or ''}"
             rendered = " ".join(live_delta_buffers[phase].split())
             if len(rendered) >= 160 or "\n" in str(text or ""):
