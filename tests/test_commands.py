@@ -916,6 +916,8 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                from mew.state import load_state
+
                 with redirect_stdout(StringIO()):
                     self.assertEqual(main(["task", "add", "Quiet cockpit", "--kind", "coding"]), 0)
 
@@ -924,12 +926,14 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
-                self.assertIn("created work session #1 for task #1", output)
+                self.assertEqual(output, "")
                 self.assertNotIn("mew chat. Type /help", output)
                 self.assertNotIn("scope:", output)
                 self.assertNotIn("work-mode:", output)
                 self.assertNotIn("Mew brief", output)
+                self.assertNotIn("Mew code", output)
                 self.assertNotIn("Next controls", output)
+                self.assertEqual(load_state()["work_sessions"][0]["task_id"], 1)
             finally:
                 os.chdir(old_cwd)
 

@@ -1949,7 +1949,8 @@ def cmd_code(args):
             session, created = create_work_session(state, task)
             remember_work_session_default_options(session, start_args)
             save_state(state)
-        print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
+        if not getattr(args, "quiet", False):
+            print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
     elif code_args_request_default_update(args):
         with state_lock():
             state = load_state()
@@ -1959,7 +1960,8 @@ def cmd_code(args):
                 return 1
             remember_work_session_default_options(session, code_default_update_args(args, session))
             save_state(state)
-        print(f"updated work session #{session['id']} defaults")
+        if not getattr(args, "quiet", False):
+            print(f"updated work session #{session['id']} defaults")
 
     chat_args = SimpleNamespace(
         poll_interval=getattr(args, "poll_interval", 1.0),
@@ -7613,7 +7615,7 @@ def chat_work_session(rest, chat_state=None):
             print("Auto recovery")
             print_work_recovery_report(auto_recovery)
             print("")
-        if resume and not task_id:
+        if resume and not task_id and scope_kind:
             active_matches = active_work_sessions_for_kind(state, scope_kind)
             if len(active_matches) > 1:
                 selected_task_id = session.get("task_id") if session else ""
