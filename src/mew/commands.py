@@ -3110,12 +3110,19 @@ def cmd_work_show_session(args):
         return auto_recovery_code
     if args.json:
         payload = {"work_session": session}
-        if not session and not getattr(args, "task_id", None):
-            payload["recent_work_sessions"] = recent_work_session_summaries(state)
-            payload["start_commands"] = [
-                f"{mew_executable()} work <task-id> --start-session",
-                "/work-session start <task-id>",
-            ]
+        if not session:
+            if getattr(args, "task_id", None):
+                payload["task_id"] = args.task_id
+                payload["start_commands"] = [
+                    mew_command("work", args.task_id, "--start-session"),
+                    f"/work-session start {args.task_id}",
+                ]
+            else:
+                payload["recent_work_sessions"] = recent_work_session_summaries(state)
+                payload["start_commands"] = [
+                    f"{mew_executable()} work <task-id> --start-session",
+                    "/work-session start <task-id>",
+                ]
         elif session:
             if getattr(args, "timeline", False):
                 payload["timeline"] = build_work_session_timeline(session, limit=getattr(args, "limit", 20))
@@ -9111,9 +9118,9 @@ def cmd_chat(args):
         kind=kind,
         metadata={"work_mode": bool(getattr(args, "work_mode", False))},
     )
-    if kind:
+    if kind and not getattr(args, "quiet", False):
         print(f"scope: {kind}", flush=True)
-    if getattr(args, "work_mode", False):
+    if getattr(args, "work_mode", False) and not getattr(args, "quiet", False):
         print("work-mode: on; text becomes /continue guidance; blank line repeats after one work step", flush=True)
     state = load_state()
     if not args.no_brief:

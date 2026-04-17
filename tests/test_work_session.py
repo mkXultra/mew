@@ -2343,6 +2343,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("Work tests #", output)
                 self.assertNotIn("Work commands #", output)
                 self.assertNotIn("Work diffs #", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tests", "--commands", "--diffs", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertIsNone(data["work_session"])
+                self.assertEqual(data["task_id"], "1")
+                self.assertIn("mew work 1 --start-session", data["start_commands"])
+                self.assertIn("/work-session start 1", data["start_commands"])
             finally:
                 os.chdir(old_cwd)
 

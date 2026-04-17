@@ -898,11 +898,13 @@ class CommandTests(unittest.TestCase):
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
-                    code = main(["chat", "--quiet", "--timeout", "0"])
+                    code = main(["chat", "--quiet", "--kind", "coding", "--work-mode", "--timeout", "0"])
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertNotIn("mew chat. Type /help", output)
+                self.assertNotIn("scope:", output)
+                self.assertNotIn("work-mode:", output)
                 self.assertNotIn("Mew brief", output)
                 self.assertNotIn("Unread backlog should stay hidden.", output)
                 self.assertNotIn("Next controls", output)
