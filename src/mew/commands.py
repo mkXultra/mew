@@ -1766,6 +1766,7 @@ def cmd_code(args):
         no_unread=bool(getattr(args, "no_unread", False)),
         work_mode=True,
         compact_controls=True,
+        compact_brief=True,
         timeout=getattr(args, "timeout", None),
     )
     return cmd_chat(chat_args)
@@ -8610,6 +8611,28 @@ def read_chat_line(poll_interval, prompt_state, prompt="mew> "):
     return line.rstrip("\n")
 
 
+def format_compact_chat_brief(state, kind=None):
+    focus = build_focus_data(state, limit=1, kind=kind)
+    runtime = state.get("runtime_status", {})
+    runtime_phase = runtime.get("phase") or ("running" if runtime.get("pid") else "stopped")
+    title = "Mew code"
+    if kind:
+        title += f" ({kind})"
+    lines = [
+        f"{title}: runtime={runtime_phase} tasks={focus.get('open_task_count') or 0} "
+        f"unread={focus.get('unread_outbox_count') or 0}",
+        f"Next: {focus.get('next_move')}",
+    ]
+    active = (focus.get("active_work_sessions") or [])[:1]
+    if active:
+        session = active[0]
+        lines.append(
+            f"Active: #{session.get('id')} task=#{session.get('task_id')} "
+            f"phase={session.get('phase')} {session.get('title') or ''}".rstrip()
+        )
+    return "\n".join(lines)
+
+
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
@@ -8636,7 +8659,10 @@ def cmd_chat(args):
         print("work-mode: on; text becomes /continue guidance; blank line repeats after one work step", flush=True)
     state = load_state()
     if not args.no_brief:
-        print(build_brief(state, limit=args.limit, kind=kind), flush=True)
+        if getattr(args, "compact_brief", False):
+            print(format_compact_chat_brief(state, kind=kind), flush=True)
+        else:
+            print(build_brief(state, limit=args.limit, kind=kind), flush=True)
     session = active_work_session_for_kind(state, kind=kind)
     if session and not suppress_startup_controls:
         print(

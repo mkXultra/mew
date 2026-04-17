@@ -544,7 +544,7 @@ def run_chat_cockpit_scenario(workspace, env=None):
     )
     code_close_result = run(["work", "3", "--close-session"])
     code_result = run(
-        ["code", "3", "--timeout", "0", "--no-brief", "--no-unread", "--read-only", "--no-verify"],
+        ["code", "3", "--timeout", "0", "--read-only", "--no-verify"],
         timeout=15,
     )
     code_output = code_result.get("stdout") or ""
@@ -636,7 +636,8 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and code_result.get("exit_code") == 0
         and "mew chat. Type /help" in code_output
         and "scope: coding" in code_output
-        and "work-mode: on" in code_output,
+        and "work-mode: on" in code_output
+        and "Mew code (coding):" in code_output,
         observed=command_result_tail(code_result),
         expected="mew code <task-id> starts/reuses a coding work session and enters work-mode chat",
     )

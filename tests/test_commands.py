@@ -3867,6 +3867,15 @@ class CommandTests(unittest.TestCase):
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["code", "--timeout", "0"]), 0)
+                compact_output = stdout.getvalue()
+                self.assertIn("Mew code (coding):", compact_output)
+                self.assertIn("Next: enter coding cockpit for task #1", compact_output)
+                self.assertNotIn("project_snapshot:", compact_output)
+                self.assertNotIn("Programmer queue", compact_output)
+                self.assertNotIn("stale coding chatter", compact_output)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
                     self.assertEqual(main(["code", "--timeout", "0", "--no-brief"]), 0)
                 output = stdout.getvalue()
                 self.assertIn("scope: coding", output)

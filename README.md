@@ -451,6 +451,8 @@ reuses that task's native work session, scopes chat to `coding`, enables
 work-mode, and keeps startup controls short: `/c`, `/follow`, and
 `/continue <guidance>`. It hides unread outbox by default so old passive chatter
 does not flood a coding session; use `--show-unread` when you want to review it.
+Its startup brief is a compact status and next-action line rather than the full
+general chat brief.
 Use `--read-only --no-verify` to enter without inheriting older write, shell, or
 verification gates from a previous session. `mew next` and `mew focus` point
 coding work back to this cockpit, whether the task is fresh or already active,
