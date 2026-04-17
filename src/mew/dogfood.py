@@ -477,6 +477,13 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     brief_result = run(["brief"], timeout=15)
     doctor_result = run(["doctor"], timeout=15)
+    desk_result = run(["desk", "--json"], timeout=15)
+    journal_path = workspace / ".mew" / "journal" / "2026-04-17.md"
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    journal_path.write_text("# Mew Journal 2026-04-17\n\nDogfood journal hint.\n", encoding="utf-8")
+    bundle_result = run(["bundle", "--date", "2026-04-17", "--json"], timeout=15)
+    desk_data = _json_stdout(desk_result)
+    bundle_data = _json_stdout(bundle_result)
 
     _scenario_check(
         checks,
@@ -529,6 +536,22 @@ def run_runtime_focus_scenario(workspace, env=None):
         and "runtime_effects: total=2 incomplete=0" in (doctor_result.get("stdout") or ""),
         observed=command_result_tail(doctor_result),
         expected="doctor shows runtime effect count",
+    )
+    _scenario_check(
+        checks,
+        "desk_json_surfaces_pet_state",
+        desk_result.get("exit_code") == 0 and bool(desk_data.get("pet_state")),
+        observed=desk_data,
+        expected="desk --json returns a pet_state view model",
+    )
+    _scenario_check(
+        checks,
+        "bundle_json_surfaces_generated_report",
+        bundle_result.get("exit_code") == 0
+        and "Journal" in (bundle_data.get("included") or [])
+        and (workspace / ".mew" / "passive-bundle" / "2026-04-17.md").exists(),
+        observed=bundle_data,
+        expected="bundle --json includes the generated journal report",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
