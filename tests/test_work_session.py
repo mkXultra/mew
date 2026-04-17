@@ -4221,6 +4221,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("prefer search_text for symbols or option names before broad read_file", prompt)
         self.assertIn("line_start and line_count", prompt)
+        self.assertIn("search the broader src tree", prompt)
+        self.assertIn("instead of repeating same-file searches", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("exact old and new strings", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
