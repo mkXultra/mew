@@ -8704,6 +8704,10 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["pending_steer"]["text"], "inspect README before edits")
                 self.assertEqual(session["pending_steer"]["source"], "user")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
+                self.assertIn("pending_steer: inspect README before edits", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

@@ -432,8 +432,8 @@ humans can add the same kind of note with `mew work --session-note` or
 review. For mid-loop steering that should not become permanent memory, use
 `mew work --steer "..."` or `/work-session steer ...`; mew queues that text for
 the next live/follow step, records the consumed steer as a note, and then clears
-it. Resume and live result panes show the queued steer while it is still
-pending. Approving a dry-run write can reuse the latest session
+it. Session, resume, and live result panes show the queued steer while it is
+still pending. Approving a dry-run write can reuse the latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
 or write verification refreshes the session's default verification command, so

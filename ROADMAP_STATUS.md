@@ -286,7 +286,7 @@ Evidence:
 - A fresh `codex-ultra` human-role compact follow test verified active cells, compact completed cells, pending approval controls, approval apply/reject, and closed-session unavailable approvals; its remaining findings are now addressed by concrete resume verifier hints, retryable failed-approval cells, and raw-diff-free compact final reports.
 - Chat `/follow --quiet` now accepts the same quiet flag as the CLI and preserves it in cached continue options, making attach-style chat probes less noisy.
 - Failed command/test cells now expand their stderr/stdout tails instead of using the success-path 8-line clip, reducing the need to open `--tests` just to see the actual failure.
-- `mew work --steer "..."` and `/work-session steer ...` queue one-time guidance for the next live/follow step; pending steer is exposed in resume/live session output, then injected into model guidance, recorded as a work-session note, and cleared. Stop requests take precedence and preserve pending steer for the next actual step.
+- `mew work --steer "..."` and `/work-session steer ...` queue one-time guidance for the next live/follow step; pending steer is exposed in session/resume/live output, then injected into model guidance, recorded as a work-session note, and cleared. Stop requests take precedence and preserve pending steer for the next actual step.
 - `Next CLI controls` now include the `mew work <task-id> --steer <guidance>` lane, making the mid-loop control discoverable from live/follow output instead of only from chat help.
 
 Missing proof:
@@ -421,6 +421,7 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `806 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `196 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_cli_controls_include_steer_command tests/test_work_session.py::WorkSessionTests::test_work_session_start_can_seed_reentry_options` current: `2 passed`.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_help_describes_native_work_flow tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `2 passed`.
 - `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.

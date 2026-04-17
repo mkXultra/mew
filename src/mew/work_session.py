@@ -2084,6 +2084,9 @@ def format_work_session(session, task=None, limit=8, details=False):
         f"updated_at: {session.get('updated_at')}",
         f"model_turns={len(turns)} tool_calls={len(calls)}",
     ]
+    pending_steer = (resume or {}).get("pending_steer") or {}
+    if pending_steer.get("text"):
+        lines.append(f"pending_steer: {clip_inline_text(pending_steer.get('text'), 240)}")
     if details:
         paths = []
         for call in calls:
