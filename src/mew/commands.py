@@ -670,6 +670,10 @@ def format_work_ai_report(report, compact=False):
     stop_request = report.get("stop_request") or {}
     if stop_request:
         lines.append(f"stop_request: {stop_request.get('reason') or 'stop requested'}")
+    if report.get("interrupted_step"):
+        lines.append(f"interrupted_step: {report.get('interrupted_step')}")
+    if report.get("interrupt_note"):
+        lines.append(f"interrupt_note: {report.get('interrupt_note')}")
     return "\n".join(lines)
 
 
@@ -1446,6 +1450,49 @@ def work_ai_step_guidance(args, index, max_steps):
     return guidance
 
 
+def pause_work_session_after_user_interrupt(session_id, step_index):
+    current_time = now_iso()
+    repairs = []
+    note_text = (
+        f"Follow interrupted by user at step {step_index}. "
+        "Resume with /c, /continue, or the printed Next CLI controls after reviewing the latest session state."
+    )
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        if not session:
+            return {"repairs": repairs, "note": note_text}
+        recovery_hint = (
+            f"Review work session #{session.get('id')} resume, verify world state, then retry or choose a new action."
+        )
+        for call in session.get("tool_calls") or []:
+            if not isinstance(call, dict) or call.get("status") != "running":
+                continue
+            call["status"] = "interrupted"
+            call["finished_at"] = current_time
+            call["error"] = call.get("error") or "Interrupted by user during follow."
+            call["summary"] = call.get("summary") or "interrupted work tool call"
+            call["recovery_hint"] = recovery_hint
+            repairs.append({"type": "interrupted_work_tool_call", "tool_call_id": call.get("id")})
+        for turn in session.get("model_turns") or []:
+            if not isinstance(turn, dict) or turn.get("status") != "running":
+                continue
+            turn["status"] = "interrupted"
+            turn["finished_at"] = current_time
+            turn["error"] = turn.get("error") or "Interrupted by user during follow."
+            turn["summary"] = turn.get("summary") or "interrupted work model turn"
+            turn["recovery_hint"] = recovery_hint
+            repairs.append({"type": "interrupted_work_model_turn", "model_turn_id": turn.get("id")})
+        add_work_session_note(session, note_text, source="system", current_time=current_time)
+        session["last_user_interrupt"] = {
+            "step": step_index,
+            "at": current_time,
+            "note": note_text,
+        }
+        save_state(state)
+    return {"repairs": repairs, "note": note_text}
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -1571,6 +1618,15 @@ def cmd_work_ai(args):
                 act_mode=getattr(args, "act_mode", "model") or "model",
                 stream_model=bool(getattr(args, "stream_model", False)),
             )
+        except KeyboardInterrupt:
+            interrupt = pause_work_session_after_user_interrupt(session_id, index)
+            report["stop_reason"] = "user_interrupt"
+            report["interrupted_step"] = index
+            report["interrupt_note"] = interrupt.get("note")
+            report["interrupt_repairs"] = interrupt.get("repairs") or []
+            if progress:
+                progress(f"step #{index}: interrupted by user")
+            break
         except MewError as exc:
             error = str(exc)
             with state_lock():
@@ -1650,16 +1706,26 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} action")
                 print(format_work_action(action))
-            batch_step = run_work_batch_action(
-                session_id,
-                task_id,
-                index,
-                planned,
-                action,
-                args,
-                progress,
-                turn_id=planning_turn_id,
-            )
+            try:
+                batch_step = run_work_batch_action(
+                    session_id,
+                    task_id,
+                    index,
+                    planned,
+                    action,
+                    args,
+                    progress,
+                    turn_id=planning_turn_id,
+                )
+            except KeyboardInterrupt:
+                interrupt = pause_work_session_after_user_interrupt(session_id, index)
+                report["stop_reason"] = "user_interrupt"
+                report["interrupted_step"] = index
+                report["interrupt_note"] = interrupt.get("note")
+                report["interrupt_repairs"] = interrupt.get("repairs") or []
+                if progress:
+                    progress(f"step #{index}: interrupted by user")
+                break
             report["steps"].append(batch_step)
             if getattr(args, "live", False):
                 with state_lock():
@@ -1839,6 +1905,24 @@ def cmd_work_ai(args):
                 work_tool_output_progress(progress, tool_call_id),
             )
             error = work_tool_result_error(action_type, result)
+        except KeyboardInterrupt:
+            interrupt = pause_work_session_after_user_interrupt(session_id, index)
+            report["steps"].append(
+                {
+                    "index": index,
+                    "status": "interrupted",
+                    "action": action,
+                    "error": "Interrupted by user during follow.",
+                    "summary": interrupt.get("note") or "",
+                }
+            )
+            report["stop_reason"] = "user_interrupt"
+            report["interrupted_step"] = index
+            report["interrupt_note"] = interrupt.get("note")
+            report["interrupt_repairs"] = interrupt.get("repairs") or []
+            if progress:
+                progress(f"step #{index}: interrupted by user")
+            break
         except (OSError, ValueError) as exc:
             result = None
             error = str(exc)
@@ -1941,6 +2025,8 @@ def cmd_work_ai(args):
             state = load_state()
             session = find_work_session(state, session_id)
             print(format_work_cli_controls(session, args))
+    if report.get("stop_reason") == "user_interrupt":
+        return 130
     return 0 if report.get("stop_reason") not in ("model_error", "tool_failed", "no_active_session") else 1
 
 
@@ -6482,7 +6568,7 @@ def chat_work_session(rest, chat_state=None):
             live_session_id = session.get("id") if session else None
         work_exit_code = cmd_work_ai(args)
         if action == "live":
-            if work_exit_code == 0:
+            if work_exit_code in (0, 130):
                 _remember_work_continue_options(parts, chat_state)
             state = load_state()
             session = find_work_session(state, live_session_id) if live_session_id else None

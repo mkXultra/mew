@@ -5415,6 +5415,93 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_keyboard_interrupt_marks_session_recoverable(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("interrupt content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    raise KeyboardInterrupt
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--max-steps",
+                                        "3",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                130,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("stop=user_interrupt", output)
+                self.assertIn("interrupted_step: 1", output)
+                self.assertIn("Resume with /c", output)
+                self.assertIn("Next CLI controls", output)
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("stop_requested_at", session)
+                self.assertEqual(session["model_turns"][0]["status"], "interrupted")
+                self.assertEqual(session["last_user_interrupt"]["step"], 1)
+                self.assertIn("Resume with /c", session["notes"][-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_follow_keyboard_interrupt_keeps_continue_options(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("chat interrupt content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    raise KeyboardInterrupt
+
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --auth auth.json --allow-read . --act-mode deterministic",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("stop=user_interrupt", output)
+                self.assertIn("Primary", output)
+                self.assertIn("--allow-read .", chat_state["work_continue_options"])
+                self.assertIn("--act-mode deterministic", chat_state["work_continue_options"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_follow_runs_bounded_live_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
