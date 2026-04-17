@@ -3971,6 +3971,50 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_result_pane_shows_search_matches(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("alpha needle\nbeta\nneedle gamma\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "search README",
+                    "action": {"type": "search_text", "path": ".", "query": "needle"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
+                self.assertIn("tool #1 [completed] search_text", result_block)
+                self.assertIn("matches:", result_block)
+                self.assertIn("alpha needle", result_block)
+                self.assertIn("needle gamma", result_block)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_finish_can_mark_task_done_when_requested(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

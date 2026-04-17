@@ -682,6 +682,18 @@ def _format_live_output_preview(label, text, max_chars=500):
     return lines
 
 
+def _format_live_match_preview(matches, max_items=5, max_chars=700):
+    matches = [str(match) for match in (matches or []) if str(match).strip()]
+    if not matches:
+        return []
+    text = clip_output("\n".join(matches[:max_items]), max_chars)
+    lines = ["matches:"]
+    lines.extend(f"  {line}" for line in text.splitlines())
+    if len(matches) > max_items:
+        lines.append(f"  ... {len(matches) - max_items} more match(es)")
+    return lines
+
+
 def _format_live_tool_summary(call):
     result = call.get("result") or {}
     if result.get("command"):
@@ -713,6 +725,8 @@ def _format_live_tool_call_result(call):
         lines.extend(_format_live_output_preview("stdout", result.get("stdout")))
     if result.get("stderr"):
         lines.extend(_format_live_output_preview("stderr", result.get("stderr")))
+    if call.get("tool") == "search_text":
+        lines.extend(_format_live_match_preview(result.get("matches") or []))
     if result.get("diff"):
         lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))
     if call.get("tool") in WRITE_WORK_TOOLS and result.get("dry_run") and result.get("changed") and not call.get("approval_status"):

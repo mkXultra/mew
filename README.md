@@ -324,6 +324,8 @@ when you want only thinking/action/result panes during a longer run and will
 open `mew work --session --resume` separately if you need the full reentry
 bundle; compact mode also keeps the final step report to command/cwd/exit
 summaries instead of replaying stdout/stderr after the result pane.
+`search_text` live results include a short matches preview, so a compact run can
+show what was found without opening the full session details.
 When the model finishes, the work session is closed
 and the final note is appended to the task so `mew work <task-id> --session --resume`
 can still show the closed session. A `finish` action can explicitly set
