@@ -30,6 +30,21 @@ mew work <task-id> --follow --max-steps 0 --quiet --allow-read .
 `--quiet` is optional; it only keeps the refresh command's terminal output
 compact.
 
+## Inspecting Freshness
+
+Observers can check whether the latest snapshot exists, how old its heartbeat
+is, and whether the producing process is still alive:
+
+```sh
+mew work --follow-status --json
+mew work <task-id> --follow-status --json
+```
+
+The command reads `.mew/follow/latest.json`, or the session-specific snapshot
+when a task id maps to a work session, and returns `status`, `producer_alive`,
+`heartbeat_age_seconds`, `pending_approval_count`, and the snapshot path. It
+exits nonzero when no snapshot exists.
+
 ## Reply File
 
 Apply a reply with:

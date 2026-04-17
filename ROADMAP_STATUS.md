@@ -92,6 +92,9 @@ reply-file approval has already resolved them.
 Follow snapshots now also expose CLI-native approval/rejection hints beside the
 chat cockpit hints, so external observer agents do not have to translate
 `/work-session ...` controls back into `mew work ...` commands.
+`mew work --follow-status` now gives observers a read-only freshness/producer
+liveness check over `.mew/follow/latest.json` or the session snapshot, closing
+the read-side loop around the reply-file observer contract.
 
 ## Milestone 1: Native Hands
 
@@ -329,6 +332,7 @@ Evidence:
 - `.mew/follow/latest.json` now includes top-level `pending_approvals`, `supported_actions`, and a context-aware `reply_template` for external observer UIs and models.
 - `mew work --live/--follow --max-steps 0` refreshes `.mew/follow/latest.json` without spending a model turn, so observers can publish pending approval state on demand.
 - Pending approval snapshots now include `cli_approve_hint` and `cli_reject_hint` alongside chat-style hints for external observer agents.
+- `mew work --follow-status --json` reports snapshot freshness, heartbeat age, producer PID liveness, and pending approval count without requiring observers to parse raw snapshot files.
 - `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
 
 Missing proof:

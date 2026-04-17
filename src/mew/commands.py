@@ -1977,6 +1977,8 @@ def cmd_work(args):
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "follow_status", False):
+        return cmd_work_follow_status(args)
     if getattr(args, "reply_schema", False):
         return cmd_work_reply_schema(args)
     if getattr(args, "reply_file", None):
@@ -4081,6 +4083,106 @@ def build_work_reply_schema(session=None, resume=None):
         "supported_actions": _work_reply_supported_actions(),
         "reply_template": _work_reply_template(session, resume=resume),
     }
+
+
+def _work_follow_snapshot_path_for_args(args, state):
+    follow_dir = STATE_DIR / "follow"
+    session = None
+    task_id = getattr(args, "task_id", None)
+    if task_id:
+        session = _latest_work_session_for_task(state, task_id)
+    else:
+        session = active_work_session(state)
+    if session and session.get("id") is not None:
+        session_path = follow_dir / f"session-{session.get('id')}.json"
+        if session_path.exists():
+            return session_path
+    return follow_dir / "latest.json"
+
+
+def _work_follow_status_from_snapshot(path):
+    if not path.exists():
+        return {
+            "snapshot_path": str(path),
+            "status": "absent",
+            "exists": False,
+            "heartbeat_at": None,
+            "heartbeat_age_seconds": None,
+            "producer_pid": None,
+            "producer_alive": False,
+        }
+    data = json.loads(path.read_text(encoding="utf-8"))
+    heartbeat_at = data.get("heartbeat_at") or data.get("generated_at")
+    heartbeat = parse_time(heartbeat_at)
+    now = parse_time(now_iso())
+    age = None
+    if heartbeat and now:
+        age = max(0.0, (now - heartbeat).total_seconds())
+    producer_pid = ((data.get("producer") or {}).get("pid")) or None
+    has_producer = producer_pid not in (None, "")
+    producer_alive = pid_alive(producer_pid) if has_producer else False
+    if age is not None and age <= 10:
+        status = "fresh"
+    elif producer_alive:
+        status = "working"
+    elif has_producer and not producer_alive:
+        status = "dead"
+    else:
+        status = "stale"
+    return {
+        "snapshot_path": str(path),
+        "status": status,
+        "exists": True,
+        "schema_version": data.get("schema_version"),
+        "mode": data.get("mode"),
+        "session_id": data.get("session_id"),
+        "task_id": data.get("task_id"),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_age_seconds": age,
+        "producer_pid": producer_pid,
+        "producer_alive": producer_alive,
+        "stop_reason": data.get("stop_reason"),
+        "step_count": data.get("step_count"),
+        "pending_approval_count": len(data.get("pending_approvals") or []),
+        "session_updated_at": data.get("session_updated_at"),
+    }
+
+
+def format_work_follow_status(data):
+    lines = [
+        f"Follow snapshot status: {data.get('status')}",
+        f"path: {data.get('snapshot_path')}",
+    ]
+    if not data.get("exists"):
+        lines.append("snapshot: absent")
+        return "\n".join(lines)
+    age = data.get("heartbeat_age_seconds")
+    age_text = "-" if age is None else f"{age:.1f}s"
+    lines.extend(
+        [
+            f"mode: {data.get('mode') or '-'}",
+            f"session: {data.get('session_id') or '-'} task: {data.get('task_id') or '-'}",
+            f"heartbeat: {data.get('heartbeat_at') or '-'} age={age_text}",
+            f"producer: pid={data.get('producer_pid') or '-'} alive={bool(data.get('producer_alive'))}",
+            f"pending_approvals: {data.get('pending_approval_count', 0)}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def cmd_work_follow_status(args):
+    try:
+        state = load_state()
+        path = _work_follow_snapshot_path_for_args(args, state)
+        data = _work_follow_status_from_snapshot(path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"mew: invalid follow snapshot: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_follow_status(data))
+    return 0 if data.get("status") != "absent" else 1
 
 
 def format_work_reply_schema(data):

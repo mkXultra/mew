@@ -1270,6 +1270,7 @@ def run_work_session_scenario(workspace, env=None):
         ]
     )
     reply_approve_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
+    reply_approve_status_result = run(["work", "7", "--follow-status", "--json"])
     reply_approve_session_result = run(["work", "7", "--session", "--json"])
     reply_approve_session = (_json_stdout(reply_approve_session_result).get("work_session") or {})
     reply_approve_path = workspace / "follow-approve-reply.json"
@@ -1310,6 +1311,7 @@ def run_work_session_scenario(workspace, env=None):
     interrupt_submit_data = _json_stdout(interrupt_submit_result)
     interrupt_resume_data = _json_stdout(interrupt_resume_result)
     reply_approve_write_data = _json_stdout(reply_approve_write_result)
+    reply_approve_status_data = _json_stdout(reply_approve_status_result)
     reply_approve_data = _json_stdout(reply_approve_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
@@ -1477,9 +1479,13 @@ def run_work_session_scenario(workspace, env=None):
         and reply_approve_write_result.get("exit_code") == 0
         and reply_approve_snapshot_result.get("exit_code") == 0
         and "Next CLI controls" not in (reply_approve_snapshot_result.get("stdout") or "")
+        and reply_approve_status_result.get("exit_code") == 0
         and reply_approve_result.get("exit_code") == 0
         and ((reply_approve_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
         and reply_approve_snapshot_data.get("stop_reason") == "snapshot_refresh"
+        and reply_approve_status_data.get("status") in ("fresh", "working")
+        and isinstance(reply_approve_status_data.get("producer_alive"), bool)
+        and isinstance(reply_approve_status_data.get("heartbeat_age_seconds"), (int, float))
         and ((reply_approve_snapshot_data.get("pending_approvals") or [{}])[0]).get("tool_call_id")
         == reply_approve_tool_id
         and ((reply_approve_snapshot_data.get("reply_template") or {}).get("actions") or [{}])[0]
@@ -1489,7 +1495,18 @@ def run_work_session_scenario(workspace, env=None):
         and (workspace / "reply-approved.md").read_text(encoding="utf-8") == "reply approved\n",
         observed={
             "write": reply_approve_write_data.get("tool_call"),
-            "snapshot": reply_approve_snapshot_data,
+            "status": {
+                "status": reply_approve_status_data.get("status"),
+                "producer_alive": reply_approve_status_data.get("producer_alive"),
+                "heartbeat_age_seconds": reply_approve_status_data.get("heartbeat_age_seconds"),
+                "snapshot_path": reply_approve_status_data.get("snapshot_path"),
+            },
+            "snapshot": {
+                "stop_reason": reply_approve_snapshot_data.get("stop_reason"),
+                "pending_approvals": reply_approve_snapshot_data.get("pending_approvals"),
+                "reply_template": reply_approve_snapshot_data.get("reply_template"),
+                "supported_actions": reply_approve_snapshot_data.get("supported_actions"),
+            },
             "reply": reply_approve_data,
         },
         expected="reply-file approve applies a pending dry-run write from a zero-step follow snapshot",
