@@ -89,6 +89,9 @@ also carries `supported_actions`, emits an approval-shaped `reply_template` when
 approvals are pending, supports `--live/--follow --max-steps 0` as a no-model
 snapshot refresh, and suppresses stale approval-waiting working-memory hints after a
 reply-file approval has already resolved them.
+Follow snapshots now also expose CLI-native approval/rejection hints beside the
+chat cockpit hints, so external observer agents do not have to translate
+`/work-session ...` controls back into `mew work ...` commands.
 
 ## Milestone 1: Native Hands
 
@@ -325,6 +328,7 @@ Evidence:
 - `mew work --reply-file` now supports `approve` and `approve_all` observer actions for pending dry-run writes, reusing existing write/verify gates and rewriting the follow snapshot after completion.
 - `.mew/follow/latest.json` now includes top-level `pending_approvals`, `supported_actions`, and a context-aware `reply_template` for external observer UIs and models.
 - `mew work --live/--follow --max-steps 0` refreshes `.mew/follow/latest.json` without spending a model turn, so observers can publish pending approval state on demand.
+- Pending approval snapshots now include `cli_approve_hint` and `cli_reject_hint` alongside chat-style hints for external observer agents.
 - `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
 
 Missing proof:

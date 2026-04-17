@@ -12,6 +12,8 @@ The snapshot is a local contract for another model or UI. It includes:
 - `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
 - `pending_approvals`: top-level pending dry-run write approvals for observers
+  with both chat-style `approve_hint`/`reject_hint` and CLI-style
+  `cli_approve_hint`/`cli_reject_hint`
 - `supported_actions`: the safe reply actions this mew version accepts
 - `reply_command`: where to submit a reply file
 - `reply_template`: a minimal safe reply payload. When pending approvals exist,

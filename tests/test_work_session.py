@@ -2070,6 +2070,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("/work-session approve 3", resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn(shlex.quote(command), resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn("/work-session reject 3", resume["pending_approvals"][0]["reject_hint"])
+                self.assertIn("mew work 1 --approve-tool 3", resume["pending_approvals"][0]["cli_approve_hint"])
+                self.assertIn("mew work 1 --reject-tool 3", resume["pending_approvals"][0]["cli_reject_hint"])
                 self.assertEqual(resume["context"]["tool_calls"], 3)
                 self.assertEqual(resume["context"]["pressure"], "low")
                 self.assertGreater(resume["context"]["total_session_chars"], 0)
@@ -4438,6 +4440,8 @@ class WorkSessionTests(unittest.TestCase):
                 resume = json.loads(stdout.getvalue())["resume"]
                 self.assertIn("/work-session approve all", resume["approve_all_hint"])
                 self.assertIn("--allow-write", resume["approve_all_hint"])
+                self.assertIn("mew work 1 --approve-all", resume["cli_approve_all_hint"])
+                self.assertIn("--allow-write", resume["cli_approve_all_hint"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
@@ -8695,6 +8699,8 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(data["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertEqual(data["pending_approvals"], data["resume"]["pending_approvals"])
+                self.assertEqual(data["pending_approvals"][0]["cli_approve_hint"], "mew work 1 --approve-tool 3 --allow-write notes.md --allow-verify --verify-command '<command>'")
+                self.assertEqual(data["pending_approvals"][0]["cli_reject_hint"], "mew work 1 --reject-tool 3 --reject-reason '<reason>'")
                 self.assertEqual(data["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
                 self.assertTrue(any(action["type"] == "approve_all" for action in data["supported_actions"]))
             finally:

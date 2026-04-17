@@ -1281,6 +1281,14 @@ def build_work_session_resume(session, task=None, limit=8):
     failures = []
     pending_approvals = []
     latest_safe_reobserve = {}
+    task_id = session.get("task_id") or (task or {}).get("id")
+
+    def work_task_command(*parts):
+        command_parts = ["work"]
+        if task_id:
+            command_parts.append(task_id)
+        command_parts.extend(parts)
+        return mew_command(*command_parts)
 
     for call in calls:
         path = work_call_path(call)
@@ -1357,10 +1365,21 @@ def build_work_session_resume(session, task=None, limit=8):
                         f"--allow-verify --verify-command {verify_command_hint}"
                     ),
                     "reject_hint": f"/work-session reject {tool_call_id} <reason>",
+                    "cli_approve_hint": work_task_command(
+                        "--approve-tool",
+                        tool_call_id,
+                        "--allow-write",
+                        write_path,
+                        "--allow-verify",
+                        "--verify-command",
+                        verify_command or "<command>",
+                    ),
+                    "cli_reject_hint": work_task_command("--reject-tool", tool_call_id, "--reject-reason", "<reason>"),
                 }
             )
 
     approve_all_hint = ""
+    cli_approve_all_hint = ""
     if len(pending_approvals) > 1:
         write_paths = []
         for approval in pending_approvals:
@@ -1372,6 +1391,11 @@ def build_work_session_resume(session, task=None, limit=8):
             f"/work-session approve all {write_flags} "
             f"--allow-verify --verify-command {verify_command_hint}"
         )
+        cli_approve_all_parts = ["--approve-all"]
+        for write_path in write_paths:
+            cli_approve_all_parts.extend(["--allow-write", write_path])
+        cli_approve_all_parts.extend(["--allow-verify", "--verify-command", verify_command or "<command>"])
+        cli_approve_all_hint = work_task_command(*cli_approve_all_parts)
 
     recent_decisions = []
     for turn in turns[-limit:]:
@@ -1397,7 +1421,6 @@ def build_work_session_resume(session, task=None, limit=8):
         )
     )
 
-    task_id = session.get("task_id") or (task or {}).get("id")
     if session.get("status") == "closed":
         if task_id:
             start_command = mew_command("work", task_id, "--start-session")
@@ -1465,6 +1488,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "queued_followups_total": len(queued_followups),
         "queued_followups_truncated": len(queued_followups) > limit,
         "approve_all_hint": approve_all_hint,
+        "cli_approve_all_hint": cli_approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "working_memory": working_memory,
