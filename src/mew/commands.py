@@ -845,6 +845,16 @@ def _work_control_options(args, session=None):
     }
 
 
+def _work_args_have_tool_gates(args):
+    return bool(
+        getattr(args, "allow_read", None)
+        or getattr(args, "allow_write", None)
+        or getattr(args, "allow_shell", False)
+        or getattr(args, "allow_verify", False)
+        or getattr(args, "verify_command", "")
+    )
+
+
 def remember_work_session_default_options(session, args):
     if not session:
         return
@@ -967,7 +977,8 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1):
     if task_id is not None:
         parts.append(str(task_id))
     parts.append("--live")
-    options = _work_control_options(args, session=session)
+    option_session = None if getattr(args, "live", False) and _work_args_have_tool_gates(args) else session
+    options = _work_control_options(args, session=option_session)
     if options.get("auth"):
         parts.extend(["--auth", options["auth"]])
     if options.get("model_backend"):

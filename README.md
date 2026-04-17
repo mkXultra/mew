@@ -309,6 +309,9 @@ first live step. Later partial commands add explicit new options without
 forgetting earlier read/write/verify/model gates. Starting a new session for a
 task that only has closed sessions clones the latest closed session defaults, so
 closed-session reentry does not forget its cockpit setup.
+For CLI live runs that pass explicit tool gates, the printed next controls follow
+that current permission posture, so a read-only continue does not suggest stale
+write, shell, or verify flags from earlier broader runs.
 Controls include both a one-step continue and a bounded `--max-steps 3`
 continue, so short autonomous runs are discoverable without hiding the safer
 single-step path. Multi-step work stops at pending dry-run write approvals
