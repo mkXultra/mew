@@ -8980,6 +8980,10 @@ def format_compact_chat_brief(state, kind=None):
 
 
 def cmd_chat(args):
+    if getattr(args, "quiet", False):
+        args.no_brief = True
+        args.no_unread = True
+        args.activity = False
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
     pending_line = None
@@ -8992,7 +8996,9 @@ def cmd_chat(args):
         except OSError:
             pending_line = None
     pending_text = pending_line.strip() if isinstance(pending_line, str) else ""
-    suppress_startup_controls = pending_text.startswith(("/work-session", "/continue", "/c", "/follow"))
+    suppress_startup_controls = bool(getattr(args, "quiet", False)) or pending_text.startswith(
+        ("/work-session", "/continue", "/c", "/follow")
+    )
     append_chat_transcript(
         "start",
         "chat started",

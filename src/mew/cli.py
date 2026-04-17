@@ -1147,6 +1147,7 @@ def build_parser():
     chat_parser.add_argument("--no-activity", dest="activity", action="store_false", help="hide runtime activity lines")
     chat_parser.add_argument("--no-brief", action="store_true", help="do not print the startup brief")
     chat_parser.add_argument("--no-unread", action="store_true", help="do not print unread messages on startup")
+    chat_parser.add_argument("--quiet", action="store_true", help="start without brief, unread messages, activity, or startup controls")
     chat_parser.add_argument(
         "--work-mode",
         action="store_true",

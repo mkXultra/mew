@@ -861,6 +861,54 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_quiet_suppresses_startup_noise(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Implement quiet chat",
+                        "description": "Keep quick chat clean.",
+                        "kind": "coding",
+                        "status": "todo",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    state["tasks"].append(task)
+                    add_outbox_message(state, "warning", "Unread backlog should stay hidden.")
+                    create_work_session(state, task, current_time="2026-04-17T00:00:00Z")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["chat", "--quiet", "--timeout", "0"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("mew chat. Type /help", output)
+                self.assertNotIn("Mew brief", output)
+                self.assertNotIn("Unread backlog should stay hidden.", output)
+                self.assertNotIn("Next controls", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_activity_slash_uses_kind_scope(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
