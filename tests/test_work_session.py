@@ -9213,13 +9213,14 @@ class WorkSessionTests(unittest.TestCase):
                     with patch("mew.work_loop.call_model_json_with_retries") as call_model:
                         with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
                             self.assertEqual(
-                                main(["work", "1", "--live", "--max-steps", "0", "--allow-read", "."]),
+                                main(["work", "1", "--live", "--max-steps", "0", "--quiet", "--allow-read", "."]),
                                 0,
                             )
 
                 load_auth.assert_not_called()
                 call_model.assert_not_called()
                 self.assertIn("mew work ai: 0/0 step(s) stop=snapshot_refresh", stdout.getvalue())
+                self.assertNotIn("Next CLI controls", stdout.getvalue())
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["mode"], "live")
                 self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
@@ -9899,6 +9900,7 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(data["schema_version"], 1)
+                self.assertTrue(data["docs_path"].endswith("docs/FOLLOW_REPLY_SCHEMA.md"))
                 self.assertEqual(data["session_id"], 1)
                 self.assertEqual(data["task_id"], 1)
                 self.assertEqual(data["observed_session_updated_at"], session["updated_at"])
@@ -9912,15 +9914,21 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
-    def test_work_reply_schema_without_active_session_fails(self):
+    def test_work_reply_schema_without_active_session_prints_generic_schema(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
                 with redirect_stdout(StringIO()) as stdout:
-                    self.assertEqual(main(["work", "--reply-schema", "--json"]), 1)
+                    self.assertEqual(main(["work", "--reply-schema", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
-                self.assertEqual(data["error"], "no_active_work_session")
+                self.assertEqual(data["schema_version"], 1)
+                self.assertIsNone(data["session_id"])
+                self.assertIsNone(data["task_id"])
+                self.assertIsNone(data["observed_session_updated_at"])
+                self.assertEqual(data["reply_command"], "mew work --reply-file .mew/follow/reply.json")
+                self.assertTrue(data["docs_path"].endswith("docs/FOLLOW_REPLY_SCHEMA.md"))
+                self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
             finally:
                 os.chdir(old_cwd)
 

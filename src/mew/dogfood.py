@@ -1476,6 +1476,7 @@ def run_work_session_scenario(workspace, env=None):
         reply_approve_start_result.get("exit_code") == 0
         and reply_approve_write_result.get("exit_code") == 0
         and reply_approve_snapshot_result.get("exit_code") == 0
+        and "Next CLI controls" not in (reply_approve_snapshot_result.get("stdout") or "")
         and reply_approve_result.get("exit_code") == 0
         and ((reply_approve_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
         and reply_approve_snapshot_data.get("stop_reason") == "snapshot_refresh"

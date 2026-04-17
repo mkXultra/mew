@@ -42,6 +42,11 @@ Print the current session-specific template with:
 mew work <task-id> --reply-schema --json
 ```
 
+Without an active session, `mew work --reply-schema --json` prints the generic
+schema with `session_id`, `task_id`, and `observed_session_updated_at` set to
+null. The JSON includes both `docs` and `docs_path`; `docs_path` is useful when
+mew is launched from a temporary directory outside the repository.
+
 Minimal payload:
 
 ```json

@@ -1656,7 +1656,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "pending_approvals": (resume or {}).get("pending_approvals") or [],
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args) if session else [],
-        "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
+        "reply_command": _work_reply_file_command(task_id, reply_path),
         "supported_actions": reply_schema["supported_actions"],
         "reply_template": reply_schema["reply_template"],
     }
@@ -2596,7 +2596,11 @@ def cmd_work_ai(args):
             resume = build_work_session_resume(session, task=task)
             write_work_follow_snapshot(args, report, session, task, resume, force=True)
         print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
-        if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
+        if (
+            getattr(args, "live", False)
+            and not getattr(args, "quiet", False)
+            and not getattr(args, "suppress_cli_controls", False)
+        ):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
@@ -4051,16 +4055,26 @@ def _work_reply_template(session=None, resume=None):
     }
 
 
+def _work_reply_file_command(task_id, reply_path):
+    parts = ["work"]
+    if task_id is not None:
+        parts.append(task_id)
+    parts.extend(["--reply-file", str(reply_path)])
+    return mew_command(*parts)
+
+
 def build_work_reply_schema(session=None, resume=None):
     task_id = (session or {}).get("task_id")
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
     reply_path = STATE_DIR / "follow" / "reply.json"
+    docs_path = Path(__file__).resolve().parents[2] / "docs" / "FOLLOW_REPLY_SCHEMA.md"
     return {
         "schema_version": 1,
         "docs": "docs/FOLLOW_REPLY_SCHEMA.md",
+        "docs_path": str(docs_path),
         "reply_file": str(reply_path),
-        "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
+        "reply_command": _work_reply_file_command(task_id, reply_path),
         "session_id": session_id,
         "task_id": task_id,
         "observed_session_updated_at": observed,
@@ -4097,12 +4111,6 @@ def format_work_reply_schema(data):
 def cmd_work_reply_schema(args):
     state = load_state()
     session = _select_active_work_session_for_args(state, args)
-    if not session:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": "no_active_work_session"}, ensure_ascii=False, indent=2))
-        else:
-            print("mew: no active work session for reply schema", file=sys.stderr)
-        return 1
     data = build_work_reply_schema(session)
     if getattr(args, "json", False):
         print(json.dumps(data, ensure_ascii=False, indent=2))
