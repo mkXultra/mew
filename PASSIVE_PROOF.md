@@ -158,4 +158,7 @@ uv run pytest -q
 
 ./mew dogfood --scenario runtime-focus --cleanup --json
 status: pass, including runtime_passive_now_processes_passive_tick
+
+./mew dogfood --scenario all --cleanup --json
+status: pass
 ```
