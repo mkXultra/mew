@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, phase/elapsed progress anchors, grouped action/result panes, compact chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, and safe read/git retries exist; automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -34,6 +34,10 @@ Real dogfood with `mew code` task #48 produced an isolated
 `experiments/mew-dream` prototype, then fixed two cockpit blockers it exposed:
 brand-new write roots can now be created during gated writes, and `--no-verify`
 now prevents approval from resurrecting stale verification commands.
+Fresh human-role dogfood with `codex-ultra` then tightened the direct CLI
+cockpit: session start gates now persist into later manual tools, closed/done
+sessions allow read-only review probes, focused pane flags compose without
+`--session`, and `mew chat --quiet` can start without a banner.
 
 ## Milestone 1: Native Hands
 
@@ -341,6 +345,11 @@ Evidence:
 - `codex-ultra` human-role dogfood reported noisy quick chat startup; `mew chat --quiet` now starts without the brief, unread backlog, runtime activity, or startup controls while preserving existing `--no-brief`/`--no-unread` behavior.
 - Native self-improvement dogfood session #90 returned to the long task-list friction; `mew task list` now accepts `--limit N`, preserving existing default output while allowing bounded done/status listings.
 - `codex-ultra` human-role dogfood reported that `mew work <task> --tests/--commands/--diffs` looked like inert flags unless `--session` was also passed; these flags now route directly to their focused work-session panes.
+- `codex-ultra` human-role dogfood on HEAD `600bb1a` verified persisted read, shell, write, and verify gates; read-only review probes on closed/done sessions; and combined `--tests --commands --diffs` panes using temporary tasks #66/#67, then closed the sessions and left tracked git status clean.
+- Direct work tools now reuse session default gates while merging explicit per-call roots, and sensitive write roots such as `.mew/...` are filtered from persisted session defaults and generated controls so copy-paste follow-ups do not advertise roots the write tool will refuse.
+- `mew work <task-id> --tool read_file|search_text|glob|git_*` can now run as a read-only review probe against the latest closed session for done or still-open tasks, while write-class tools explain how to resume/reopen instead of emitting a generic no-active-session error.
+- `mew work <task-id> --tests --commands --diffs` now prints all requested focused panes in one command and prints a single start/resume hint when no session exists for the task.
+- `mew chat --quiet` now suppresses the REPL banner as well as startup brief, unread messages, activity, and controls, making scripted attach/chat checks truly quiet.
 
 Missing proof:
 
@@ -355,7 +364,10 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `682 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `694 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `323 passed, 4 subtests passed`.
+- `codex-ultra` human-role dogfood on HEAD `600bb1a` current: persisted gate reuse, closed/done read-only probes, combined focused panes, and final `git status --short` clean.
+- `claude-ultra` review of `d6caf93..a7ace9c` current: follow-up materially addressed persisted gates, review probes, and multi-pane composition; remaining cosmetic fallback and double-computation notes were resolved in `600bb1a`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_run_tests_missing_executable_reports_not_found tests/test_work_session.py::WorkSessionTests::test_work_session_write_tools_default_to_dry_run_and_can_apply_with_verification` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `164 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-work-view-flags --json` current: pass across 36 commands.

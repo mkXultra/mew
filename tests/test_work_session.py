@@ -702,6 +702,80 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_does_not_persist_sensitive_write_roots(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".mew/dogfood-gate-scratch",
+                                "--allow-write",
+                                "safe-output",
+                            ]
+                        ),
+                        0,
+                    )
+
+                defaults = load_state()["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["allow_write"], ["safe-output"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("--allow-write safe-output", output)
+                self.assertNotIn(".mew/dogfood-gate-scratch", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_explicit_sensitive_write_root_still_reports_sensitive_path(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                ".mew/dogfood-gate-scratch/probe.txt",
+                                "--content",
+                                "nope\n",
+                                "--create",
+                                "--allow-write",
+                                ".mew/dogfood-gate-scratch",
+                            ]
+                        ),
+                        1,
+                    )
+
+                self.assertIn("sensitive path", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_uses_session_default_shell_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

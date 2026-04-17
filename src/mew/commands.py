@@ -112,7 +112,7 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
-from .read_tools import glob_paths, inspect_dir, read_file, search_text, summarize_read_result
+from .read_tools import glob_paths, inspect_dir, is_sensitive_path, read_file, search_text, summarize_read_result
 from .tasks import (
     clip_output,
     find_task,
@@ -1124,7 +1124,7 @@ def _work_control_options(args, session=None):
             return value
         return getattr(args, name, fallback)
 
-    return {
+    options = {
         "auth": option("auth"),
         "model_backend": option("model_backend"),
         "model": option("model"),
@@ -1139,6 +1139,21 @@ def _work_control_options(args, session=None):
         "prompt_approval": bool(option("prompt_approval", False)),
         "no_prompt_approval": bool(option("no_prompt_approval", False)),
     }
+    options["allow_write"] = safe_work_write_roots(options.get("allow_write") or [])
+    return options
+
+
+def safe_work_write_roots(roots):
+    safe = []
+    for root in roots or []:
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if is_sensitive_path(path):
+            continue
+        if root not in safe:
+            safe.append(root)
+    return safe
 
 
 def _work_args_have_tool_gates(args):
@@ -1156,8 +1171,11 @@ def _work_tool_gate_options(args, session=None):
     verify_disabled = bool(defaults.get("verify_disabled"))
 
     def merged_list(name):
+        default_items = list(defaults.get(name) or [])
+        if name == "allow_write":
+            default_items = safe_work_write_roots(default_items)
         merged = []
-        for item in list(defaults.get(name) or []) + list(getattr(args, name, None) or []):
+        for item in default_items + list(getattr(args, name, None) or []):
             if item and item not in merged:
                 merged.append(item)
         return merged
@@ -1212,6 +1230,8 @@ def remember_work_session_default_options(session, args):
         for item in list(current.get(name) or []) + list(options.get(name) or []):
             if item and item not in merged:
                 merged.append(item)
+        if name == "allow_write":
+            return safe_work_write_roots(merged)
         return merged
 
     def merged_scalar(name):
