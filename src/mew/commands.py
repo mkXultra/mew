@@ -51,6 +51,7 @@ from .dogfood import (
     run_dogfood_scenario,
     summarize_dogfood_scenario_json,
 )
+from .dream import build_dream_view_model, format_dream_view, render_dream_markdown, write_dream_report
 from .errors import MewError
 from .journal import (
     build_journal_view_model,
@@ -4795,6 +4796,10 @@ def cmd_passive_bundle(args):
             self_memory_path = write_self_memory_report(self_memory_view, reports_root)
             generated.append({"type": "Self Memory", "path": str(self_memory_path)})
 
+            dream_view = build_dream_view_model(state, explicit_date=args.date)
+            dream_path = write_dream_report(dream_view, reports_root)
+            generated.append({"type": "Dream", "path": str(dream_path)})
+
             if args.morning_feed:
                 try:
                     items = load_feed(Path(args.morning_feed).expanduser())
@@ -5000,6 +5005,36 @@ def cmd_self_memory(args):
         print(render_self_memory_markdown(view_model), end="")
     else:
         print(format_self_memory_view(view_model))
+        if written:
+            print(f"written_markdown: {written}")
+    return 0
+
+def cmd_dream(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
+    state = load_state()
+    try:
+        view_model = build_dream_view_model(state, explicit_date=args.date)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    written = None
+    if args.write:
+        try:
+            written = write_dream_report(view_model, Path(args.output_dir).expanduser())
+        except OSError as exc:
+            print(f"mew: failed to write report: {exc}", file=sys.stderr)
+            return 1
+    if args.json:
+        data = dict(view_model)
+        if written:
+            data["path"] = str(written)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(render_dream_markdown(view_model), end="")
+    else:
+        print(format_dream_view(view_model))
         if written:
             print(f"written_markdown: {written}")
     return 0

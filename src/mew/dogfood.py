@@ -504,6 +504,7 @@ def run_runtime_focus_scenario(workspace, env=None):
     journal_result = run(["journal", "--date", bundle_day, "--write", "--json"], timeout=15)
     mood_result = run(["mood", "--date", bundle_day, "--write", "--json"], timeout=15)
     self_memory_result = run(["self-memory", "--date", bundle_day, "--write", "--json"], timeout=15)
+    dream_result = run(["dream", "--date", bundle_day, "--write", "--json"], timeout=15)
     morning_paper_result = run(
         [
             "morning-paper",
@@ -522,6 +523,7 @@ def run_runtime_focus_scenario(workspace, env=None):
     journal_data = _json_stdout(journal_result)
     mood_data = _json_stdout(mood_result)
     self_memory_data = _json_stdout(self_memory_result)
+    dream_data = _json_stdout(dream_result)
     morning_paper_data = _json_stdout(morning_paper_result)
     bundle_data = _json_stdout(bundle_result)
 
@@ -613,6 +615,15 @@ def run_runtime_focus_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "dream_json_writes_report",
+        dream_result.get("exit_code") == 0
+        and "learnings" in dream_data
+        and (workspace / ".mew" / "dreams" / f"{bundle_day}.md").exists(),
+        observed=dream_data,
+        expected="dream --write --json returns learnings and writes a report",
+    )
+    _scenario_check(
+        checks,
         "morning_paper_json_writes_report",
         morning_paper_result.get("exit_code") == 0
         and morning_paper_data.get("top_picks") == 1
@@ -627,10 +638,11 @@ def run_runtime_focus_scenario(workspace, env=None):
         and "Journal" in (bundle_data.get("included") or [])
         and "Mood" in (bundle_data.get("included") or [])
         and "Morning Paper" in (bundle_data.get("included") or [])
+        and "Dream" in (bundle_data.get("included") or [])
         and "Self Memory" in (bundle_data.get("included") or [])
         and (workspace / ".mew" / "passive-bundle" / f"{bundle_day}.md").exists(),
         observed=bundle_data,
-        expected="bundle --json includes generated journal, mood, morning paper, and self-memory reports",
+        expected="bundle --json includes generated journal, mood, morning paper, dream, and self-memory reports",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
 

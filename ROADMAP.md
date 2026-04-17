@@ -106,6 +106,7 @@ Target:
 - first-class mood scoring that tells the model and human whether mew is steady, concerned, or watchful
 - static-feed morning paper ranking that can later grow into passive research collection
 - first-class self-memory generation for traits, learnings, and continuity cues
+- first-class dream generation for overnight-style reflection and reentry
 - desktop-pet view model for passive state without coupling UI to raw state
 - file watcher or git watcher for passive observation
 - passive tick updates that refine the next action without spamming the user

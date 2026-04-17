@@ -144,6 +144,8 @@ Status:
 - Dogfood task #75 added dream `## Learnings` output from explicit
   `learnings`/`changes`/`decisions` and recent done-task notes.
 - Dogfood task #76 added active work-session continuity output.
+- The dream report generator is promoted to the core `mew dream` command and
+  `mew bundle --generate-core`.
 - Latest validation: `uv run pytest -q` passed with `707 passed, 6 subtests
   passed`.
 

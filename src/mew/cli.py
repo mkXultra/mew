@@ -30,6 +30,7 @@ from .commands import (
     cmd_desk,
     cmd_dogfood,
     cmd_doctor,
+    cmd_dream,
     cmd_effects,
     cmd_event,
     cmd_focus,
@@ -506,6 +507,14 @@ def build_parser():
     self_memory_parser.add_argument("--show", action="store_true", help="print the markdown report")
     self_memory_parser.add_argument("--json", action="store_true", help="print structured output")
     self_memory_parser.set_defaults(func=cmd_self_memory)
+
+    dream_parser = subparsers.add_parser("dream", help="generate a dream report")
+    dream_parser.add_argument("--date", help="report date YYYY-MM-DD; defaults to today")
+    dream_parser.add_argument("--write", action="store_true", help="write .mew/dreams/YYYY-MM-DD.md")
+    dream_parser.add_argument("--output-dir", default=".", help="where to write .mew/dreams files with --write")
+    dream_parser.add_argument("--show", action="store_true", help="print the markdown report")
+    dream_parser.add_argument("--json", action="store_true", help="print structured output")
+    dream_parser.set_defaults(func=cmd_dream)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)
