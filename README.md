@@ -563,9 +563,13 @@ Live and follow runs also write `.mew/follow/latest.json` plus
 next controls for another model or UI to observe without scraping terminal text.
 That observer can write a JSON reply file and apply it with
 `mew work --reply-file reply.json`; supported safe actions are `steer`,
-`followup`, `interrupt_submit`, `note`, `stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md`
-for the snapshot and reply contract, including the stale-snapshot guard, or run
-`mew work <task-id> --reply-schema --json` to print a session-specific template.
+`followup`, `interrupt_submit`, `note`, `stop`, `reject`, `approve`, and
+`approve_all`. Follow snapshots include `supported_actions`, top-level
+`pending_approvals`, and a context-aware `reply_template` so observers can
+approve pending dry-run writes without scraping terminal text. See
+`docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and reply contract, including
+the stale-snapshot guard, or run `mew work <task-id> --reply-schema --json` to
+print a session-specific template.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

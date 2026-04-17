@@ -5855,6 +5855,21 @@ class WorkSessionTests(unittest.TestCase):
             self.assertEqual(len(result["matches"]), 1)
             self.assertIn("--status pending", result["matches"][0])
 
+    def test_search_text_include_pattern_does_not_reinclude_sensitive_paths(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".mew").mkdir()
+            (root / ".mew" / "state.json").write_text("needle in state\n", encoding="utf-8")
+            (root / "visible.txt").write_text("needle in visible file\n", encoding="utf-8")
+
+            result = search_text("needle", str(root), [str(root)], max_matches=5, context_lines=1, pattern="*")
+
+            self.assertEqual(len(result["matches"]), 1)
+            self.assertIn("visible.txt", result["matches"][0])
+            self.assertNotIn(".mew", "\n".join(result["matches"]))
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 
@@ -8632,6 +8647,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["reply_template"]["task_id"], 1)
                 self.assertEqual(data["reply_template"]["observed_session_updated_at"], data["session_updated_at"])
                 self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
+                self.assertTrue(any(action["type"] == "approve" for action in data["supported_actions"]))
             finally:
                 os.chdir(old_cwd)
 
@@ -8679,8 +8695,62 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(data["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertEqual(data["pending_approvals"], data["resume"]["pending_approvals"])
+                self.assertEqual(data["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
+                self.assertTrue(any(action["type"] == "approve_all" for action in data["supported_actions"]))
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_session_suppresses_resolved_approval_memory_next_step(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Approval resolved",
+            "updated_at": "2026-04-18T00:00:03Z",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "tool_call_id": 1,
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "A write is ready.",
+                            "next_step": "After reentry, wait for approval or rejection of tool_call_id 1.",
+                        }
+                    },
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "approval_status": "applied",
+                    "parameters": {"path": "notes.md", "old": "before", "new": "after"},
+                    "result": {"path": "notes.md", "dry_run": True, "changed": True},
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "notes.md", "old": "before", "new": "after", "apply": True},
+                    "result": {"path": "notes.md", "dry_run": False, "changed": True},
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session, task={"id": 1, "title": "Approval resolved"})
+
+        self.assertEqual(resume["pending_approvals"], [])
+        memory = resume["working_memory"]
+        self.assertEqual(memory["hypothesis"], "A write is ready.")
+        self.assertEqual(memory.get("next_step"), "")
+        self.assertTrue(memory["resolved_pending_approval"])
+        self.assertIn("pending approval already applied", memory["latest_tool_state"])
 
     def test_max_steps_note_replaces_older_boundary_notes(self):
         from mew.commands import record_max_steps_reentry_note
@@ -9078,7 +9148,7 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
-    def test_chat_follow_rejects_zero_max_steps_without_model_call(self):
+    def test_chat_follow_zero_max_steps_refreshes_snapshot_without_model_call(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
@@ -9095,7 +9165,7 @@ class WorkSessionTests(unittest.TestCase):
                 chat_state = {"work_continue_options": "--allow-read ."}
                 with patch("mew.commands.load_model_auth") as load_auth:
                     with patch("mew.work_loop.call_model_json_with_retries") as call_model:
-                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 run_chat_slash_command(
                                     "/follow --max-steps 0 inspect without acting",
@@ -9106,8 +9176,14 @@ class WorkSessionTests(unittest.TestCase):
 
                 load_auth.assert_not_called()
                 call_model.assert_not_called()
-                self.assertIn("mew: --max-steps must be >= 1", stderr.getvalue())
+                self.assertIn("mew work ai: reused session #1 task=#1", stderr.getvalue())
+                self.assertIn("mew work ai: 0/0 step(s) stop=snapshot_refresh", stdout.getvalue())
                 self.assertEqual(load_state()["work_sessions"][0]["status"], "active")
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["mode"], "follow")
+                self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
+                self.assertEqual(snapshot["max_steps"], 0)
+                self.assertEqual(snapshot["step_count"], 0)
             finally:
                 os.chdir(old_cwd)
 

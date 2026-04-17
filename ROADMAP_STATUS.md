@@ -83,6 +83,12 @@ approval tool ids.
 Native self-improve entry output now prints a direct resume command alongside
 continue/follow, making long-running self-improvement sessions easier to reenter
 after context compression or a terminal restart.
+External observer dogfood on that approval loop confirmed another model could
+approve a dry-run write from `.mew/follow/latest.json`; the follow snapshot now
+also carries `supported_actions`, emits an approval-shaped `reply_template` when
+approvals are pending, supports `--follow --max-steps 0` as a no-model snapshot
+refresh, and suppresses stale approval-waiting working-memory hints after a
+reply-file approval has already resolved them.
 
 ## Milestone 1: Native Hands
 
@@ -317,7 +323,8 @@ Evidence:
 - `mew code --help` now includes direct reentry examples for reviewing a work-session resume and reopening coding-scoped work-mode chat.
 - `mew work --cells --cell-tail-lines N` provides configurable command/test tail output, reducing noisy cell panes without changing the full `--commands`/`--tests` detail views.
 - `mew work --reply-file` now supports `approve` and `approve_all` observer actions for pending dry-run writes, reusing existing write/verify gates and rewriting the follow snapshot after completion.
-- `.mew/follow/latest.json` now includes top-level `pending_approvals` for external observer UIs and models.
+- `.mew/follow/latest.json` now includes top-level `pending_approvals`, `supported_actions`, and a context-aware `reply_template` for external observer UIs and models.
+- `mew work --follow --max-steps 0` refreshes `.mew/follow/latest.json` without spending a model turn, so observers can publish pending approval state on demand.
 - `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
 
 Missing proof:

@@ -33,6 +33,17 @@ SENSITIVE_GLOBS = (
     "id_rsa",
     "id_ed25519",
 )
+SEARCH_EXCLUDE_GLOBS = (
+    "!.mew",
+    "!.mew/**",
+    "!auth.json",
+    "!.env",
+    "!.env.*",
+    "!*.pem",
+    "!*.key",
+    "!id_rsa",
+    "!id_ed25519",
+)
 
 
 def _is_relative_to(path, root):
@@ -221,7 +232,7 @@ def _search_snippet(candidate, line_number, context_lines, line_cache):
         if resolved not in line_cache:
             line_cache[resolved] = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
         lines = line_cache[resolved]
-    except OSError:
+    except (OSError, ValueError):
         return None
 
     start = max(1, int(line_number) - context_lines)
@@ -278,28 +289,12 @@ def search_text(
         "--no-heading",
         "--color",
         "never",
-        "--glob",
-        "!.mew",
-        "--glob",
-        "!.mew/**",
-        "--glob",
-        "!auth.json",
-        "--glob",
-        "!.env",
-        "--glob",
-        "!.env.*",
-        "--glob",
-        "!*.pem",
-        "--glob",
-        "!*.key",
-        "--glob",
-        "!id_rsa",
-        "--glob",
-        "!id_ed25519",
     ]
     include_patterns = _normalize_search_patterns(pattern)
     for include_pattern in include_patterns:
         command.extend(["--glob", include_pattern])
+    for exclude_pattern in SEARCH_EXCLUDE_GLOBS:
+        command.extend(["--glob", exclude_pattern])
     command.extend(["--", str(query), str(resolved)])
     env = os.environ.copy()
     env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
@@ -325,6 +320,7 @@ def search_text(
     snippets = []
     line_cache = {}
     total_matches = 0
+    skipped_sensitive = 0
     for line in result.stdout.splitlines():
         try:
             event = json.loads(line)
@@ -332,13 +328,16 @@ def search_text(
             continue
         if event.get("type") != "match":
             continue
-        total_matches += 1
-        if len(matches) >= max_matches:
-            break
         data = event.get("data") or {}
         path_text = ((data.get("path") or {}).get("text") or "").strip()
         line_number = data.get("line_number")
         line_text = ((data.get("lines") or {}).get("text") or "").rstrip("\n")
+        if path_text and is_sensitive_path(path_text):
+            skipped_sensitive += 1
+            continue
+        total_matches += 1
+        if len(matches) >= max_matches:
+            break
         match_text = f"{path_text}:{line_number}:{line_text}" if path_text and line_number else line_text
         matches.append(match_text)
         snippet = _search_snippet(path_text, line_number, context_lines, line_cache)
@@ -354,6 +353,7 @@ def search_text(
         "snippets": snippets,
         "context_lines": context_lines,
         "truncated": total_matches > max_matches,
+        "skipped_sensitive": skipped_sensitive,
     }
 
 

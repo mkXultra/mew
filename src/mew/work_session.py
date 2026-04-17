@@ -1055,6 +1055,32 @@ def build_working_memory(turns, calls, task=None):
     return _annotate_working_memory_with_latest_tool(memory, latest_turn or None, calls)
 
 
+def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
+    if not memory or pending_approvals:
+        return memory
+    next_step = str(memory.get("next_step") or "").lower()
+    if not any(token in next_step for token in ("approval", "approve", "rejection", "reject", "承認", "却下")):
+        return memory
+    for call in reversed(calls or []):
+        if call.get("tool") not in ("write_file", "edit_file"):
+            continue
+        if call.get("approval_status") not in ("applied", "rejected", "failed"):
+            continue
+        result = call.get("result") or {}
+        if not result.get("dry_run"):
+            continue
+        status = call.get("approval_status")
+        resolved = dict(memory)
+        resolved["next_step"] = ""
+        resolved["latest_tool_call_id"] = call.get("id")
+        resolved["latest_tool_state"] = f"pending approval already {status}; no pending approvals remain"
+        resolved["stale_after_tool_call_id"] = call.get("id")
+        resolved["stale_after_tool"] = "approval"
+        resolved["resolved_pending_approval"] = True
+        return resolved
+    return memory
+
+
 def _json_size(value):
     try:
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -1077,6 +1103,7 @@ def build_work_context_metrics(calls, turns):
     recent_turns = turns[-8:]
     recent_chars = _json_size({"tool_calls": recent_calls, "model_turns": recent_turns})
     total_chars = _json_size({"tool_calls": calls, "model_turns": turns})
+
     return {
         "tool_calls": len(calls),
         "model_turns": len(turns),
@@ -1409,6 +1436,11 @@ def build_work_session_resume(session, task=None, limit=8):
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
     if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
         next_action = recovery_plan["next_action"]
+    working_memory = _suppress_resolved_approval_memory(
+        build_working_memory(turns, calls, task=task),
+        calls,
+        pending_approvals,
+    )
 
     return {
         "session_id": session.get("id"),
@@ -1430,7 +1462,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "approve_all_hint": approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
-        "working_memory": build_working_memory(turns, calls, task=task),
+        "working_memory": working_memory,
         "context": build_work_context_metrics(calls, turns),
         "stop_request": (
             {

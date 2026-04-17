@@ -12,8 +12,17 @@ The snapshot is a local contract for another model or UI. It includes:
 - `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
 - `pending_approvals`: top-level pending dry-run write approvals for observers
+- `supported_actions`: the safe reply actions this mew version accepts
 - `reply_command`: where to submit a reply file
-- `reply_template`: a minimal safe reply payload
+- `reply_template`: a minimal safe reply payload. When pending approvals exist,
+  this template points at the first pending `approve` action; otherwise it uses
+  a `steer` action.
+
+To refresh the snapshot without spending a model turn, run:
+
+```sh
+mew work <task-id> --follow --max-steps 0 --quiet --allow-read .
+```
 
 ## Reply File
 

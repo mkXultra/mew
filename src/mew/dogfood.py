@@ -1257,6 +1257,24 @@ def run_work_session_scenario(workspace, env=None):
     )
     reply_approve_write_data_for_reply = _json_stdout(reply_approve_write_result)
     reply_approve_tool_id = (reply_approve_write_data_for_reply.get("tool_call") or {}).get("id")
+    reply_approve_snapshot_result = run(
+        [
+            "work",
+            "7",
+            "--follow",
+            "--max-steps",
+            "0",
+            "--quiet",
+            "--allow-read",
+            ".",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            "true",
+        ]
+    )
+    reply_approve_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
     reply_approve_session_result = run(["work", "7", "--session", "--json"])
     reply_approve_session = (_json_stdout(reply_approve_session_result).get("work_session") or {})
     reply_approve_path = workspace / "follow-approve-reply.json"
@@ -1462,12 +1480,23 @@ def run_work_session_scenario(workspace, env=None):
         "work_reply_file_approves_pending_write",
         reply_approve_start_result.get("exit_code") == 0
         and reply_approve_write_result.get("exit_code") == 0
+        and reply_approve_snapshot_result.get("exit_code") == 0
         and reply_approve_result.get("exit_code") == 0
         and ((reply_approve_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and reply_approve_snapshot_data.get("stop_reason") == "snapshot_refresh"
+        and ((reply_approve_snapshot_data.get("pending_approvals") or [{}])[0]).get("tool_call_id")
+        == reply_approve_tool_id
+        and ((reply_approve_snapshot_data.get("reply_template") or {}).get("actions") or [{}])[0]
+        == {"type": "approve", "tool_call_id": reply_approve_tool_id}
+        and any(action.get("type") == "approve_all" for action in reply_approve_snapshot_data.get("supported_actions") or [])
         and any(action.get("type") == "approve" for action in reply_approve_data.get("applied") or [])
         and (workspace / "reply-approved.md").read_text(encoding="utf-8") == "reply approved\n",
-        observed={"write": reply_approve_write_data.get("tool_call"), "reply": reply_approve_data},
-        expected="reply-file approve applies a pending dry-run write without a separate CLI approval command",
+        observed={
+            "write": reply_approve_write_data.get("tool_call"),
+            "snapshot": reply_approve_snapshot_data,
+            "reply": reply_approve_data,
+        },
+        expected="reply-file approve applies a pending dry-run write from a zero-step follow snapshot",
     )
     _scenario_check(
         checks,

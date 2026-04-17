@@ -1637,6 +1637,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
     task_id = (session or {}).get("task_id")
     generated_at = now_iso()
     reply_path = STATE_DIR / "follow" / "reply.json"
+    reply_schema = build_work_reply_schema(session, resume=resume)
     payload = {
         "schema_version": 1,
         "generated_at": generated_at,
@@ -1656,13 +1657,8 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args) if session else [],
         "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
-        "reply_template": {
-            "schema_version": 1,
-            "session_id": session_id,
-            "task_id": task_id,
-            "observed_session_updated_at": (session or {}).get("updated_at"),
-            "actions": [{"type": "steer", "text": "<next-step guidance>"}],
-        },
+        "supported_actions": reply_schema["supported_actions"],
+        "reply_template": reply_schema["reply_template"],
     }
     latest_path = follow_dir / "latest.json"
     targets = [latest_path]
@@ -2049,15 +2045,16 @@ def detect_default_verify_command():
     return ""
 
 
-def positive_max_steps(value, default=1):
+def positive_max_steps(value, default=1, allow_zero=False):
     if value is None:
         value = default
     try:
         max_steps = int(value)
     except (TypeError, ValueError) as exc:
         raise MewError("--max-steps must be an integer") from exc
-    if max_steps < 1:
-        raise MewError("--max-steps must be >= 1")
+    minimum = 0 if allow_zero else 1
+    if max_steps < minimum:
+        raise MewError(f"--max-steps must be >= {minimum}")
     return max_steps
 
 
@@ -2533,7 +2530,11 @@ def cmd_work_ai(args):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
         return 1
     try:
-        max_steps = positive_max_steps(getattr(args, "max_steps", None), default=1)
+        max_steps = positive_max_steps(
+            getattr(args, "max_steps", None),
+            default=1,
+            allow_zero=bool(getattr(args, "follow", False)),
+        )
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -2561,11 +2562,6 @@ def cmd_work_ai(args):
             print(done_task_work_session_error(task), file=sys.stderr)
             return 1
         task_id = task.get("id")
-    try:
-        model_auth = load_model_auth(model_backend, args.auth)
-    except MewError as exc:
-        print(f"mew: {exc}", file=sys.stderr)
-        return 1
     with state_lock():
         state = load_state()
         task = find_task(state, task_id)
@@ -2590,6 +2586,29 @@ def cmd_work_ai(args):
         "stop_reason": "max_steps",
         "steps": [],
     }
+    if max_steps == 0:
+        report["stop_reason"] = "snapshot_refresh"
+        if getattr(args, "live", False):
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session)
+            resume = build_work_session_resume(session, task=task)
+            write_work_follow_snapshot(args, report, session, task, resume, force=True)
+        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
+        if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+            print(format_work_cli_controls(session, args))
+        return 0
+
+    try:
+        model_auth = load_model_auth(model_backend, args.auth)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+
     options = _work_control_options(args, session=session)
     live_cells_seen = len(build_work_session_cells(session, limit=None))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
@@ -3974,7 +3993,64 @@ def _active_work_sessions_for_reply(state):
     return sessions
 
 
-def build_work_reply_schema(session=None):
+def _work_reply_supported_actions():
+    return [
+        {
+            "type": "steer",
+            "description": "queue one-shot guidance for the next live/follow step",
+            "required": ["text"],
+        },
+        {
+            "type": "followup",
+            "description": "queue FIFO user input for a later live/follow step",
+            "required": ["text"],
+        },
+        {
+            "type": "interrupt_submit",
+            "description": "stop at the next boundary and submit text as the next step",
+            "required": ["text"],
+        },
+        {"type": "note", "description": "record durable observer context", "required": ["text"]},
+        {"type": "stop", "description": "request a stop at the next model/tool boundary", "required": []},
+        {
+            "type": "reject",
+            "description": "reject a pending dry-run write_file/edit_file tool call",
+            "required": ["tool_call_id"],
+        },
+        {
+            "type": "approve",
+            "description": "approve and apply a pending dry-run write_file/edit_file tool call",
+            "required": ["tool_call_id"],
+            "optional": ["allow_write"],
+        },
+        {
+            "type": "approve_all",
+            "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
+            "required": [],
+            "optional": ["allow_write"],
+        },
+    ]
+
+
+def _work_reply_template(session=None, resume=None):
+    task_id = (session or {}).get("task_id")
+    session_id = (session or {}).get("id")
+    observed = (session or {}).get("updated_at")
+    pending_approvals = (resume or {}).get("pending_approvals") or []
+    if pending_approvals:
+        actions = [{"type": "approve", "tool_call_id": pending_approvals[0].get("tool_call_id")}]
+    else:
+        actions = [{"type": "steer", "text": "<next-step guidance>"}]
+    return {
+        "schema_version": 1,
+        "session_id": session_id,
+        "task_id": task_id,
+        "observed_session_updated_at": observed,
+        "actions": actions,
+    }
+
+
+def build_work_reply_schema(session=None, resume=None):
     task_id = (session or {}).get("task_id")
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
@@ -3987,49 +4063,8 @@ def build_work_reply_schema(session=None):
         "session_id": session_id,
         "task_id": task_id,
         "observed_session_updated_at": observed,
-        "supported_actions": [
-            {
-                "type": "steer",
-                "description": "queue one-shot guidance for the next live/follow step",
-                "required": ["text"],
-            },
-            {
-                "type": "followup",
-                "description": "queue FIFO user input for a later live/follow step",
-                "required": ["text"],
-            },
-            {
-                "type": "interrupt_submit",
-                "description": "stop at the next boundary and submit text as the next step",
-                "required": ["text"],
-            },
-            {"type": "note", "description": "record durable observer context", "required": ["text"]},
-            {"type": "stop", "description": "request a stop at the next model/tool boundary", "required": []},
-            {
-                "type": "reject",
-                "description": "reject a pending dry-run write_file/edit_file tool call",
-                "required": ["tool_call_id"],
-            },
-            {
-                "type": "approve",
-                "description": "approve and apply a pending dry-run write_file/edit_file tool call",
-                "required": ["tool_call_id"],
-                "optional": ["allow_write"],
-            },
-            {
-                "type": "approve_all",
-                "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
-                "required": [],
-                "optional": ["allow_write"],
-            },
-        ],
-        "reply_template": {
-            "schema_version": 1,
-            "session_id": session_id,
-            "task_id": task_id,
-            "observed_session_updated_at": observed,
-            "actions": [{"type": "steer", "text": "<next-step guidance>"}],
-        },
+        "supported_actions": _work_reply_supported_actions(),
+        "reply_template": _work_reply_template(session, resume=resume),
     }
 
 
