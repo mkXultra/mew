@@ -304,6 +304,82 @@ def _activity_item(thought):
     }
 
 
+def _work_activity_item(session, kind, record_type, record, summary, actions=None):
+    timestamp = (
+        record.get("finished_at")
+        or record.get("updated_at")
+        or record.get("created_at")
+        or record.get("started_at")
+        or session.get("updated_at")
+        or session.get("created_at")
+    )
+    task_id = session.get("task_id")
+    label = f"session #{session.get('id')}"
+    if task_id is not None:
+        label += f" task #{task_id}"
+    if kind:
+        label += f" {kind}"
+    summary_text = " ".join(str(summary or "").split())
+    if len(summary_text) > 160:
+        summary_text = summary_text[:157].rstrip() + "..."
+    return {
+        "id": f"work-{session.get('id')}-{record_type}-{record.get('id') or timestamp or 'note'}",
+        "at": timestamp,
+        "event_type": "work_session",
+        "cycle_reason": record_type,
+        "summary": f"{label}: {summary_text}",
+        "actions": actions or [],
+        "message_count": 0,
+        "session_id": session.get("id"),
+        "task_id": task_id,
+    }
+
+
+def _work_session_activity_entries(state, limit=5, kind=None):
+    task_ids = _task_ids_for_kind(state, kind)
+    entries = []
+    for session_index, session in enumerate(state.get("work_sessions") or []):
+        if kind and str(session.get("task_id")) not in task_ids:
+            continue
+        session_kind = ""
+        task = work_session_task(state, session)
+        if task:
+            session_kind = task_kind(task)
+        for turn_index, turn in enumerate(session.get("model_turns") or []):
+            if not isinstance(turn, dict):
+                continue
+            summary = turn.get("summary") or (turn.get("action") or {}).get("summary") or ""
+            if not summary:
+                continue
+            action = turn.get("action") or {}
+            action_type = action.get("type")
+            actions = [f"model {action_type}"] if action_type else ["model_turn"]
+            item = _work_activity_item(session, session_kind, "model_turn", turn, summary, actions=actions)
+            entries.append((item.get("at") or "", session_index, turn_index, item))
+        for tool_index, call in enumerate(session.get("tool_calls") or []):
+            if not isinstance(call, dict):
+                continue
+            summary = call.get("summary") or call.get("error") or ""
+            tool_name = call.get("tool") or "tool"
+            if not summary:
+                summary = tool_name
+            actions = [f"{tool_name} {call.get('status') or 'unknown'}"]
+            item = _work_activity_item(session, session_kind, "tool_call", call, summary, actions=actions)
+            entries.append((item.get("at") or "", session_index, tool_index, item))
+        for note_index, note in enumerate(session.get("notes") or []):
+            if not isinstance(note, dict):
+                continue
+            text = str(note.get("text") or "").strip()
+            if not text:
+                continue
+            summary = text.splitlines()[0]
+            actions = [f"note {note.get('source') or 'user'}"]
+            item = _work_activity_item(session, session_kind, "note", note, summary, actions=actions)
+            entries.append((item.get("at") or "", session_index, note_index, item))
+    entries.sort(key=lambda entry: entry[:3], reverse=True)
+    return [entry[3] for entry in entries[:limit]]
+
+
 def activity_label(item):
     event_type = item.get("event_type") or "unknown"
     cycle_reason = item.get("cycle_reason") or ""
@@ -312,24 +388,57 @@ def activity_label(item):
     return event_type
 
 
-def recent_activity(state, limit=5):
+def activity_identity(item):
+    if item.get("event_type") == "work_session":
+        return f"work#{item.get('session_id')}"
+    return f"#{item.get('id')}"
+
+
+def _task_ids_for_kind(state, kind):
+    if not kind:
+        return set()
+    return {str(task.get("id")) for task in state.get("tasks", []) if task_kind(task) == kind}
+
+
+def _thought_matches_task_ids(thought, task_ids):
+    if not task_ids:
+        return True
+    for action in thought.get("actions") or []:
+        action_task_id = action.get("task_id") or action.get("related_task_id")
+        if action_task_id is not None and str(action_task_id) in task_ids:
+            return True
+    return False
+
+
+def recent_activity(state, limit=5, kind=None):
     thoughts = list(state.get("thought_journal", []))
-    items = []
-    for thought in reversed(thoughts):
+    task_ids = _task_ids_for_kind(state, kind)
+    entries = []
+    for thought_index, thought in enumerate(thoughts):
+        if kind and not _thought_matches_task_ids(thought, task_ids):
+            continue
         if thought.get("event_type") not in ("startup", "passive_tick", "user_message"):
             continue
         summary = thought.get("summary") or ""
         actions = thought.get("actions") or []
         if not summary and not actions:
             continue
-        items.append(_activity_item(thought))
-        if len(items) >= limit:
-            break
-    return items
+        item = _activity_item(thought)
+        entries.append((item.get("at") or "", thought_index, item))
+    for work_index, item in enumerate(_work_session_activity_entries(state, limit=limit, kind=kind)):
+        entries.append((item.get("at") or "", len(thoughts) + work_index, item))
+    entries.sort(key=lambda entry: entry[:2], reverse=True)
+    return [entry[2] for entry in entries[:limit]]
 
 
-def build_activity_data(state, limit=10):
+def build_activity_data(state, limit=10, kind=None):
     thoughts = list(state.get("thought_journal", []))
+    task_ids = _task_ids_for_kind(state, kind)
+    filtered_thoughts = [
+        thought
+        for thought in thoughts
+        if not kind or _thought_matches_task_ids(thought, task_ids)
+    ]
     dropped = [
         {
             "id": thought.get("id"),
@@ -338,26 +447,30 @@ def build_activity_data(state, limit=10):
             "dropped_thread_ratio": thought.get("dropped_thread_ratio", 0.0),
             "dropped_threads": thought.get("dropped_threads", []),
         }
-        for thought in reversed(thoughts)
+        for thought in reversed(filtered_thoughts)
         if thought.get("dropped_threads")
     ]
     action_counts = {}
-    for thought in thoughts:
+    for thought in filtered_thoughts:
         for action in thought.get("actions") or []:
             action_type = action.get("type") or "unknown"
             action_counts[action_type] = action_counts.get(action_type, 0) + 1
     return {
         "generated_at": now_iso(),
-        "recent_activity": recent_activity(state, limit=limit),
+        "kind": kind,
+        "recent_activity": recent_activity(state, limit=limit, kind=kind),
         "action_counts": dict(sorted(action_counts.items())),
         "dropped_threads": dropped[:limit],
     }
 
 
-def format_activity(state, limit=10):
-    data = build_activity_data(state, limit=limit)
+def format_activity(state, limit=10, kind=None):
+    data = build_activity_data(state, limit=limit, kind=kind)
     activity = data["recent_activity"]
-    lines = [f"Mew activity at {data['generated_at']}"]
+    title = "Mew activity"
+    if kind:
+        title += f" ({kind})"
+    lines = [f"{title} at {data['generated_at']}"]
     if not activity:
         lines.append("No recent activity.")
     else:
@@ -365,7 +478,7 @@ def format_activity(state, limit=10):
             actions = item.get("actions") or []
             suffix = f" actions={', '.join(actions)}" if actions else ""
             lines.append(
-                f"- #{item.get('id')} {activity_label(item)}: "
+                f"- {activity_identity(item)} {activity_label(item)}: "
                 f"{item.get('summary')}{suffix}"
             )
 

@@ -155,6 +155,7 @@ Evidence:
 - `mew focus` now marks stale work-session memory and suppresses stale `memory_next` text when later tool or model activity means the resident should refresh before relying on it.
 - `mew focus` now reuses the active work session's saved model/gate/verify/approval defaults in its continue/follow commands, so daily reentry stays copy-paste runnable.
 - `mew digest` exposes the chat digest as a top-level command, making recent autonomous activity review available without entering the chat REPL.
+- `mew activity --kind ...` now scopes activity to task kind and includes native work-session turns, notes, and tool calls, so the coding cockpit has an observable activity stream without unrelated passive history.
 - Active sessions remember start/live read/write/verify/model/approval options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Chat work-session Inspect and Advanced controls now reuse the active session's saved/default read roots instead of falling back to `--allow-read .`, keeping scoped cockpits from suggesting broader or invalid read gates.
 - Chat `/work-session resume <task> --allow-read <root>` now carries that explicit read root into the printed Next controls and cached `/c` options, so scoped resume does not immediately suggest broader `--allow-read .` follow-ups.

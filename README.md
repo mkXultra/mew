@@ -150,6 +150,7 @@ uv run mew daily
 uv run mew brief
 uv run mew brief --json
 uv run mew activity
+uv run mew activity --kind coding
 uv run mew context
 uv run mew step --dry-run
 uv run mew step --ai --auth auth.json --allow-read . --max-steps 3

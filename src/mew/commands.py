@@ -4388,10 +4388,11 @@ def cmd_focus(args):
 
 def cmd_activity(args):
     state = load_state()
+    kind = getattr(args, "kind", None) or None
     if args.json:
-        print(json.dumps(build_activity_data(state, limit=args.limit), ensure_ascii=False, indent=2))
+        print(json.dumps(build_activity_data(state, limit=args.limit, kind=kind), ensure_ascii=False, indent=2))
         return 0
-    print(format_activity(state, limit=args.limit))
+    print(format_activity(state, limit=args.limit, kind=kind))
     return 0
 
 

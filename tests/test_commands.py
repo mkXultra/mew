@@ -2935,6 +2935,74 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_activity_can_be_scoped_by_task_kind(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {"id": 1, "title": "Research grants", "status": "todo", "kind": "research"},
+                            {"id": 2, "title": "Improve cockpit", "status": "todo", "kind": "coding"},
+                        ]
+                    )
+                    state["thought_journal"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "event_id": 1,
+                                "event_type": "passive_tick",
+                                "summary": "Research activity",
+                                "actions": [{"type": "record_memory", "task_id": 1}],
+                                "counts": {"actions": 1},
+                            },
+                            {
+                                "id": 2,
+                                "event_id": 2,
+                                "event_type": "passive_tick",
+                                "summary": "Coding activity",
+                                "actions": [{"type": "record_memory", "task_id": 2}],
+                                "counts": {"actions": 1},
+                            },
+                        ]
+                    )
+                    _, _ = create_work_session(
+                        state,
+                        {"id": 2, "title": "Improve cockpit", "status": "todo", "kind": "coding"},
+                        current_time="2026-04-17T00:00:00Z",
+                    )
+                    state["work_sessions"][0]["model_turns"].append(
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "summary": "Review scoped work activity",
+                            "action": {"type": "remember"},
+                            "finished_at": "2026-04-17T00:01:00Z",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["activity", "--kind", "coding"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Mew activity (coding)", output)
+                self.assertIn("Review scoped work activity", output)
+                self.assertIn("Coding activity", output)
+                self.assertNotIn("Research activity", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["activity", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["kind"], "coding")
+                self.assertIn("Review scoped work activity", data["recent_activity"][0]["summary"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_digest_command_prints_chat_digest(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

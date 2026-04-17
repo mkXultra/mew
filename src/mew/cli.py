@@ -92,6 +92,7 @@ from .config import (
 from .model_backends import SUPPORTED_MODEL_BACKENDS
 from .read_tools import DEFAULT_READ_MAX_CHARS
 from .runtime import run_runtime
+from .tasks import TASK_KINDS
 
 
 def build_parser():
@@ -446,6 +447,7 @@ def build_parser():
 
     activity_parser = subparsers.add_parser("activity", help="show recent mew activity")
     activity_parser.add_argument("--limit", type=int, default=10, help="maximum activity items")
+    activity_parser.add_argument("--kind", choices=TASK_KINDS, help="scope activity to tasks of this kind")
     activity_parser.add_argument("--json", action="store_true", help="print structured JSON")
     activity_parser.set_defaults(func=cmd_activity)
 
