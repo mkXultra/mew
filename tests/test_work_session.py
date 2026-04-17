@@ -2790,6 +2790,50 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_model_error_preserves_pending_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--steer", "retry this after model recovers"]), 0)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=MewError("model offline")):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "model_error")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["pending_steer"]["text"], "retry this after model recovers")
+                self.assertNotIn("steer for step", "\n".join(note.get("text", "") for note in session.get("notes", [])))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_show_without_active_lists_recent_sessions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

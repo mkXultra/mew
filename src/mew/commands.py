@@ -2154,13 +2154,31 @@ def queue_work_session_steer(session, text, source="user"):
     return steer
 
 
-def consume_work_session_steer(session, step_index):
-    steer = (session or {}).pop("pending_steer", None)
-    text = str((steer or {}).get("text") or "").strip()
+def pending_work_session_steer(session):
+    steer = (session or {}).get("pending_steer") or {}
+    text = str(steer.get("text") or "").strip()
     if not text:
-        return ""
-    add_work_session_note(session, f"steer for step {step_index}: {text}", source=steer.get("source") or "user")
-    return text
+        return None
+    pending = dict(steer)
+    pending["text"] = text
+    return pending
+
+
+def complete_work_session_steer(session, steer, step_index):
+    expected = steer or {}
+    current = pending_work_session_steer(session)
+    if not current:
+        return False
+    for key in ("text", "source", "created_at"):
+        if str(current.get(key) or "") != str(expected.get(key) or ""):
+            return False
+    session.pop("pending_steer", None)
+    add_work_session_note(
+        session,
+        f"steer for step {step_index}: {current.get('text')}",
+        source=current.get("source") or "user",
+    )
+    return True
 
 
 def pause_work_session_after_user_interrupt(session_id, step_index):
@@ -2412,11 +2430,11 @@ def cmd_work_ai(args):
             state = load_state()
             session = find_work_session(state, session_id)
             stop_request = consume_work_session_stop(session)
-            pending_steer = ""
+            pending_steer = None
             if not stop_request:
-                pending_steer = consume_work_session_steer(session, index)
+                pending_steer = pending_work_session_steer(session)
             task = work_session_task(state, session)
-            if stop_request or pending_steer:
+            if stop_request:
                 save_state(state)
         if stop_request:
             report["stop_reason"] = "stop_requested"
@@ -2426,11 +2444,12 @@ def cmd_work_ai(args):
             break
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if pending_steer:
+            pending_steer_text = pending_steer.get("text") or ""
             step_guidance = "\n\n".join(
-                part for part in (step_guidance, f"User steer for this step:\n{pending_steer}") if part
+                part for part in (step_guidance, f"User steer for this step:\n{pending_steer_text}") if part
             )
             if progress:
-                progress(f"step #{index}: consumed steer")
+                progress(f"step #{index}: applying steer")
 
         prompt_state = state
         prompt_session = session
@@ -2569,6 +2588,7 @@ def cmd_work_ai(args):
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
+            steer_consumed = complete_work_session_steer(session, pending_steer, index) if pending_steer else False
             stop_request = consume_work_session_stop(session)
             if stop_request:
                 turn = update_work_model_turn_plan(
@@ -2587,6 +2607,10 @@ def cmd_work_ai(args):
                         4000,
                     )
                 save_state(state)
+            elif steer_consumed:
+                save_state(state)
+        if pending_steer and steer_consumed and progress:
+            progress(f"step #{index}: consumed steer")
         if stop_request:
             report["steps"].append(
                 {
