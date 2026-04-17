@@ -101,6 +101,7 @@ Evidence:
 - `mew work --live --compact-live` and `/work-session live --compact-live` skip full per-step resume blocks, leaving a lighter thinking/action/result stream for longer supervised runs.
 - Compact live mode also keeps the final step report to command/cwd/exit summaries, avoiding stdout/stderr replay after the result pane.
 - `mew work --live` now prints a compact `result` pane after each step, combining tool outcome, command output, phase, context pressure, pending approvals, and next action before the full resume block.
+- Live result panes now surface compact work-session memory (`memory_hypothesis`, `memory_next`/`stale_memory_next`, and verification state), so compact follow keeps the resident model's current belief and next intended step visible without opening a full resume.
 - Live result panes now group `outcome`, `tools`, and `session`, include per-tool duration when timestamps are available, indent multiline command metadata consistently, and place command cwd/stdout/stderr directly under the tool result instead of a duplicate `summary: command` line.
 - Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
 - Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
@@ -149,6 +150,7 @@ Evidence:
 - Active sessions remember start/live read/write/verify/model/approval options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Chat work-session Inspect and Advanced controls now reuse the active session's saved/default read roots instead of falling back to `--allow-read .`, keeping scoped cockpits from suggesting broader or invalid read gates.
 - Chat `/work-session resume <task> --allow-read <root>` now carries that explicit read root into the printed Next controls and cached `/c` options, so scoped resume does not immediately suggest broader `--allow-read .` follow-ups.
+- Scripted non-interactive `mew chat` defers startup controls when the first input is a work-session/continue command, so scoped command results are not preceded by generic active-session controls.
 - Manual `run_tests` / `run_command` calls no longer store the parser's default `--path .` as a touched file, so non-file actions do not create noisy `.` world-state warnings.
 - Missing-executable verification failures now keep JSON `exit_code: null` but render human-facing resume/commands/tests output as `exit=unavailable` with `executable not found: ...` context.
 - Missing-executable command records now normalize stderr to `executable not found: ...`, so focused command/test panes no longer leak raw Python `[Errno 2]` text.
@@ -319,9 +321,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `629 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `631 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `135 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `137 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -374,6 +376,8 @@ Next action:
 - `codex-ultra` retest after those fixes found that CLI scoped resume preserved read roots, but chat `/work-session resume <task> --allow-read <root>` still printed broadened Next controls and command/test panes still showed `exit=None`; both follow-up issues are now fixed with regression tests.
 - `codex-ultra` focused retest of chat scoped resume controls and missing-executable panes passed against the current implementation: scoped slash-command resume printed `sample` controls, no `.` controls appeared in that command block, and resume/commands/tests panes used `exit=unavailable` plus normalized `executable not found` text. The agent noted its final clean-tree check saw concurrent local edits from this session, not test-created changes.
 - Mew dogfood session #48 used Codex Web API as a read-only buddy after the front-door workbench change; it reentered task #46, inspected `ROADMAP_STATUS.md`, and recorded the next non-duplicative Milestone 2 slice as stabilizing the continuous reasoning/status pane and reducing repeated reentry material during long sessions.
+- `codex-ultra` cockpit evaluation recommended the smallest next slice as surfacing active work-session `working_memory` inside the live result cockpit; this is now implemented in `format_work_live_step_result` with stale-memory labeling.
+- `claude-ultra` cockpit evaluation recommended a future recurring-failure ribbon for repeated tool failures; this remains a candidate next slice after the live working-memory improvement.
 
 ## Current Roadmap Focus
 

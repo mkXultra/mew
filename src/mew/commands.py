@@ -895,6 +895,17 @@ def format_work_live_step_result(step, resume=None):
         if resume.get("pending_approvals"):
             ids = ", ".join(f"#{item.get('tool_call_id')}" for item in resume.get("pending_approvals") or [])
             session_lines.append(f"pending_approvals: {ids}")
+        memory = resume.get("working_memory") or {}
+        if memory:
+            if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
+                session_lines.append("memory: stale; refresh before relying on next_step")
+            if memory.get("hypothesis"):
+                session_lines.append(f"memory_hypothesis: {clip_inline_text(memory.get('hypothesis'), 280)}")
+            if memory.get("next_step"):
+                key = "stale_memory_next" if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id") else "memory_next"
+                session_lines.append(f"{key}: {clip_inline_text(memory.get('next_step'), 280)}")
+            if memory.get("last_verified_state"):
+                session_lines.append(f"memory_verified: {clip_inline_text(memory.get('last_verified_state'), 280)}")
         if resume.get("next_action"):
             session_lines.append(f"next: {resume.get('next_action')}")
         _append_live_section(lines, "session", session_lines)
@@ -8457,6 +8468,17 @@ def read_chat_line(poll_interval, prompt_state, prompt="mew> "):
 def cmd_chat(args):
     print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
+    pending_line = None
+    can_preload_stdin = args.timeout is None or args.timeout > 0
+    if can_preload_stdin and not sys.stdin.isatty():
+        try:
+            pending_line = sys.stdin.readline()
+            if pending_line == "":
+                pending_line = CHAT_EOF
+        except OSError:
+            pending_line = None
+    pending_text = pending_line.strip() if isinstance(pending_line, str) else ""
+    suppress_startup_controls = pending_text.startswith(("/work-session", "/continue", "/c", "/follow"))
     append_chat_transcript(
         "start",
         "chat started",
@@ -8471,7 +8493,7 @@ def cmd_chat(args):
     if not args.no_brief:
         print(build_brief(state, limit=args.limit, kind=kind), flush=True)
     session = active_work_session_for_kind(state, kind=kind)
-    if session:
+    if session and not suppress_startup_controls:
         print(format_work_cockpit_controls(state=state, session=session), flush=True)
 
     seen_ids = emit_initial_outbox(
@@ -8503,7 +8525,11 @@ def cmd_chat(args):
             if deadline is not None:
                 poll_interval = min(poll_interval, max(0.0, deadline - time.monotonic()))
 
-            line = read_chat_line(poll_interval, prompt_state, prompt=chat_prompt_text(chat_state))
+            if pending_line is not None:
+                line = pending_line if pending_line is CHAT_EOF else pending_line.rstrip("\n")
+                pending_line = None
+            else:
+                line = read_chat_line(poll_interval, prompt_state, prompt=chat_prompt_text(chat_state))
             if line is None:
                 continue
             if line is CHAT_EOF:

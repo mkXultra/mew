@@ -86,7 +86,15 @@ class WorkSessionTests(unittest.TestCase):
                     },
                 },
             },
-            resume={"phase": "idle", "context": {"pressure": "low", "tool_calls": 1, "model_turns": 1}},
+            resume={
+                "phase": "idle",
+                "context": {"pressure": "low", "tool_calls": 1, "model_turns": 1},
+                "working_memory": {
+                    "hypothesis": "Command output proves the tool path works.",
+                    "next_step": "Continue with the focused verifier.",
+                    "last_verified_state": "echo passed",
+                },
+            },
         )
 
         self.assertIn("outcome:\n  status: completed", text)
@@ -96,6 +104,26 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("summary: command:", text)
         self.assertIn("stdout:\n    hi", text)
         self.assertIn("session:\n  phase: idle", text)
+        self.assertIn("memory_hypothesis: Command output proves the tool path works.", text)
+        self.assertIn("memory_next: Continue with the focused verifier.", text)
+        self.assertIn("memory_verified: echo passed", text)
+
+    def test_work_live_step_result_marks_stale_working_memory(self):
+        text = format_work_live_step_result(
+            {"status": "completed", "action": {"type": "remember"}, "summary": "noted"},
+            resume={
+                "phase": "idle",
+                "working_memory": {
+                    "next_step": "Use the old plan.",
+                    "stale_after_tool_call_id": 9,
+                    "stale_after_tool": "run_tests",
+                },
+            },
+        )
+
+        self.assertIn("memory: stale; refresh before relying on next_step", text)
+        self.assertIn("stale_memory_next: Use the old plan.", text)
+        self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
@@ -4978,6 +5006,33 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("Mew focus", output)
                 self.assertIn("Next controls", output)
                 self.assertIn("/continue --allow-read .", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_scripted_chat_defers_startup_controls_to_scoped_work_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("sample").mkdir()
+                Path("sample/README.md").write_text("scoped startup\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "sample/README.md", "--allow-read", "sample"]), 0)
+
+                stdin = StringIO("/work-session resume 1 --allow-read sample\n/exit\n")
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["chat", "--no-brief", "--no-unread", "--no-activity"]), 0)
+                output = stdout.getvalue()
+
+                self.assertEqual(output.count("Next controls"), 1)
+                self.assertIn("- /c --allow-read sample", output)
+                self.assertIn("- /work-session resume --allow-read sample", output)
+                self.assertNotIn("- /c --allow-read .", output)
             finally:
                 os.chdir(old_cwd)
 
