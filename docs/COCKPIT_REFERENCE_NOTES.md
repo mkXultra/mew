@@ -145,6 +145,11 @@ Initial implementation status, 2026-04-18:
 - The first dogfood pass showed that cell rows should prioritize preview text
   over raw ids and timestamps; the formatter now keeps ids/timing as metadata
   lines under each row.
+- `mew work --cells --cell-tail-lines N` caps command/test tails for calmer
+  review without changing the full `--commands` / `--tests` panes.
+- External observer dogfood also proved `.mew/follow/latest.json` can carry
+  pending approvals, supported reply actions, approval-shaped reply templates,
+  and CLI-native approval/rejection hints.
 
 Estimated time: 1 to 1.5 focused days.
 
@@ -194,8 +199,9 @@ Initial implementation status, 2026-04-18:
   stdout/stderr line and character counts, output tails, explicit no-output
   rows, timeout/error metadata, and a `full_output` hint back to the focused
   pane.
-- The remaining work is pacing and control: configurable tails, collapse/expand,
-  and a cleaner cell-native follow stream.
+- Configurable tails are now available through `--cell-tail-lines`.
+- The remaining work is pacing and control: collapse/expand semantics and a
+  cleaner cell-native follow stream.
 
 Estimated time: 0.5 to 1 day after P0.
 
