@@ -26,6 +26,8 @@ Validation:
   `/tmp/mew-desk-real/.mew/desk/2026-04-17.json`.
 - Live-state pet state was `alerting` because three unanswered questions and
   three open attention items are present.
+- The view model was promoted as the core `mew desk` command with text, JSON,
+  and optional file output.
 
 Early product learning:
 

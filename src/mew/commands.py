@@ -41,6 +41,7 @@ from .brief import (
 from .codex_api import load_codex_oauth
 from .config import CHAT_TRANSCRIPT_FILE, DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
+from .desk import build_desk_view_model, format_desk_view, write_desk_view
 from .dogfood import (
     format_dogfood_loop_report,
     format_dogfood_report,
@@ -4754,6 +4755,24 @@ def cmd_passive_bundle(args):
         print(result.text, end="")
     else:
         print(result.path)
+    return 0
+
+def cmd_desk(args):
+    state = load_state()
+    view_model = build_desk_view_model(state, explicit_date=args.date)
+    written = None
+    if args.write:
+        written = write_desk_view(view_model, Path(args.output_dir).expanduser())
+    if args.json:
+        data = dict(view_model)
+        if written:
+            data["paths"] = {"json": str(written[0]), "markdown": str(written[1])}
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_desk_view(view_model))
+        if written:
+            print(f"written_json: {written[0]}")
+            print(f"written_markdown: {written[1]}")
     return 0
 
 def cmd_activity(args):

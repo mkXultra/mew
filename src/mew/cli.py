@@ -27,6 +27,7 @@ from .commands import (
     cmd_do,
     cmd_desires_init,
     cmd_desires_show,
+    cmd_desk,
     cmd_dogfood,
     cmd_doctor,
     cmd_effects,
@@ -444,6 +445,13 @@ def build_parser():
     bundle_parser.add_argument("--show", action="store_true", help="print the generated bundle instead of only its path")
     bundle_parser.add_argument("--json", action="store_true", help="print structured output")
     bundle_parser.set_defaults(func=cmd_passive_bundle)
+
+    desk_parser = subparsers.add_parser("desk", help="show the desktop-pet view model")
+    desk_parser.add_argument("--date", help="view-model date YYYY-MM-DD; defaults to today")
+    desk_parser.add_argument("--write", action="store_true", help="write .mew/desk/YYYY-MM-DD.json and .md")
+    desk_parser.add_argument("--output-dir", default=".", help="where to write .mew/desk files with --write")
+    desk_parser.add_argument("--json", action="store_true", help="print structured output")
+    desk_parser.set_defaults(func=cmd_desk)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)
