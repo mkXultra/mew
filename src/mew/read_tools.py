@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -6,6 +7,7 @@ import fnmatch
 
 DEFAULT_READ_MAX_CHARS = 50000
 DEFAULT_SEARCH_MAX_MATCHES = 50
+DEFAULT_SEARCH_CONTEXT_LINES = 3
 DEFAULT_GLOB_MAX_MATCHES = 100
 DEFAULT_GLOB_IGNORED_PARTS = {
     ".git",
@@ -210,8 +212,42 @@ def read_file(
     }
 
 
-def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCHES):
+def _search_snippet(candidate, line_number, context_lines, line_cache):
+    if context_lines <= 0 or not line_number:
+        return None
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        ensure_not_sensitive(resolved, verb="search")
+        if resolved not in line_cache:
+            line_cache[resolved] = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = line_cache[resolved]
+    except OSError:
+        return None
+
+    start = max(1, int(line_number) - context_lines)
+    end = min(len(lines), int(line_number) + context_lines)
+    return {
+        "path": str(resolved),
+        "line": int(line_number),
+        "start_line": start,
+        "end_line": end,
+        "lines": [
+            {
+                "line": number,
+                "text": lines[number - 1],
+                "match": number == int(line_number),
+            }
+            for number in range(start, end + 1)
+        ],
+    }
+
+
+def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCHES, context_lines=DEFAULT_SEARCH_CONTEXT_LINES):
     max_matches = max(1, min(int(max_matches), 200))
+    try:
+        context_lines = max(0, min(int(context_lines or 0), 5))
+    except (TypeError, ValueError):
+        context_lines = DEFAULT_SEARCH_CONTEXT_LINES
     if not query or not str(query).strip():
         raise ValueError("search query is empty")
 
@@ -219,6 +255,7 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
     ensure_not_sensitive(resolved, verb="search")
     command = [
         "rg",
+        "--json",
         "--line-number",
         "--fixed-strings",
         "--no-heading",
@@ -266,16 +303,36 @@ def search_text(query, path, allowed_roots, max_matches=DEFAULT_SEARCH_MAX_MATCH
         raise ValueError(f"search failed: {detail}")
 
     matches = []
+    snippets = []
+    line_cache = {}
+    total_matches = 0
     for line in result.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "match":
+            continue
+        total_matches += 1
         if len(matches) >= max_matches:
             break
-        matches.append(line)
+        data = event.get("data") or {}
+        path_text = ((data.get("path") or {}).get("text") or "").strip()
+        line_number = data.get("line_number")
+        line_text = ((data.get("lines") or {}).get("text") or "").rstrip("\n")
+        match_text = f"{path_text}:{line_number}:{line_text}" if path_text and line_number else line_text
+        matches.append(match_text)
+        snippet = _search_snippet(path_text, line_number, context_lines, line_cache)
+        if snippet:
+            snippets.append(snippet)
 
     return {
         "path": str(resolved),
         "query": str(query),
         "matches": matches,
-        "truncated": len(result.stdout.splitlines()) > max_matches,
+        "snippets": snippets,
+        "context_lines": context_lines,
+        "truncated": total_matches > max_matches,
     }
 
 
@@ -349,8 +406,16 @@ def summarize_read_result(action_type, result):
         )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
-        matches = "\n".join(result.get("matches", []))
-        return f"Searched {result.get('path')} for {result.get('query')!r}{suffix}\n{matches}"
+        snippets = []
+        for snippet in (result.get("snippets") or [])[:10]:
+            lines = []
+            for line in snippet.get("lines") or []:
+                marker = ">" if line.get("match") else " "
+                lines.append(f"{marker} {line.get('line')}: {line.get('text')}")
+            if lines:
+                snippets.append(f"{snippet.get('path')}:{snippet.get('start_line')}-{snippet.get('end_line')}\n" + "\n".join(lines))
+        body = "\n\n".join(snippets) if snippets else "\n".join(result.get("matches", []))
+        return f"Searched {result.get('path')} for {result.get('query')!r}{suffix}\n{body}"
     if action_type == "glob":
         suffix = " (truncated)" if result.get("truncated") else ""
         matches = "\n".join(

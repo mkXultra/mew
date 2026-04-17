@@ -3678,6 +3678,52 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("output truncated", match)
         self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_CONTEXT_BUDGET)
 
+    def test_work_model_context_includes_search_snippets(self):
+        from mew.work_loop import build_work_model_context
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Use search context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": ".", "query": "needle"},
+                    "result": {
+                        "path": ".",
+                        "query": "needle",
+                        "matches": ["README.md:2:needle"],
+                        "snippets": [
+                            {
+                                "path": "README.md",
+                                "line": 2,
+                                "start_line": 1,
+                                "end_line": 3,
+                                "lines": [
+                                    {"line": 1, "text": "before", "match": False},
+                                    {"line": 2, "text": "needle", "match": True},
+                                    {"line": 3, "text": "after", "match": False},
+                                ],
+                            }
+                        ],
+                    },
+                    "summary": "search with snippet",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Search", "description": "Use search context.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+
+        snippets = work_context["tool_calls"][0]["result"]["snippets"]
+        self.assertEqual(snippets[0]["lines"][1]["text"], "needle")
+
     def test_work_model_context_includes_bounded_world_state_when_read_allowed(self):
         from mew.work_loop import build_work_model_context
 
@@ -4103,9 +4149,10 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 result_block = output.split("Work live step #1 result", 1)[1].split("Work live step #1 resume", 1)[0]
                 self.assertIn("tool #1 [completed] search_text", result_block)
-                self.assertIn("matches:", result_block)
-                self.assertIn("alpha needle", result_block)
-                self.assertIn("needle gamma", result_block)
+                self.assertIn("snippets:", result_block)
+                self.assertIn("> 1: alpha needle", result_block)
+                self.assertIn("  2: beta", result_block)
+                self.assertIn("> 3: needle gamma", result_block)
             finally:
                 os.chdir(old_cwd)
 

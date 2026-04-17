@@ -716,6 +716,26 @@ def _format_live_match_preview(matches, max_items=5, max_chars=700):
     return lines
 
 
+def _format_live_search_snippet_preview(snippets, max_items=3, max_chars=900):
+    chunks = []
+    for snippet in (snippets or [])[:max_items]:
+        path = _compact_live_path_text(snippet.get("path") or "")
+        header = f"{path}:{snippet.get('start_line')}-{snippet.get('end_line')}"
+        lines = [header]
+        for line in snippet.get("lines") or []:
+            marker = ">" if line.get("match") else " "
+            lines.append(f"{marker} {line.get('line')}: {line.get('text')}")
+        chunks.append("\n".join(lines))
+    if not chunks:
+        return []
+    text = clip_output("\n\n".join(chunks), max_chars)
+    lines = ["snippets:"]
+    lines.extend(f"  {line}" for line in text.splitlines())
+    if len(snippets or []) > max_items:
+        lines.append(f"  ... {len(snippets or []) - max_items} more snippet(s)")
+    return lines
+
+
 def _format_live_tool_summary(call):
     result = call.get("result") or {}
     if result.get("command"):
@@ -757,7 +777,10 @@ def _format_live_tool_call_result(call):
     if result.get("stderr"):
         lines.extend(_format_live_output_preview("stderr", result.get("stderr")))
     if call.get("tool") == "search_text":
-        lines.extend(_format_live_match_preview(result.get("matches") or []))
+        lines.extend(
+            _format_live_search_snippet_preview(result.get("snippets") or [])
+            or _format_live_match_preview(result.get("matches") or [])
+        )
     if result.get("diff"):
         lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))
     if call.get("tool") in WRITE_WORK_TOOLS and result.get("dry_run") and result.get("changed") and not call.get("approval_status"):
@@ -2756,6 +2779,7 @@ def _work_tool_parameters(args):
         "line_start": getattr(args, "line_start", None),
         "line_count": getattr(args, "line_count", None),
         "max_matches": getattr(args, "max_matches", None),
+        "context_lines": getattr(args, "context_lines", None),
     }
     return {key: value for key, value in parameters.items() if value is not None}
 
@@ -4502,6 +4526,7 @@ def cmd_tool_search(args):
             args.path,
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
+            context_lines=getattr(args, "context_lines", 3),
         )
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)

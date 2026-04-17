@@ -338,8 +338,9 @@ when you want only thinking/action/result panes during a longer run and will
 open `mew work --session --resume` separately if you need the full reentry
 bundle; compact mode also keeps the final step report to command/cwd/exit
 summaries instead of replaying stdout/stderr after the result pane.
-`search_text` live results include a short matches preview, so a compact run can
-show what was found without opening the full session details.
+`search_text` live results include short context snippets around matches, so a
+compact run can show what was found without opening the full session details or
+making the model infer too much from a single matched line.
 `mew work --follow` uses compact live mode and streams batched model text
 deltas into the live thinking pane when the backend supports it, so a bounded
 autonomous run is observable while it is thinking instead of only after each
@@ -421,7 +422,7 @@ uv run mew work 1 --session --resume --allow-read . --auto-recover-safe
 uv run mew work --stop-session --stop-reason "pause after this step"
 uv run mew work 1 --tool read_file --path README.md --allow-read .
 uv run mew work 1 --tool read_file --path src/mew/commands.py --allow-read . --offset 50000 --max-chars 12000
-uv run mew work 1 --tool search_text --query "work session" --path . --allow-read .
+uv run mew work 1 --tool search_text --query "work session" --path . --allow-read . --context-lines 3
 uv run mew work 1 --tool glob --pattern "*.py" --path src --allow-read .
 uv run mew work 1 --tool git_status --allow-read .
 uv run mew work 1 --tool git_diff --allow-read .

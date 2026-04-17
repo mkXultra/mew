@@ -798,6 +798,7 @@ def build_parser():
     work_parser.add_argument("--line-start", type=int, help="1-based starting line for read_file")
     work_parser.add_argument("--line-count", type=int, help="number of lines to read with --line-start")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
+    work_parser.add_argument("--context-lines", type=int, default=3, help="context lines around search_text matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")
     work_parser.add_argument("--resume", action="store_true", help="show a compact work-session resume bundle")
     work_parser.add_argument("--timeline", action="store_true", help="show a compact chronological work-session timeline")
@@ -858,6 +859,7 @@ def build_parser():
     tool_search_parser.add_argument("path", nargs="?", default=".")
     tool_search_parser.add_argument("--root", action="append", default=[], help="allowed root; default current directory")
     tool_search_parser.add_argument("--max-matches", type=int, default=50)
+    tool_search_parser.add_argument("--context-lines", type=int, default=3, help="context lines around matches")
     tool_search_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_search_parser.set_defaults(func=cmd_tool_search)
 

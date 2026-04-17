@@ -384,6 +384,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             parameters.get("path") or ".",
             allowed_read_roots,
             max_matches=parameters.get("max_matches", 50),
+            context_lines=parameters.get("context_lines", 3),
         )
     if tool == "glob":
         return glob_paths(

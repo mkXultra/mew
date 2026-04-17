@@ -106,6 +106,10 @@ def _compact_tool_result(tool, result):
             matches = result.get("matches") or []
             compact["matches"] = _compact_context_items(matches)
             compact["matches_context_truncated"] = len(matches) > len(compact["matches"])
+        if "snippets" in result:
+            snippets = result.get("snippets") or []
+            compact["snippets"] = _compact_context_items(snippets)
+            compact["snippets_context_truncated"] = len(snippets) > len(compact["snippets"])
         return compact
     if tool in ("run_command", "run_tests", "git_status", "git_diff", "git_log"):
         return {
@@ -626,6 +630,11 @@ def work_tool_parameters_from_action(
                 parameters[key] = max(1, min(int(parameters.get(key)), maximum))
             except (TypeError, ValueError):
                 parameters.pop(key, None)
+    if action_type == "search_text":
+        try:
+            parameters["context_lines"] = max(0, min(int(parameters.get("context_lines") or 3), 5))
+        except (TypeError, ValueError):
+            parameters["context_lines"] = 3
     if action_type == "git_diff" and "stat" not in parameters:
         parameters["stat"] = True
     return parameters

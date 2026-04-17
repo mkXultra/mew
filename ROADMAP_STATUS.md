@@ -16,13 +16,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Current Focus
 
-Milestone 2 is the active focus. Readable diff panes, command/test output panes,
-chat work-mode, bounded follow loops, compact live result panes, batched
-model-delta previews, phase/elapsed progress anchors, chat transcript logging,
-interrupt/max-step reentry notes, and scoped reentry controls now exist. The
-next product gap is still a calmer continuous coding cockpit: a more stable
-reasoning/status pane, less repeated reentry material during long sessions, and
-more real dogfood on repository work.
+Milestone 2 is the active focus. Already shipped: readable diff panes,
+command/test output panes, chat work-mode, bounded follow loops, compact live
+result panes, batched model-delta previews, phase/elapsed progress anchors, chat
+transcript logging, interrupt/max-step reentry notes, and scoped reentry
+controls. Remaining gap: a calmer continuous coding cockpit with a more stable
+reasoning/status pane, less raw JSON in live thinking output, less repeated
+reentry material during long sessions, and more real dogfood on repository work.
 
 ## Milestone 1: Native Hands
 
@@ -102,7 +102,7 @@ Evidence:
 - Live result panes now group `outcome`, `tools`, and `session`, include per-tool duration when timestamps are available, indent multiline command metadata consistently, and place command cwd/stdout/stderr directly under the tool result instead of a duplicate `summary: command` line.
 - Live result panes suppress duplicate step/tool summaries, keeping command and tool outcomes easier to scan during dogfood.
 - Live result panes now use compact read/search/glob summaries instead of dumping file text into the main cockpit stream.
-- Live result panes now show a short `search_text` matches preview, so compact runs reveal what the resident model found without opening full session details.
+- Live result panes now show bounded `search_text` context snippets around matches, so compact runs reveal what the resident model found without opening full session details or forcing conclusions from a single matched line.
 - Final `mew work --ai` step reports now reuse compact tool summaries, so live runs do not reprint read-file bodies after the resume.
 - `mew work --live` now prints the selected action, reason, key parameters, and tool-call id before execution, so the user can see what the resident model is about to do before the resume bundle appears.
 - `/work-session live ...` provides a chat shortcut for the same live resident work loop, and pending write approvals in resume output include concrete `/work-session approve ...` and `/work-session reject ...` hints.
@@ -305,9 +305,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `616 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `617 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `123 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `124 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `129 passed, 4 subtests passed`.
@@ -350,6 +350,7 @@ Next action:
 - Mew dogfood task #46 used `mew work --follow` with Codex Web API as a resident buddy after the 2026-04-17 cockpit changes; it verified grouped result panes with duration output and recorded that the remaining live-output gap was dense tool-result rendering, which led to multiline section indentation and direct command cwd/stdout/stderr rendering.
 - `codex-ultra` human-role retest after the 2026-04-17 cockpit transcript work found three issues: non-git initial world-state resume showed `(no files)`, stale working memory rendered an old `next_step` too strongly, and `effects 10` / `runtime-effects 10` failed despite analogous chat grammar. Follow-up retest verified all three fixed with no repo edits.
 - Live Codex Web API dogfood on task #46 exposed that SSE responses can omit `content-type`, causing final text to work while live deltas were dropped; after the fix, session #40 showed batched `model_delta` lines in the thinking pane with no stderr token spam.
+- Mew buddy dogfood on task #46 exposed that one-line `search_text` hits could make the resident model misread ROADMAP_STATUS; after adding bounded context snippets and clarifying the status wording, session #44 correctly distinguished shipped cockpit panes from the remaining live reasoning/status-pane gap.
 
 ## Current Roadmap Focus
 
