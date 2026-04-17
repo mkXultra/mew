@@ -783,7 +783,10 @@ def build_parser():
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
     work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
-    work_parser.add_argument("--session-note", help="record a durable note on the active native work session")
+    work_parser.add_argument(
+        "--session-note",
+        help="record a durable note on the active native work session, or latest task session when task_id is provided",
+    )
     work_parser.add_argument("--recover-session", action="store_true", help="recover a safely retryable interrupted work-session tool")
     work_parser.add_argument(
         "--auto-recover-safe",

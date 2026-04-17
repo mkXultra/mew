@@ -374,7 +374,9 @@ CLI live runs end with `Next CLI controls` so the next continue, stop, resume,
 or chat command is visible. Work-mode `remember` records
 durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
-`/work-session note`. Approving a dry-run write can reuse the latest session
+`/work-session note`. With an explicit task id, `mew work <task-id>
+--session-note ...` can also annotate the latest closed task session after
+review. Approving a dry-run write can reuse the latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
 or write verification refreshes the session's default verification command, so

@@ -1767,6 +1767,18 @@ class WorkSessionTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Work notes", text)
                 self.assertIn("[user] prefer small verified steps", text)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session-note", "reviewed after close", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["work_session"]["status"], "closed")
+                self.assertEqual(data["work_note"]["text"], "reviewed after close")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                self.assertIn("[user] reviewed after close", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

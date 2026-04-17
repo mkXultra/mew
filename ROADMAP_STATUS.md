@@ -257,7 +257,7 @@ Evidence:
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
 - Working memory treats observed verification results as authoritative over model-written verification claims and marks the digest stale when later model turns did not refresh it.
 - Work mode now has a `remember` control action that records durable session notes surfaced in resume bundles and future model context.
-- Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, making persistent guidance distinct from one-shot `/continue` guidance.
+- Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, and task-qualified `mew work <task-id> --session-note ...` can annotate the latest closed task session after review, making persistent guidance distinct from one-shot `/continue` guidance.
 - Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
 - Work model context now includes a bounded live `world_state` summary when read access is allowed, so resumed work can compare durable history with current git/file metadata.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
@@ -343,6 +343,7 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `665 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_note_records_user_note` current: `1 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_work_recovery_next_action_prioritizes_missing_touched_paths tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying` current: `3 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-world-aware-recovery --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `2 passed`.

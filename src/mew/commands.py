@@ -3055,6 +3055,8 @@ def cmd_work_session_note(args):
     with state_lock():
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
+        if not session and getattr(args, "task_id", None):
+            session = _latest_work_session_for_task(state, args.task_id)
         if not session:
             print("No active work session.")
             return 0
