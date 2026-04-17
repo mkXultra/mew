@@ -956,7 +956,25 @@ def build_parser():
         git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
         git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
 
-    self_improve_parser = subparsers.add_parser("self-improve", help="create and optionally dispatch a mew self-improvement task")
+    self_improve_parser = subparsers.add_parser(
+        "self-improve",
+        help="create, plan, or open a mew self-improvement task",
+        description=(
+            "Create or continue a mew self-improvement task.\n\n"
+            "Default mode creates a programmer-plan task. Use --native to hand the task\n"
+            "to native `mew work` instead, or --start-session to open that native work\n"
+            "session immediately."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Native work-session flow:\n"
+            "  mew self-improve --start-session --focus \"Make the coding cockpit calmer\"\n"
+            "  mew work <task-id> --live --allow-read . --max-steps 1\n\n"
+            "Planned dispatcher flow:\n"
+            "  mew self-improve --focus \"Improve stale agent-run handling\"\n"
+            "  mew self-improve --focus \"Improve docs\" --ready --auto-execute --dispatch --dry-run"
+        ),
+    )
     self_improve_parser.add_argument("--title", help="task title")
     self_improve_parser.add_argument("--description", help="task description")
     self_improve_parser.add_argument("--focus", help="self-improvement focus")
@@ -967,8 +985,16 @@ def build_parser():
     self_improve_parser.add_argument("--agent-model", help="implementation model")
     self_improve_parser.add_argument("--review-model", help="review model")
     self_improve_parser.add_argument("--no-plan", action="store_true", help="create/reuse the task without creating a plan")
-    self_improve_parser.add_argument("--native", action="store_true", help="create/reuse the task for native mew work instead of a programmer plan")
-    self_improve_parser.add_argument("--start-session", action="store_true", help="start a native work session for the self-improvement task; implies --native")
+    self_improve_parser.add_argument(
+        "--native",
+        action="store_true",
+        help="prepare native mew work instead of a programmer-plan/ai-cli dispatch",
+    )
+    self_improve_parser.add_argument(
+        "--start-session",
+        action="store_true",
+        help="open or reuse the native mew work session now; implies --native",
+    )
     self_improve_parser.add_argument("--force", action="store_true", help="create a new task even if one is open")
     self_improve_parser.add_argument("--force-plan", action="store_true", help="create a new plan even if one exists")
     self_improve_parser.add_argument("--dispatch", action="store_true", help="start an implementation run immediately")

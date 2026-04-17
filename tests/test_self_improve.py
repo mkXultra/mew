@@ -145,6 +145,20 @@ class SelfImproveTests(unittest.TestCase):
         self.assertNotEqual(first_plan["id"], second_plan["id"])
         self.assertEqual(second_plan["status"], "planned")
 
+    def test_cli_self_improve_help_describes_native_work_flow(self):
+        with redirect_stdout(StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as raised:
+                main(["self-improve", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        output = stdout.getvalue()
+        self.assertIn("Create or continue a mew self-improvement task.", output)
+        self.assertIn("Native work-session flow:", output)
+        self.assertIn("mew self-improve --start-session --focus", output)
+        self.assertIn("mew work <task-id> --live --allow-read . --max-steps 1", output)
+        self.assertIn("prepare native mew work instead of a programmer-", output)
+        self.assertIn("plan/ai-cli dispatch", output)
+
     def test_cli_self_improve_dry_run_dispatch(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
