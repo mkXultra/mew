@@ -421,10 +421,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `810 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `811 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `200 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `201 passed`.
+- `uv run pytest -q tests/test_work_session.py -k "follow_writes_round_trip_snapshot or reply_file_can_queue_safe_follow_actions or reply_file_without_active_session_fails"` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "reply_file_can_queue_safe_follow_actions or follow_writes_round_trip_snapshot or work_session_steer_requires_task_id_when_multiple_sessions_active"` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "work_live_prints_resume_after_step or work_follow_honors_explicit_one_step_bound or work_follow_writes_round_trip_snapshot or work_follow_runs_compact_multi_step_live_loop"` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_steer_is_consumed_by_next_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_model_error_preserves_pending_steer tests/test_work_session.py::WorkSessionTests::test_work_session_stop_preserves_pending_steer` current: `3 passed`.
@@ -432,6 +433,7 @@ Next action:
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_cli_controls_include_steer_command tests/test_work_session.py::WorkSessionTests::test_work_session_start_can_seed_reentry_options` current: `2 passed`.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_help_describes_native_work_flow tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `2 passed`.
 - `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 41 commands.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 41 commands, including CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
 - `uv run python -m py_compile src/mew/commands.py src/mew/cli.py src/mew/work_session.py src/mew/dogfood.py` current: pass.
 - `uv run pytest -q` last observed before the steer lane: `802 passed, 6 subtests passed`.
@@ -639,6 +641,8 @@ Next action:
 - Mid-loop steer now has an explicit CLI/chat lane via `mew work --steer` and `/work-session steer`, with regression coverage for next-step model guidance injection and stop-request precedence.
 - Live/follow work runs now write `.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with the latest step, resume bundle, cells, and next controls, creating the first structured follow cockpit artifact for another model or UI to observe.
 - `mew work --reply-file reply.json` now applies safe structured observer replies back into an active work session, covering `steer`, `note`, `stop`, and dry-run write `reject` actions while leaving approval gates explicit.
+- The follow snapshot contract now includes `schema_version`, heartbeat/process metadata, `session_updated_at`, `reply_command`, and `reply_template`; applying a reply file rewrites the snapshot with `mode=reply_file`, and no-active reply files fail nonzero instead of silently succeeding.
+- `docs/FOLLOW_REPLY_SCHEMA.md` documents the local snapshot/reply contract for another model or UI.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
 ## Current Roadmap Focus

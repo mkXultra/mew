@@ -295,6 +295,9 @@ Initial implementation status, 2026-04-18:
   path back into an active session. The supported actions are `steer`, `note`,
   `stop`, and dry-run write `reject`; approvals stay out of this path until
   the gate/verification semantics are explicit enough.
+- The snapshot/reply contract is documented in `docs/FOLLOW_REPLY_SCHEMA.md`,
+  and snapshots carry `schema_version`, heartbeat/process metadata, a reply
+  command, and a reply template.
 
 Remaining:
 

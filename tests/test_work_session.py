@@ -8276,6 +8276,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(latest_path.read_text(encoding="utf-8"), session_path.read_text(encoding="utf-8"))
 
                 data = json.loads(latest_path.read_text(encoding="utf-8"))
+                self.assertEqual(data["schema_version"], 1)
+                self.assertIn("heartbeat_at", data)
+                self.assertGreater(data["producer"]["pid"], 0)
                 self.assertEqual(data["mode"], "follow")
                 self.assertEqual(data["session_id"], 1)
                 self.assertEqual(data["task_id"], 1)
@@ -8291,6 +8294,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(
                     any(item["command"].startswith("mew work 1 --steer") for item in data["controls"])
                 )
+                self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
+                self.assertEqual(data["reply_template"]["session_id"], 1)
+                self.assertEqual(data["reply_template"]["task_id"], 1)
+                self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
             finally:
                 os.chdir(old_cwd)
 
@@ -8889,6 +8896,7 @@ class WorkSessionTests(unittest.TestCase):
                 reply_path.write_text(
                     json.dumps(
                         {
+                            "session_id": 1,
                             "task_id": 1,
                             "actions": [
                                 {"type": "steer", "text": "inspect the rejected diff before continuing"},
@@ -8918,6 +8926,29 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["stop_reason"], "pause after observer reply")
                 self.assertEqual(session["tool_calls"][0]["approval_status"], "rejected")
                 self.assertEqual(session["tool_calls"][0]["rejection_reason"], "wrong direction")
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["mode"], "reply_file")
+                self.assertEqual(snapshot["stop_reason"], "reply_file")
+                self.assertEqual(snapshot["last_step"]["action"]["type"], "reply_file")
+                self.assertEqual(snapshot["reply_template"]["session_id"], 1)
+                self.assertEqual(snapshot["resume"]["pending_steer"]["source"], "reply_file")
+                self.assertEqual(snapshot["resume"]["pending_steer"]["text"], "inspect the rejected diff before continuing")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_without_active_session_fails(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("reply.json").write_text(
+                    json.dumps({"task_id": 1, "actions": [{"type": "steer", "text": "please continue"}]}),
+                    encoding="utf-8",
+                )
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                self.assertIn("no active work session", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

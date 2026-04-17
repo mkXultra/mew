@@ -1591,19 +1591,26 @@ def format_work_cli_controls(session, args):
     return "\n".join(lines)
 
 
-def write_work_follow_snapshot(args, report, session, task, resume, step=None):
-    if not getattr(args, "live", False):
+def write_work_follow_snapshot(args, report, session, task, resume, step=None, force=False, mode=None):
+    if not force and not getattr(args, "live", False):
         return None
     ensure_state_dir()
     follow_dir = STATE_DIR / "follow"
     follow_dir.mkdir(parents=True, exist_ok=True)
     session_id = (session or {}).get("id")
+    task_id = (session or {}).get("task_id")
+    generated_at = now_iso()
+    reply_path = STATE_DIR / "follow" / "reply.json"
     payload = {
-        "generated_at": now_iso(),
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "heartbeat_at": generated_at,
+        "producer": {"pid": os.getpid()},
         "session_id": session_id,
-        "task_id": (session or {}).get("task_id"),
+        "session_updated_at": (session or {}).get("updated_at"),
+        "task_id": task_id,
         "title": (session or {}).get("title") or (task or {}).get("title") or "",
-        "mode": "follow" if getattr(args, "follow", False) else "live",
+        "mode": mode or ("follow" if getattr(args, "follow", False) else "live"),
         "stop_reason": (report or {}).get("stop_reason"),
         "max_steps": (report or {}).get("max_steps"),
         "step_count": len((report or {}).get("steps") or []),
@@ -1611,6 +1618,13 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None):
         "resume": resume or {},
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args) if session else [],
+        "reply_command": mew_command("work", task_id, "--reply-file", str(reply_path)),
+        "reply_template": {
+            "schema_version": 1,
+            "session_id": session_id,
+            "task_id": task_id,
+            "actions": [{"type": "steer", "text": "<next-step guidance>"}],
+        },
     }
     latest_path = follow_dir / "latest.json"
     targets = [latest_path]
@@ -3679,13 +3693,30 @@ def cmd_work_reply_file(args):
     if cli_task_id and reply_task_id is not None and str(cli_task_id) != str(reply_task_id):
         print("mew: reply task_id does not match command task_id", file=sys.stderr)
         return 1
+    reply_session_id = payload.get("session_id")
     select_args = SimpleNamespace(**vars(args))
     if not getattr(select_args, "task_id", None) and reply_task_id is not None:
         select_args.task_id = str(reply_task_id)
 
     with state_lock():
         state = load_state()
-        if not getattr(select_args, "task_id", None):
+        session = None
+        if reply_session_id is not None:
+            session = find_work_session(state, reply_session_id)
+            task = work_session_task(state, session)
+            if not session or session.get("status") != "active" or (task and task.get("status") == "done"):
+                if getattr(args, "json", False):
+                    print(
+                        json.dumps(
+                            {"applied": False, "reason": "no_active_work_session", "session_id": reply_session_id},
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print("mew: no active work session for reply file", file=sys.stderr)
+                return 1
+        elif not getattr(select_args, "task_id", None):
             active_sessions = _active_work_sessions_for_reply(state)
             if len(active_sessions) > 1:
                 if getattr(args, "json", False):
@@ -3707,10 +3738,26 @@ def cmd_work_reply_file(args):
                     for item in active_sessions[-5:]:
                         print(f"- {mew_command('work', item.get('task_id'), '--reply-file', str(path))}")
                 return 1
-        session = _select_active_work_session_for_args(state, select_args)
         if not session:
-            print("No active work session.")
-            return 0
+            session = _select_active_work_session_for_args(state, select_args)
+        if not session:
+            if getattr(args, "json", False):
+                print(
+                    json.dumps(
+                        {"applied": False, "reason": "no_active_work_session"},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print("mew: no active work session for reply file", file=sys.stderr)
+            return 1
+        if cli_task_id and str(session.get("task_id")) != str(cli_task_id):
+            print("mew: reply session_id does not match command task_id", file=sys.stderr)
+            return 1
+        if reply_task_id is not None and str(session.get("task_id")) != str(reply_task_id):
+            print("mew: reply session_id does not match reply task_id", file=sys.stderr)
+            return 1
 
         for action in actions:
             if action["type"] != "reject":
@@ -3750,6 +3797,24 @@ def cmd_work_reply_file(args):
                     }
                 )
         save_state(state)
+        task = work_session_task(state, session)
+        resume = build_work_session_resume(session, task=task)
+        snapshot_step = {
+            "status": "completed",
+            "action": {"type": "reply_file", "path": str(path)},
+            "summary": f"applied {len(applied)} reply action(s)",
+            "applied": applied,
+        }
+        write_work_follow_snapshot(
+            select_args,
+            {"stop_reason": "reply_file", "steps": [snapshot_step]},
+            session,
+            task,
+            resume,
+            step=snapshot_step,
+            force=True,
+            mode="reply_file",
+        )
     if getattr(args, "json", False):
         print(
             json.dumps(

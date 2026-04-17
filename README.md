@@ -556,7 +556,8 @@ Live and follow runs also write `.mew/follow/latest.json` plus
 next controls for another model or UI to observe without scraping terminal text.
 That observer can write a JSON reply file and apply it with
 `mew work --reply-file reply.json`; supported safe actions are `steer`, `note`,
-`stop`, and `reject`.
+`stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and
+reply contract.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
