@@ -1539,17 +1539,45 @@ class CommandTests(unittest.TestCase):
             os.chdir(tmp)
             try:
                 with redirect_stdout(StringIO()):
-                    self.assertEqual(main(["task", "add", "Draft plan"]), 0)
-                    self.assertEqual(main(["task", "add", "Ready task", "--ready"]), 0)
-                    self.assertEqual(main(["task", "add", "Finished task"]), 0)
-                    self.assertEqual(main(["task", "done", "3"]), 0)
+                    self.assertEqual(main(["task", "add", "Draft plan", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "add", "Ready task", "--kind", "coding", "--ready"]), 0)
+                    self.assertEqual(main(["task", "add", "Running task", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "update", "3", "--status", "running"]), 0)
+                    self.assertEqual(main(["task", "add", "Blocked task", "--kind", "admin"]), 0)
+                    self.assertEqual(main(["task", "update", "4", "--status", "blocked"]), 0)
+                    self.assertEqual(main(["task", "add", "Finished task", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "done", "5"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "todo"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Draft plan", output)
+                self.assertNotIn("Ready task", output)
+                self.assertNotIn("Running task", output)
+                self.assertNotIn("Blocked task", output)
+                self.assertNotIn("Finished task", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["task", "list", "--status", "ready"]), 0)
                 output = stdout.getvalue()
                 self.assertIn("Ready task", output)
                 self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Running task", output)
                 self.assertNotIn("Finished task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "running"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Running task", output)
+                self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Blocked task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "blocked"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Blocked task", output)
+                self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Running task", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["task", "list", "--status", "done"]), 0)
@@ -1563,6 +1591,24 @@ class CommandTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Draft plan", output)
                 self.assertIn("Ready task", output)
+                self.assertIn("Running task", output)
+                self.assertIn("Blocked task", output)
+                self.assertNotIn("Finished task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "open", "--kind", "coding"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Draft plan", output)
+                self.assertIn("Ready task", output)
+                self.assertIn("Running task", output)
+                self.assertNotIn("Blocked task", output)
+                self.assertNotIn("Finished task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--all", "--status", "todo"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Draft plan", output)
+                self.assertNotIn("Ready task", output)
                 self.assertNotIn("Finished task", output)
             finally:
                 os.chdir(old_cwd)

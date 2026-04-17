@@ -335,7 +335,7 @@ Evidence:
 - Native self-improvement dogfood session #81 used `mew self-improve --start-session` and `mew work --live` with Codex Web API to identify redundant `--start-session` output; the follow-up implementation now keeps plain `--native` start guidance while showing only the actionable continue hint after a session is already started.
 - Native self-improvement dogfood session #82 used `mew work --follow` with Codex Web API plus write/verify gates to apply a real edit: chat `/self ... start` now matches CLI behavior by suppressing the redundant native-work start hint after the session already exists.
 - Native self-improvement dogfood session #83 used `mew work --follow` with Codex Web API plus write/verify gates to apply a cockpit cleanup: non-compact work controls now show only the scoped `/work-session resume --allow-read ...` hint instead of also showing a generic duplicate resume line.
-- Native self-improvement dogfood session #84 targeted a real friction from this session (`mew task list --status pending`); mew found the parser but needed manual assist to locate the imported handler, after which task list gained `--status` with `pending`/`open` aliases.
+- Native self-improvement dogfood session #84 targeted a real friction from this session (`mew task list --status pending`); mew found the parser but needed manual assist to locate the imported handler, after which task list gained `--status` with `pending`/`open` aliases and Claude review follow-up coverage for `todo`, `running`, `blocked`, `open`, `--kind`, and `--all --status`.
 - Native self-improvement dogfood session #85 followed up on #84's handler-location friction; `mew work` THINK guidance now tells the resident model to search the broader `src` tree when a symbol is imported but not defined in the current file, rather than repeating same-file searches.
 
 Missing proof:
@@ -352,6 +352,8 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `680 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_commands.py::CommandTests::test_task_list_can_filter_by_status` current: `1 passed`.
+- `uv run pytest -q tests/test_commands.py` current: `146 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `1 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `163 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-imported-symbol-prompt --json` current: pass across 36 commands.
