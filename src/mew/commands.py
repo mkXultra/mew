@@ -561,9 +561,6 @@ def _format_workbench_reentry(resume, task):
             f"latest_decision: #{decision.get('model_turn_id')} "
             f"{decision.get('action') or 'unknown'}{tool_text} {summary}".rstrip()
         )
-        guidance = decision.get("guidance_snapshot") or decision.get("guidance")
-        if guidance:
-            lines.append(f"guidance: {clip_inline_text(guidance, 360)}")
 
     task_notes = _format_workbench_task_notes((task or {}).get("notes") or "")
     if task_notes:
@@ -578,14 +575,16 @@ def _format_workbench_reentry(resume, task):
 
 
 def _format_workbench_task_notes(notes):
-    task_notes = format_task_notes_display(notes, max_lines=3, max_chars=800)
-    if not task_notes:
+    if not notes:
         return ""
-
-    lines = task_notes.splitlines()
+    lines = str(notes).splitlines()
+    if not lines:
+        return ""
+    if len(lines) > 3:
+        lines = ["[...older task notes omitted...]", *lines[-3:]]
     finish_indices = [index for index, line in enumerate(lines) if line.startswith("Work session finished:")]
     if len(finish_indices) <= 1:
-        return task_notes
+        return clip_output("\n".join(lines), 800)
 
     latest_finish_index = finish_indices[-1]
     omitted = len(finish_indices) - 1
@@ -599,6 +598,9 @@ def _format_workbench_task_notes(notes):
                 marker_inserted = True
             continue
         compacted.append(line)
+    content_lines = [line for line in compacted if not line.startswith("[...")]
+    if content_lines and all(line.startswith("Work session finished:") for line in content_lines):
+        return ""
     return clip_output("\n".join(compacted), 800)
 
 
