@@ -80,6 +80,9 @@ can drive a dry-run write through approval without a separate human CLI command.
 The same follow snapshot now also exposes top-level `pending_approvals`, so an
 observer does not have to dig through the nested resume bundle just to find the
 approval tool ids.
+Native self-improve entry output now prints a direct resume command alongside
+continue/follow, making long-running self-improvement sessions easier to reenter
+after context compression or a terminal restart.
 
 ## Milestone 1: Native Hands
 
@@ -315,6 +318,7 @@ Evidence:
 - `mew work --cells --cell-tail-lines N` provides configurable command/test tail output, reducing noisy cell panes without changing the full `--commands`/`--tests` detail views.
 - `mew work --reply-file` now supports `approve` and `approve_all` observer actions for pending dry-run writes, reusing existing write/verify gates and rewriting the follow snapshot after completion.
 - `.mew/follow/latest.json` now includes top-level `pending_approvals` for external observer UIs and models.
+- `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
 
 Missing proof:
 

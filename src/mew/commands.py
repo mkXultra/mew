@@ -6962,6 +6962,7 @@ def cmd_self_improve(args):
         print(f"work cwd: {resolved_task_cwd_text(task)}")
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
         print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
+        print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']}")
@@ -10456,6 +10457,7 @@ def chat_self_improve(rest):
         print(f"work cwd: {resolved_task_cwd_text(task)}")
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
         print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
+        print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
     if show_prompt:
         if not plan:
             print("No programmer plan was created for native self-improvement.")
