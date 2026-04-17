@@ -551,6 +551,9 @@ ids such as `s1:model_turn:2` or `s1:test:7`, so a human or future UI can point
 at the same work item instead of reconstructing it from raw logs. The follow
 stream keeps completed cells compact; use `mew work --cells` or
 `/work-session cells` to inspect the full cell view later.
+Live and follow runs also write `.mew/follow/latest.json` plus
+`.mew/follow/session-<id>.json`, containing the latest step, resume, cells, and
+next controls for another model or UI to observe without scraping terminal text.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

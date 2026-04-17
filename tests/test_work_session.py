@@ -8232,6 +8232,68 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_writes_round_trip_snapshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("snapshot follow content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "should not run", "action": {"type": "finish", "reason": "too many"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--max-steps",
+                                        "1",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                latest_path = Path(".mew/follow/latest.json")
+                session_path = Path(".mew/follow/session-1.json")
+                self.assertTrue(latest_path.exists())
+                self.assertTrue(session_path.exists())
+                self.assertEqual(latest_path.read_text(encoding="utf-8"), session_path.read_text(encoding="utf-8"))
+
+                data = json.loads(latest_path.read_text(encoding="utf-8"))
+                self.assertEqual(data["mode"], "follow")
+                self.assertEqual(data["session_id"], 1)
+                self.assertEqual(data["task_id"], 1)
+                self.assertEqual(data["title"], "Build native hands")
+                self.assertEqual(data["stop_reason"], "max_steps")
+                self.assertEqual(data["max_steps"], 1)
+                self.assertEqual(data["step_count"], 1)
+                self.assertEqual(data["last_step"]["action"]["type"], "read_file")
+                self.assertEqual(data["resume"]["phase"], "idle")
+                self.assertTrue(any(cell["kind"] == "model_turn" for cell in data["cells"]))
+                self.assertTrue(any(cell["kind"] == "tool_call" for cell in data["cells"]))
+                self.assertTrue(any(item["label"] == "steer next step" for item in data["controls"]))
+                self.assertTrue(
+                    any(item["command"].startswith("mew work 1 --steer") for item in data["controls"])
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_max_steps_note_replaces_older_boundary_notes(self):
         from mew.commands import record_max_steps_reentry_note
 

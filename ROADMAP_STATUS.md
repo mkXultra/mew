@@ -421,8 +421,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `808 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `198 passed`.
+- `uv run pytest -q` current: `809 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `199 passed`.
+- `uv run pytest -q tests/test_work_session.py -k "work_live_prints_resume_after_step or work_follow_honors_explicit_one_step_bound or work_follow_writes_round_trip_snapshot or work_follow_runs_compact_multi_step_live_loop"` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_steer_is_consumed_by_next_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_model_error_preserves_pending_steer tests/test_work_session.py::WorkSessionTests::test_work_session_stop_preserves_pending_steer` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_steer_requires_task_id_when_multiple_sessions_active tests/test_work_session.py::WorkSessionTests::test_work_session_steer_is_consumed_by_next_model_step` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_cli_controls_include_steer_command tests/test_work_session.py::WorkSessionTests::test_work_session_start_can_seed_reentry_options` current: `2 passed`.
@@ -633,6 +634,7 @@ Next action:
 - Mew buddy dogfood session #99 chose the smallest visible cockpit polish: `/help work` now documents task-first live usage (`/work-session <task-id> live --allow-read .`) alongside task-first resume, preserving the accepted command order in the focused chat help.
 - Mew buddy dogfood session #100 then inspected README/help/test command wording and exposed that idle resume `next_action` still pointed at a taskless `mew work --live`; resume now points at `mew work <task-id> --live` when the task id is known.
 - Mid-loop steer now has an explicit CLI/chat lane via `mew work --steer` and `/work-session steer`, with regression coverage for next-step model guidance injection and stop-request precedence.
+- Live/follow work runs now write `.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with the latest step, resume bundle, cells, and next controls, creating the first structured follow cockpit artifact for another model or UI to observe.
 
 ## Current Roadmap Focus
 

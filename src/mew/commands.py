@@ -1591,6 +1591,39 @@ def format_work_cli_controls(session, args):
     return "\n".join(lines)
 
 
+def write_work_follow_snapshot(args, report, session, task, resume, step=None):
+    if not getattr(args, "live", False):
+        return None
+    ensure_state_dir()
+    follow_dir = STATE_DIR / "follow"
+    follow_dir.mkdir(parents=True, exist_ok=True)
+    session_id = (session or {}).get("id")
+    payload = {
+        "generated_at": now_iso(),
+        "session_id": session_id,
+        "task_id": (session or {}).get("task_id"),
+        "title": (session or {}).get("title") or (task or {}).get("title") or "",
+        "mode": "follow" if getattr(args, "follow", False) else "live",
+        "stop_reason": (report or {}).get("stop_reason"),
+        "max_steps": (report or {}).get("max_steps"),
+        "step_count": len((report or {}).get("steps") or []),
+        "last_step": step or (((report or {}).get("steps") or [None])[-1]),
+        "resume": resume or {},
+        "cells": build_work_session_cells(session, limit=30) if session else [],
+        "controls": work_cli_control_items(session, args) if session else [],
+    }
+    latest_path = follow_dir / "latest.json"
+    targets = [latest_path]
+    if session_id is not None:
+        targets.append(follow_dir / f"session-{session_id}.json")
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2)
+    for path in targets:
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(encoded + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    return latest_path
+
+
 def work_ai_has_tool_gates(options):
     return bool(
         options.get("allow_read")
@@ -2924,6 +2957,7 @@ def cmd_work_ai(args):
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session)
             resume = build_work_session_resume(session, task=task)
+            write_work_follow_snapshot(args, report, session, task, resume, step=report["steps"][-1])
             live_cells_seen = print_work_live_step_output(
                 args,
                 index,
@@ -2994,6 +3028,13 @@ def cmd_work_ai(args):
     if should_note_max_steps:
         mode = "follow" if getattr(args, "follow", False) else "live"
         report["max_steps_note"] = record_max_steps_reentry_note(session_id, report, mode=mode)
+
+    if getattr(args, "live", False):
+        state = load_state()
+        session = find_work_session(state, session_id)
+        task = work_session_task(state, session)
+        resume = build_work_session_resume(session, task=task)
+        write_work_follow_snapshot(args, report, session, task, resume)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

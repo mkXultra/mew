@@ -287,6 +287,10 @@ Initial implementation status, 2026-04-18:
   explicit mid-loop steer lane: text is queued for the next live/follow step,
   exposed in resume/live session output while pending, injected into that step
   guidance, journaled as consumed, and cleared.
+- `mew work --live` and `mew work --follow` write
+  `.mew/follow/latest.json` plus `.mew/follow/session-<id>.json` with the
+  latest step, resume bundle, cells, and next controls. This gives another
+  model or UI a structured observation point without parsing terminal output.
 
 Remaining:
 
