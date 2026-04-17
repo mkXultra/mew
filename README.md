@@ -30,6 +30,7 @@ uv run mew daily
 uv run mew journal --write
 uv run mew morning-paper feed.json --interest ai --write
 uv run mew bundle --show
+uv run mew bundle --generate-core --morning-feed feed.json --interest ai --show
 uv run mew desk --json
 uv run mew mood --write
 uv run mew digest
@@ -58,6 +59,9 @@ core command.
 source reports; use it after `mew journal --write`, `mew mood --write`,
 `mew morning-paper ... --write`, or after dream/self-memory experiments have
 written files under `.mew`.
+Use `mew bundle --generate-core` to generate journal and mood before composing;
+add `--morning-feed feed.json --interest TAG` to include the static morning
+paper in the same command.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
 `typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
 for a future tray/window process, or `mew desk --write` to write `.mew/desk`
@@ -177,6 +181,7 @@ uv run mew journal --show
 uv run mew morning-paper feed.json --interest ai --write
 uv run mew morning-paper feed.json --show
 uv run mew bundle --date 2026-04-17 --show
+uv run mew bundle --date 2026-04-17 --generate-core --morning-feed feed.json --interest ai --show
 uv run mew desk --json
 uv run mew desk --write
 uv run mew mood --date 2026-04-17 --write

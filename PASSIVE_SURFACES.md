@@ -119,6 +119,7 @@ Useful commands:
 uv run mew bundle --show
 uv run mew bundle --json
 uv run mew bundle --date 2026-04-17
+uv run mew bundle --generate-core --morning-feed feed.json --interest ai --show
 ```
 
 Current source report paths:
@@ -132,6 +133,8 @@ Current source report paths:
 The command composes existing reports only. It does not generate dream or
 self-memory reports. `mew journal --write`, `mew mood --write`, and
 `mew morning-paper ... --write` can generate core source reports.
+`--generate-core` can generate journal and mood first; `--morning-feed` adds the
+static morning-paper source report before composing.
 
 ## Experiments
 
@@ -173,7 +176,7 @@ promotions and review fixes:
 
 ```text
 uv run pytest -q
-772 passed, 6 subtests passed
+775 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

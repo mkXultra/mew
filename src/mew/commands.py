@@ -4761,12 +4761,43 @@ def cmd_passive_bundle(args):
     if args.json and args.show:
         print("mew: --json and --show cannot be used together", file=sys.stderr)
         return 1
+    if args.morning_feed and not args.generate_core:
+        print("mew: --morning-feed requires --generate-core", file=sys.stderr)
+        return 1
+    reports_root = Path(args.reports_root).expanduser()
+    output_dir = Path(args.output_dir).expanduser()
+    generated = []
     try:
+        if args.generate_core:
+            state = load_state()
+            journal_view = build_journal_view_model(state, explicit_date=args.date)
+            journal_path = write_journal_report(journal_view, reports_root)
+            generated.append({"type": "Journal", "path": str(journal_path)})
+
+            mood_view = build_mood_view_model(state, explicit_date=args.date)
+            mood_path = write_mood_report(mood_view, reports_root)
+            generated.append({"type": "Mood", "path": str(mood_path)})
+
+            if args.morning_feed:
+                items = load_feed(Path(args.morning_feed).expanduser())
+                morning_view = build_morning_paper_view_model(
+                    items,
+                    state,
+                    explicit_date=args.date,
+                    explicit_interests=args.interest,
+                    limit=args.limit,
+                )
+                morning_path = write_morning_paper_report(morning_view, reports_root)
+                generated.append({"type": "Morning Paper", "path": str(morning_path)})
+
         result = generate_bundle(
-            Path(args.reports_root).expanduser(),
-            Path(args.output_dir).expanduser(),
+            reports_root,
+            output_dir,
             explicit_date=args.date,
         )
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"mew: failed to read feed: {exc}", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -4774,6 +4805,7 @@ def cmd_passive_bundle(args):
         "path": str(result.path),
         "included": result.included,
         "missing": result.missing,
+        "generated": generated,
     }
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))

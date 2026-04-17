@@ -455,6 +455,14 @@ def build_parser():
     bundle_parser.add_argument("--date", help="bundle date YYYY-MM-DD; defaults to today")
     bundle_parser.add_argument("--show", action="store_true", help="print the generated bundle instead of only its path")
     bundle_parser.add_argument("--json", action="store_true", help="print structured output")
+    bundle_parser.add_argument(
+        "--generate-core",
+        action="store_true",
+        help="generate core journal and mood reports before composing the bundle",
+    )
+    bundle_parser.add_argument("--morning-feed", help="with --generate-core, feed JSON for morning-paper generation")
+    bundle_parser.add_argument("--interest", action="append", default=[], help="with --morning-feed, interest tag to rank for")
+    bundle_parser.add_argument("--limit", type=int, default=8, help="with --morning-feed, maximum feed items to include")
     bundle_parser.set_defaults(func=cmd_passive_bundle)
 
     desk_parser = subparsers.add_parser("desk", help="show the desktop-pet view model")

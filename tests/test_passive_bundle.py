@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mew.cli import main
 from mew.passive_bundle import generate_bundle
+from mew.state import add_question, load_state, save_state, state_lock
 
 
 def write_report(root: Path, relative: str, text: str) -> None:
@@ -99,6 +100,80 @@ class PassiveBundleTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("--json and --show cannot be used together", stderr.getvalue())
+
+    def test_bundle_command_can_generate_core_reports_before_composing(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append({"id": 1, "title": "Open work", "status": "ready"})
+                    add_question(state, "Need input?")
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["bundle", "--date", "2026-04-17", "--generate-core", "--json"])
+                data = json.loads(stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(data["included"], ["Journal", "Mood"])
+            self.assertEqual([item["type"] for item in data["generated"]], ["Journal", "Mood"])
+            self.assertTrue((Path(tmp) / ".mew" / "journal" / "2026-04-17.md").exists())
+            self.assertTrue((Path(tmp) / ".mew" / "mood" / "2026-04-17.md").exists())
+
+    def test_bundle_command_can_generate_morning_paper_from_feed(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feed = root / "feed.json"
+            feed.write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "title": "Passive AI shell",
+                                "source": "local",
+                                "summary": "Useful for mew.",
+                                "tags": ["passive-ai"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "bundle",
+                            "--date",
+                            "2026-04-17",
+                            "--generate-core",
+                            "--morning-feed",
+                            str(feed),
+                            "--interest",
+                            "passive-ai",
+                            "--json",
+                        ]
+                    )
+                data = json.loads(stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(data["included"], ["Journal", "Mood", "Morning Paper"])
+            self.assertIn("Morning Paper", [item["type"] for item in data["generated"]])
+
+    def test_bundle_command_rejects_morning_feed_without_generate_core(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            code = main(["bundle", "--morning-feed", "feed.json"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--morning-feed requires --generate-core", stderr.getvalue())
 
 
 if __name__ == "__main__":
