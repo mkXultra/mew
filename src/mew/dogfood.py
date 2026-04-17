@@ -1267,11 +1267,6 @@ def run_work_session_scenario(workspace, env=None):
             "--quiet",
             "--allow-read",
             ".",
-            "--allow-write",
-            ".",
-            "--allow-verify",
-            "--verify-command",
-            "true",
         ]
     )
     reply_approve_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})

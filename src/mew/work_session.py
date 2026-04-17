@@ -1,4 +1,5 @@
 import json
+import re
 import shlex
 
 from .cli_command import mew_command, mew_executable
@@ -40,6 +41,11 @@ WORK_TOOLS = {
     "write_file",
     "edit_file",
 }
+APPROVAL_WAIT_RE = re.compile(
+    r"\b(?:wait|waiting|await|awaiting)\b.*\b(?:approval|approve|rejection|reject)\b"
+    r"|\b(?:approval|approve|rejection|reject)\b.*\b(?:wait|waiting|await|awaiting)\b",
+    re.IGNORECASE,
+)
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
@@ -1059,7 +1065,7 @@ def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
     if not memory or pending_approvals:
         return memory
     next_step = str(memory.get("next_step") or "").lower()
-    if not any(token in next_step for token in ("approval", "approve", "rejection", "reject", "承認", "却下")):
+    if not (APPROVAL_WAIT_RE.search(next_step) or "承認待" in next_step or "却下待" in next_step):
         return memory
     for call in reversed(calls or []):
         if call.get("tool") not in ("write_file", "edit_file"):
@@ -1072,11 +1078,10 @@ def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
         status = call.get("approval_status")
         resolved = dict(memory)
         resolved["next_step"] = ""
-        resolved["latest_tool_call_id"] = call.get("id")
-        resolved["latest_tool_state"] = f"pending approval already {status}; no pending approvals remain"
-        resolved["stale_after_tool_call_id"] = call.get("id")
-        resolved["stale_after_tool"] = "approval"
         resolved["resolved_pending_approval"] = True
+        resolved["resolved_pending_approval_tool_call_id"] = call.get("id")
+        resolved["resolved_pending_approval_status"] = status
+        resolved["resolved_pending_approval_state"] = f"pending approval already {status}; no pending approvals remain"
         return resolved
     return memory
 
@@ -1654,6 +1659,11 @@ def format_work_session_resume(resume):
             lines.append(f"last_verified_state: {memory.get('last_verified_state')}")
         if memory.get("latest_tool_state"):
             lines.append(f"latest_tool_state: {memory.get('latest_tool_state')}")
+        if memory.get("resolved_pending_approval_state"):
+            lines.append(
+                f"resolved_pending_approval: #{memory.get('resolved_pending_approval_tool_call_id')} "
+                f"{memory.get('resolved_pending_approval_state')}"
+            )
         source = memory.get("source") or ""
         turn_id = memory.get("model_turn_id")
         if source or turn_id:

@@ -2533,7 +2533,7 @@ def cmd_work_ai(args):
         max_steps = positive_max_steps(
             getattr(args, "max_steps", None),
             default=1,
-            allow_zero=bool(getattr(args, "follow", False)),
+            allow_zero=bool(getattr(args, "live", False) or getattr(args, "follow", False)),
         )
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
@@ -4037,8 +4037,9 @@ def _work_reply_template(session=None, resume=None):
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
     pending_approvals = (resume or {}).get("pending_approvals") or []
-    if pending_approvals:
-        actions = [{"type": "approve", "tool_call_id": pending_approvals[0].get("tool_call_id")}]
+    first_approval_id = (pending_approvals[0] or {}).get("tool_call_id") if pending_approvals else None
+    if first_approval_id not in (None, ""):
+        actions = [{"type": "approve", "tool_call_id": first_approval_id}]
     else:
         actions = [{"type": "steer", "text": "<next-step guidance>"}]
     return {

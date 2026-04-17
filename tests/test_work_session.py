@@ -8750,7 +8750,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(memory["hypothesis"], "A write is ready.")
         self.assertEqual(memory.get("next_step"), "")
         self.assertTrue(memory["resolved_pending_approval"])
-        self.assertIn("pending approval already applied", memory["latest_tool_state"])
+        self.assertEqual(memory["resolved_pending_approval_tool_call_id"], 1)
+        self.assertIn("pending approval already applied", memory["resolved_pending_approval_state"])
+        self.assertEqual(memory["latest_tool_call_id"], 2)
+
+    def test_work_reply_template_falls_back_when_pending_approval_id_missing(self):
+        from mew.commands import build_work_reply_schema
+
+        data = build_work_reply_schema(
+            {"id": 1, "task_id": 2, "updated_at": "2026-04-18T00:00:00Z"},
+            resume={"pending_approvals": [{"path": "notes.md"}]},
+        )
+
+        self.assertEqual(data["reply_template"]["actions"][0]["type"], "steer")
 
     def test_max_steps_note_replaces_older_boundary_notes(self):
         from mew.commands import record_max_steps_reentry_note
@@ -9184,6 +9196,33 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
                 self.assertEqual(snapshot["max_steps"], 0)
                 self.assertEqual(snapshot["step_count"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_live_zero_max_steps_refreshes_snapshot_without_model_call(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth") as load_auth:
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(["work", "1", "--live", "--max-steps", "0", "--allow-read", "."]),
+                                0,
+                            )
+
+                load_auth.assert_not_called()
+                call_model.assert_not_called()
+                self.assertIn("mew work ai: 0/0 step(s) stop=snapshot_refresh", stdout.getvalue())
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["mode"], "live")
+                self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
             finally:
                 os.chdir(old_cwd)
 

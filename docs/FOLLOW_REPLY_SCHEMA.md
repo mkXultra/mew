@@ -18,11 +18,15 @@ The snapshot is a local contract for another model or UI. It includes:
   this template points at the first pending `approve` action; otherwise it uses
   a `steer` action.
 
-To refresh the snapshot without spending a model turn, run:
+To refresh the snapshot without spending a model turn, run either live or
+follow with zero steps:
 
 ```sh
 mew work <task-id> --follow --max-steps 0 --quiet --allow-read .
 ```
+
+`--quiet` is optional; it only keeps the refresh command's terminal output
+compact.
 
 ## Reply File
 
