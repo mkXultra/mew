@@ -3506,8 +3506,8 @@ def cmd_message(args):
         mark_read=getattr(args, "mark_read", False),
     )
 
-def session_message(kind, request_id=None, **payload):
-    data = {"type": kind}
+def session_message(message_type, request_id=None, **payload):
+    data = {"type": message_type}
     if request_id is not None:
         data["id"] = request_id
     data.update(payload)
@@ -3545,16 +3545,26 @@ def load_state_locked():
     with state_lock():
         return load_state()
 
-def session_status_payload(state):
+def session_request_kind(request):
+    kind = request.get("kind")
+    return kind if isinstance(kind, str) and kind.strip() else None
+
+
+def session_status_payload(state, kind=None):
     lock = read_lock()
     lock_state = "none"
     if lock:
         lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
-    questions = open_questions(state)
-    attention = open_attention_items(state)
+    tasks = filter_tasks_by_kind(open_tasks(state), kind=kind)
+    task_ids = {str(task.get("id")) for task in tasks}
+    questions = filter_questions_for_tasks(open_questions(state), tasks, kind=kind)
+    attention = filter_attention_for_tasks(open_attention_items(state), tasks, kind=kind)
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
-    unread = unread_outbox_messages(state)
+    if kind:
+        running_agents = [run for run in running_agents if str(run.get("task_id")) in task_ids]
+    unread = filter_messages_for_tasks(unread_outbox_messages(state), tasks, kind=kind)
     return {
+        "kind": kind or "",
         "runtime_status": state["runtime_status"],
         "agent_status": state["agent_status"],
         "user_status": state["user_status"],
@@ -3565,13 +3575,13 @@ def session_status_payload(state):
             "started_at": (lock or {}).get("started_at") if lock else None,
         },
         "counts": {
-            "open_tasks": len(open_tasks(state)),
+            "open_tasks": len(tasks),
             "open_questions": len(questions),
             "open_attention": len(attention),
             "running_agent_runs": len(running_agents),
             "unread_outbox": len(unread),
         },
-        "next_move": next_move(state),
+        "next_move": next_move(state, kind=kind),
     }
 
 def handle_session_request(request):
@@ -3627,13 +3637,15 @@ def handle_session_request(request):
             return session_message(response_type, request_id, question=question)
 
         if request_type == "status":
-            return session_message("status", request_id, **session_status_payload(load_state_locked()))
+            kind = session_request_kind(request)
+            return session_message("status", request_id, **session_status_payload(load_state_locked(), kind=kind))
 
         if request_type == "brief":
             limit = request.get("limit", 5)
             if not isinstance(limit, int):
                 limit = 5
-            return session_message("brief", request_id, brief=build_brief_data(load_state_locked(), limit=limit))
+            kind = session_request_kind(request)
+            return session_message("brief", request_id, brief=build_brief_data(load_state_locked(), limit=limit, kind=kind))
 
         if request_type in ("focus", "daily"):
             limit = request.get("limit", 3)
@@ -3648,7 +3660,8 @@ def handle_session_request(request):
             limit = request.get("limit", 10)
             if not isinstance(limit, int):
                 limit = 10
-            return session_message("activity", request_id, activity=build_activity_data(load_state_locked(), limit=limit))
+            kind = session_request_kind(request)
+            return session_message("activity", request_id, activity=build_activity_data(load_state_locked(), limit=limit, kind=kind))
 
         if request_type == "questions":
             state = load_state_locked()

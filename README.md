@@ -593,8 +593,9 @@ line. Supported request types include `status`, `brief`, `focus`, `daily`, `acti
 `questions`, `attention`, `outbox`, `ack`, `message`, `reply`, `next`, and
 `defer_question`, `reopen_question`, `wait_outbox`, and `stop`. `message`
 requests may also pass `"wait": true`. `stop` exits the JSONL session;
-it does not stop the background runtime. `focus` responses contain a `focus`
-payload; `daily` responses contain the same shape under `daily`:
+it does not stop the background runtime. `status`, `brief`, `focus`, `daily`,
+and `activity` accept `"kind": "coding"` style scopes. `focus` responses contain
+a `focus` payload; `daily` responses contain the same shape under `daily`:
 
 ```sh
 printf '{"id":"m1","type":"message","text":"今日のタスクは何？"}\n{"id":"s1","type":"status"}\n{"type":"stop"}\n' | uv run mew session

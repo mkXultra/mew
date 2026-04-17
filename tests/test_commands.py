@@ -1285,6 +1285,68 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_session_jsonl_scopes_status_brief_and_activity_by_kind(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {"id": 1, "title": "Research grants", "status": "todo", "kind": "research"},
+                            {"id": 2, "title": "Improve cockpit", "status": "todo", "kind": "coding"},
+                        ]
+                    )
+                    add_question(state, "Which city?", related_task_id=1)
+                    add_outbox_message(state, "info", "coding note", related_task_id=2)
+                    state["thought_journal"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "event_id": 1,
+                                "event_type": "passive_tick",
+                                "summary": "Research activity",
+                                "actions": [{"type": "record_memory", "task_id": 1}],
+                                "counts": {"actions": 1},
+                            },
+                            {
+                                "id": 2,
+                                "event_id": 2,
+                                "event_type": "passive_tick",
+                                "summary": "Coding activity",
+                                "actions": [{"type": "record_memory", "task_id": 2}],
+                                "counts": {"actions": 1},
+                            },
+                        ]
+                    )
+                    save_state(state)
+
+                stdin = StringIO(
+                    '{"id":"s","type":"status","kind":"coding"}\n'
+                    '{"id":"b","type":"brief","kind":"coding"}\n'
+                    '{"id":"a","type":"activity","kind":"coding"}\n'
+                    '{"id":"x","type":"stop"}\n'
+                )
+                with patch("sys.stdin", stdin), redirect_stdout(StringIO()) as stdout:
+                    code = main(["session"])
+
+                self.assertEqual(code, 0)
+                responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual(responses[1]["type"], "status")
+                self.assertEqual(responses[1]["kind"], "coding")
+                self.assertEqual(responses[1]["counts"]["open_tasks"], 1)
+                self.assertEqual(responses[1]["counts"]["open_questions"], 0)
+                self.assertEqual(responses[1]["counts"]["unread_outbox"], 1)
+                self.assertEqual(responses[2]["brief"]["kind"], "coding")
+                self.assertEqual(responses[2]["brief"]["open_tasks"][0]["title"], "Improve cockpit")
+                self.assertEqual(responses[3]["activity"]["kind"], "coding")
+                self.assertEqual(responses[3]["activity"]["recent_activity"][0]["summary"], "Coding activity")
+            finally:
+                os.chdir(old_cwd)
+
     def test_session_jsonl_reports_errors_and_keeps_running(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
