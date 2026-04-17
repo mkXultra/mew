@@ -572,7 +572,6 @@ def _format_workbench_reentry(resume, task):
     task_id = resume.get("task_id") or (task or {}).get("id")
     if task_id:
         lines.append(f"resume: {mew_command('work', task_id, '--session', '--resume')}")
-        lines.append(f"chat: /work-session resume {task_id}")
     return lines
 
 
@@ -7142,12 +7141,21 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         lines.append(f"- /work-session resume{task_suffix}")
         lines.append(f"- /work-session start{task_suffix or ' <task-id>'}")
         return "\n".join(lines)
+    resume = build_work_session_resume(session, task=work_session_task(state, session))
     if session.get("stop_requested_at"):
+        if (resume or {}).get("approve_all_hint"):
+            lines.append(f"- {(resume or {}).get('approve_all_hint')}")
+        for approval in (resume or {}).get("pending_approvals") or []:
+            if approval.get("approve_hint"):
+                lines.append(f"- {approval.get('approve_hint')}")
+            if approval.get("reject_hint"):
+                lines.append(f"- {approval.get('reject_hint')}")
         lines.append(f"- /work-session resume{task_suffix}")
+        lines.append("- /work-session details")
+        lines.append("- /work-session diffs")
         lines.append("- /work-session close")
         return "\n".join(lines)
 
-    resume = build_work_session_resume(session, task=work_session_task(state, session))
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
         lines.append(f"- /work-session resume{task_suffix} --allow-read . --auto-recover-safe")

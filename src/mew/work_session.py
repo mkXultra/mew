@@ -704,10 +704,12 @@ def parent_path_for_observation(path):
     trimmed = path.rstrip("/\\")
     if not trimmed:
         return "/"
-    if "/" in trimmed:
-        return trimmed.rsplit("/", 1)[0] or "/"
-    if "\\" in trimmed:
-        return trimmed.rsplit("\\", 1)[0] or "."
+    separator_index = max(trimmed.rfind("/"), trimmed.rfind("\\"))
+    if separator_index >= 0:
+        parent = trimmed[:separator_index]
+        if parent:
+            return parent
+        return "/" if trimmed.startswith("/") else "."
     return "."
 
 

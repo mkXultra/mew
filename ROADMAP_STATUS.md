@@ -346,7 +346,14 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `671 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `674 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_chat_work_session_can_request_stop tests/test_work_session.py::WorkSessionTests::test_chat_work_session_stop_keeps_pending_approval_controls tests/test_work_session.py::WorkSessionTests::test_workbench_surfaces_work_session_reentry_guidance` current: `3 passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_parent_path_for_observation_handles_common_paths tests/test_work_session.py::WorkSessionTests::test_retry_failed_source_does_not_hide_retry_call_reobserve tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_parent_inspection_after_failed_read_file tests/test_work_session.py::WorkSessionTests::test_chat_work_session_stop_keeps_pending_approval_controls` current: `4 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `304 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-calm-reentry --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Reduce repeated reentry material..."` created task #50/session #73; `./mew work 50 --live --auth auth.json --allow-read . --max-steps 2 --compact-live ...` identified the workbench reentry command duplication slice.
+- `./mew work 50` current: Reentry now shows one `resume:` line and no repeated `chat: /work-session resume ...` line.
+- `claude-ultra` review of `5398723` and `c99e5ba` current: no critical issues; low-risk findings around stop-requested pending approvals, retry_failed coverage, and parent path edge cases were addressed in the follow-up slice.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_safe_reobserve_after_failed_edit tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_parent_inspection_after_failed_read_file tests/test_work_session.py::WorkSessionTests::test_work_resume_retries_interrupted_read_file tests/test_work_session.py::WorkSessionTests::test_work_resume_uses_recorded_output_review_after_failed_command tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `5 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `301 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-safe-reobserve-tight --json` current: pass across 36 commands.

@@ -2141,6 +2141,54 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("interrupted", reobserve["reason"])
 
+    def test_parent_path_for_observation_handles_common_paths(self):
+        from mew.work_session import parent_path_for_observation
+
+        self.assertEqual(parent_path_for_observation("README.md"), ".")
+        self.assertEqual(parent_path_for_observation("src/app.py"), "src")
+        self.assertEqual(parent_path_for_observation("/tmp/app.py"), "/tmp")
+        self.assertEqual(parent_path_for_observation("/app.py"), "/")
+        self.assertEqual(parent_path_for_observation("src/sub\\app.py"), "src/sub")
+        self.assertEqual(parent_path_for_observation("src\\sub\\app.py"), "src\\sub")
+        self.assertEqual(parent_path_for_observation("src/sub/"), "src")
+
+    def test_retry_failed_source_does_not_hide_retry_call_reobserve(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover failed retry",
+            "goal": "Recover failed retry.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "interrupted",
+                    "parameters": {"path": "README.md"},
+                    "error": "Interrupted before the work tool completed.",
+                    "recovery_status": "retry_failed",
+                    "recovered_by_tool_call_id": 2,
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "failed",
+                    "parameters": {"path": "README.md"},
+                    "error": "read access is disabled",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["suggested_safe_reobserve"]["source_tool_call_id"], 2)
+        self.assertEqual(resume["suggested_safe_reobserve"]["action"], "inspect_dir")
+        self.assertNotIn("suggested_safe_reobserve", resume["failures"][0])
+        self.assertEqual(resume["failures"][1]["suggested_safe_reobserve"]["source_tool_call_id"], 2)
+
     def test_work_resume_uses_recorded_output_review_after_failed_command(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5411,7 +5459,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("Work session finished: duplicate closure", output)
                 self.assertNotIn("Work session finished: latest closure", output)
                 self.assertIn("resume:", output)
-                self.assertIn("chat: /work-session resume 1", output)
+                self.assertNotIn("chat: /work-session resume 1", output)
             finally:
                 os.chdir(old_cwd)
 
@@ -7186,6 +7234,54 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("/work-session live", controls)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["stop_reason"], "pause soon")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_stop_keeps_pending_approval_controls(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "README.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session stop pause for review", {}), "continue")
+                output = stdout.getvalue()
+                controls = output.split("Next controls", 1)[1]
+                self.assertIn("/work-session approve 1", controls)
+                self.assertIn("/work-session reject 1", controls)
+                self.assertIn("/work-session details", controls)
+                self.assertIn("/work-session diffs", controls)
+                self.assertNotIn("/follow", controls)
+                self.assertNotIn("/work-session live", controls)
             finally:
                 os.chdir(old_cwd)
 
