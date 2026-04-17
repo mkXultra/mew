@@ -6599,6 +6599,46 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_follow_partial_options_reuse_session_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("partial follow defaults\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --max-steps 1 inspect README with cached gates",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                output = stdout.getvalue()
+                self.assertNotIn("read access is disabled", output)
+                self.assertIn("--allow-read .", chat_state["work_continue_options"])
+                self.assertIn("--max-steps 1", chat_state["work_continue_options"])
+                tool_call = load_state()["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(tool_call["status"], "completed")
+                self.assertIn("partial follow defaults", tool_call["result"]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

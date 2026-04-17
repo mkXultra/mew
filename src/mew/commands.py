@@ -6725,6 +6725,39 @@ def _split_continue_options_and_guidance(rest):
     return shlex.join(kept), ""
 
 
+def _continue_options_should_use_cached_defaults(options):
+    try:
+        parts = shlex.split(options or "")
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    if parts[0].lstrip("#").isdigit():
+        return False
+    explicit_target_options = {
+        "--auth",
+        "--model-backend",
+        "--model",
+        "--base-url",
+        "--model-timeout",
+        "--allow-read",
+        "--allow-write",
+        "--verify-command",
+        "--verify-timeout",
+    }
+    explicit_target_flags = {
+        "--allow-shell",
+        "--allow-verify",
+    }
+    explicit_target_prefixes = tuple(f"{option}=" for option in explicit_target_options)
+    return not any(
+        token in explicit_target_options
+        or token.startswith(explicit_target_prefixes)
+        or token in explicit_target_flags
+        for token in parts
+    )
+
+
 def _chat_continue_rest(rest, chat_state):
     rest = (rest or "").strip()
     cached = (chat_state or {}).get("work_continue_options", "").strip()
@@ -6734,10 +6767,12 @@ def _chat_continue_rest(rest, chat_state):
         return cached
     if _looks_like_work_continue_options(rest):
         options, guidance_text = _split_continue_options_and_guidance(rest)
+        if cached and _continue_options_should_use_cached_defaults(options):
+            options = " ".join(part for part in (cached, options) if part)
         if guidance_text:
             guidance = "--work-guidance " + shlex.quote(guidance_text)
             return " ".join(part for part in (options, guidance) if part)
-        return rest
+        return options
     guidance = "--work-guidance " + shlex.quote(rest)
     return " ".join(part for part in (cached, guidance) if part)
 

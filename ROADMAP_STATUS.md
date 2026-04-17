@@ -22,7 +22,9 @@ result panes, readable compact model-delta previews, phase/elapsed progress
 anchors, chat transcript logging, interrupt/max-step reentry notes, and scoped
 reentry controls. Remaining gap: a calmer continuous coding cockpit with a more
 stable reasoning/status pane, less repeated reentry material during long
-sessions, and more real dogfood on repository work.
+sessions, and more real dogfood on repository work. Fresh `mew code` dogfood
+fixed partial `/follow --max-steps ...` commands dropping cached session gates;
+keep using real cockpit friction, not imagined polish, to choose the next fix.
 
 ## Milestone 1: Native Hands
 
