@@ -955,6 +955,53 @@ def run_work_session_scenario(workspace, env=None):
         write_json_file(state_path, state)
 
     auto_recover_result = run(["work", "3", "--session", "--resume", "--allow-read", ".", "--auto-recover-safe", "--json"])
+    run(["task", "add", "Approve all batch task", "--kind", "coding"])
+    run(["work", "4", "--start-session", "--json"])
+    approve_all_first_result = run(
+        [
+            "work",
+            "4",
+            "--tool",
+            "write_file",
+            "--path",
+            "batch-one.md",
+            "--content",
+            "batch one\n",
+            "--create",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    approve_all_second_result = run(
+        [
+            "work",
+            "4",
+            "--tool",
+            "write_file",
+            "--path",
+            "batch-two.md",
+            "--content",
+            "batch two\n",
+            "--create",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    approve_all_result = run(
+        [
+            "work",
+            "4",
+            "--approve-all",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            "true",
+            "--json",
+        ]
+    )
 
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
@@ -965,6 +1012,9 @@ def run_work_session_scenario(workspace, env=None):
     line_read_data = _json_stdout(line_read_result)
     large_edit_data = _json_stdout(large_edit_result)
     approve_data = _json_stdout(approve_result)
+    approve_all_first_data = _json_stdout(approve_all_first_result)
+    approve_all_second_data = _json_stdout(approve_all_second_result)
+    approve_all_data = _json_stdout(approve_all_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1072,6 +1122,24 @@ def run_work_session_scenario(workspace, env=None):
         and (workspace / "approved.md").read_text(encoding="utf-8") == "approved dogfood\n",
         observed={"dry_run": approve_dry_run_data.get("tool_call"), "approval": approve_data.get("tool_call")},
         expected="approve-tool applies a new file when --allow-write names that exact missing file",
+    )
+    _scenario_check(
+        checks,
+        "work_approve_all_pending_writes",
+        approve_all_first_result.get("exit_code") == 0
+        and approve_all_second_result.get("exit_code") == 0
+        and approve_all_result.get("exit_code") == 0
+        and ((approve_all_first_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and ((approve_all_second_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and approve_all_data.get("count") == 2
+        and (workspace / "batch-one.md").read_text(encoding="utf-8") == "batch one\n"
+        and (workspace / "batch-two.md").read_text(encoding="utf-8") == "batch two\n",
+        observed={
+            "first": approve_all_first_data.get("tool_call"),
+            "second": approve_all_second_data.get("tool_call"),
+            "approval": approve_all_data,
+        },
+        expected="approve-all applies multiple pending dry-run writes with one command",
     )
     _scenario_check(
         checks,
