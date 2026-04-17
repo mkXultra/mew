@@ -265,6 +265,27 @@ Why it matters:
 
 Core risk: low.
 
+### Integration: mew-passive-bundle
+
+Goal: Compose generated daily reports into one passive reentry artifact.
+
+Status:
+- First isolated prototype exists under `experiments/mew-passive-bundle`.
+- Dogfood task #82 used work session #108 and `mew work --ai` planning to pick
+  the smallest integration pass.
+- The prototype scans an output root for journal, mood, morning paper, dream,
+  and self-memory reports for one date, then writes
+  `.mew/passive-bundle/YYYY-MM-DD.md`.
+- Latest validation: `uv run pytest -q experiments/mew-passive-bundle` passed
+  with `3 passed`.
+
+Why it matters:
+- It tests whether the side-project artifacts can become a single daily cockpit
+  object before any core promotion.
+- It makes missing passive artifacts visible.
+
+Core risk: low.
+
 ## Real Dogfooding Protocol
 
 For any side project:
@@ -300,11 +321,12 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be `mew-desk` only after one more
-integration pass.
+The next side project should probably be a tiny `mew-desk` static prototype or
+a core promotion decision for the passive bundle.
 
 Reason: `mew-dream`, `mew-bond`, `mew-journal`, `mew-mood`, and
 `mew-morning-paper` now cover memory, self-continuity, daily continuity, passive
-state visibility, and offline research ranking in isolated form. Before a visual
-desktop layer, the useful next step is to decide which of these reports should
-be promoted into core commands or composed into one daily passive bundle.
+state visibility, and offline research ranking in isolated form.
+`mew-passive-bundle` now proves they can be composed into one reentry artifact.
+The next question is whether to make that bundle a core command or start a
+non-core visual shell that reads it.
