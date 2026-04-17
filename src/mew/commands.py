@@ -5233,8 +5233,9 @@ def cmd_self_improve(args):
         print(("created" if plan_created else "reused") + f" {format_task_plan(plan)}")
     if session:
         print(("started" if session_created else "reused") + f" work session #{session['id']}")
-    if native:
+    if native and not getattr(args, "start_session", False):
         print(f"native work: {mew_command('work', task['id'], '--start-session')}")
+    if native:
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
     if run:
         if args.dry_run:
