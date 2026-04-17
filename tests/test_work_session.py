@@ -2647,6 +2647,12 @@ class WorkSessionTests(unittest.TestCase):
                     )
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertIn("/work-session approve all", resume["approve_all_hint"])
+                self.assertIn("--allow-write", resume["approve_all_hint"])
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
                         main(
                             [

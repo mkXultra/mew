@@ -1169,6 +1169,19 @@ def build_work_session_resume(session, task=None, limit=8):
                 }
             )
 
+    approve_all_hint = ""
+    if len(pending_approvals) > 1:
+        write_paths = []
+        for approval in pending_approvals:
+            write_path = approval.get("path") or "."
+            if write_path not in write_paths:
+                write_paths.append(write_path)
+        write_flags = " ".join(f"--allow-write {shlex.quote(write_path)}" for write_path in write_paths)
+        approve_all_hint = (
+            f"/work-session approve all {write_flags} "
+            f"--allow-verify --verify-command {verify_command_hint}"
+        )
+
     recent_decisions = []
     for turn in turns[-limit:]:
         action = turn.get("action") or {}
@@ -1232,6 +1245,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "failures": failures[-limit:],
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
+        "approve_all_hint": approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "working_memory": build_working_memory(turns, calls, task=task),
@@ -1289,6 +1303,8 @@ def format_work_session_resume(resume):
     lines.extend(["", "Pending approvals"])
     approvals = resume.get("pending_approvals") or []
     if approvals:
+        if resume.get("approve_all_hint"):
+            lines.append(f"approve all: {resume.get('approve_all_hint')}")
         for approval in approvals:
             lines.append(f"#{approval.get('tool_call_id')} {approval.get('tool')} {approval.get('path') or ''}")
             if approval.get("diff_preview"):

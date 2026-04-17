@@ -7142,6 +7142,8 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
         lines.append(f"- /work-session resume{task_suffix} --allow-read . --auto-recover-safe")
+    if (resume or {}).get("approve_all_hint"):
+        lines.append(f"- {(resume or {}).get('approve_all_hint')}")
     for approval in (resume or {}).get("pending_approvals") or []:
         if approval.get("approve_hint"):
             lines.append(f"- {approval.get('approve_hint')}")
