@@ -247,7 +247,7 @@ Evidence:
 - Text outbox/listen/chat history views now clip very large message bodies and point to `outbox --json` for the full payload, reducing the chance that historical agent payloads swamp the cockpit.
 - `edit_file` now permits small exact replacements in large files by limiting replacement/delta size instead of rejecting based on total edited file size.
 - `mew work --live` dogfood task #44 used Codex Web API as a resident buddy: it exposed the missing line-based read path, exposed the large-file small-edit blocker, retried after those fixes, produced dry-run edit #133, and approved it with `uv run pytest -q`.
-- `dogfood --scenario work-session` now covers line-based `read_file`, large-file dry-run `edit_file`, focused diff previews, and focused test output, bringing the recurring scenario to 29 commands.
+- `dogfood --scenario work-session` now covers line-based `read_file`, large-file dry-run `edit_file`, no-trailing-newline diff stats, focused diff previews, and focused test output.
 - `dogfood --scenario chat-cockpit` now exercises a scripted `mew chat --kind coding` session with `/scope`, `/tasks`, `/work`, scoped startup controls, scoped `/work-session`, and chat transcript logging, making the scoped cockpit path part of deterministic recurring dogfood.
 - Focused work-session panes now compose cleanly, avoid duplicated `run_tests` entries when `--tests --commands` are combined, and expose historical diff timestamps as both `finished_at` and `recorded_at` in JSON.
 - Batch action rendering now includes read-window fields such as `line_start`, `line_count`, and `max_chars`, keeping compact text summaries aligned with the underlying model/tool JSON during dogfood.
@@ -387,6 +387,7 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `702 passed, 6 subtests passed`.
+- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands, including no-trailing-newline large edit diff stats.
 - `codex-ultra` retest of prior human-role frictions current: scoped resume naming, self-improve work cwd, explicit dogfood cleanup reason, and code quiet passed; remaining no-trailing-newline diff-stat edge was reproduced and fixed in `85e2d07`.
 - `claude-ultra` review of `b18880d..5a6f3fd` current: no blockers for compact labels, unclipped diff stats, explicit dogfood cleanup skip reasons, and self-improve cwd output; minor notes were schema/memory/test-coupling caveats.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; temporary workspace removed.
