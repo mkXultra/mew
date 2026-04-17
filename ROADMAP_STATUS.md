@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has quieter deterministic live steps, command streaming, action/resume output, chat/listen kind scopes, work-mode/follow cockpit controls, approval/live controls, line-targeted reads, large-file small edits, context pressure diagnostics, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming, action/result panes, compact chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -17,10 +17,11 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 ## Current Focus
 
 Milestone 2 is the active focus. Readable diff panes, command/test output panes,
-chat work-mode, bounded follow loops, compact live result panes, and scoped
-reentry controls now exist. The next product gap is a more polished continuous
-coding cockpit: better reasoning/progress flow, less duplicate output, and more
-real dogfood on long-running repository work.
+chat work-mode, bounded follow loops, compact live result panes, model-stream
+previews, interrupt/max-step reentry notes, and scoped reentry controls now
+exist. The next product gap is a calmer continuous coding cockpit: a more stable
+reasoning/status pane, less repeated reentry material during long sessions, and
+more real dogfood on repository work.
 
 ## Milestone 1: Native Hands
 
@@ -196,15 +197,15 @@ Evidence:
 
 Missing proof:
 
-- Model delta streaming is opt-in and no longer pollutes `--live` by default, and focused diff/test panes now exist, but there is still no polished reasoning pane comparable to Claude Code / Codex CLI.
+- Model delta streaming and a separated thinking-pane preview now exist, but there is still no polished live reasoning/status pane comparable to Claude Code / Codex CLI.
 - `mew chat --work-mode`, `/c`, and bounded `/follow` now reduce cockpit friction, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode, bounded follow loops, inline guidance capture, boundary stop requests, recent-session reentry, next controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/streaming.
+- Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 
 Next action:
 
-- Dogfood the live cockpit on real repository investigations, then add a polished reasoning/progress pane so a long chat work session feels closer to Claude Code / Codex CLI.
+- Dogfood the live cockpit on real repository investigations, then improve the reasoning/status pane and long-session output pacing so a chat work session feels closer to Claude Code / Codex CLI.
 
 ## Milestone 3: Persistent Advantage
 
@@ -299,7 +300,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `605 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `611 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `103 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
@@ -312,7 +313,7 @@ Next action:
 - `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, scoped `/work-session`, `/follow` discoverability, and `/work-mode` toggles.
 - `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
-- `./mew doctor` current: state/runtime/auth ok.
+- `uv run mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
 - `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
@@ -338,9 +339,11 @@ Next action:
 - `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 - `codex-ultra` focused retest after live-gate preflight, inline approval, interrupted recovery context, active-focus surfacing, and state backup found no concrete regressions in that scope.
 - `codex-ultra` human-role retest after the follow/work-mode slice verified four targeted fixes: explicit `--follow --max-steps 1` is honored, chat `/follow` controls include `--max-steps 10`, world-state git status uses allowed repo roots from disposable cwd, and `glob` skips cache/venv directories. Repo status stayed clean.
+- `claude-ultra` review after the follow interrupt/streaming/max-step work judged mew coherent but not yet preferred over Claude Code/Codex CLI; top blockers were thin streaming UX, shallow interrupt cancellation, and max-step note scope.
+- `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
 
 ## Current Roadmap Focus
 
 Milestone 2: Interactive Parity.
 
-The next implementation should make the new `mew chat --work-mode` / `/follow` path feel like a real resident coding cockpit: clearer reasoning/progress panes, less duplicate control output, strong approval boundaries, and a durable final note that explains what changed or what should happen next.
+The next implementation should make the new `mew chat --work-mode` / `/follow` path calmer in longer real coding sessions: improve the live reasoning/status pane, reduce repeated reentry material further, and keep dogfooding against repository tasks until the cockpit feels preferable to delegating back to Claude Code or Codex CLI.
