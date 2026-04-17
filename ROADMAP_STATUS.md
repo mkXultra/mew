@@ -346,7 +346,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `677 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `678 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_rejects_dispatch_and_cycle tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_native_rejects_dispatch tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_native_rejects_cycle tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work` current: `4 passed, 2 subtests passed`.
+- `uv run pytest -q tests/test_self_improve.py tests/test_brief.py tests/test_commands.py` current: `199 passed, 6 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-self-improve-alias-tests --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Pick the next smallest improvement to make mew's dogfood..."` created task #56/session #80; read-only `./mew work 56 --live ...` identified missing `--start-session` invalid-combination parity coverage.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `1 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `307 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-specific-recovery-hints --json` current: pass across 36 commands.
