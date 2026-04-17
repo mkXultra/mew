@@ -382,12 +382,18 @@ Evidence:
 - `mew task show` and chat `/show` now clip long task notes to recent lines, so human reentry views do not drown in old self-improvement session endings.
 - Work-session write and verification records now appear in global `mew writes` / `mew verification` ledgers with stable identifiers, so task-local work history is discoverable without reopening raw session JSON.
 - Kind-scoped `mew status --kind coding` and `mew brief --kind coding` provide a calmer task/coding reentry view that is not dominated by unrelated research questions or unread outbox.
+- A controlled no-input `--passive-now --autonomy-level propose --echo-outbox`
+  run in `/tmp/mew-passive-outbox-proof.tgg0Oo` created a user-visible outbox
+  question for a ready coding task, proving passive proposal output can happen
+  when stale unanswered questions are not already blocking the loop.
 
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
-- No watcher-driven passive updates.
+- Watcher-driven passive output has a controlled one-shot proof, but not yet a
+  long-running real-state proof with old unanswered questions and competing
+  attention items.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
