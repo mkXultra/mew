@@ -478,10 +478,11 @@ def run_runtime_focus_scenario(workspace, env=None):
     brief_result = run(["brief"], timeout=15)
     doctor_result = run(["doctor"], timeout=15)
     desk_result = run(["desk", "--json"], timeout=15)
-    journal_path = workspace / ".mew" / "journal" / "2026-04-17.md"
+    bundle_day = now_iso()[:10]
+    journal_path = workspace / ".mew" / "journal" / f"{bundle_day}.md"
     journal_path.parent.mkdir(parents=True, exist_ok=True)
-    journal_path.write_text("# Mew Journal 2026-04-17\n\nDogfood journal hint.\n", encoding="utf-8")
-    bundle_result = run(["bundle", "--date", "2026-04-17", "--json"], timeout=15)
+    journal_path.write_text(f"# Mew Journal {bundle_day}\n\nDogfood journal hint.\n", encoding="utf-8")
+    bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
     desk_data = _json_stdout(desk_result)
     bundle_data = _json_stdout(bundle_result)
 
@@ -549,7 +550,7 @@ def run_runtime_focus_scenario(workspace, env=None):
         "bundle_json_surfaces_generated_report",
         bundle_result.get("exit_code") == 0
         and "Journal" in (bundle_data.get("included") or [])
-        and (workspace / ".mew" / "passive-bundle" / "2026-04-17.md").exists(),
+        and (workspace / ".mew" / "passive-bundle" / f"{bundle_day}.md").exists(),
         observed=bundle_data,
         expected="bundle --json includes the generated journal report",
     )

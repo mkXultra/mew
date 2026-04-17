@@ -62,11 +62,16 @@ def strip_h1(markdown: str) -> str:
 
 
 def first_non_empty_line(markdown: str) -> str:
-    for line in markdown.splitlines():
+    fallback_heading = ""
+    for line in strip_h1(markdown).splitlines():
         text = line.strip()
-        if text and not text.startswith("#"):
-            return text
-    return ""
+        if not text:
+            continue
+        if text.startswith("#"):
+            fallback_heading = fallback_heading or text.lstrip("#").strip()
+            continue
+        return text
+    return fallback_heading
 
 
 def collect_reports(root: Path, day: str) -> tuple[list[tuple[ReportSpec, Path, str]], list[ReportSpec]]:

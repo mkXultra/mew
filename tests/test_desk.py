@@ -95,6 +95,15 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["counts"]["active_work_sessions"], 1)
         self.assertEqual(view["focus"], "Working on: Open session")
 
+    def test_build_desk_view_model_alerts_on_open_attention(self):
+        view = build_desk_view_model(
+            {"attention": {"items": [{"id": 1, "status": "open", "title": "Needs review"}]}},
+            explicit_date="2026-04-17",
+        )
+
+        self.assertEqual(view["pet_state"], "alerting")
+        self.assertEqual(view["counts"]["open_attention"], 1)
+
     def test_format_desk_view(self):
         text = format_desk_view(
             {

@@ -34,6 +34,19 @@ class PassiveBundleTests(unittest.TestCase):
             self.assertIn("## Mood", text)
             self.assertNotIn("# Mew Mood", text)
 
+    def test_generate_bundle_handles_no_reports_and_heading_only_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            empty_result = generate_bundle(root, root, explicit_date="2026-04-17")
+            empty_text = empty_result.path.read_text(encoding="utf-8")
+            self.assertIn("- included: none", empty_text)
+            self.assertIn("No reports found", empty_text)
+
+            write_report(root, ".mew/journal/2026-04-18.md", "# Mew Journal\n\n## Morning\n")
+            heading_result = generate_bundle(root, root, explicit_date="2026-04-18")
+            heading_text = heading_result.path.read_text(encoding="utf-8")
+            self.assertIn("- Journal: Morning", heading_text)
+
     def test_bundle_command_prints_path_and_writes_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -79,6 +92,13 @@ class PassiveBundleTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("date must be in YYYY-MM-DD format", stderr.getvalue())
+
+    def test_bundle_command_rejects_json_with_show(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            code = main(["bundle", "--json", "--show"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--json and --show cannot be used together", stderr.getvalue())
 
 
 if __name__ == "__main__":

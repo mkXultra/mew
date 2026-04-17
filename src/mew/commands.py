@@ -4739,6 +4739,9 @@ def cmd_focus(args):
     return 0
 
 def cmd_passive_bundle(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
     try:
         result = generate_bundle(
             Path(args.reports_root).expanduser(),
