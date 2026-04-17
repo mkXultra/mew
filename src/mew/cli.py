@@ -710,7 +710,22 @@ def build_parser():
     do_parser.add_argument("--verify-timeout", type=int, default=300)
     do_parser.set_defaults(func=cmd_do)
 
-    code_parser = subparsers.add_parser("code", help="enter the persistent coding cockpit")
+    code_parser = subparsers.add_parser(
+        "code",
+        help="enter the persistent coding cockpit",
+        description=(
+            "Enter the persistent coding cockpit.\n\n"
+            "With a task id, mew creates or reuses that task's native work session,\n"
+            "caches the continue gates, then opens coding-scoped work-mode chat."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Common flows:\n"
+            "  mew code <task-id>\n"
+            "  mew code <task-id> --read-only --no-verify\n"
+            "  mew code <task-id> --quiet --timeout 0"
+        ),
+    )
     code_parser.add_argument("task_id", nargs="?")
     code_parser.add_argument("--auth", help="model auth file; defaults to ./auth.json then ~/.codex/auth.json")
     code_parser.add_argument("--model-backend", choices=SUPPORTED_MODEL_BACKENDS)

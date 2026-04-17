@@ -937,6 +937,18 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_help_describes_coding_cockpit_flow(self):
+        with redirect_stdout(StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as raised:
+                main(["code", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        output = stdout.getvalue()
+        self.assertIn("Enter the persistent coding cockpit.", output)
+        self.assertIn("creates or reuses that task's native work session", output)
+        self.assertIn("Common flows:", output)
+        self.assertIn("mew code <task-id> --quiet --timeout 0", output)
+
     def test_chat_activity_slash_uses_kind_scope(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
