@@ -3358,6 +3358,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("guidance_snapshot", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
+        self.assertIn("prefer search_text for symbols or option names before broad read_file", prompt)
+        self.assertIn("line_start and line_count", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
