@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "title": "Passive AI shells for local coding agents",
+      "source": "HN",
+      "url": "https://example.com/passive-ai-shells",
+      "summary": "A discussion of resident agents that wake up, inspect local state, and preserve continuity.",
+      "tags": ["passive-ai", "agents", "local-first"]
+    },
+    {
+      "title": "Long-term memory for coding assistants",
+      "source": "arXiv",
+      "url": "https://example.com/agent-memory",
+      "summary": "A paper about retrieval, summarization, and self-state for long-running coding assistants.",
+      "tags": ["memory", "agents", "research"]
+    },
+    {
+      "title": "A tiny desktop pet in Tauri",
+      "source": "RSS",
+      "url": "https://example.com/tauri-pet",
+      "summary": "A walkthrough for a lightweight tray app with a small animated companion.",
+      "tags": ["desktop", "tauri", "pet"]
+    },
+    {
+      "title": "CSS subgrid notes",
+      "source": "RSS",
+      "url": "https://example.com/css-subgrid",
+      "summary": "Frontend layout tips unrelated to the current mew roadmap.",
+      "tags": ["frontend"]
+    }
+  ]
+}

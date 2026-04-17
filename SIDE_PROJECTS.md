@@ -152,6 +152,15 @@ Core risk: low.
 
 Goal: Overnight research digest tailored to the user's interests.
 
+Status:
+- First isolated prototype exists under `experiments/mew-morning-paper`.
+- Dogfood task #81 used work session #107 and `mew work --ai` planning to pick
+  the smallest slice.
+- The prototype ranks a static feed JSON against local interest tags and writes
+  `.mew/morning-paper/YYYY-MM-DD.md`.
+- Latest validation: `uv run pytest -q experiments/mew-morning-paper` passed
+  with `6 passed`.
+
 Scope:
 - Read configured feeds such as HN, RSS, GitHub trending, or arXiv.
 - Score items against local interest tags.
@@ -291,9 +300,11 @@ For any side project:
 
 ## Current Bias
 
-The next side project should probably be `mew-morning-paper`.
+The next side project should probably be `mew-desk` only after one more
+integration pass.
 
-Reason: `mew-dream`, `mew-bond`, and `mew-journal` now cover memory,
-self-continuity, daily continuity, and passive state visibility in isolated
-form. The next useful slice should test overnight research and preference
-learning without network access first, using static feeds.
+Reason: `mew-dream`, `mew-bond`, `mew-journal`, `mew-mood`, and
+`mew-morning-paper` now cover memory, self-continuity, daily continuity, passive
+state visibility, and offline research ranking in isolated form. Before a visual
+desktop layer, the useful next step is to decide which of these reports should
+be promoted into core commands or composed into one daily passive bundle.
