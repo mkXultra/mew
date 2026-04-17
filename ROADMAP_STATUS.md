@@ -340,6 +340,7 @@ Evidence:
 - Native self-improvement dogfood session #88 exposed a work-tool bug while looking for `--limit`: `search_text` treated a query beginning with `--status` as an `rg` flag. The read tool now inserts `--` before the query so dash-prefixed literal searches work.
 - `codex-ultra` human-role dogfood reported noisy quick chat startup; `mew chat --quiet` now starts without the brief, unread backlog, runtime activity, or startup controls while preserving existing `--no-brief`/`--no-unread` behavior.
 - Native self-improvement dogfood session #90 returned to the long task-list friction; `mew task list` now accepts `--limit N`, preserving existing default output while allowing bounded done/status listings.
+- `codex-ultra` human-role dogfood reported that `mew work <task> --tests/--commands/--diffs` looked like inert flags unless `--session` was also passed; these flags now route directly to their focused work-session panes.
 
 Missing proof:
 
@@ -355,6 +356,9 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `682 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_run_tests_missing_executable_reports_not_found tests/test_work_session.py::WorkSessionTests::test_work_session_write_tools_default_to_dry_run_and_can_apply_with_verification` current: `2 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `164 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-work-view-flags --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_commands.py::CommandTests::test_task_list_can_filter_by_status` current: `1 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `147 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-task-list-limit --json` current: pass across 36 commands.

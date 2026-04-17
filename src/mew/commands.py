@@ -1705,7 +1705,9 @@ def cmd_work(args):
         return cmd_work_start_session(args)
     if getattr(args, "stop_session", False):
         return cmd_work_stop_session(args)
-    if getattr(args, "session", False):
+    if getattr(args, "session", False) or any(
+        getattr(args, name, False) for name in ("resume", "timeline", "diffs", "tests", "commands")
+    ):
         return cmd_work_show_session(args)
     if getattr(args, "close_session", False):
         return cmd_work_close_session(args)

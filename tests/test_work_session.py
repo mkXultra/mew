@@ -777,10 +777,24 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("[Errno 2]", command_text)
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--commands"]), 0)
+                command_text = stdout.getvalue()
+                self.assertIn("Work commands #1 [active] task=#1", command_text)
+                self.assertIn("exit=unavailable", command_text)
+                self.assertNotIn("Work task #1", command_text)
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)
                 tests_text = stdout.getvalue()
                 self.assertIn("exit=unavailable", tests_text)
                 self.assertNotIn("exit=None", tests_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tests"]), 0)
+                tests_text = stdout.getvalue()
+                self.assertIn("Work tests #1 [active] task=#1", tests_text)
+                self.assertIn("exit=unavailable", tests_text)
+                self.assertNotIn("Work task #1", tests_text)
             finally:
                 os.chdir(old_cwd)
 
@@ -1075,6 +1089,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("verification_exit_code=0", diffs)
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--diffs"]), 0)
+                diffs = stdout.getvalue()
+                self.assertIn("Work diffs #1 [active] task=#1", diffs)
+                self.assertIn("Diff preview (+1 -1)", diffs)
+                self.assertNotIn("Work task #1", diffs)
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--diffs", "--json"]), 0)
                 diff_data = json.loads(stdout.getvalue())
                 self.assertEqual(diff_data["diffs"][0]["diff_stats"], {"added": 1, "removed": 1})
@@ -1085,6 +1106,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work tests #1 [active] task=#1", tests_output)
                 self.assertIn("[passed] edit_file_verification", tests_output)
                 self.assertIn("verify ok", tests_output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tests"]), 0)
+                tests_output = stdout.getvalue()
+                self.assertIn("Work tests #1 [active] task=#1", tests_output)
+                self.assertIn("[passed] edit_file_verification", tests_output)
+                self.assertNotIn("Work task #1", tests_output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--tests", "--json"]), 0)
