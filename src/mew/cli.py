@@ -791,6 +791,7 @@ def build_parser():
         help="with --session --resume, retry one interrupted read/git tool after explicit read gates",
     )
     work_parser.add_argument("--approve-tool", type=int, help="approve and apply a dry-run write/edit tool call")
+    work_parser.add_argument("--approve-all", action="store_true", help="approve and apply all pending dry-run write/edit tool calls")
     work_parser.add_argument("--reject-tool", type=int, help="reject a dry-run write/edit tool call")
     work_parser.add_argument("--reject-reason", help="reason recorded with --reject-tool")
     work_parser.add_argument(

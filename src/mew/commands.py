@@ -1643,6 +1643,8 @@ def cmd_work(args):
             print("mew: --ai and --tool cannot be combined", file=sys.stderr)
             return 1
         return cmd_work_ai(args)
+    if getattr(args, "approve_all", False):
+        return cmd_work_approve_all(args)
     if getattr(args, "approve_tool", None):
         return cmd_work_approve_tool(args)
     if getattr(args, "reject_tool", None):
@@ -2666,37 +2668,37 @@ def _approval_parameters_from_call(call, args):
     return {key: value for key, value in parameters.items() if value is not None}
 
 
-def cmd_work_approve_tool(args):
+def _apply_work_approval(args, approve_tool_id):
     progress = work_tool_progress(args)
     with state_lock():
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
-            return 1
+            return 1, None
         task = work_session_task(state, session)
         if not getattr(args, "verify_command", None):
             inferred_verify_command = work_session_default_verify_command(session, task=task)
             if inferred_verify_command:
                 args.verify_command = inferred_verify_command
                 args.allow_verify = True
-        source_call = find_work_tool_call(session, args.approve_tool)
+        source_call = find_work_tool_call(session, approve_tool_id)
         if not source_call:
-            print(f"mew: work tool call not found: {args.approve_tool}", file=sys.stderr)
-            return 1
+            print(f"mew: work tool call not found: {approve_tool_id}", file=sys.stderr)
+            return 1, None
         if source_call.get("tool") not in ("write_file", "edit_file"):
             print("mew: only write_file/edit_file tool calls can be approved", file=sys.stderr)
-            return 1
+            return 1, None
         result = source_call.get("result") or {}
         if not result.get("dry_run"):
             print("mew: only dry-run write/edit tool calls can be approved", file=sys.stderr)
-            return 1
+            return 1, None
         if source_call.get("approval_status") in ("applying", "applied", "rejected"):
             print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
-            return 1
+            return 1, None
         if not result.get("changed"):
             print("mew: dry-run tool call has no changes to approve", file=sys.stderr)
-            return 1
+            return 1, None
         parameters = _approval_parameters_from_call(source_call, args)
         tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)
         source_call["approval_status"] = "applying"
@@ -2706,7 +2708,7 @@ def cmd_work_approve_tool(args):
         tool_call_id = tool_call.get("id")
         save_state(state)
     if progress:
-        progress(f"approval #{args.approve_tool} -> tool #{tool_call_id} start")
+        progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} start")
 
     try:
         result = execute_work_tool_with_output(
@@ -2723,21 +2725,81 @@ def cmd_work_approve_tool(args):
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
-        source_call = find_work_tool_call(session, args.approve_tool)
+        source_call = find_work_tool_call(session, approve_tool_id)
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
         remember_successful_work_verification(session, source_call.get("tool") if source_call else "", result)
         if source_call:
             source_call["approval_status"] = "applied" if tool_call.get("status") == "completed" else "failed"
             source_call["approval_error"] = tool_call.get("error") or ""
         save_state(state)
+    if progress:
+        progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} {tool_call.get('status')}")
+    return 0 if tool_call.get("status") == "completed" else 1, {
+        "approved_tool_call": source_call,
+        "tool_call": tool_call,
+    }
+
+
+def cmd_work_approve_tool(args):
+    code, data = _apply_work_approval(args, args.approve_tool)
+    if data is None:
+        return code
     if args.json:
-        print(json.dumps({"approved_tool_call": source_call, "tool_call": tool_call}, ensure_ascii=False, indent=2))
+        print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
+        tool_call = data["tool_call"]
         print(f"approved work tool #{args.approve_tool} -> #{tool_call['id']} [{tool_call['status']}]")
         print(tool_call.get("summary") or tool_call.get("error") or "")
-    if progress:
-        progress(f"approval #{args.approve_tool} -> tool #{tool_call_id} {tool_call.get('status')}")
-    return 0 if tool_call.get("status") == "completed" else 1
+    return code
+
+
+def _pending_approval_tool_ids(session):
+    ids = []
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") not in ("write_file", "edit_file"):
+            continue
+        result = call.get("result") or {}
+        if not result.get("dry_run") or not result.get("changed"):
+            continue
+        if call.get("approval_status") in ("applying", "applied", "rejected"):
+            continue
+        ids.append(call.get("id"))
+    return ids
+
+
+def cmd_work_approve_all(args):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
+            return 1
+        approve_ids = _pending_approval_tool_ids(session)
+    if not approve_ids:
+        if args.json:
+            print(json.dumps({"approved": [], "count": 0}, ensure_ascii=False, indent=2))
+        else:
+            print("No pending dry-run write/edit tool calls to approve.")
+        return 0
+
+    approved = []
+    exit_code = 0
+    for approve_id in approve_ids:
+        approve_args = SimpleNamespace(**vars(args))
+        approve_args.approve_tool = approve_id
+        code, data = _apply_work_approval(approve_args, approve_id)
+        if data is not None:
+            approved.append(data)
+            if not args.json:
+                tool_call = data["tool_call"]
+                print(f"approved work tool #{approve_id} -> #{tool_call['id']} [{tool_call['status']}]")
+                print(tool_call.get("summary") or tool_call.get("error") or "")
+        if code != 0:
+            exit_code = code
+            break
+    if args.json:
+        print(json.dumps({"approved": approved, "count": len(approved)}, ensure_ascii=False, indent=2))
+    return exit_code
 
 
 def cmd_work_reject_tool(args):
@@ -7384,15 +7446,19 @@ def chat_work_session(rest, chat_state=None):
     if action == "approve":
         if len(parts) < 2:
             print(
-                'usage: /work-session approve <tool-call-id> [--task <task-id>] '
+                'usage: /work-session approve <tool-call-id|all> [--task <task-id>] '
                 '--allow-write <path> --verify-command "<command>"'
             )
             return
-        try:
-            tool_call_id = int(parts[1])
-        except ValueError:
-            print(f"mew: invalid tool call id: {parts[1]}")
-            return
+        approve_all = parts[1] == "all"
+        if approve_all:
+            tool_call_id = None
+        else:
+            try:
+                tool_call_id = int(parts[1])
+            except ValueError:
+                print(f"mew: invalid tool call id: {parts[1]}")
+                return
         approve_task_id = None
         allow_write = []
         verify_command = ""
@@ -7472,7 +7538,11 @@ def chat_work_session(rest, chat_state=None):
             allow_read=[],
             json=False,
         )
-        cmd_work_approve_tool(args)
+        if approve_all:
+            args.approve_all = True
+            cmd_work_approve_all(args)
+        else:
+            cmd_work_approve_tool(args)
         state = load_state()
         session = active_work_session_for_kind(state, scope_kind)
         print(

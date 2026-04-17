@@ -2598,6 +2598,79 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_can_approve_all_pending_dry_run_writes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "one.md",
+                                "--content",
+                                "one\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "two.md",
+                                "--content",
+                                "two\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-all",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                            ]
+                        ),
+                        0,
+                    )
+
+                output = stdout.getvalue()
+                self.assertIn("approved work tool #1", output)
+                self.assertIn("approved work tool #2", output)
+                self.assertEqual(Path("one.md").read_text(encoding="utf-8"), "one\n")
+                self.assertEqual(Path("two.md").read_text(encoding="utf-8"), "two\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_reuses_latest_verification_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -6959,5 +7032,72 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(rejected["approval_status"], "rejected")
                 self.assertEqual(rejected["rejection_reason"], "not needed")
                 self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_can_approve_all_tool_changes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "one.md",
+                                "--content",
+                                "one\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "two.md",
+                                "--content",
+                                "two\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command(
+                            "/work-session approve all --allow-write . --verify-command true",
+                            {},
+                        ),
+                        "continue",
+                    )
+
+                output = stdout.getvalue()
+                self.assertIn("approved work tool #1", output)
+                self.assertIn("approved work tool #2", output)
+                self.assertEqual(Path("one.md").read_text(encoding="utf-8"), "one\n")
+                self.assertEqual(Path("two.md").read_text(encoding="utf-8"), "two\n")
             finally:
                 os.chdir(old_cwd)

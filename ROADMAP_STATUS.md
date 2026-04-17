@@ -86,6 +86,7 @@ Evidence:
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
 - Pending write approvals in resume output and inline `--prompt-approval` now include clipped diff previews with added/removed line counts, so the cockpit can support approve/reject decisions without opening a separate details view.
 - Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
+- `mew work --approve-all` and `/work-session approve all ...` can apply multiple pending dry-run write/edit calls with the same explicit write and verification gates, reducing scaffold dogfood approval churn.
 - `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
 - `run_tests` tool calls now fail the work-session step when the verifier exits nonzero, and `/work-session details` includes a compact `Verification failures` section with command, cwd, exit code, stderr, and stdout context.
 - `--progress` streams `run_tests`, `run_command`, and write-verification stdout/stderr lines to stderr for both manual work tools and `mew work --ai`.
@@ -335,12 +336,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `660 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `662 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
 - Focused regression tests for default `next` coding surfacing, workbench generated-focus elision, and closed-session restart guidance current: `3 passed`.
 - Focused regression tests for `mew code` quiet unread defaults, session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `147 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `148 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `135 passed, 4 subtests passed`.
