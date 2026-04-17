@@ -766,6 +766,12 @@ def next_move(state, kind=None):
         return f"inspect verification run #{recent_verifications[0].get('id')} with `{mew_command('verification')}`"
     if active_work:
         session = active_work[0]
+        task = next((task for task in tasks if str(task.get("id")) == str(session.get("task_id"))), {})
+        if task_kind(task) == "coding" and session.get("task_id") is not None:
+            return (
+                f"enter coding cockpit for active work session #{session.get('id')} "
+                f"task #{session.get('task_id')} with `{mew_command('code', session.get('task_id'))}`"
+            )
         return (
             f"continue active work session #{session.get('id')} for task #{session.get('task_id')} "
             f"with `{session.get('continue_command')}`"

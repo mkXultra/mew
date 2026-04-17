@@ -566,7 +566,7 @@ class BriefTests(unittest.TestCase):
         )
         self.assertEqual(
             data["next_move"],
-            "continue active work session #3 for task #7 with `./mew work 7 --live --allow-read . --max-steps 1`",
+            "enter coding cockpit for active work session #3 task #7 with `./mew code 7`",
         )
         self.assertIn("Active work sessions", focus)
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)

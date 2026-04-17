@@ -452,7 +452,9 @@ work-mode, and keeps startup controls short: `/c`, `/follow`, and
 `/continue <guidance>`. It hides unread outbox by default so old passive chatter
 does not flood a coding session; use `--show-unread` when you want to review it.
 Use `--read-only --no-verify` to enter without inheriting older write, shell, or
-verification gates from a previous session.
+verification gates from a previous session. When coding work is already active,
+`mew next` and `mew focus` point back to this cockpit instead of printing the
+long flag-heavy live command as the primary next action.
 
 `mew do <task-id>` is the compact supervised coding path. It runs the resident
 work loop live with deterministic ACT, `--allow-read .`, `--allow-write .`, and

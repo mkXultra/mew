@@ -400,6 +400,7 @@ Next action:
 - `mew work <task-id>` now elides embedded generated `Current coding focus` blocks from long self-improvement task descriptions, leaving the real focus and constraints without replaying a nested `Mew focus` view.
 - Closed task-specific work-session resumes now suggest the task-specific restart command, such as `./mew work 46 --start-session`, instead of a generic `mew work --ai` path.
 - `mew code [task-id]` now provides a single coding-cockpit entrypoint that starts or reuses a task work session, scopes chat to coding, enables work-mode, hides unread outbox by default, and caches safe `/continue` defaults. Its startup controls collapse to `/c`, `/follow`, and `/continue <guidance>` while detailed flag-heavy commands stay behind `/help work`; `--read-only --no-verify` clears cloned write/shell/verify defaults, so a read-only cockpit cannot inherit stale side-effect gates from an older session.
+- `mew next` and `mew focus` now point active coding work sessions at `mew code <task-id>` as the quiet cockpit entry instead of surfacing the full flag-heavy `mew work --live ...` command in the primary next-action line.
 
 ## Current Roadmap Focus
 
