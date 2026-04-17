@@ -592,8 +592,13 @@ def normalize_work_model_action(action_plan, verify_command=""):
 
     if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
         normalized["summary"] = action_plan.get("summary")
+    edit_old = normalized.get("old")
+    edit_new = normalized.get("new")
     if action_type == "edit_file" and (
-        not normalized.get("path") or "old" not in normalized or "new" not in normalized
+        not normalized.get("path")
+        or not isinstance(edit_old, str)
+        or edit_old == ""
+        or not isinstance(edit_new, str)
     ):
         if normalized.get("path"):
             read_action = {

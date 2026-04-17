@@ -1286,9 +1286,9 @@ def recovery_next_action_with_world_state(next_action, world_state):
         git_status.get("stderr") or ""
     ).strip()
     if files and git_clean:
-        return f"{next_action}; live world check: git is clean and touched paths still exist"
+        return f"{next_action}; live world check: git is clean and observed paths still exist"
     if files or git_status:
-        return f"{next_action}; live world check: review git status and touched paths before retrying"
+        return f"{next_action}; live world check: review git status and observed paths before retrying"
     return next_action
 
 

@@ -4068,6 +4068,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["line_count"], "80")
         self.assertIn("exact old and new", action["reason"])
 
+        empty_old = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "edit_file",
+                    "path": "README.md",
+                    "old": "",
+                    "new": "replacement",
+                }
+            }
+        )
+        self.assertEqual(empty_old["type"], "read_file")
+        self.assertEqual(empty_old["path"], "README.md")
+
     def test_work_model_actions_default_to_small_reads_and_diffstat(self):
         from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
 

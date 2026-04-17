@@ -344,6 +344,7 @@ Next action:
 
 - `uv run pytest -q` current: `665 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_note_records_user_note` current: `1 passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool tests/test_work_session.py::WorkSessionTests::test_work_recovery_next_action_prioritizes_missing_touched_paths tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying` current: `3 passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-world-aware-recovery --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_model_incomplete_edit_reads_target_before_retrying tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch` current: `2 passed`.
@@ -393,6 +394,7 @@ Next action:
 - `codex-ultra` distracted-user dogfood found that generated live/continue controls failed when only `~/.codex/auth.json` existed; work/do/chat defaults now preserve normal auth fallback instead of baking in `--auth auth.json`.
 - `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 - `codex-ultra` focused retest after live-gate preflight, inline approval, interrupted recovery context, active-focus surfacing, and state backup found no concrete regressions in that scope.
+- `claude-ultra` review of the 2026-04-17 recovery/cockpit commits found no crash-level issues; follow-up fixes made empty `edit_file.old` re-observe instead of failing and changed world-state recovery wording from touched paths to observed paths.
 - `codex-ultra` human-role retest after the follow/work-mode slice verified four targeted fixes: explicit `--follow --max-steps 1` is honored, chat `/follow` controls include `--max-steps 10`, world-state git status uses allowed repo roots from disposable cwd, and `glob` skips cache/venv directories. Repo status stayed clean.
 - `claude-ultra` review after the follow interrupt/streaming/max-step work judged mew coherent but not yet preferred over Claude Code/Codex CLI; top blockers were thin streaming UX, shallow interrupt cancellation, and max-step note scope.
 - `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
