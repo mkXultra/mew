@@ -129,6 +129,55 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_glob_skips_cache_and_virtualenv_dirs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src").mkdir()
+                Path("src/app.py").write_text("print('app')\n", encoding="utf-8")
+                Path(".pytest_cache").mkdir()
+                Path(".pytest_cache/README.py").write_text("cache\n", encoding="utf-8")
+                Path(".venv").mkdir()
+                Path(".venv/generated.py").write_text("venv\n", encoding="utf-8")
+                Path("__pycache__").mkdir()
+                Path("__pycache__/cached.py").write_text("cache\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "glob",
+                                "--pattern",
+                                "*.py",
+                                "--path",
+                                ".",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                paths = [match["path"] for match in data["tool_call"]["result"]["matches"]]
+                self.assertTrue(any(path.endswith("src/app.py") for path in paths))
+                self.assertFalse(any(".pytest_cache" in path for path in paths))
+                self.assertFalse(any(".venv" in path for path in paths))
+                self.assertFalse(any("__pycache__" in path for path in paths))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_read_file_default_handles_larger_source_files(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -4250,6 +4299,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Next controls", stdout.getvalue())
                 self.assertIn("/continue --allow-read .", stdout.getvalue())
                 self.assertIn("/c --allow-read .", stdout.getvalue())
+                self.assertIn("/follow --allow-read . --max-steps 10", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 
@@ -4827,6 +4877,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_world_state_uses_allowed_read_root_for_git_status(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            outside = Path(tmp) / "outside"
+            repo.mkdir()
+            outside.mkdir()
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+            (repo / "README.md").write_text("world root\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                world = build_work_world_state(
+                    {"files_touched": [str(repo / "README.md")]},
+                    [str(repo)],
+                )
+
+                self.assertEqual(world["git_status"]["exit_code"], 0)
+                self.assertEqual(Path(world["git_status"]["cwd"]), repo.resolve())
+                self.assertEqual(world["files"][0]["path"], str(repo / "README.md"))
+                self.assertTrue(world["files"][0]["exists"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_successful_run_tests_refreshes_session_verify_default(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -5237,6 +5312,51 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("Work live step #1 resume", output)
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("Work session finished: follow complete", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_honors_explicit_one_step_bound(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("follow one content\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "should not run", "action": {"type": "finish", "reason": "too many"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--max-steps",
+                                        "1",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertEqual(call_model.call_count, 1)
+                self.assertIn("progress: step=1/1", output)
+                self.assertIn("mew work ai: 1/1 step(s) stop=max_steps", output)
+                self.assertNotIn("Work live step #2", output)
             finally:
                 os.chdir(old_cwd)
 

@@ -86,6 +86,7 @@ Evidence:
 - Work-session resume bundles now include compact `working_memory` when available, giving humans and future model turns a short hypothesis, next step, open questions, and latest verification state.
 - Work-session working memory now also surfaces the latest tool observation and marks itself stale when a tool result landed after the memory was written, preventing pre-tool `next_step` text from looking current after a live step.
 - `mew work --session --resume --allow-read ...` and `/work-session resume --allow-read ...` add live git status and touched-file stats to the resume, and the same bounded world-state summary is injected into future work-model context when read access is allowed.
+- Resume world-state git status now probes allowed read roots before falling back to the current directory, so reentry from a disposable cwd can still report the actual project repo state.
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
@@ -110,6 +111,7 @@ Evidence:
 - Closed work sessions can still be inspected with `mew work <task-id> --session --resume`, so a finished resident work loop leaves a durable reentry/final-state artifact.
 - `mew chat` now has `/continue ...` as a short one-step live command for the active work session, reducing the repeated `/work-session live ...` command burden.
 - Work mode now supports a read-only `batch` action with up to five inspection tools in one model turn, journaling each tool call separately while keeping writes and shell commands outside batch mode.
+- `glob` now skips common generated/cache directories such as `.git`, `.pytest_cache`, `.venv`, `__pycache__`, and `node_modules`, reducing noisy read-only navigation for resident models.
 - Codex Web API dogfood for batch exposed a missing `read_file.path` failure, after which batch normalization was hardened to skip invalid read subtools; retrying the same dogfood task completed `inspect_dir` and `read_file README.md` in one model turn without writes.
 - Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
 - Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.

@@ -1439,7 +1439,7 @@ def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
         args.compact_live = True
-        if int(getattr(args, "max_steps", 1) or 1) <= 1:
+        if getattr(args, "max_steps", None) is None:
             args.max_steps = 10
     if getattr(args, "live", False) and getattr(args, "json", False):
         print("mew: --live cannot be combined with --json", file=sys.stderr)
@@ -5930,7 +5930,7 @@ def _parse_chat_work_ai_args(parts):
         "model": None,
         "base_url": None,
         "model_timeout": 60.0,
-        "max_steps": 1,
+        "max_steps": None,
         "act_mode": None,
         "work_guidance": "",
         "progress": False,
@@ -6264,14 +6264,14 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
     if cached:
         lines.append(f"- /continue {cached}")
         lines.append(f"- /c {cached}")
-        lines.append(f"- /follow {cached}")
+        lines.append(f"- /follow {_work_options_with_max_steps(cached, 10)}")
         lines.append("- /continue <guidance>")
         lines.append(f"- /work-session live {cached}")
         lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
         lines.append("- /continue --allow-read .")
         lines.append("- /c --allow-read .")
-        lines.append("- /follow --allow-read .")
+        lines.append("- /follow --allow-read . --max-steps 10")
         lines.append("- /work-session live --allow-read . --max-steps 3")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
     lines.append("- /work-session resume")

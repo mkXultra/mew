@@ -7,6 +7,20 @@ import fnmatch
 DEFAULT_READ_MAX_CHARS = 50000
 DEFAULT_SEARCH_MAX_MATCHES = 50
 DEFAULT_GLOB_MAX_MATCHES = 100
+DEFAULT_GLOB_IGNORED_PARTS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
 SENSITIVE_GLOBS = (
     ".mew",
     "auth.json",
@@ -275,9 +289,16 @@ def glob_paths(pattern, path, allowed_roots, max_matches=DEFAULT_GLOB_MAX_MATCHE
     if not resolved.is_dir():
         raise ValueError(f"path is not a directory: {resolved}")
 
+    def ignored(candidate):
+        try:
+            parts = candidate.relative_to(resolved).parts
+        except ValueError:
+            parts = candidate.parts
+        return any(part in DEFAULT_GLOB_IGNORED_PARTS for part in parts)
+
     matches = []
     for candidate in sorted(resolved.rglob(str(pattern)), key=lambda item: str(item)):
-        if is_sensitive_path(candidate):
+        if is_sensitive_path(candidate) or ignored(candidate):
             continue
         if len(matches) >= max_matches:
             break
@@ -288,7 +309,7 @@ def glob_paths(pattern, path, allowed_roots, max_matches=DEFAULT_GLOB_MAX_MATCHE
     if len(matches) >= max_matches:
         matched_paths = {match["path"] for match in matches}
         for candidate in resolved.rglob(str(pattern)):
-            if is_sensitive_path(candidate):
+            if is_sensitive_path(candidate) or ignored(candidate):
                 continue
             if str(candidate) not in matched_paths:
                 truncated = True
