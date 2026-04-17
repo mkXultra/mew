@@ -18,16 +18,7 @@ def normalize_allowed_write_roots(allowed_roots):
         path = Path(root).expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
-        try:
-            roots.append(path.resolve(strict=True))
-            continue
-        except OSError:
-            pass
-        try:
-            parent = path.parent.resolve(strict=True)
-        except OSError:
-            continue
-        roots.append(parent / path.name)
+        roots.append(path.resolve(strict=False))
     return roots
 
 
@@ -57,7 +48,7 @@ def resolve_allowed_write_path(path, allowed_roots, create=False):
     else:
         if not create:
             raise ValueError(f"path does not exist: {candidate}; pass --create to create it")
-        parent = candidate.parent.resolve(strict=True)
+        parent = candidate.parent.resolve(strict=False)
         resolved = parent / candidate.name
         ensure_not_sensitive(resolved, verb="write")
         for root in roots:
@@ -152,6 +143,8 @@ def write_file(path, content, allowed_roots, create=False, dry_run=False, max_ch
     changed = before != after
     started_at = now_iso()
     if changed and not dry_run:
+        if create:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_text(resolved, after)
 
     return {

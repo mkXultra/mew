@@ -27,12 +27,15 @@ class WriteToolsTests(unittest.TestCase):
             self.assertTrue(result["written"])
             self.assertEqual(path.read_text(encoding="utf-8"), "hello\n")
 
-    def test_write_explains_unresolvable_allowed_root(self):
+    def test_write_allows_missing_directory_root_for_new_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "missing" / "notes.md"
+            root = Path(tmp) / "experiments" / "mew-dream"
+            path = root / "README.md"
 
-            with self.assertRaisesRegex(ValueError, "parent directory"):
-                write_file(str(path), "hello\n", [str(path)], create=True)
+            result = write_file(str(path), "hello\n", [str(root)], create=True)
+
+            self.assertTrue(result["written"])
+            self.assertEqual(path.read_text(encoding="utf-8"), "hello\n")
 
     def test_edit_refuses_missing_old_text(self):
         with tempfile.TemporaryDirectory() as tmp:
