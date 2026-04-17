@@ -50,6 +50,8 @@ outside the repository.
 The remaining scoped-resume ambiguity from that dogfood is also reduced:
 implicit `/work-session resume` now names the selected active task when more
 than one scoped session matches.
+Retesting then found and fixed the last diff-stat edge case: huge single-line
+edits without a trailing newline now count as `+1 -1` instead of `+0 -1`.
 
 ## Milestone 1: Native Hands
 
@@ -254,6 +256,7 @@ Evidence:
 - Diff previews now use full, unclipped diff stats even when the stored diff body is clipped, so huge single-line edits no longer appear as false `+0 -0` changes.
 - `mew dogfood --cleanup --workspace ...` now reports `cleanup_skipped_reason=explicit_workspace` instead of silently keeping the user-provided path, and native self-improvement output now prints the resolved `work cwd`.
 - When scoped chat has multiple active matching work sessions, implicit `/work-session resume` now names the selected task and points to `/work-session resume <task-id>` for explicit selection.
+- Write/edit diff stats now count line replacements from the before/after text rather than parsing unified diff text, covering no-trailing-newline replacements that `difflib` renders on one physical line.
 
 Missing proof:
 
@@ -383,7 +386,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `700 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `702 passed, 6 subtests passed`.
+- `codex-ultra` retest of prior human-role frictions current: scoped resume naming, self-improve work cwd, explicit dogfood cleanup reason, and code quiet passed; remaining no-trailing-newline diff-stat edge was reproduced and fixed in `85e2d07`.
 - `claude-ultra` review of `b18880d..5a6f3fd` current: no blockers for compact labels, unclipped diff stats, explicit dogfood cleanup skip reasons, and self-improve cwd output; minor notes were schema/memory/test-coupling caveats.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; temporary workspace removed.
 - `codex-ultra` human-role dogfood on current HEAD current: deterministic dogfood `all` and `trace-smoke`, temp self-improve/work-session/chat probes, and targeted `tests/test_self_improve.py tests/test_work_session.py tests/test_dogfood.py` passed; reported diff-stat, cleanup, cwd, and scoped resume frictions.
