@@ -2815,7 +2815,7 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["next", "--json"]), 0)
                 next_data = json.loads(stdout.getvalue())
                 self.assertIn("next_move", next_data)
-                self.assertEqual(next_data["command"], "mew work 1 --start-session")
+                self.assertEqual(next_data["command"], "mew code 1")
             finally:
                 os.chdir(old_cwd)
 
@@ -3095,13 +3095,13 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["next", "--kind", "coding", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["kind"], "coding")
-                self.assertEqual(data["command"], "mew work 2 --start-session")
+                self.assertEqual(data["command"], "mew code 2")
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["next"]), 0)
                 output = stdout.getvalue()
                 self.assertIn('answer question #1 with `mew reply 1 "..."`', output)
-                self.assertIn("Coding: start native work session for task #2", output)
+                self.assertIn("Coding: enter coding cockpit for task #2", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["focus", "--kind", "coding"]), 0)
@@ -3118,7 +3118,7 @@ class CommandTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(commands_module.run_chat_slash_command("/next --kind coding", {}), "continue")
-                self.assertIn("mew work 2 --start-session", stdout.getvalue())
+                self.assertIn("mew code 2", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

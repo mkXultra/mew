@@ -2534,7 +2534,7 @@ class AutonomyTests(unittest.TestCase):
         )
 
         messages = [decision for decision in plan["decisions"] if decision.get("type") == "send_message"]
-        self.assertEqual(messages[0]["text"], "Next: start native work session for task #1 with `./mew work 1 --start-session`")
+        self.assertEqual(messages[0]["text"], "Next: enter coding cockpit for task #1 with `./mew code 1`")
 
     def test_non_ai_passive_wait_surfaces_next_move(self):
         state = default_state()

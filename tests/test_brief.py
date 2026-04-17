@@ -103,7 +103,7 @@ class BriefTests(unittest.TestCase):
         question, _ = add_question(state, "What should I do?", related_task_id=1)
         mark_question_deferred(state, question, reason="later")
 
-        self.assertEqual(next_move(state), "start native work session for task #1 with `./mew work 1 --start-session`")
+        self.assertEqual(next_move(state), "enter coding cockpit for task #1 with `./mew code 1`")
 
     def test_next_move_kind_filter_ignores_unrelated_questions(self):
         state = default_state()
@@ -112,7 +112,7 @@ class BriefTests(unittest.TestCase):
         add_question(state, "Which city should I research?", related_task_id=1)
 
         self.assertIn("mew reply", next_move(state))
-        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `./mew work 2 --start-session`")
+        self.assertEqual(next_move(state, kind="coding"), "enter coding cockpit for task #2 with `./mew code 2`")
 
     def test_focus_global_surfaces_coding_next_move(self):
         state = default_state()
@@ -126,9 +126,9 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", data["next_move"])
         self.assertEqual(
             data["coding_next_move"],
-            "start native work session for task #2 with `./mew work 2 --start-session`",
+            "enter coding cockpit for task #2 with `./mew code 2`",
         )
-        self.assertIn("Coding: start native work session for task #2", focus)
+        self.assertIn("Coding: enter coding cockpit for task #2", focus)
 
     def test_brief_kind_filter_scopes_tasks_questions_and_messages(self):
         state = default_state()
@@ -185,7 +185,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["recent_steps"], [])
         self.assertEqual(
             data["next_move"],
-            "start native work session for task #2 with `./mew work 2 --start-session`",
+            "enter coding cockpit for task #2 with `./mew code 2`",
         )
         self.assertEqual(focus["unread_outbox_count"], 1)
 
@@ -237,7 +237,7 @@ class BriefTests(unittest.TestCase):
         state = default_state()
         add_task(state)
 
-        self.assertEqual(next_move(state), "start native work session for task #1 with `./mew work 1 --start-session`")
+        self.assertEqual(next_move(state), "enter coding cockpit for task #1 with `./mew code 1`")
 
     def test_next_move_does_not_programmer_plan_admin_task(self):
         state = default_state()
@@ -740,7 +740,7 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(next_move(state, kind="coding"), "start native work session for task #2 with `./mew work 2 --start-session`")
+        self.assertEqual(next_move(state, kind="coding"), "enter coding cockpit for task #2 with `./mew code 2`")
 
 
 if __name__ == "__main__":

@@ -788,7 +788,7 @@ def next_move(state, kind=None):
         return f"dispatch task #{task.get('id')} plan #{plan.get('id')} with `{mew_command('task', 'dispatch', task.get('id'))}`"
     if plan_needed:
         task_id = plan_needed[0].get("id")
-        return f"start native work session for task #{task_id} with `{mew_command('work', task_id, '--start-session')}`"
+        return f"enter coding cockpit for task #{task_id} with `{mew_command('code', task_id)}`"
     if attention:
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
     if tasks:
