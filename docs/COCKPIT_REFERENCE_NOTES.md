@@ -277,6 +277,8 @@ Initial implementation status, 2026-04-18:
   stdout cells. Passing `--progress` keeps the explicit progress stream.
 - Chat `/follow --quiet` uses the same behavior and keeps `--quiet` in cached
   continue options.
+- Failed command/test cells use expanded tails so the first error view is more
+  likely to include the relevant traceback or verifier failure.
 - Follow dogfood with `codex-ultra` then tightened the last approval/report
   papercuts: resume approval hints reuse known verifier defaults, failed
   approval verification cells are marked retryable instead of pending, and

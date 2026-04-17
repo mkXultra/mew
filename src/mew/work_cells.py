@@ -17,6 +17,8 @@ COMMAND_CELL_TOOLS = {"run_command"} | GIT_WORK_TOOLS
 TEST_CELL_TOOLS = {"run_tests"}
 TAIL_MAX_LINES = 8
 TAIL_MAX_CHARS = 1200
+FAILURE_TAIL_MAX_LINES = 40
+FAILURE_TAIL_MAX_CHARS = 6000
 
 
 def _duration_seconds(started_at, finished_at):
@@ -130,10 +132,27 @@ def _tail_lines(text, max_lines=TAIL_MAX_LINES, max_chars=TAIL_MAX_CHARS):
     return lines
 
 
-def _command_tail(result):
+def _command_cell_failed(call):
+    result = _command_result(call)
+    if call.get("status") in ("failed", "interrupted"):
+        return True
+    if call.get("error"):
+        return True
+    if result.get("timed_out"):
+        return True
+    if "exit_code" in result and result.get("exit_code") not in (0, None):
+        return True
+    if result.get("verification_exit_code") not in (None, 0):
+        return True
+    return False
+
+
+def _command_tail(result, expanded=False):
     tail = []
+    max_lines = FAILURE_TAIL_MAX_LINES if expanded else TAIL_MAX_LINES
+    max_chars = FAILURE_TAIL_MAX_CHARS if expanded else TAIL_MAX_CHARS
     for stream in ("stdout", "stderr"):
-        lines = _tail_lines((result or {}).get(stream) or "")
+        lines = _tail_lines((result or {}).get(stream) or "", max_lines=max_lines, max_chars=max_chars)
         if lines:
             tail.append({"stream": stream, "lines": lines})
     return tail
@@ -206,6 +225,8 @@ def _command_detail(session, call, kind):
     lines.append(f"full_output: mew work{task_part} {pane}")
     if call.get("error"):
         lines.append(f"error: {clip_inline_text(call.get('error'), 240)}")
+    if _command_cell_failed(call):
+        lines.append("tail: expanded_for_failure")
     return "\n".join(lines)
 
 
@@ -223,7 +244,7 @@ def command_or_test_cell(session, call):
         _command_preview(call),
     )
     cell["detail"] = _command_detail(session, call, kind)
-    cell["tail"] = _command_tail(_command_result(call))
+    cell["tail"] = _command_tail(_command_result(call), expanded=_command_cell_failed(call))
     if not cell["tail"] and call.get("status") == "completed":
         cell["tail"] = [{"stream": "output", "lines": ["(no output)"]}]
     return cell

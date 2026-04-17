@@ -284,6 +284,7 @@ Evidence:
 - `mew work --follow --quiet` now suppresses default `mew work ai:` progress lines unless `--progress` is explicitly passed, leaving a cleaner stdout-only cell stream for humans and scripted captures.
 - A fresh `codex-ultra` human-role compact follow test verified active cells, compact completed cells, pending approval controls, approval apply/reject, and closed-session unavailable approvals; its remaining findings are now addressed by concrete resume verifier hints, retryable failed-approval cells, and raw-diff-free compact final reports.
 - Chat `/follow --quiet` now accepts the same quiet flag as the CLI and preserves it in cached continue options, making attach-style chat probes less noisy.
+- Failed command/test cells now expand their stderr/stdout tails instead of using the success-path 8-line clip, reducing the need to open `--tests` just to see the actual failure.
 
 Missing proof:
 
@@ -415,8 +416,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `801 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `191 passed`.
+- `uv run pytest -q` current: `802 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `192 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
 - `codex-ultra` human-role cells dogfood current: verified stable CLI/chat cell rendering and exposed five approval/control issues; the current code fixes four directly and narrows the remaining active in-flight cell work.

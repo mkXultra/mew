@@ -339,10 +339,40 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("required_gate: --allow-shell", text)
         self.assertIn("grant_once: mew work 11 --tool run_command", text)
 
-    def test_work_session_cells_mark_resolved_permission_gate(self):
+    def test_work_session_cells_expand_failed_test_tail(self):
+        stderr = "\n".join(f"failure line {index}" for index in range(1, 15))
         session = {
             "id": 6,
             "task_id": 12,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"command": "pytest", "cwd": "."},
+                    "result": {"command": "pytest", "cwd": ".", "exit_code": 1, "stdout": "", "stderr": stderr},
+                    "error": "verification failed with exit_code=1",
+                }
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertEqual(cells[0]["kind"], "test")
+        self.assertEqual(cells[0]["tail"][0]["stream"], "stderr")
+        self.assertIn("failure line 1", cells[0]["tail"][0]["lines"])
+        self.assertIn("failure line 14", cells[0]["tail"][0]["lines"])
+        self.assertNotIn("[...snip...]", cells[0]["tail"][0]["lines"])
+        self.assertIn("tail: expanded_for_failure", text)
+
+    def test_work_session_cells_mark_resolved_permission_gate(self):
+        session = {
+            "id": 7,
+            "task_id": 13,
             "status": "active",
             "tool_calls": [
                 {
@@ -378,8 +408,8 @@ class WorkSessionTests(unittest.TestCase):
 
     def test_work_session_cells_mark_closed_pending_approval_unavailable(self):
         session = {
-            "id": 7,
-            "task_id": 13,
+            "id": 8,
+            "task_id": 14,
             "status": "closed",
             "tool_calls": [
                 {
@@ -405,14 +435,14 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(cells[1]["kind"], "approval")
         self.assertEqual(cells[1]["status"], "unavailable")
-        self.assertEqual(cells[1]["actions"], {"review": "mew work 13 --session --resume"})
+        self.assertEqual(cells[1]["actions"], {"review": "mew work 14 --session --resume"})
         self.assertIn("approval_unavailable: session is not active", text)
         self.assertNotIn("--approve-tool 4", text)
 
     def test_work_session_cells_mark_failed_approval_retryable(self):
         session = {
-            "id": 8,
-            "task_id": 14,
+            "id": 9,
+            "task_id": 15,
             "status": "active",
             "default_options": {"verify_command": "python3 -m py_compile sample.py", "allow_verify": True},
             "tool_calls": [
@@ -452,8 +482,8 @@ class WorkSessionTests(unittest.TestCase):
 
     def test_work_session_tests_include_failed_verify_gate(self):
         session = {
-            "id": 9,
-            "task_id": 15,
+            "id": 10,
+            "task_id": 16,
             "status": "active",
             "tool_calls": [
                 {
