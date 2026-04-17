@@ -1,0 +1,17 @@
+{
+  "date": "2026-04-17",
+  "tasks": [
+    {
+      "title": "Prototype mew dream journal experiment",
+      "status": "in_progress"
+    },
+    {
+      "title": "Write pytest coverage for markdown generation",
+      "status": "todo"
+    }
+  ],
+  "notes": [
+    "Keep the prototype isolated under experiments/mew-dream.",
+    "Generate both dream and journal markdown files from local state JSON."
+  ]
+}
