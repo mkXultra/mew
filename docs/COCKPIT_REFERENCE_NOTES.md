@@ -213,6 +213,14 @@ Show:
 
 ### P1: Approval Anchors
 
+Initial implementation status, 2026-04-18:
+
+- Pending write/edit approvals now produce structured approval cells with
+  `operation`, `target`, and `actions`.
+- The first actions are approve once, reject, and reject with feedback.
+- Missing shell and verification gates can also surface as required approval
+  cells, so a failed command cell can point at the exact gate needed to retry.
+
 Estimated time: 1 day after cells exist.
 
 Add operation-specific approval cells for:

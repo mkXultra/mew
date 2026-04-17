@@ -273,6 +273,7 @@ Evidence:
 - Real read-only `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` dogfood used the new cells, found that leading raw ids/timestamps made rows noisy, and the formatter was then adjusted to put stable ids and timing in metadata lines.
 - `dogfood --scenario work-session` now checks both CLI and chat cell panes, including model, test, diff, and pending approval rows.
 - Command/test cells now include command, cwd, exit status, elapsed time, stdout/stderr line and character counts, output tails, explicit no-output rows, timeout/error metadata, and a `full_output` hint back to `mew work <task-id> --tests` or `--commands`.
+- Approval cells now carry structured `operation`, `target`, and `actions`; pending write/edit approvals expose approve-once, reject, and reject-with-feedback commands, and missing shell/verification gates can surface as required approval cells.
 
 Missing proof:
 
@@ -286,7 +287,7 @@ Missing proof:
 
 Next action:
 
-- Dogfood the new command/test cells in real resident work, then build approval anchors on top of the same cell model before redesigning interrupts, diffs, or live-resume state.
+- Dogfood approval anchors in real resident work, then decide whether the next slice should be cell-native follow rendering or richer diff cells.
 
 ## Milestone 3: Persistent Advantage
 
@@ -404,7 +405,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `792 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `793 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `182 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.

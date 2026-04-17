@@ -191,6 +191,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(cells[1]["tail"][0]["stream"], "stdout")
         self.assertIn("2 passed", cells[1]["tail"][0]["lines"])
         self.assertEqual(cells[3]["status"], "pending")
+        self.assertEqual(cells[3]["operation"], "file_write")
+        self.assertEqual(cells[3]["target"], "README.md")
+        self.assertIn("--approve-tool 3", cells[3]["actions"]["approve_once"])
+        self.assertIn("--reject-reason <feedback>", cells[3]["actions"]["reject_with_feedback"])
         self.assertIn("approval needed", cells[3]["preview"])
 
         text = format_work_session_cells(session, limit=None)
@@ -205,6 +209,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("full_output: mew work 9 --tests", text)
         self.assertIn("stdout_tail:", text)
         self.assertIn("- approval [pending] approval needed", text)
+        self.assertIn("operation: file_write", text)
+        self.assertIn("reject_with_feedback: mew work 9 --reject-tool 3 --reject-reason <feedback>", text)
         self.assertIn("id: s3:approval:3", text)
 
     def test_work_session_cells_pane_is_available_from_cli(self):
@@ -294,6 +300,36 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("output: (no output)", text)
         self.assertIn("output_tail:\n    (no output)", text)
         self.assertIn("full_output: mew work 10 --commands", text)
+
+    def test_work_session_cells_anchor_missing_shell_gate(self):
+        session = {
+            "id": 5,
+            "task_id": 11,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "failed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"command": "git status --short", "cwd": "."},
+                    "result": None,
+                    "error": "shell command execution is disabled; pass --allow-shell",
+                }
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertEqual([cell["kind"] for cell in cells], ["command", "approval"])
+        self.assertEqual(cells[1]["status"], "required")
+        self.assertEqual(cells[1]["operation"], "shell_command")
+        self.assertIn("--allow-shell", cells[1]["actions"]["grant_once"])
+        self.assertIn("- approval [required] approval needed for shell_command", text)
+        self.assertIn("required_gate: --allow-shell", text)
+        self.assertIn("grant_once: mew work 11 --tool run_command", text)
 
     def test_diff_preview_can_use_unclipped_diff_stats(self):
         clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
