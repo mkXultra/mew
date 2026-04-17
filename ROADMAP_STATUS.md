@@ -26,8 +26,10 @@ sessions, and more real dogfood on repository work. Fresh `mew code` dogfood
 fixed partial `/follow --max-steps ...` commands dropping cached session gates;
 made runtime activity opt-in for `mew code`; added search match counts to
 summaries; made inline approval rejection stop live/follow loops; and removed
-duplicated cached `--max-steps` controls. Keep using real cockpit friction, not
-imagined polish, to choose the next fix.
+duplicated cached `--max-steps` controls. External dogfood then fixed
+non-positive `--max-steps` running a model step and stopped newer memory from
+reattaching stale old tool state. Keep using real cockpit friction, not imagined
+polish, to choose the next fix.
 
 ## Milestone 1: Native Hands
 
