@@ -6597,6 +6597,32 @@ def _parse_chat_work_resume_args(parts):
     return task_id, allow_read, auto_recover_safe, ""
 
 
+def _work_read_flags_from_options(option_text, session=None):
+    roots = []
+    try:
+        parts = shlex.split(option_text or "")
+    except ValueError:
+        parts = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        if token == "--allow-read" and index + 1 < len(parts):
+            roots.append(parts[index + 1])
+            index += 2
+            continue
+        if token.startswith("--allow-read="):
+            roots.append(token.partition("=")[2])
+        index += 1
+    if not roots:
+        roots = list(((session or {}).get("default_options") or {}).get("allow_read") or [])
+    if not roots:
+        roots = ["."]
+    flags = []
+    for root in roots:
+        flags.extend(["--allow-read", root])
+    return shlex.join(flags)
+
+
 def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False):
     state = state or load_state()
     if session is None:
@@ -6623,6 +6649,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
             lines.append(f"- {approval.get('reject_hint')}")
 
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
+    read_flags = _work_read_flags_from_options(cached, session=session)
     lines.append("Primary")
     if cached:
         lines.append(f"- /c {cached}")
@@ -6640,7 +6667,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         return "\n".join(lines)
     lines.append("Inspect")
     lines.append("- /work-session resume")
-    lines.append("- /work-session resume --allow-read .")
+    lines.append(f"- /work-session resume {read_flags}")
     lines.append("- /work-session details")
     lines.append("- /work-session diffs")
     lines.append("- /work-session tests")
@@ -6656,7 +6683,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         lines.append(f"- /work-session live {_work_options_with_max_steps(cached, 3)}")
     else:
         lines.append("- /work-session live --allow-read . --max-steps 3")
-    lines.append("- /work-session recover --allow-read .")
+    lines.append(f"- /work-session recover {read_flags}")
     return "\n".join(lines)
 
 

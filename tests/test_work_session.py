@@ -4471,6 +4471,33 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_inspect_controls_reuse_read_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("sample").mkdir()
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "sample"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
+
+                output = stdout.getvalue()
+                self.assertIn("- /work-session resume --allow-read sample", output)
+                self.assertIn("- /work-session recover --allow-read sample", output)
+                self.assertNotIn("- /work-session resume --allow-read .", output)
+                self.assertNotIn("- /work-session recover --allow-read .", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_timeline_surfaces_model_and_tool_events(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
