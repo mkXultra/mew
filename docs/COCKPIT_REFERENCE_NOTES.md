@@ -264,10 +264,12 @@ Initial implementation status, 2026-04-18:
   The new model/tool/diff/approval cells become the primary step result.
 - If no new cell appears, follow falls back to the old result pane rather than
   going silent.
+- Follow now also prints a `Work active cell` snapshot for the running model
+  turn and running tool call, then prints the durable completed cells after the
+  step finishes.
 
 Remaining:
 
-- show active in-flight tool/model cells before completion
 - reduce planning prose once the model-turn cell can carry enough summary
 - decide whether a TTY redraw mode should coexist with the line-oriented log
 
@@ -301,11 +303,11 @@ Resume should restore:
 ## Next Recommended Task
 
 Continue from the landed P0 cell slice, command/test cells, approval anchors,
-initial diff-cell metadata, and first follow-cell rendering into active live
-cell state:
+initial diff-cell metadata, first follow-cell rendering, and active-cell
+snapshots into real task dogfood:
 
-> Show the current in-flight model/tool cell during follow, then settle it into
-> the durable completed cell instead of only printing cells after each step.
+> Run a real resident coding task through the cell stream and fix the first
+> concrete cockpit friction it exposes.
 
 Target duration:
 

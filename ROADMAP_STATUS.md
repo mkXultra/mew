@@ -278,6 +278,7 @@ Evidence:
 - Diff cells now carry structured `operation`, `target`, `diff_stats`, `dry_run`, `applied`, and `approval_status` metadata plus a `full_diff` hint back to `mew work <task-id> --diffs`, so write previews are no longer just raw clipped patches.
 - `mew work --follow` now treats cells as the primary per-step result display: follow still shows thinking/progress, but it suppresses the older action/result panes whenever new cells are available.
 - `codex-ultra` human-role cells dogfood then found and drove fixes for pending-approval CLI controls, concrete verifier hints in approval cells, resolved shell/verify gate cells, failed verify-gate visibility in `--tests`, and unavailable approval actions on closed sessions.
+- Follow mode now prints a `Work active cell` for the running model turn and running tool call before completion, then prints the durable completed cells after the step finishes.
 
 Missing proof:
 
@@ -286,7 +287,7 @@ Missing proof:
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
-- `mew work --follow` now has stable cell anchors and suppresses duplicate action/result panes when cells are available, but it is not yet a fully live cell stream with active in-flight tool cells.
+- `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
 - TTY redraw, cell-level collapse/expand, and configurable command/test tail controls are not implemented.
 
 Next action:

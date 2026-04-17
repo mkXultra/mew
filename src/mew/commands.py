@@ -2194,6 +2194,24 @@ def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
     return len(cells)
 
 
+def maybe_print_work_active_cell(args, session, task, index, source, source_id):
+    if not getattr(args, "follow", False):
+        return
+    for cell in build_work_session_cells(session, limit=None):
+        if (
+            cell.get("source") == source
+            and str(cell.get("source_id")) == str(source_id)
+            and cell.get("status") == "running"
+        ):
+            print("")
+            print(f"Work active cell step #{index}")
+            title = (session or {}).get("title") or (task or {}).get("title") or ""
+            if title:
+                print(f"title: {title}")
+            print(format_work_cells([cell], header=""))
+            return
+
+
 def print_work_live_step_output(args, index, step, resume, session, task, seen_count=0):
     if getattr(args, "follow", False):
         next_seen = maybe_print_work_live_cells(args, session, task, index, seen_count)
@@ -2381,6 +2399,7 @@ def cmd_work_ai(args):
             )
             planning_turn_id = planning_turn.get("id")
             save_state(state)
+        maybe_print_work_active_cell(args, session, task, index, "model_turn", planning_turn_id)
 
         try:
             planned = plan_work_model_turn(
@@ -2709,6 +2728,7 @@ def cmd_work_ai(args):
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id")
             save_state(state)
+        maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)
         if getattr(args, "live", False) and not getattr(args, "follow", False):
             print("")
             print(f"Work live step #{index} action")
