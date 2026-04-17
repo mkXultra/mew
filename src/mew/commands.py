@@ -9059,7 +9059,8 @@ def cmd_chat(args):
         args.no_brief = True
         args.no_unread = True
         args.activity = False
-    print("mew chat. Type /help for commands, /exit to leave.", flush=True)
+    if not getattr(args, "quiet", False):
+        print("mew chat. Type /help for commands, /exit to leave.", flush=True)
     kind = getattr(args, "kind", None) or None
     pending_line = None
     can_preload_stdin = args.timeout is None or args.timeout > 0

@@ -902,7 +902,7 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
-                self.assertIn("mew chat. Type /help", output)
+                self.assertNotIn("mew chat. Type /help", output)
                 self.assertNotIn("Mew brief", output)
                 self.assertNotIn("Unread backlog should stay hidden.", output)
                 self.assertNotIn("Next controls", output)
