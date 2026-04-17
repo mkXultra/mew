@@ -4756,6 +4756,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("started work session #1", output)
+                self.assertNotIn("native work: mew work 1 --start-session", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
 
                 state = load_state()

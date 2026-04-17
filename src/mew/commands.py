@@ -8587,7 +8587,8 @@ def chat_self_improve(rest):
     if native:
         if session:
             print(("started " if session_created else "reused ") + f"work session #{session['id']}")
-        print(f"native work: {mew_command('work', task['id'], '--start-session')}")
+        if not start_session:
+            print(f"native work: {mew_command('work', task['id'], '--start-session')}")
         print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
     if show_prompt:
         if not plan:

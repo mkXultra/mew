@@ -333,6 +333,7 @@ Evidence:
 - Native self-improvement dogfood session #70 used `mew work --follow` with Codex Web API to continue True Recovery work; it exposed malformed JSON and incomplete edit friction, then landed world-aware recovery `next_action` guidance after those cockpit fixes.
 - Native self-improvement dogfood session #71 used `mew work --follow` with Codex Web API to attempt the first post-error re-observer slice; it stalled on a stale edit after a partial patch, which directly shaped the manual structured `suggested_safe_reobserve` implementation.
 - Native self-improvement dogfood session #81 used `mew self-improve --start-session` and `mew work --live` with Codex Web API to identify redundant `--start-session` output; the follow-up implementation now keeps plain `--native` start guidance while showing only the actionable continue hint after a session is already started.
+- Native self-improvement dogfood session #82 used `mew work --follow` with Codex Web API plus write/verify gates to apply a real edit: chat `/self ... start` now matches CLI behavior by suppressing the redundant native-work start hint after the session already exists.
 
 Missing proof:
 
@@ -348,6 +349,9 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `679 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_commands.py::CommandTests::test_chat_self_improve_native_skips_programmer_plan tests/test_commands.py::CommandTests::test_chat_self_improve_start_opens_native_work_session` current: `2 passed`.
+- `uv run pytest -q tests/test_commands.py tests/test_self_improve.py` current: `162 passed, 6 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-chat-self-improve-output --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_native_skips_programmer_plan tests/test_self_improve.py::SelfImproveTests::test_cli_self_improve_start_session_uses_native_work tests/test_commands.py::CommandTests::test_chat_self_improve_native_skips_programmer_plan tests/test_commands.py::CommandTests::test_chat_self_improve_start_opens_native_work_session` current: `4 passed`.
 - `uv run pytest -q tests/test_self_improve.py tests/test_commands.py` current: `162 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-self-improve-output --json` current: pass across 36 commands.
