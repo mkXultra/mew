@@ -8993,6 +8993,63 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_file_reject_action_is_single_use(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "reject", "tool_call_id": 1, "reason": "not wanted"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                self.assertEqual(load_state()["work_sessions"][0]["tool_calls"][0]["approval_status"], "rejected")
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                error = stderr.getvalue()
+                self.assertTrue("already rejected" in error or "stale work-session snapshot" in error)
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_approve_and_reject_tool_changes(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

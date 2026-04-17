@@ -3309,6 +3309,28 @@ def cmd_work_approve_all(args):
     return exit_code
 
 
+def _work_reject_error(source_call):
+    if not source_call:
+        return "work tool call not found"
+    if source_call.get("tool") not in ("write_file", "edit_file"):
+        return "only write_file/edit_file tool calls can be rejected"
+    result = source_call.get("result") or {}
+    if not result.get("dry_run") or not result.get("changed"):
+        return "only pending dry-run write/edit tool calls can be rejected"
+    if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+        return f"tool call is already {source_call.get('approval_status')}"
+    return ""
+
+
+def reject_work_tool_call(session, source_call, reason=""):
+    current_time = now_iso()
+    source_call["approval_status"] = "rejected"
+    source_call["rejected_at"] = current_time
+    source_call["rejection_reason"] = reason or ""
+    session["updated_at"] = current_time
+    return source_call
+
+
 def cmd_work_reject_tool(args):
     with state_lock():
         state = load_state()
@@ -3320,15 +3342,11 @@ def cmd_work_reject_tool(args):
         if not source_call:
             print(f"mew: work tool call not found: {args.reject_tool}", file=sys.stderr)
             return 1
-        if source_call.get("tool") not in ("write_file", "edit_file"):
-            print("mew: only write_file/edit_file tool calls can be rejected", file=sys.stderr)
+        reject_error = _work_reject_error(source_call)
+        if reject_error:
+            print(f"mew: {reject_error}", file=sys.stderr)
             return 1
-        if source_call.get("approval_status") in ("applying", "applied"):
-            print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
-            return 1
-        source_call["approval_status"] = "rejected"
-        source_call["rejected_at"] = now_iso()
-        source_call["rejection_reason"] = getattr(args, "reject_reason", None) or ""
+        reject_work_tool_call(session, source_call, getattr(args, "reject_reason", None) or "")
         save_state(state)
     if args.json:
         print(json.dumps({"rejected_tool_call": source_call}, ensure_ascii=False, indent=2))
@@ -3785,11 +3803,9 @@ def cmd_work_reply_file(args):
             if not source_call:
                 print(f"mew: work tool call not found: {action['tool_call_id']}", file=sys.stderr)
                 return 1
-            if source_call.get("tool") not in ("write_file", "edit_file"):
-                print("mew: only write_file/edit_file tool calls can be rejected", file=sys.stderr)
-                return 1
-            if source_call.get("approval_status") in ("applying", "applied"):
-                print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
+            reject_error = _work_reject_error(source_call)
+            if reject_error:
+                print(f"mew: {reject_error}", file=sys.stderr)
                 return 1
 
         applied = []
@@ -3805,9 +3821,7 @@ def cmd_work_reply_file(args):
                 applied.append({"type": "stop", "reason": session.get("stop_reason") or ""})
             elif action["type"] == "reject":
                 source_call = find_work_tool_call(session, action["tool_call_id"])
-                source_call["approval_status"] = "rejected"
-                source_call["rejected_at"] = now_iso()
-                source_call["rejection_reason"] = action.get("reason") or ""
+                reject_work_tool_call(session, source_call, action.get("reason") or "")
                 applied.append(
                     {
                         "type": "reject",

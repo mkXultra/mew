@@ -421,11 +421,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `812 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `33 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `202 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `203 passed`.
+- `uv run pytest -q tests/test_work_session.py -k "reply_file_can_queue_safe_follow_actions or reply_file_rejects_stale_session_snapshot or reply_file_reject_action_is_single_use or chat_work_session_can_approve_and_reject_tool_changes"` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "follow_writes_round_trip_snapshot or reply_file_can_queue_safe_follow_actions or reply_file_without_active_session_fails or reply_file_rejects_stale_session_snapshot"` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "reply_file_can_queue_safe_follow_actions or follow_writes_round_trip_snapshot or work_session_steer_requires_task_id_when_multiple_sessions_active"` current: `3 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "work_live_prints_resume_after_step or work_follow_honors_explicit_one_step_bound or work_follow_writes_round_trip_snapshot or work_follow_runs_compact_multi_step_live_loop"` current: `4 passed`.
@@ -645,6 +646,7 @@ Next action:
 - The follow snapshot contract now includes `schema_version`, heartbeat/process metadata, `session_updated_at`, `reply_command`, and `reply_template`; applying a reply file rewrites the snapshot with `mode=reply_file`, and no-active reply files fail nonzero instead of silently succeeding.
 - `docs/FOLLOW_REPLY_SCHEMA.md` documents the local snapshot/reply contract for another model or UI.
 - Reply files can now include `observed_session_updated_at`; stale observer replies are rejected before mutation when the active session has moved on.
+- Reply-file `reject` now shares the pending dry-run write/edit guard, rejects replayed reject actions, and bumps the work-session `updated_at` like the other reply actions.
 - `dogfood --scenario work-session` now covers a deterministic structured reply-file loop and verifies the follow snapshot acknowledgement, so the observer interface is part of recurring dogfood.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
