@@ -5475,7 +5475,9 @@ class WorkSessionTests(unittest.TestCase):
                     on_text_delta=None,
                 ):
                     if on_text_delta:
-                        on_text_delta("follow model delta")
+                        on_text_delta("follow ")
+                        on_text_delta("model ")
+                        on_text_delta("delta")
                     return {"summary": "done", "action": {"type": "finish", "reason": "stream observed"}}
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
@@ -5499,10 +5501,12 @@ class WorkSessionTests(unittest.TestCase):
                             )
 
                 progress = stderr.getvalue()
-                self.assertIn("THINK delta follow model delta", progress)
+                self.assertIn("THINK start", progress)
+                self.assertNotIn("THINK delta", progress)
                 output = stdout.getvalue()
                 self.assertIn("model_delta: THINK follow model delta", output)
-                self.assertIn("model_stream: THINK chunks=1", output)
+                self.assertEqual(output.count("model_delta: THINK"), 1)
+                self.assertIn("model_stream: THINK chunks=3", output)
                 self.assertIn("stream_preview: follow model delta", output)
                 self.assertLess(output.index("model_delta: THINK"), output.index("model_stream: THINK"))
             finally:

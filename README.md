@@ -340,12 +340,12 @@ bundle; compact mode also keeps the final step report to command/cwd/exit
 summaries instead of replaying stdout/stderr after the result pane.
 `search_text` live results include a short matches preview, so a compact run can
 show what was found without opening the full session details.
-`mew work --follow` uses compact live mode and streams model text deltas into
-the progress output and live thinking pane when the backend supports it, so a
-bounded autonomous run is observable while it is thinking instead of only after
-each step completes. The thinking pane prints `model_delta` lines as chunks
-arrive and then includes a clipped model-stream preview, separated from
-tool/progress lines, when deltas are available.
+`mew work --follow` uses compact live mode and streams batched model text
+deltas into the live thinking pane when the backend supports it, so a bounded
+autonomous run is observable while it is thinking instead of only after each
+step completes. Compact follow keeps duplicate delta progress off stderr, then
+includes a clipped model-stream preview separated from tool/progress lines when
+deltas are available.
 If a follow run or multi-step live run reaches `--max-steps`, mew records a
 system work-session note with the last action/result and the reentry command
 hint, so the next session can tell the loop hit its bound rather than silently

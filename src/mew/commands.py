@@ -1636,6 +1636,7 @@ def cmd_work_ai(args):
     for index in range(1, max_steps + 1):
         step_started = time.monotonic()
         live_thinking_open = False
+        live_delta_buffers = {}
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
@@ -1663,6 +1664,19 @@ def cmd_work_ai(args):
         prompt_session = session
         prompt_task = task
 
+        def flush_live_model_delta(phase=None):
+            if not getattr(args, "live", False):
+                return
+            phases = [phase] if phase else list(live_delta_buffers)
+            for current_phase in phases:
+                buffered = live_delta_buffers.get(current_phase) or ""
+                if not buffered:
+                    continue
+                rendered = " ".join(buffered.split())
+                live_delta_buffers[current_phase] = ""
+                if rendered:
+                    print(format_work_live_model_delta(current_phase, rendered), flush=True)
+
         def live_model_delta(phase, text):
             nonlocal live_thinking_open
             if not getattr(args, "live", False):
@@ -1681,7 +1695,10 @@ def cmd_work_ai(args):
                     )
                 )
                 live_thinking_open = True
-            print(format_work_live_model_delta(phase, text), flush=True)
+            live_delta_buffers[phase] = f"{live_delta_buffers.get(phase, '')}{text or ''}"
+            rendered = " ".join(live_delta_buffers[phase].split())
+            if len(rendered) >= 160 or "\n" in str(text or ""):
+                flush_live_model_delta(phase)
 
         with state_lock():
             state = load_state()
@@ -1719,8 +1736,11 @@ def cmd_work_ai(args):
                 model_delta_sink=(
                     live_model_delta if bool(getattr(args, "stream_model", False)) else None
                 ),
+                progress_model_deltas=not bool(getattr(args, "compact_live", False)),
             )
+            flush_live_model_delta()
         except KeyboardInterrupt:
+            flush_live_model_delta()
             interrupt = pause_work_session_after_user_interrupt(session_id, index)
             report["stop_reason"] = "user_interrupt"
             report["interrupted_step"] = index
@@ -1730,6 +1750,7 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: interrupted by user")
             break
         except MewError as exc:
+            flush_live_model_delta()
             error = str(exc)
             with state_lock():
                 state = load_state()

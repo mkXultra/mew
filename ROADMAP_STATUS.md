@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming, phase/elapsed progress anchors, grouped action/result panes, compact chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with batched live model deltas, phase/elapsed progress anchors, grouped action/result panes, compact chat controls, work-mode/follow cockpit controls, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -17,8 +17,8 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 ## Current Focus
 
 Milestone 2 is the active focus. Readable diff panes, command/test output panes,
-chat work-mode, bounded follow loops, compact live result panes, model-stream
-previews, phase/elapsed progress anchors, chat transcript logging,
+chat work-mode, bounded follow loops, compact live result panes, batched
+model-delta previews, phase/elapsed progress anchors, chat transcript logging,
 interrupt/max-step reentry notes, and scoped reentry controls now exist. The
 next product gap is still a calmer continuous coding cockpit: a more stable
 reasoning/status pane, less repeated reentry material during long sessions, and
@@ -92,7 +92,8 @@ Evidence:
 - `mew work --live` runs the resident work loop with progress and prints a resume bundle after each completed tool step.
 - `mew archive` now archives closed work sessions, which gives large work-session histories a retention path after read/context limits increased.
 - `read_file` supports `offset` and returns `next_offset`, letting the resident model page through files larger than one read window.
-- Codex SSE text deltas can be forwarded into work progress with `--stream-model`; `--follow` enables the same model-delta stream by default when the backend supports it.
+- Codex Web API SSE text deltas are forwarded even when the response omits a `content-type` header; `--follow` enables batched live `model_delta` thinking-pane output by default when the backend supports it.
+- Compact follow mode suppresses duplicate stderr delta progress while still preserving the model stream in the thinking pane and final preview, reducing token-by-token noise during real Codex Web API dogfood.
 - `mew work --live` now prints a compact `thinking` pane before each action, showing the model summary and planned action before any tool runs.
 - Live thinking panes now include a stable progress anchor (`step/max`, session id, task id, phase, and elapsed time), improving orientation during multi-step resident work.
 - `mew work --live --compact-live` and `/work-session live --compact-live` skip full per-step resume blocks, leaving a lighter thinking/action/result stream for longer supervised runs.
@@ -201,7 +202,7 @@ Evidence:
 
 Missing proof:
 
-- Model delta streaming and a separated thinking-pane preview now exist, but there is still no polished live reasoning/status pane comparable to Claude Code / Codex CLI.
+- Model delta streaming and a separated thinking-pane preview now exist and work against the live Codex Web API, but the stream is still raw JSON-plan text rather than a polished reasoning/status pane comparable to Claude Code / Codex CLI.
 - `mew chat --work-mode`, `/c`, and bounded `/follow` now reduce cockpit friction, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
@@ -304,7 +305,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `615 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `616 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `123 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
@@ -347,6 +349,7 @@ Next action:
 - `codex-ultra` human-role cockpit dogfood verified `/c`, `/follow`, max-step notes, and Ctrl+C reentry in a temporary workspace. It judged mew usable for short bounded read-only coding sessions and found three papercuts: sharp initial work-mode blank lines, repeated full controls, and verbose max-step notes; all three now have focused fixes and regression tests.
 - Mew dogfood task #46 used `mew work --follow` with Codex Web API as a resident buddy after the 2026-04-17 cockpit changes; it verified grouped result panes with duration output and recorded that the remaining live-output gap was dense tool-result rendering, which led to multiline section indentation and direct command cwd/stdout/stderr rendering.
 - `codex-ultra` human-role retest after the 2026-04-17 cockpit transcript work found three issues: non-git initial world-state resume showed `(no files)`, stale working memory rendered an old `next_step` too strongly, and `effects 10` / `runtime-effects 10` failed despite analogous chat grammar. Follow-up retest verified all three fixed with no repo edits.
+- Live Codex Web API dogfood on task #46 exposed that SSE responses can omit `content-type`, causing final text to work while live deltas were dropped; after the fix, session #40 showed batched `model_delta` lines in the thinking pane with no stderr token spam.
 
 ## Current Roadmap Focus
 

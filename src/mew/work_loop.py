@@ -639,7 +639,7 @@ def compact_model_stream(deltas):
         texts = [item.get("text") or "" for item in deltas if item.get("phase") == phase]
         if not texts:
             continue
-        joined = " ".join(texts)
+        joined = "".join(texts)
         phases.append(
             {
                 "phase": phase,
@@ -656,12 +656,12 @@ def model_delta_progress(progress, session_id, phase, sink=None):
         return None
 
     def emit(delta):
-        text = " ".join((delta or "").split())
-        if text:
-            if sink:
-                sink(phase, text)
-            if progress:
-                progress(f"session #{session_id}: {phase} delta {clip_output(text, 240)}")
+        raw_text = delta if isinstance(delta, str) else str(delta or "")
+        display_text = " ".join(raw_text.split())
+        if raw_text and sink:
+            sink(phase, raw_text)
+        if display_text and progress:
+            progress(f"session #{session_id}: {phase} delta {clip_output(display_text, 240)}")
 
     return emit
 
@@ -685,6 +685,7 @@ def plan_work_model_turn(
     act_mode="model",
     stream_model=False,
     model_delta_sink=None,
+    progress_model_deltas=True,
 ):
     current_time = now_iso()
     context = build_work_model_context(
@@ -708,7 +709,8 @@ def plan_work_model_turn(
 
     if progress:
         progress(f"session #{session.get('id')}: THINK start")
-    think_delta = model_delta_progress(progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
+    delta_progress = progress if progress_model_deltas else None
+    think_delta = model_delta_progress(delta_progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
     decision_plan = call_model_json_with_retries(
         model_backend,
@@ -734,7 +736,7 @@ def plan_work_model_turn(
     else:
         if progress:
             progress(f"session #{session.get('id')}: ACT start")
-        act_delta = model_delta_progress(progress, session.get("id"), "ACT", sink=capture_delta) if stream_model else None
+        act_delta = model_delta_progress(delta_progress, session.get("id"), "ACT", sink=capture_delta) if stream_model else None
         act_kwargs = {"on_text_delta": act_delta} if act_delta else {}
         action_plan = call_model_json_with_retries(
             model_backend,

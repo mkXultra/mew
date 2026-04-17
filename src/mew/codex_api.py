@@ -161,7 +161,7 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
-            if "text/event-stream" in content_type:
+            if on_text_delta or "text/event-stream" in content_type:
                 chunks = []
                 for raw_line in response:
                     line = raw_line.decode("utf-8", errors="replace")
