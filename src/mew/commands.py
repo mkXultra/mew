@@ -6759,6 +6759,33 @@ def _continue_options_should_use_cached_defaults(options):
     )
 
 
+def _strip_cached_work_control_options(cached, override_options):
+    try:
+        override_parts = shlex.split(override_options or "")
+        cached_parts = shlex.split(cached or "")
+    except ValueError:
+        return (cached or "").strip()
+    singleton_value_options = {"--max-steps", "--act-mode"}
+    override_names = {
+        token.split("=", 1)[0]
+        for token in override_parts
+        if token in singleton_value_options or token.split("=", 1)[0] in singleton_value_options
+    }
+    if not override_names:
+        return shlex.join(cached_parts)
+    kept = []
+    index = 0
+    while index < len(cached_parts):
+        token = cached_parts[index]
+        option_name = token.split("=", 1)[0]
+        if option_name in override_names:
+            index += 2 if token == option_name else 1
+            continue
+        kept.append(token)
+        index += 1
+    return shlex.join(kept)
+
+
 def _chat_continue_rest(rest, chat_state):
     rest = (rest or "").strip()
     cached = (chat_state or {}).get("work_continue_options", "").strip()
@@ -6769,6 +6796,7 @@ def _chat_continue_rest(rest, chat_state):
     if _looks_like_work_continue_options(rest):
         options, guidance_text = _split_continue_options_and_guidance(rest)
         if cached and _continue_options_should_use_cached_defaults(options):
+            cached = _strip_cached_work_control_options(cached, options)
             options = " ".join(part for part in (cached, options) if part)
         if guidance_text:
             guidance = "--work-guidance " + shlex.quote(guidance_text)

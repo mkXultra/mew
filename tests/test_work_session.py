@@ -6653,6 +6653,41 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_follow_partial_options_replace_cached_max_steps(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {"summary": "pause", "action": {"type": "wait", "reason": "bounded"}}
+
+                chat_state = {"work_continue_options": "--allow-read . --max-steps 1 --act-mode deterministic"}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --max-steps 2 inspect without duplicating bounds",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                self.assertEqual(chat_state["work_continue_options"].count("--max-steps"), 1)
+                self.assertIn("--max-steps 2", chat_state["work_continue_options"])
+                self.assertIn("--allow-read .", chat_state["work_continue_options"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_request_stop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
