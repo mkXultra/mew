@@ -860,6 +860,10 @@ def format_work_live_progress(index, max_steps, session_id, task_id, phase="thin
     return text
 
 
+def format_work_live_model_delta(phase, text):
+    return f"model_delta: {phase} {clip_output(text, 500)}"
+
+
 def _work_control_options(args, session=None):
     defaults = (session or {}).get("default_options") or {}
 
@@ -1631,6 +1635,7 @@ def cmd_work_ai(args):
 
     for index in range(1, max_steps + 1):
         step_started = time.monotonic()
+        live_thinking_open = False
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if progress:
             progress(f"step #{index}: planning")
@@ -1657,6 +1662,27 @@ def cmd_work_ai(args):
         prompt_state = state
         prompt_session = session
         prompt_task = task
+
+        def live_model_delta(phase, text):
+            nonlocal live_thinking_open
+            if not getattr(args, "live", False):
+                return
+            if not live_thinking_open:
+                print("")
+                print(f"Work live step #{index} thinking")
+                print(
+                    format_work_live_progress(
+                        index,
+                        max_steps,
+                        session_id,
+                        task_id,
+                        phase="thinking",
+                        elapsed_seconds=time.monotonic() - step_started,
+                    )
+                )
+                live_thinking_open = True
+            print(format_work_live_model_delta(phase, text), flush=True)
+
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -1690,6 +1716,9 @@ def cmd_work_ai(args):
                 progress=progress,
                 act_mode=getattr(args, "act_mode", "model") or "model",
                 stream_model=bool(getattr(args, "stream_model", False)),
+                model_delta_sink=(
+                    live_model_delta if bool(getattr(args, "stream_model", False)) else None
+                ),
             )
         except KeyboardInterrupt:
             interrupt = pause_work_session_after_user_interrupt(session_id, index)
@@ -1770,18 +1799,20 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: stop requested after planning")
             break
         if getattr(args, "live", False):
-            print("")
-            print(f"Work live step #{index} thinking")
-            print(
-                format_work_live_progress(
-                    index,
-                    max_steps,
-                    session_id,
-                    task_id,
-                    phase="thinking",
-                    elapsed_seconds=time.monotonic() - step_started,
+            if not live_thinking_open:
+                print("")
+                print(f"Work live step #{index} thinking")
+                print(
+                    format_work_live_progress(
+                        index,
+                        max_steps,
+                        session_id,
+                        task_id,
+                        phase="thinking",
+                        elapsed_seconds=time.monotonic() - step_started,
+                    )
                 )
-            )
+                live_thinking_open = True
             print(format_work_planning(planned))
         if action_type == "batch":
             if getattr(args, "live", False):

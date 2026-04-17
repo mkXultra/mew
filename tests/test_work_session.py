@@ -5501,8 +5501,10 @@ class WorkSessionTests(unittest.TestCase):
                 progress = stderr.getvalue()
                 self.assertIn("THINK delta follow model delta", progress)
                 output = stdout.getvalue()
+                self.assertIn("model_delta: THINK follow model delta", output)
                 self.assertIn("model_stream: THINK chunks=1", output)
                 self.assertIn("stream_preview: follow model delta", output)
+                self.assertLess(output.index("model_delta: THINK"), output.index("model_stream: THINK"))
             finally:
                 os.chdir(old_cwd)
 

@@ -684,6 +684,7 @@ def plan_work_model_turn(
     progress=None,
     act_mode="model",
     stream_model=False,
+    model_delta_sink=None,
 ):
     current_time = now_iso()
     context = build_work_model_context(
@@ -702,6 +703,8 @@ def plan_work_model_turn(
 
     def capture_delta(phase, text):
         stream_deltas.append({"phase": phase, "text": text})
+        if model_delta_sink:
+            model_delta_sink(phase, text)
 
     if progress:
         progress(f"session #{session.get('id')}: THINK start")
