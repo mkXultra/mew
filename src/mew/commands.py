@@ -282,6 +282,16 @@ def cmd_task_classify(args):
         print(f"changed {len(changed)} task(s)")
     return 0
 
+def format_task_notes_display(notes, max_lines=12, max_chars=4000):
+    if not notes:
+        return ""
+    text = str(notes)
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        text = "[...older task notes omitted...]\n" + "\n".join(lines[-max_lines:])
+    return clip_output(text, max_chars)
+
+
 def cmd_task_show(args):
     state = load_state()
     task = find_task(state, args.task_id)
@@ -293,7 +303,7 @@ def cmd_task_show(args):
     print(f"description: {task.get('description') or ''}")
     print(f"kind: {task_kind(task)}")
     print(f"kind_override: {task.get('kind') or ''}")
-    print(f"notes: {task.get('notes') or ''}")
+    print(f"notes: {format_task_notes_display(task.get('notes') or '')}")
     print(f"command: {task.get('command') or ''}")
     print(f"cwd: {task.get('cwd') or ''}")
     print(f"auto_execute: {task.get('auto_execute')}")
@@ -6227,7 +6237,7 @@ def print_chat_task(task_id):
     print(f"description: {task.get('description') or ''}")
     print(f"kind: {task_kind(task)}")
     print(f"kind_override: {task.get('kind') or ''}")
-    print(f"notes: {task.get('notes') or ''}")
+    print(f"notes: {format_task_notes_display(task.get('notes') or '')}")
     print(f"command: {task.get('command') or ''}")
     print(f"cwd: {task.get('cwd') or ''}")
     print(f"auto_execute: {task.get('auto_execute')}")

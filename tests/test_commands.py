@@ -1419,6 +1419,30 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_show_clips_old_notes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Noisy task"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["tasks"][0]["notes"] = "old note\n" + "\n".join(f"note {index}" for index in range(20))
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "show", "1"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("notes: [...older task notes omitted...]", output)
+                self.assertNotIn("old note", output)
+                self.assertIn("note 19", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_workbench_summarizes_task_resume_surface(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
