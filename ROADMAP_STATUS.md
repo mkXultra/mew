@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has quieter deterministic live steps, command streaming, action/resume output, chat/listen kind scopes, approval/live controls, line-targeted reads, large-file small edits, context pressure diagnostics, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has quieter deterministic live steps, command streaming, action/resume output, chat/listen kind scopes, work-mode/follow cockpit controls, approval/live controls, line-targeted reads, large-file small edits, context pressure diagnostics, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, and `outcome` exist; automatic safe resume is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -17,10 +17,10 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 ## Current Focus
 
 Milestone 2 is the active focus. Readable diff panes, command/test output panes,
-chat cockpit controls, compact live result panes, and scoped reentry controls
-now exist. The next product gap is a more polished continuous coding cockpit:
-better reasoning/progress flow, less duplicate output, and more real dogfood on
-long-running repository work.
+chat work-mode, bounded follow loops, compact live result panes, and scoped
+reentry controls now exist. The next product gap is a more polished continuous
+coding cockpit: better reasoning/progress flow, less duplicate output, and more
+real dogfood on long-running repository work.
 
 ## Milestone 1: Native Hands
 
@@ -194,11 +194,11 @@ Evidence:
 
 Missing proof:
 
-- Model delta streaming is opt-in and no longer pollutes `--live` by default, and focused diff/test panes now exist, but there is still no polished reasoning pane or unified streaming cockpit comparable to Claude Code / Codex CLI.
-- `mew work --live` now defaults to one model call per step, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
+- Model delta streaming is opt-in and no longer pollutes `--live` by default, and focused diff/test panes now exist, but there is still no polished reasoning pane comparable to Claude Code / Codex CLI.
+- `mew chat --work-mode`, `/c`, and bounded `/follow` now reduce cockpit friction, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has focused help, one-step `/continue`, reusable options, inline guidance capture, boundary stop requests, recent-session reentry, next controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/streaming.
+- Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode, bounded follow loops, inline guidance capture, boundary stop requests, recent-session reentry, next controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/streaming.
 
 Next action:
 
@@ -297,7 +297,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `592 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `605 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `103 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
@@ -307,7 +307,7 @@ Next action:
 - `uv run pytest -q tests/test_self_improve.py` current: `16 passed` (last observed in this long-session cycle before the latest cockpit edits).
 - `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_chat_cockpit_scenario tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario` current: `2 passed`.
 - `uv run python -m compileall -q src/mew` current: pass.
-- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, and scoped `/work-session`.
+- `uv run mew dogfood --scenario chat-cockpit --cleanup` current: pass, including scoped chat startup, scoped `/tasks`, scoped `/work`, scoped active-session controls, scoped `/work-session`, `/follow` discoverability, and `/work-mode` toggles.
 - `uv run mew dogfood --scenario work-session --cleanup` current: pass, including exact new-file approval, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, safe read auto-recovery, and 31 commands.
 - `uv run mew dogfood --scenario all --cleanup` current: pass, including `chat-cockpit` and `work-session`.
 - `./mew doctor` current: state/runtime/auth ok.
@@ -335,9 +335,10 @@ Next action:
 - `codex-ultra` distracted-user dogfood found that generated live/continue controls failed when only `~/.codex/auth.json` existed; work/do/chat defaults now preserve normal auth fallback instead of baking in `--auth auth.json`.
 - `claude-ultra` product evaluation at HEAD before inline approval judged mew `NOT_YET` versus Claude Code/Codex CLI, with the top one-hour recommendation to add an inline live write approval loop; `--prompt-approval` is now the first implementation slice of that recommendation.
 - `codex-ultra` focused retest after live-gate preflight, inline approval, interrupted recovery context, active-focus surfacing, and state backup found no concrete regressions in that scope.
+- `codex-ultra` human-role retest after the follow/work-mode slice verified four targeted fixes: explicit `--follow --max-steps 1` is honored, chat `/follow` controls include `--max-steps 10`, world-state git status uses allowed repo roots from disposable cwd, and `glob` skips cache/venv directories. Repo status stayed clean.
 
 ## Current Roadmap Focus
 
 Milestone 2: Interactive Parity.
 
-The next implementation should turn `mew work --live` and `/work-session live` into a real resident coding cockpit: a continuous loop with readable reasoning/diff/test panes, controlled continuation, approval handling, and a durable final note that explains what changed or what should happen next.
+The next implementation should make the new `mew chat --work-mode` / `/follow` path feel like a real resident coding cockpit: clearer reasoning/progress panes, less duplicate control output, strong approval boundaries, and a durable final note that explains what changed or what should happen next.
