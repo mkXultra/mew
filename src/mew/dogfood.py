@@ -1040,6 +1040,7 @@ def run_work_session_scenario(workspace, env=None):
     verification_ledger_result = run(["verification", "--json"])
     writes_ledger_result = run(["writes", "--json"])
     timeline_result = run(["work", "1", "--session", "--timeline", "--json"])
+    cells_result = run(["work", "1", "--cells", "--json"])
     chat_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
@@ -1059,6 +1060,11 @@ def run_work_session_scenario(workspace, env=None):
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
         input_text="/work-session commands\n",
+    )
+    chat_cells_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session cells\n",
     )
     chat_world_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
@@ -1196,6 +1202,7 @@ def run_work_session_scenario(workspace, env=None):
     verification_ledger_data = _json_stdout(verification_ledger_result, [])
     writes_ledger_data = _json_stdout(writes_ledger_result, [])
     timeline_data = _json_stdout(timeline_result)
+    cells_data = _json_stdout(cells_result)
     interrupted_resume_data = _json_stdout(interrupted_resume_result)
     interrupted_recover_data = _json_stdout(interrupted_recover_result)
     auto_recover_data = _json_stdout(auto_recover_result)
@@ -1205,6 +1212,7 @@ def run_work_session_scenario(workspace, env=None):
     workbench_session_verifications = work_data.get("work_session_verifications") or []
     workbench_session_writes = work_data.get("work_session_writes") or []
     timeline = timeline_data.get("timeline") or []
+    cells = cells_data.get("cells") or []
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
     interrupted_review = interrupted_recovery.get("review_item") or {}
@@ -1452,6 +1460,17 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_cells_surface_stable_cockpit_rows",
+        cells_result.get("exit_code") == 0
+        and any(cell.get("kind") == "model_turn" for cell in cells)
+        and any(cell.get("kind") == "test" for cell in cells)
+        and any(cell.get("kind") == "diff" for cell in cells)
+        and any(cell.get("kind") == "approval" for cell in cells),
+        observed=cells[:6],
+        expected="cells include model, test, diff, and approval cockpit rows",
+    )
+    _scenario_check(
+        checks,
         "chat_surfaces_work_session_details",
         chat_result.get("exit_code") == 0
         and "Work session #1 [active] task=#1" in (chat_result.get("stdout") or "")
@@ -1485,6 +1504,15 @@ def run_work_session_scenario(workspace, env=None):
         and "work command ok" in (chat_commands_result.get("stdout") or ""),
         observed=command_result_tail(chat_commands_result),
         expected="chat /work-session commands shows focused command output",
+    )
+    _scenario_check(
+        checks,
+        "chat_surfaces_work_session_cells",
+        chat_cells_result.get("exit_code") == 0
+        and "Work cells #1 [active] task=#1" in (chat_cells_result.get("stdout") or "")
+        and "model_turn [completed]" in (chat_cells_result.get("stdout") or ""),
+        observed=command_result_tail(chat_cells_result),
+        expected="chat /work-session cells shows stable cockpit rows",
     )
     _scenario_check(
         checks,

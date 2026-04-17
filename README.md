@@ -468,6 +468,7 @@ uv run mew work 1 --start-session
 uv run mew work --session
 uv run mew work --session --details
 uv run mew work --session --timeline
+uv run mew work --cells
 uv run mew work --session --resume
 uv run mew work --session --resume --allow-read .
 uv run mew work --session-note "prefer small verified steps"
@@ -532,11 +533,17 @@ step is visible before any tool runs.
 They also print a compact `result` pane after each step, combining action
 status, key tool output, phase, context pressure, pending approvals, and the
 next action before the full resume block.
+`mew work --follow` also emits newly added stable cockpit cells after each step.
+Cells give model turns, tools, commands, tests, diffs, and pending approvals
+durable ids such as `s1:model_turn:2` or `s1:test:7`, so a human or future UI
+can point at the same work item instead of reconstructing it from raw logs. Use
+`mew work --cells` or `/work-session cells` to inspect the same cell view later.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
 Inside `mew chat`, use `/work-session details`, `/work-session diffs`,
-`/work-session tests`, `/work-session commands`, `/work-session timeline`,
+`/work-session tests`, `/work-session commands`, `/work-session cells`,
+`/work-session timeline`,
 `/work-session resume --allow-read .`,
 `/work-session resume --allow-read . --auto-recover-safe`,
 `/work-session live 1 --allow-read . --max-steps 1`,

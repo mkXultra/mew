@@ -199,6 +199,7 @@ from .work_session import (
     work_session_task,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
+from .work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from .work_world import build_work_world_state
 
 
@@ -1789,7 +1790,7 @@ def cmd_work(args):
     if getattr(args, "stop_session", False):
         return cmd_work_stop_session(args)
     if getattr(args, "session", False) or any(
-        getattr(args, name, False) for name in ("resume", "timeline", "diffs", "tests", "commands")
+        getattr(args, name, False) for name in ("resume", "timeline", "diffs", "tests", "commands", "cells")
     ):
         return cmd_work_show_session(args)
     if getattr(args, "close_session", False):
@@ -2103,6 +2104,24 @@ def record_max_steps_reentry_note(session_id, report, mode="follow"):
     return note_text
 
 
+def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
+    if not (getattr(args, "follow", False) or getattr(args, "cells", False)):
+        return seen_count
+    cells = build_work_session_cells(session, limit=None)
+    new_cells = cells[seen_count:] if seen_count < len(cells) else []
+    if not new_cells:
+        return len(cells)
+    print("")
+    title = (session or {}).get("title") or (task or {}).get("title") or ""
+    if title:
+        print(f"Work cells after step #{index}")
+        print(f"title: {title}")
+        print(format_work_cells(new_cells, header=""))
+    else:
+        print(format_work_cells(new_cells, header=f"Work cells after step #{index}"))
+    return len(cells)
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -2172,6 +2191,7 @@ def cmd_work_ai(args):
         "steps": [],
     }
     options = _work_control_options(args, session=session)
+    live_cells_seen = len(build_work_session_cells(session, limit=None))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
         report["stop_reason"] = "missing_gates"
         if progress:
@@ -2440,6 +2460,7 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} result")
                 print(format_work_live_step_result(batch_step, resume=resume))
+                live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
                 if not getattr(args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
@@ -2505,6 +2526,7 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} result")
                 print(format_work_live_step_result(control_step, resume=resume))
+                live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
                 if not getattr(args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
@@ -2669,6 +2691,7 @@ def cmd_work_ai(args):
             print("")
             print(f"Work live step #{index} result")
             print(format_work_live_step_result(report["steps"][-1], resume=resume))
+            live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
             if not getattr(args, "compact_live", False):
                 print("")
                 print(f"Work live step #{index} resume")
@@ -3176,12 +3199,14 @@ def cmd_work_show_session(args):
                 payload["tests"] = build_work_session_test_entries(session, limit=getattr(args, "limit", 8))
             if getattr(args, "commands", False):
                 payload["commands"] = build_work_session_command_entries(session, limit=getattr(args, "limit", 8))
+            if getattr(args, "cells", False):
+                payload["cells"] = build_work_session_cells(session, limit=getattr(args, "limit", 20))
             payload["next_cli_controls"] = work_cli_control_commands(session, args)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if not session and not getattr(args, "task_id", None):
             print(format_no_active_work_session(state))
-        elif any(getattr(args, name, False) for name in ("timeline", "diffs", "tests", "commands")):
+        elif any(getattr(args, name, False) for name in ("timeline", "diffs", "tests", "commands", "cells")):
             if not session:
                 print(format_no_active_work_session(state))
                 return 0
@@ -3201,6 +3226,8 @@ def cmd_work_show_session(args):
                         include_tests=not getattr(args, "tests", False),
                     )
                 )
+            if getattr(args, "cells", False):
+                panes.append(format_work_session_cells(session, task=task, limit=getattr(args, "limit", 20)))
             print("\n\n".join(panes))
             print(format_work_cli_controls(session, args))
         else:
@@ -7052,6 +7079,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session diffs                   show only recent write/edit diff previews
 /work-session tests                   show recent test and verification output
 /work-session commands                show recent command stdout/stderr
+/work-session cells                   show stable cockpit cells for model/tool state
 /work-session timeline                show compact model/tool event timeline
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
@@ -7677,6 +7705,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     lines.append("- /work-session diffs")
     lines.append("- /work-session tests")
     lines.append("- /work-session commands")
+    lines.append("- /work-session cells")
     lines.append("- /work-session timeline")
     lines.append("Manage")
     lines.append("- /work-session note <remember this>")
@@ -7715,6 +7744,7 @@ def chat_work_session(rest, chat_state=None):
         "diffs",
         "tests",
         "commands",
+        "cells",
     }
     if len(parts) >= 2 and parts[0].lstrip("#").isdigit() and parts[1].casefold() in task_first_actions:
         parts = [parts[1], parts[0], *parts[2:]]
@@ -7735,6 +7765,7 @@ def chat_work_session(rest, chat_state=None):
         "diffs",
         "tests",
         "commands",
+        "cells",
         "approve",
         "reject",
     ):
@@ -8121,6 +8152,8 @@ def chat_work_session(rest, chat_state=None):
         print(format_work_session_tests(session, task=work_session_task(state, session)))
     elif action == "commands":
         print(format_work_session_commands(session, task=work_session_task(state, session)))
+    elif action == "cells":
+        print(format_work_session_cells(session, task=work_session_task(state, session)))
     else:
         print(format_work_session(session, task=work_session_task(state, session), details=details))
     print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))

@@ -137,6 +137,15 @@ What mew should adapt:
 
 ### P0: Cell-Based `mew work --follow`
 
+Initial implementation status, 2026-04-18:
+
+- `src/mew/work_cells.py` builds stable cells over existing work-session state.
+- `mew work --cells` and `/work-session cells` expose the cell view.
+- `mew work --follow` prints newly added cells after each live step.
+- The first dogfood pass showed that cell rows should prioritize preview text
+  over raw ids and timestamps; the formatter now keeps ids/timing as metadata
+  lines under each row.
+
 Estimated time: 1 to 1.5 focused days.
 
 Why first:
@@ -251,13 +260,14 @@ Resume should restore:
 
 ## Next Recommended Task
 
-Implement P0:
+Continue from the landed P0 slice into P1:
 
-> Cell-based `mew work --follow` rendering over existing work session state.
+> Improve command/test cell rendering and output pacing on top of the new stable
+> cell model.
 
 Target duration:
 
-- first useful slice: 5 to 6 hours
+- first useful slice: 4 to 6 hours
 - polished dogfooded slice: 1 to 1.5 days
 
 Done when:

@@ -18,9 +18,10 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
-change the roadmap goal, but it narrows the next implementation target to
-cell-based `mew work --follow` rendering. That should land before approval,
-interrupt, diff, or live-resume work grows further.
+change the roadmap goal, but it narrowed the next implementation target to
+cell-based `mew work --follow` rendering. The first useful cell slice now
+exists, so the next cockpit work should build on those stable rows rather than
+adding more ad hoc log output.
 
 Already shipped: readable diff panes,
 command/test output panes, chat work-mode, bounded follow loops, compact live
@@ -266,6 +267,11 @@ Evidence:
 - `dogfood --scenario chat-cockpit` now covers `mew code --quiet`, preserving the silent scripted cockpit startup path.
 - `mew code --help` now describes the coding-cockpit create/reuse flow and common quiet/read-only entry commands.
 - Read-only `codex-ultra` investigations of Claude Code and Codex CLI, followed by a `claude-ultra` product decision pass, identified stable transcript cells as the next enabling cockpit primitive; the findings are captured in `docs/COCKPIT_REFERENCE_NOTES.md`.
+- `src/mew/work_cells.py` builds stable cockpit cells from existing work-session state, including `model_turn`, `tool_call`, `command`, `test`, `diff`, and `approval` cells with durable ids, statuses, previews, details, and command/test tails.
+- `mew work --cells --json`, text `mew work --cells`, and chat `/work-session cells` expose the same cell model for reentry and future UIs.
+- `mew work --follow` now prints newly added cells after each live step, so follow-mode output has stable model/tool anchors instead of only transient stream text.
+- Real read-only `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` dogfood used the new cells, found that leading raw ids/timestamps made rows noisy, and the formatter was then adjusted to put stable ids and timing in metadata lines.
+- `dogfood --scenario work-session` now checks both CLI and chat cell panes, including model, test, diff, and pending approval rows.
 
 Missing proof:
 
@@ -274,11 +280,12 @@ Missing proof:
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
-- `mew work --follow` still renders too much as stream/log text rather than stable cells with durable ids, statuses, previews, details, and command/test tails.
+- `mew work --follow` now has stable cell anchors, but it still renders alongside the older thinking/action/result logs rather than as a fully cell-native stream.
+- TTY redraw, cell-level collapse/expand, and richer command/test tail controls are not implemented.
 
 Next action:
 
-- Implement the P0 cockpit slice from `docs/COCKPIT_REFERENCE_NOTES.md`: build a small cell model over existing work-session state and use it to render stable `mew work --follow` output.
+- Build the next cockpit slice on top of cells: improve command/test cell rendering and output pacing before redesigning approvals, interrupts, diffs, or live-resume state.
 
 ## Milestone 3: Persistent Advantage
 
@@ -396,6 +403,10 @@ Next action:
 
 ## Latest Validation
 
+- `uv run pytest -q` current: `791 passed, 6 subtests passed`.
+- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
+- `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` current: real Codex Web API dogfood inspected the new cell implementation, produced stable cells after each step, and identified the row-noise polish that was fixed in this session.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session after the latest cockpit help/resume next-action changes.
 - `uv run pytest -q tests/test_work_session.py` current: `179 passed`, including task-specific idle resume `next_action`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands after task-specific live resume next-action changes.

@@ -15,6 +15,7 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
+from mew.work_cells import build_work_session_cells, format_work_session_cells
 from mew.work_session import format_diff_preview, format_work_action
 
 
@@ -129,6 +130,134 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("line_start=42", text)
         self.assertIn("line_count=12", text)
         self.assertIn("max_chars=12000", text)
+
+    def test_work_session_cells_capture_model_command_diff_and_approval(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Cell cockpit",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "action": {"type": "run_tests"},
+                    "summary": "verify",
+                    "tool_call_id": 2,
+                    "guidance_snapshot": "Run the narrow verifier.",
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:02Z",
+                    "finished_at": "2026-04-18T00:00:05Z",
+                    "parameters": {"command": "uv run pytest -q", "cwd": "."},
+                    "result": {
+                        "command": "uv run pytest -q",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "stdout": "1 passed\n2 passed\n",
+                        "stderr": "",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:06Z",
+                    "finished_at": "2026-04-18T00:00:07Z",
+                    "parameters": {"path": "README.md"},
+                    "result": {
+                        "path": "README.md",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+                        "diff_stats": {"added": 1, "removed": 1},
+                    },
+                },
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+
+        self.assertEqual([cell["kind"] for cell in cells], ["model_turn", "test", "diff", "approval"])
+        self.assertEqual(cells[0]["id"], "s3:model_turn:1")
+        self.assertEqual(cells[1]["id"], "s3:test:2")
+        self.assertEqual(cells[1]["tail"][0]["stream"], "stdout")
+        self.assertIn("2 passed", cells[1]["tail"][0]["lines"])
+        self.assertEqual(cells[3]["status"], "pending")
+        self.assertIn("approval needed", cells[3]["preview"])
+
+        text = format_work_session_cells(session, limit=None)
+        self.assertIn("Work cells #3 [active] task=#9", text)
+        self.assertIn("- test [completed] run_tests exit=0 duration=3.0s uv run pytest -q", text)
+        self.assertIn("id: s3:test:2", text)
+        self.assertIn("elapsed: 3.0s", text)
+        self.assertIn("stdout_tail:", text)
+        self.assertIn("- approval [pending] approval needed", text)
+        self.assertIn("id: s3:approval:3", text)
+
+    def test_work_session_cells_pane_is_available_from_cli(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Exercise cells.",
+                            "created_at": "2026-04-18T00:00:00Z",
+                            "updated_at": "2026-04-18T00:00:03Z",
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "status": "completed",
+                                    "started_at": "2026-04-18T00:00:00Z",
+                                    "finished_at": "2026-04-18T00:00:01Z",
+                                    "action": {"type": "read_file", "path": "README.md"},
+                                    "summary": "read README",
+                                    "tool_call_id": 1,
+                                }
+                            ],
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "tool": "read_file",
+                                    "status": "completed",
+                                    "started_at": "2026-04-18T00:00:02Z",
+                                    "finished_at": "2026-04-18T00:00:03Z",
+                                    "parameters": {"path": "README.md"},
+                                    "result": {"path": "README.md", "text": "hello\n", "truncated": False},
+                                    "summary": "Read file README.md",
+                                }
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--cells"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("Work cells #1 [active] task=#1", output)
+                self.assertIn("- model_turn [completed] read_file: read README", output)
+                self.assertIn("id: s1:model_turn:1", output)
+                self.assertIn("- tool_call [completed] read_file: Read file README.md", output)
+                self.assertIn("id: s1:tool_call:1", output)
+                self.assertIn("Next CLI controls", output)
+            finally:
+                os.chdir(old_cwd)
 
     def test_diff_preview_can_use_unclipped_diff_stats(self):
         clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
@@ -7328,6 +7457,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 thinking", output)
                 self.assertIn("progress: step=1/10", output)
                 self.assertIn("Work live step #2 thinking", output)
+                self.assertIn("Work cells after step #1", output)
+                self.assertIn("- model_turn [completed] read_file: read README", output)
+                self.assertIn("id: s1:model_turn:1", output)
+                self.assertIn("- tool_call [completed] read_file", output)
+                self.assertIn("id: s1:tool_call:1", output)
                 self.assertIn("mew work ai: 2/10 step(s) stop=finish", output)
                 self.assertNotIn("Work live step #1 resume", output)
                 self.assertIn("Next CLI controls", output)
