@@ -30,6 +30,10 @@ duplicated cached `--max-steps` controls. External dogfood then fixed
 non-positive `--max-steps` running a model step and stopped newer memory from
 reattaching stale old tool state. Keep using real cockpit friction, not imagined
 polish, to choose the next fix.
+Real dogfood with `mew code` task #48 produced an isolated
+`experiments/mew-dream` prototype, then fixed two cockpit blockers it exposed:
+brand-new write roots can now be created during gated writes, and `--no-verify`
+now prevents approval from resurrecting stale verification commands.
 
 ## Milestone 1: Native Hands
 
@@ -199,8 +203,8 @@ Evidence:
 - `mew next --kind coding`, `mew focus --kind coding`, and chat `/next coding` / `/focus coding` expose the next coding-shell move without being blocked by unrelated open research or personal questions.
 - `mew self-improve --native`, `mew self-improve --start-session`, and chat `/self native ...` / `/self start ...` create/reuse a self-improvement coding task without forcing the older programmer-plan path, then print or start the native work-session path.
 - When the coding queue is empty, `mew next --kind coding` / `mew focus --kind coding` now suggest starting a native self-improvement session rather than going silent.
-- `mew work --approve-tool` now accepts exact new-file write roots when the parent directory exists, so resume-suggested file-level approvals apply correctly without broadening the write gate to `.`.
-- Unresolvable write roots now explain that the parent directory must exist instead of reporting a misleading `write is disabled` error when `--allow-write` was supplied.
+- `mew work --approve-tool` now accepts exact new-file write roots and missing directory roots for `create=True` writes, so independent experiments can start from an empty path without broadening the write gate to `.`.
+- `mew code --no-verify` now records verification as explicitly disabled, so approval no longer reuses stale successful verification commands after the user cleared verify defaults.
 - `mew work <task-id>` now surfaces the latest work-session write and verification ledgers, including closed sessions, so the task workbench no longer says `Verification (none)` / `Writes (none)` after verified native work.
 - `mew work <task-id>` now surfaces a compact `Reentry` block with work-session working memory, recent user/model notes, latest decision guidance, task notes, and resume/chat hints, making the top-level task workbench a usable front door for resident continuation.
 - `mew verification` and `mew writes` now include work-session tool calls with stable `source`, `id`, `ledger_id`, and session-qualified labels such as `work25#113.verify`, making native work audit trails visible outside the full session view.
@@ -331,12 +335,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `642 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `660 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py` current: `310 passed, 4 subtests passed`.
 - Focused regression tests for default `next` coding surfacing, workbench generated-focus elision, and closed-session restart guidance current: `3 passed`.
 - Focused regression tests for `mew code` quiet unread defaults, session startup, coding work-mode entry, and read-only default clearing current: `3 passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `142 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `147 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `135 passed, 4 subtests passed`.
@@ -352,6 +356,7 @@ Next action:
 - `uv run mew doctor` current: state/runtime/auth ok.
 - `codex-ultra` focused reviews of the low-intent wait guard, stale work-session filtering/closing, and self-improvement context changes found no concrete issues after fixes.
 - `mew work --live` dogfood as a self-improvement buddy exposed repeated stale-topic selection; self-improvement descriptions now put recent completed commits before a coding-only focus view.
+- `mew code` real dogfood task #48 used Codex Web API as a resident buddy to create `experiments/mew-dream`, approve gated writes, fix a pytest import failure, run the generated CLI, and commit the result; it exposed the missing-write-root and stale-verify approval issues fixed in commits `f9f8ddf` and `b341ec9`.
 - `codex-ultra` focused re-review of stop/context/recovery fixes: no concrete remaining issues found.
 - `codex-ultra` read-only external-use test: usable for short bounded resident coding sessions; main remaining gap is the REPL-style cockpit and reentry discovery.
 - `codex-ultra` reentry retest after cockpit changes: strict chat resume order and missing chat resume hints are mostly fixed; remaining UX gaps are broader cockpit polish and quiet-chat affordances.
