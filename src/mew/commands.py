@@ -1745,9 +1745,16 @@ def cmd_code(args):
             read_only=bool(getattr(args, "read_only", False)),
             no_verify=bool(getattr(args, "no_verify", False)),
         )
-        code = cmd_work_start_session(start_args)
-        if code:
-            return code
+        with state_lock():
+            state = load_state()
+            task = select_workbench_task(state, task_id)
+            if not task:
+                print(f"mew: task not found: {task_id}", file=sys.stderr)
+                return 1
+            session, created = create_work_session(state, task)
+            remember_work_session_default_options(session, start_args)
+            save_state(state)
+        print(("created " if created else "reused ") + f"work session #{session['id']} for task #{task['id']}")
 
     chat_args = SimpleNamespace(
         poll_interval=getattr(args, "poll_interval", 1.0),
@@ -1758,6 +1765,7 @@ def cmd_code(args):
         no_brief=bool(getattr(args, "no_brief", False)),
         no_unread=bool(getattr(args, "no_unread", False)),
         work_mode=True,
+        compact_controls=True,
         timeout=getattr(args, "timeout", None),
     )
     return cmd_chat(chat_args)
@@ -6852,7 +6860,7 @@ def _replace_work_allow_read_options(option_text, roots):
     return shlex.join(kept)
 
 
-def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False):
+def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False, terse=False):
     state = state or load_state()
     if session is None:
         session = active_work_session(state)
@@ -6880,7 +6888,11 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
     read_flags = _work_read_flags_from_options(cached, session=session)
     lines.append("Primary")
-    if cached:
+    if terse:
+        lines.append("- /c")
+        lines.append("- /follow")
+        lines.append("- /continue <guidance>")
+    elif cached:
         lines.append(f"- /c {cached}")
         lines.append(f"- /follow {_work_options_with_max_steps(cached, 10)}")
         lines.append("- /continue <guidance>")
@@ -8627,7 +8639,15 @@ def cmd_chat(args):
         print(build_brief(state, limit=args.limit, kind=kind), flush=True)
     session = active_work_session_for_kind(state, kind=kind)
     if session and not suppress_startup_controls:
-        print(format_work_cockpit_controls(state=state, session=session), flush=True)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                compact=bool(getattr(args, "compact_controls", False)),
+                terse=bool(getattr(args, "compact_controls", False)),
+            ),
+            flush=True,
+        )
 
     seen_ids = emit_initial_outbox(
         history=False,

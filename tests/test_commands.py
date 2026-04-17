@@ -3753,6 +3753,11 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("mew chat. Type /help", output)
                 self.assertIn("scope: coding", output)
                 self.assertIn("work-mode: on", output)
+                self.assertNotIn("Tool calls", output)
+                controls = output.split("Next controls", 1)[1]
+                self.assertIn("- /c", controls)
+                self.assertIn("- /follow", controls)
+                self.assertNotIn("--allow-read src", controls)
 
                 from mew.state import load_state
 
