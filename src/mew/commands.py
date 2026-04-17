@@ -1151,6 +1151,31 @@ def _work_args_have_tool_gates(args):
     )
 
 
+def _work_tool_gate_options(args, session=None):
+    defaults = (session or {}).get("default_options") or {}
+
+    def merged_list(name):
+        merged = []
+        for item in list(defaults.get(name) or []) + list(getattr(args, name, None) or []):
+            if item and item not in merged:
+                merged.append(item)
+        return merged
+
+    def explicit_or_default(name, fallback=None):
+        value = getattr(args, name, fallback)
+        if value not in (None, "", [], False):
+            return value
+        return defaults.get(name, fallback)
+
+    return {
+        "allow_read": merged_list("allow_read"),
+        "allow_write": merged_list("allow_write"),
+        "allow_shell": bool(defaults.get("allow_shell") or getattr(args, "allow_shell", False)),
+        "allow_verify": bool(defaults.get("allow_verify") or getattr(args, "allow_verify", False)),
+        "verify_command": explicit_or_default("verify_command", ""),
+    }
+
+
 def remember_work_session_default_options(session, args):
     if not session:
         return
@@ -2674,6 +2699,46 @@ def _select_active_work_session_for_args(state, args):
     return session
 
 
+def _review_work_tools():
+    return READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
+
+
+def _select_work_tool_session_for_args(state, args):
+    session = _select_active_work_session_for_args(state, args)
+    if session:
+        return session, False
+    task_id = getattr(args, "task_id", None)
+    if not task_id:
+        return None, False
+    task = find_task(state, task_id)
+    latest = _latest_work_session_for_task(state, task_id)
+    if not task or not latest:
+        return None, False
+    if getattr(args, "tool", "") not in _review_work_tools():
+        return None, False
+    if latest.get("status") != "active" or task.get("status") == "done":
+        return latest, True
+    return None, False
+
+
+def format_no_work_tool_session(state, args):
+    task_id = getattr(args, "task_id", None)
+    if not task_id:
+        return "mew: no active work session; run `mew work <task-id> --start-session`"
+    task = find_task(state, task_id)
+    if not task:
+        return f"mew: task not found: {task_id}"
+    latest = _latest_work_session_for_task(state, task_id)
+    if task.get("status") == "done":
+        lines = [done_task_work_session_error(task)]
+    else:
+        lines = [f"mew: no active work session for task #{task_id}; run `{mew_command('work', task_id, '--start-session')}`"]
+    if latest:
+        lines.append(f"review: {mew_command('work', task_id, '--session', '--resume', '--allow-read', '.')}")
+        lines.append(f"read-only review tools: {', '.join(sorted(_review_work_tools()))}")
+    return "\n".join(lines)
+
+
 def _work_session_matches_kind(state, session, kind=None):
     if not session:
         return False
@@ -3284,8 +3349,9 @@ def cmd_work_recover_session(args):
     return code
 
 
-def _work_tool_parameters(args):
+def _work_tool_parameters(args, session=None):
     path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file"}
+    options = _work_tool_gate_options(args, session)
     parameters = {
         "path": args.path if getattr(args, "tool", "") in path_tools else None,
         "query": getattr(args, "query", None),
@@ -3302,10 +3368,10 @@ def _work_tool_parameters(args):
         "apply": getattr(args, "apply", False),
         "cwd": getattr(args, "cwd", None),
         "timeout": getattr(args, "timeout", None),
-        "allowed_write_roots": getattr(args, "allow_write", None) or [],
-        "allow_shell": getattr(args, "allow_shell", False),
-        "allow_verify": getattr(args, "allow_verify", False),
-        "verify_command": getattr(args, "verify_command", None),
+        "allowed_write_roots": options.get("allow_write") or getattr(args, "allow_write", None) or [],
+        "allow_shell": options.get("allow_shell") or getattr(args, "allow_shell", False),
+        "allow_verify": options.get("allow_verify") or getattr(args, "allow_verify", False),
+        "verify_command": options.get("verify_command") or getattr(args, "verify_command", None),
         "verify_cwd": getattr(args, "verify_cwd", None),
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
@@ -3323,18 +3389,14 @@ def cmd_work_tool(args):
     progress = work_tool_progress(args)
     with state_lock():
         state = load_state()
-        session = active_work_session(state)
-        if getattr(args, "task_id", None):
-            session = None
-            for candidate in reversed(state.get("work_sessions", [])):
-                if str(candidate.get("task_id")) == str(args.task_id) and candidate.get("status") == "active":
-                    session = candidate
-                    break
+        session, review_probe = _select_work_tool_session_for_args(state, args)
         if not session:
-            print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
+            print(format_no_work_tool_session(state, args), file=sys.stderr)
             return 1
-        parameters = _work_tool_parameters(args)
+        parameters = _work_tool_parameters(args, session=session)
         tool_call = start_work_tool_call(state, session, args.tool, parameters)
+        if review_probe:
+            tool_call["review_probe"] = True
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
         save_state(state)
@@ -3345,7 +3407,7 @@ def cmd_work_tool(args):
         result = execute_work_tool_with_output(
             args.tool,
             parameters,
-            getattr(args, "allow_read", None) or [],
+            _work_tool_gate_options(args, session).get("allow_read") or [],
             work_tool_output_progress(progress, tool_call_id),
         )
         error = work_tool_result_error(args.tool, result)

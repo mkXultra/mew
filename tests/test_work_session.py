@@ -594,6 +594,209 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_uses_session_default_read_roots(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("session default read root\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "README.md"]), 0)
+
+                output = stdout.getvalue()
+                self.assertIn("work tool #1 [completed] read_file", output)
+                self.assertIn("session default read root", output)
+                call = load_state()["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(call["status"], "completed")
+                self.assertEqual(call["parameters"]["path"], "README.md")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_merges_explicit_read_roots_with_session_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src").mkdir()
+                Path("docs").mkdir()
+                Path("src/default.txt").write_text("default root\n", encoding="utf-8")
+                Path("docs/extra.txt").write_text("explicit root\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "src"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "read_file", "--path", "docs/extra.txt", "--allow-read", "docs"]),
+                        0,
+                    )
+
+                self.assertIn("explicit root", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_uses_session_default_write_and_verify_gates(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                verify_command = f"{sys.executable} -c \"from pathlib import Path; assert Path('generated.md').read_text() == 'ok\\\\n'\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "generated.md",
+                                "--content",
+                                "ok\n",
+                                "--create",
+                                "--apply",
+                            ]
+                        ),
+                        0,
+                    )
+
+                self.assertEqual(Path("generated.md").read_text(encoding="utf-8"), "ok\n")
+                self.assertIn("work tool #1 [completed] write_file", stdout.getvalue())
+                result = load_state()["work_sessions"][0]["tool_calls"][0]["result"]
+                self.assertTrue(result["written"])
+                self.assertEqual(result["verification"]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_allows_read_only_review_probe_on_closed_done_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("review-target\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["tasks"][0]["status"] = "done"
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "search_text",
+                                "--path",
+                                ".",
+                                "--query",
+                                "review-target",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["tool_call"]["review_probe"])
+                self.assertEqual(data["tool_call"]["status"], "completed")
+                self.assertEqual(data["tool_call"]["tool"], "search_text")
+                state = load_state()
+                self.assertEqual(state["work_sessions"][0]["status"], "closed")
+                self.assertTrue(state["work_sessions"][0]["tool_calls"][0]["review_probe"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_explains_write_tool_on_closed_done_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--close-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["tasks"][0]["status"] = "done"
+                    save_state(state)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "generated.md",
+                                "--content",
+                                "generated\n",
+                                "--create",
+                            ]
+                        ),
+                        1,
+                    )
+
+                error = stderr.getvalue()
+                self.assertIn("task #1 is done", error)
+                self.assertIn("review: mew work 1 --session --resume --allow-read .", error)
+                self.assertIn("read-only review tools:", error)
+                self.assertFalse(Path("generated.md").exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_saves_running_call_before_execution(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
