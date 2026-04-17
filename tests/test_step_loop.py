@@ -146,6 +146,19 @@ class StepLoopTests(unittest.TestCase):
 
         self.assertEqual(step_stop_reason(action_plan), "")
 
+    def test_zero_max_steps_does_not_write_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                report = run_step_loop(max_steps=0)
+                self.assertFalse(Path(".mew/state.json").exists())
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(report["max_steps"], 0)
+        self.assertEqual(report["steps"], [])
+
     def test_dry_run_step_does_not_write_state(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

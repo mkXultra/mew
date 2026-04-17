@@ -216,6 +216,20 @@ def task_json_data(task):
     return data
 
 
+def task_json_response(task, **extra):
+    data = task_json_data(task)
+    response = {
+        "task": data,
+        "id": data.get("id"),
+        "title": data.get("title"),
+        "status": data.get("status"),
+        "kind": data.get("kind"),
+        "effective_kind": data.get("effective_kind"),
+    }
+    response.update(extra)
+    return response
+
+
 def cmd_task_add(args):
     with state_lock():
         state = load_state()
@@ -244,7 +258,7 @@ def cmd_task_add(args):
         state["tasks"].append(task)
         save_state(state)
     if getattr(args, "json", False):
-        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
+        print(json.dumps(task_json_response(task), ensure_ascii=False, indent=2))
         return 0
     print(format_task(task))
     return 0
@@ -365,7 +379,7 @@ def cmd_task_show(args):
         return 1
 
     if getattr(args, "json", False):
-        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
+        print(json.dumps(task_json_response(task), ensure_ascii=False, indent=2))
         return 0
 
     print(format_task(task))
@@ -4995,7 +5009,7 @@ def cmd_task_done(args):
         sync_task_done_state(state, task, summary, current_time)
         save_state(state)
     if getattr(args, "json", False):
-        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
+        print(json.dumps(task_json_response(task, completion_summary=summary), ensure_ascii=False, indent=2))
         return 0
     print(format_task(task))
     return 0
@@ -5073,7 +5087,7 @@ def cmd_task_update(args):
             task["updated_at"] = now_iso()
             save_state(state)
     if getattr(args, "json", False):
-        print(json.dumps({"task": task_json_data(task), "changed": changed}, ensure_ascii=False, indent=2))
+        print(json.dumps(task_json_response(task, changed=changed), ensure_ascii=False, indent=2))
         return 0
     print(format_task(task))
     return 0
@@ -6582,6 +6596,14 @@ def cmd_step(args):
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+
+    if args.max_steps == 0:
+        report = run_step_loop(max_steps=0, dry_run=args.dry_run)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_step_loop_report(report))
+        return 0
 
     model = args.model or model_backend_default_model(model_backend)
     base_url = args.base_url or model_backend_default_base_url(model_backend)

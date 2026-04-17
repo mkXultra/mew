@@ -94,6 +94,24 @@ Supported actions:
 - `approve`: approve and apply a pending dry-run `write_file` or `edit_file` tool call.
 - `approve_all`: approve and apply all pending dry-run `write_file` or `edit_file` tool calls.
 
+## Task Helpers
+
+Observers should avoid parsing task text output. The task lifecycle has JSON
+surfaces for the common automation path:
+
+```sh
+mew task add "Inspect observer flow" --kind coding --json
+mew task list --kind coding --json
+mew task show <task-id> --json
+mew task update <task-id> --status ready --json
+mew task done <task-id> --summary "verified" --json
+```
+
+Task JSON responses place the full task object under `task` and also expose
+top-level `id`, `title`, `status`, `kind`, and `effective_kind` aliases for
+simple automation. `task done --json` also returns `completion_summary`. List
+responses use `tasks` plus `count`.
+
 Example:
 
 ```json

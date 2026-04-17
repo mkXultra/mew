@@ -139,6 +139,20 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Review current mew changes", guidance)
         self.assertIn("Do not stop solely because an unrelated older question is waiting.", guidance)
 
+    def test_step_zero_max_steps_json_does_not_create_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["step", "--max-steps", "0", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["max_steps"], 0)
+                self.assertEqual(data["steps"], [])
+                self.assertFalse(Path(".mew/state.json").exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_step_allow_read_injects_evidence_gathering_guidance(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,6 +424,10 @@ class CommandTests(unittest.TestCase):
                         0,
                     )
                 data = json.loads(stdout.getvalue())
+                self.assertEqual(data["id"], 1)
+                self.assertEqual(data["title"], "Observer flow")
+                self.assertEqual(data["status"], "ready")
+                self.assertEqual(data["kind"], "coding")
                 self.assertEqual(data["task"]["id"], 1)
                 self.assertEqual(data["task"]["title"], "Observer flow")
                 self.assertEqual(data["task"]["status"], "ready")
@@ -427,6 +445,8 @@ class CommandTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["task", "show", "1", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
+                self.assertEqual(data["id"], 1)
+                self.assertEqual(data["effective_kind"], "coding")
                 self.assertEqual(data["task"]["id"], 1)
                 self.assertEqual(data["task"]["title"], "Show JSON task")
                 self.assertEqual(data["task"]["kind"], "coding")
@@ -470,6 +490,8 @@ class CommandTests(unittest.TestCase):
                     )
                 data = json.loads(stdout.getvalue())
                 self.assertTrue(data["changed"])
+                self.assertEqual(data["id"], 1)
+                self.assertEqual(data["status"], "ready")
                 self.assertEqual(data["task"]["id"], 1)
                 self.assertEqual(data["task"]["status"], "ready")
                 self.assertEqual(data["task"]["priority"], "high")
@@ -486,6 +508,9 @@ class CommandTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["task", "done", "1", "--summary", "verified", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
+                self.assertEqual(data["id"], 1)
+                self.assertEqual(data["status"], "done")
+                self.assertEqual(data["completion_summary"], "verified")
                 self.assertEqual(data["task"]["id"], 1)
                 self.assertEqual(data["task"]["status"], "done")
                 self.assertIn("verified", data["task"]["notes"])

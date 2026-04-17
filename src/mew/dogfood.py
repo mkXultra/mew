@@ -1360,10 +1360,15 @@ def run_work_session_scenario(workspace, env=None):
         checks,
         "work_task_add_json_returns_created_task",
         task_add_json_result.get("exit_code") == 0
+        and task_add_json_data.get("id") == 1
         and (task_add_json_data.get("task") or {}).get("id") == 1
         and (task_add_json_data.get("task") or {}).get("title") == "Native work task"
         and (task_add_json_data.get("task") or {}).get("kind") == "coding",
-        observed=task_add_json_data,
+        observed={
+            "id": task_add_json_data.get("id"),
+            "title": task_add_json_data.get("title"),
+            "kind": task_add_json_data.get("kind"),
+        },
         expected="task add --json returns the created task without text parsing",
     )
     _scenario_check(
@@ -1373,7 +1378,11 @@ def run_work_session_scenario(workspace, env=None):
         and (task_show_json_data.get("task") or {}).get("id") == 1
         and (task_show_json_data.get("task") or {}).get("title") == "Native work task"
         and (task_show_json_data.get("task") or {}).get("effective_kind") == "coding",
-        observed=task_show_json_data,
+        observed={
+            "id": task_show_json_data.get("id"),
+            "title": task_show_json_data.get("title"),
+            "effective_kind": task_show_json_data.get("effective_kind"),
+        },
         expected="task show --json returns the selected task without text parsing",
     )
     _scenario_check(
@@ -1383,7 +1392,11 @@ def run_work_session_scenario(workspace, env=None):
         and task_list_json_data.get("count") == 1
         and ((task_list_json_data.get("tasks") or [{}])[0]).get("id") == 1
         and ((task_list_json_data.get("tasks") or [{}])[0]).get("effective_kind") == "coding",
-        observed=task_list_json_data,
+        observed={
+            "count": task_list_json_data.get("count"),
+            "first_id": ((task_list_json_data.get("tasks") or [{}])[0]).get("id"),
+            "first_effective_kind": ((task_list_json_data.get("tasks") or [{}])[0]).get("effective_kind"),
+        },
         expected="task list --json returns matching tasks without text parsing",
     )
     _scenario_check(
@@ -1391,9 +1404,14 @@ def run_work_session_scenario(workspace, env=None):
         "work_task_update_json_returns_updated_task",
         task_update_json_result.get("exit_code") == 0
         and task_update_json_data.get("changed") is True
+        and task_update_json_data.get("id") == 1
         and (task_update_json_data.get("task") or {}).get("id") == 1
         and (task_update_json_data.get("task") or {}).get("priority") == "high",
-        observed=task_update_json_data,
+        observed={
+            "id": task_update_json_data.get("id"),
+            "changed": task_update_json_data.get("changed"),
+            "priority": (task_update_json_data.get("task") or {}).get("priority"),
+        },
         expected="task update --json returns the updated task and changed flag",
     )
     _scenario_check(
@@ -1570,10 +1588,17 @@ def run_work_session_scenario(workspace, env=None):
         task_done_json_seed_result.get("exit_code") == 0
         and (task_done_json_seed_data.get("task") or {}).get("id") == 8
         and task_done_json_result.get("exit_code") == 0
+        and task_done_json_data.get("id") == 8
+        and task_done_json_data.get("completion_summary") == "dogfood verified"
         and (task_done_json_data.get("task") or {}).get("id") == 8
         and (task_done_json_data.get("task") or {}).get("status") == "done"
         and "dogfood verified" in ((task_done_json_data.get("task") or {}).get("notes") or ""),
-        observed={"seed": task_done_json_seed_data, "done": task_done_json_data},
+        observed={
+            "seed_id": (task_done_json_seed_data.get("task") or {}).get("id"),
+            "done_id": task_done_json_data.get("id"),
+            "status": task_done_json_data.get("status"),
+            "completion_summary": task_done_json_data.get("completion_summary"),
+        },
         expected="task done --json returns the completed task without text parsing",
     )
     _scenario_check(

@@ -374,7 +374,7 @@ def run_step_loop(
 ):
     steps = []
     stop_reason = "max_steps"
-    max_steps = max(1, int(max_steps or 1))
+    max_steps = 1 if max_steps is None else max(0, int(max_steps))
     allowed_read_roots = allowed_read_roots or []
     allowed_write_roots = allowed_write_roots or []
 
