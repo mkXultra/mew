@@ -322,9 +322,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `635 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `636 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `140 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `141 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -388,6 +388,7 @@ Next action:
 - Mew buddy dogfood session #50 exposed that a model-selected `search_text` action with `pattern=*.md` still searched Python files; `search_text` now honors optional glob filters from resident actions and the CLI, reducing noisy false-scope search results in cockpit output.
 - The same session showed that three broad model-selected searches could push resume context to medium pressure; model-selected `search_text` now defaults to 20 matches and caps explicit requests at 50, while manual CLI searches keep their broader defaults.
 - `claude-ultra` cockpit review after the reentry-noise work recommended deduping the front-door workbench against the full resume; `mew work <task-id>` now leaves guidance snapshots and finish-only task-note history to `--session --resume` instead of replaying them in the compact Reentry block.
+- Mew buddy dogfood session #51 found a suspected `search_text.truncated` edge case during read-only retest; focused regression coverage now proves overflow beyond `max_matches` reports `truncated=True`, turning the dogfood concern into a preserved contract.
 
 ## Current Roadmap Focus
 

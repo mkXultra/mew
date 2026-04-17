@@ -3771,6 +3771,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(explicit["max_matches"], 50)
         self.assertEqual(explicit["context_lines"], 5)
 
+    def test_search_text_marks_truncated_when_more_matches_exist(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(3):
+                (root / f"hit{index}.txt").write_text("needle\n", encoding="utf-8")
+
+            result = search_text("needle", str(root), [str(root)], max_matches=2, context_lines=0)
+
+            self.assertEqual(len(result["matches"]), 2)
+            self.assertTrue(result["truncated"])
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 
