@@ -518,7 +518,7 @@ def run_chat_cockpit_scenario(workspace, env=None):
     chat_result = run(
         ["chat", "--kind", "coding", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
-        input_text="/scope\n/tasks\n/work\n/work-session\n/exit\n",
+        input_text="/scope\n/tasks\n/work\n/work-session\n/work-mode on\n/work-mode off\n/exit\n",
     )
     chat_output = chat_result.get("stdout") or ""
 
@@ -573,6 +573,22 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "Research default task" not in chat_output,
         observed=command_result_tail(chat_result),
         expected="/work-session uses the scoped coding active session even when a research session is newer",
+    )
+    _scenario_check(
+        checks,
+        "chat_work_controls_include_follow",
+        chat_result.get("exit_code") == 0 and "/follow " in chat_output and "--allow-read coding-root" in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="chat work controls include a bounded follow loop for the scoped active session",
+    )
+    _scenario_check(
+        checks,
+        "chat_work_mode_toggles",
+        chat_result.get("exit_code") == 0
+        and "work-mode: on; text becomes /continue guidance, blank line continues" in chat_output
+        and "work-mode: off; text is sent as user messages" in chat_output,
+        observed=command_result_tail(chat_result),
+        expected="/work-mode toggles the chat cockpit text routing",
     )
     return _scenario_report("chat-cockpit", workspace, commands, checks)
 
