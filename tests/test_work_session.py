@@ -8278,6 +8278,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_follow_quiet_suppresses_progress_stderr(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                model_outputs = [
+                    {"summary": "quiet chat", "action": {"type": "finish", "reason": "quiet chat done"}},
+                ]
+                chat_state = {}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                            self.assertEqual(
+                                run_chat_slash_command(
+                                    "/follow --quiet --auth auth.json --allow-read . --act-mode deterministic --max-steps 1",
+                                    chat_state,
+                                ),
+                                "continue",
+                            )
+
+                self.assertEqual(stderr.getvalue(), "")
+                output = stdout.getvalue()
+                self.assertIn("Work active cell step #1", output)
+                self.assertIn("Work cells after step #1", output)
+                self.assertIn("--quiet", chat_state["work_continue_options"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_follow_partial_options_reuse_session_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

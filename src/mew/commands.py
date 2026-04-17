@@ -7403,6 +7403,7 @@ def _parse_chat_work_ai_args(parts):
         "follow": False,
         "stream_model": False,
         "compact_live": False,
+        "quiet": False,
         "prompt_approval": False,
         "no_prompt_approval": False,
         "allow_read": [],
@@ -7488,6 +7489,10 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--compact-live":
             args["compact_live"] = True
+            index += 1
+            continue
+        if token == "--quiet":
+            args["quiet"] = True
             index += 1
             continue
         if token == "--prompt-approval":
@@ -7586,6 +7591,7 @@ def _split_continue_options_and_guidance(rest):
         "--follow",
         "--stream-model",
         "--compact-live",
+        "--quiet",
         "--prompt-approval",
         "--no-prompt-approval",
     }

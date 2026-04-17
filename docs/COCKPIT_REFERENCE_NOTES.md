@@ -275,6 +275,8 @@ Initial implementation status, 2026-04-18:
   live mode.
 - `mew work --follow --quiet` hides default progress stderr while preserving
   stdout cells. Passing `--progress` keeps the explicit progress stream.
+- Chat `/follow --quiet` uses the same behavior and keeps `--quiet` in cached
+  continue options.
 - Follow dogfood with `codex-ultra` then tightened the last approval/report
   papercuts: resume approval hints reuse known verifier defaults, failed
   approval verification cells are marked retryable instead of pending, and
