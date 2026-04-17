@@ -4958,6 +4958,60 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_workbench_hides_only_boundary_reentry_notes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Boundary note",
+                            "goal": "Keep the workbench quiet.",
+                            "created_at": "then",
+                            "updated_at": "now",
+                            "notes": [
+                                {
+                                    "created_at": "now",
+                                    "source": "system",
+                                    "text": "Live run reached max_steps=3 after 3 step(s). Last action: read_file.",
+                                }
+                            ],
+                            "tool_calls": [],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "completed",
+                                    "decision_plan": {
+                                        "summary": "remember",
+                                        "working_memory": {"hypothesis": "Quiet front door."},
+                                    },
+                                    "action_plan": {"summary": "remember"},
+                                    "action": {"type": "remember", "note": "quiet"},
+                                    "summary": "recorded memory",
+                                }
+                            ],
+                        }
+                    ]
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Reentry", output)
+                self.assertIn("hypothesis: Quiet front door.", output)
+                self.assertNotIn("note[system]", output)
+                self.assertNotIn("Live run reached max_steps", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_timeline_surfaces_model_and_tool_events(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

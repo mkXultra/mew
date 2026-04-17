@@ -536,7 +536,7 @@ def _format_workbench_reentry(resume, task):
             note.get("source") == "system"
             and str(note.get("text") or "").startswith(("Follow reached max_steps=", "Live run reached max_steps="))
         )
-    ] or notes
+    ]
     for note in display_notes[-2:]:
         text = clip_inline_text(note.get("text") or "", 360)
         if text:
