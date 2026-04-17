@@ -1321,10 +1321,21 @@ class WorkSessionTests(unittest.TestCase):
             guidance="Freshly inspect README before deciding.",
         )
         turn = finish_work_model_turn(state, 1, turn["id"])
+        second_turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "remember same guidance"},
+            {"summary": "remember same guidance"},
+            {"type": "remember", "note": "same guidance"},
+            guidance="Freshly inspect README before deciding.",
+        )
+        finish_work_model_turn(state, 1, second_turn["id"])
 
         resume = build_work_session_resume(session)
         self.assertEqual(resume["recent_decisions"][0]["guidance_snapshot"], "Freshly inspect README before deciding.")
-        self.assertIn("guidance: Freshly inspect README before deciding.", format_work_session_resume(resume))
+        resume_text = format_work_session_resume(resume)
+        self.assertIn("guidance: Freshly inspect README before deciding.", resume_text)
+        self.assertIn("guidance: same as #1", resume_text)
         self.assertEqual(build_work_session_timeline(session)[0]["guidance_snapshot"], "Freshly inspect README before deciding.")
         self.assertIn("guidance=Freshly inspect README before deciding.", format_work_session_timeline(session))
         self.assertEqual(work_model_turn_for_model(turn)["guidance_snapshot"], "Freshly inspect README before deciding.")

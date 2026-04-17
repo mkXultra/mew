@@ -1360,6 +1360,7 @@ def format_work_session_resume(resume):
     lines.extend(["", "Recent decisions"])
     decisions = resume.get("recent_decisions") or []
     if decisions:
+        seen_guidance = {}
         for decision in decisions:
             tool_text = f" tool_call=#{decision.get('tool_call_id')}" if decision.get("tool_call_id") else ""
             lines.append(
@@ -1368,7 +1369,12 @@ def format_work_session_resume(resume):
             )
             guidance = decision.get("guidance_snapshot") or decision.get("guidance")
             if guidance:
-                lines.append(f"  guidance: {guidance}")
+                guidance_text = _guidance_display_with_reference(
+                    guidance,
+                    seen_guidance,
+                    decision.get("model_turn_id"),
+                )
+                lines.append(f"  guidance: {guidance_text}")
     else:
         lines.append("(none)")
 
@@ -1438,6 +1444,15 @@ def format_work_session_resume(resume):
 
     lines.extend(["", "Next action", resume.get("next_action") or ""])
     return "\n".join(lines)
+
+
+def _guidance_display_with_reference(guidance, seen_guidance, owner_id):
+    previous_owner = seen_guidance.get(guidance)
+    if previous_owner:
+        return f"same as #{previous_owner}"
+    if owner_id:
+        seen_guidance[guidance] = owner_id
+    return guidance
 
 
 def _display_value(action, parameters, key):

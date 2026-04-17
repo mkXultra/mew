@@ -382,6 +382,7 @@ Next action:
 - `claude-ultra` cockpit evaluation recommended a recurring-failure ribbon for repeated tool failures; this is now implemented by deriving repeated tool/target/error groups from existing work-session history and surfacing them in resume/live result views.
 - Focused dogfood of `mew work <task-id>` after the recurring-failure slice exposed old system max-step boundary notes crowding the front-door reentry block; workbench reentry now prefers user/model notes and hides those boundary notes while full resumes keep the audit trail.
 - Follow-up dogfood of `mew work 46` exposed repeated `Work session finished:` task notes crowding the same front-door reentry block; workbench reentry now collapses older finish notes and keeps the latest one visible.
+- Full `mew work --session --resume` dogfood exposed repeated identical one-shot guidance under every recent decision; resume text now prints the first guidance and references later duplicates as `same as #...`, preserving context without replaying the same paragraph.
 
 ## Current Roadmap Focus
 
