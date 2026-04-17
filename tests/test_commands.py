@@ -1658,6 +1658,21 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("Draft plan", output)
                 self.assertNotIn("Ready task", output)
                 self.assertNotIn("Finished task", output)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--status", "pending", "--limit", "2"]), 0)
+                output = stdout.getvalue()
+                lines = [line for line in output.splitlines() if line.strip()]
+                self.assertEqual(len(lines), 2)
+                self.assertIn("Running task", output)
+                self.assertIn("Ready task", output)
+                self.assertNotIn("Draft plan", output)
+                self.assertNotIn("Blocked task", output)
+                self.assertNotIn("Finished task", output)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["task", "list", "--limit", "0"]), 1)
+                self.assertIn("--limit must be positive", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

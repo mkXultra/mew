@@ -1259,6 +1259,7 @@ def build_parser():
         choices=("todo", "ready", "running", "blocked", "done", "pending", "open"),
         help="filter by task status across all tasks; pending/open means not done",
     )
+    list_parser.add_argument("--limit", type=int, help="show at most N tasks")
     list_parser.set_defaults(func=cmd_task_list)
 
     classify_parser = task_subparsers.add_parser("classify", help="inspect or update task kind inference")

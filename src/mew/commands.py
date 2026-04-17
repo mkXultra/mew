@@ -220,6 +220,12 @@ def cmd_task_list(args):
         else:
             tasks = [task for task in tasks if task.get("status") == status]
     tasks = sorted(tasks, key=task_sort_key)
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        if limit <= 0:
+            print("mew: task list --limit must be positive", file=sys.stderr)
+            return 1
+        tasks = tasks[:limit]
     if not tasks:
         print("No tasks.")
         return 0
