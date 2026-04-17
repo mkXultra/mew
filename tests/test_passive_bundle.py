@@ -119,10 +119,11 @@ class PassiveBundleTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
             self.assertEqual(code, 0)
-            self.assertEqual(data["included"], ["Journal", "Mood"])
-            self.assertEqual([item["type"] for item in data["generated"]], ["Journal", "Mood"])
+            self.assertEqual(data["included"], ["Journal", "Mood", "Self Memory"])
+            self.assertEqual([item["type"] for item in data["generated"]], ["Journal", "Mood", "Self Memory"])
             self.assertTrue((Path(tmp) / ".mew" / "journal" / "2026-04-17.md").exists())
             self.assertTrue((Path(tmp) / ".mew" / "mood" / "2026-04-17.md").exists())
+            self.assertTrue((Path(tmp) / ".mew" / "self" / "learned-2026-04-17.md").exists())
 
     def test_bundle_command_can_generate_morning_paper_from_feed(self):
         old_cwd = os.getcwd()
@@ -165,7 +166,7 @@ class PassiveBundleTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
             self.assertEqual(code, 0)
-            self.assertEqual(data["included"], ["Journal", "Mood", "Morning Paper"])
+            self.assertEqual(data["included"], ["Journal", "Mood", "Morning Paper", "Self Memory"])
             self.assertIn("Morning Paper", [item["type"] for item in data["generated"]])
 
     def test_bundle_command_rejects_morning_feed_without_generate_core(self):

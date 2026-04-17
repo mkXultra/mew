@@ -54,6 +54,7 @@ from .commands import (
     cmd_runtime_effects,
     cmd_self_init,
     cmd_self_improve,
+    cmd_self_memory,
     cmd_self_show,
     cmd_session,
     cmd_snapshot,
@@ -497,6 +498,14 @@ def build_parser():
     morning_paper_parser.add_argument("--show", action="store_true", help="print the markdown report")
     morning_paper_parser.add_argument("--json", action="store_true", help="print structured output")
     morning_paper_parser.set_defaults(func=cmd_morning_paper)
+
+    self_memory_parser = subparsers.add_parser("self-memory", help="generate a self-memory report")
+    self_memory_parser.add_argument("--date", help="report date YYYY-MM-DD; defaults to today")
+    self_memory_parser.add_argument("--write", action="store_true", help="write .mew/self/learned-YYYY-MM-DD.md")
+    self_memory_parser.add_argument("--output-dir", default=".", help="where to write .mew/self files with --write")
+    self_memory_parser.add_argument("--show", action="store_true", help="print the markdown report")
+    self_memory_parser.add_argument("--json", action="store_true", help="print structured output")
+    self_memory_parser.set_defaults(func=cmd_self_memory)
 
     digest_parser = subparsers.add_parser("digest", help="summarize activity since the last user message")
     digest_parser.set_defaults(func=cmd_digest)

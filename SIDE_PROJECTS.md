@@ -217,6 +217,8 @@ Status:
   local state JSON.
 - Dogfood task #78 added conservative durable-trait inference from repeated
   self learnings.
+- The self-memory report generator is promoted to the core `mew self-memory`
+  command and `mew bundle --generate-core`.
 - Latest validation: `uv run pytest -q experiments/mew-bond` passed with
   `9 passed`.
 

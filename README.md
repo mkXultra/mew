@@ -29,6 +29,7 @@ uv run mew focus --kind coding
 uv run mew daily
 uv run mew journal --write
 uv run mew morning-paper feed.json --interest ai --write
+uv run mew self-memory --write
 uv run mew bundle --show
 uv run mew bundle --generate-core --morning-feed feed.json --interest ai --show
 uv run mew desk --json
@@ -54,14 +55,16 @@ questions, active work sessions, and runtime effects.
 `morning-paper` ranks a static feed JSON against interest tags and writes
 `.mew/morning-paper/YYYY-MM-DD.md`; collection from the web is still outside the
 core command.
+`self-memory` writes `.mew/self/learned-YYYY-MM-DD.md` with durable traits,
+recent learnings, and continuity cues.
 `bundle` composes already-generated daily report markdown files into one
 `.mew/passive-bundle/YYYY-MM-DD.md` reentry artifact. It does not generate the
 source reports; use it after `mew journal --write`, `mew mood --write`,
-`mew morning-paper ... --write`, or after dream/self-memory experiments have
-written files under `.mew`.
+`mew self-memory --write`, `mew morning-paper ... --write`, or after dream
+experiments have written files under `.mew`.
 Use `mew bundle --generate-core` to generate journal and mood before composing;
 add `--morning-feed feed.json --interest TAG` to include the static morning
-paper in the same command. Generated source reports are written under
+paper in the same command. It also generates self-memory. Generated source reports are written under
 `--reports-root`; pass the same path to `--reports-root` and `--output-dir` when
 you want sources and bundle under a separate root. If generated reports would
 overwrite different existing content, mew writes a sibling `.bak` first.
@@ -183,6 +186,7 @@ uv run mew journal --date 2026-04-17 --write
 uv run mew journal --show
 uv run mew morning-paper feed.json --interest ai --write
 uv run mew morning-paper feed.json --show
+uv run mew self-memory --date 2026-04-17 --write
 uv run mew bundle --date 2026-04-17 --show
 uv run mew bundle --date 2026-04-17 --generate-core --morning-feed feed.json --interest ai --show
 uv run mew desk --json

@@ -95,6 +95,12 @@ from .programmer import (
     latest_task_plan,
 )
 from .self_improve import create_self_improve_task, ensure_self_improve_plan
+from .self_memory import (
+    build_self_memory_view_model,
+    format_self_memory_view,
+    render_self_memory_markdown,
+    write_self_memory_report,
+)
 from .state import (
     add_attention_item,
     add_outbox_message,
@@ -4785,6 +4791,10 @@ def cmd_passive_bundle(args):
             mood_path = write_mood_report(mood_view, reports_root)
             generated.append({"type": "Mood", "path": str(mood_path)})
 
+            self_memory_view = build_self_memory_view_model(state, explicit_date=args.date)
+            self_memory_path = write_self_memory_report(self_memory_view, reports_root)
+            generated.append({"type": "Self Memory", "path": str(self_memory_path)})
+
             if args.morning_feed:
                 try:
                     items = load_feed(Path(args.morning_feed).expanduser())
@@ -4960,6 +4970,36 @@ def cmd_morning_paper(args):
         print(render_morning_paper_markdown(view_model), end="")
     else:
         print(format_morning_paper_view(view_model))
+        if written:
+            print(f"written_markdown: {written}")
+    return 0
+
+def cmd_self_memory(args):
+    if args.json and args.show:
+        print("mew: --json and --show cannot be used together", file=sys.stderr)
+        return 1
+    state = load_state()
+    try:
+        view_model = build_self_memory_view_model(state, explicit_date=args.date)
+    except ValueError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    written = None
+    if args.write:
+        try:
+            written = write_self_memory_report(view_model, Path(args.output_dir).expanduser())
+        except OSError as exc:
+            print(f"mew: failed to write report: {exc}", file=sys.stderr)
+            return 1
+    if args.json:
+        data = dict(view_model)
+        if written:
+            data["path"] = str(written)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    elif args.show:
+        print(render_self_memory_markdown(view_model), end="")
+    else:
+        print(format_self_memory_view(view_model))
         if written:
             print(f"written_markdown: {written}")
     return 0

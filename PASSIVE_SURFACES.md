@@ -108,6 +108,27 @@ Outputs:
 
 This is only static-feed ranking. Web collection remains outside core.
 
+### `mew self-memory`
+
+Purpose: preserve what mew has learned about itself for context compression and
+future reentry.
+
+Useful commands:
+
+```bash
+uv run mew self-memory
+uv run mew self-memory --json
+uv run mew self-memory --show
+uv run mew self-memory --write
+```
+
+Outputs:
+
+- durable traits from local state and preference memory
+- recent self learnings from state, memory, and completed task notes
+- continuity cues from active work sessions
+- optional `.mew/self/learned-YYYY-MM-DD.md` report for `mew bundle`
+
 ### `mew bundle`
 
 Purpose: compose generated daily report markdown files into one reentry
@@ -130,12 +151,13 @@ Current source report paths:
 - `.mew/dreams/YYYY-MM-DD.md`
 - `.mew/self/learned-YYYY-MM-DD.md`
 
-The command composes existing reports only. It does not generate dream or
-self-memory reports. `mew journal --write`, `mew mood --write`, and
+The command composes existing reports only. It does not generate dream reports.
+`mew journal --write`, `mew mood --write`, `mew self-memory --write`, and
 `mew morning-paper ... --write` can generate core source reports.
 `--generate-core` can generate journal and mood first; `--morning-feed` adds the
-static morning-paper source report before composing. Generated source reports
-are written under `--reports-root`, then composed into `--output-dir`.
+static morning-paper source report before composing. It also generates
+self-memory. Generated source reports are written under `--reports-root`, then
+composed into `--output-dir`.
 When a generated report would overwrite different existing content, mew writes
 a sibling `.bak` file first.
 
@@ -165,21 +187,22 @@ Promoted:
 - mood scoring
 - journal generation
 - static-feed morning paper ranking
+- self-memory generation
 
 Not promoted yet:
 
 - morning-paper feed collection
-- dream/self-memory generation
+- dream generation
 - any visual desktop shell
 
 ## Latest Verification
 
-After the core `desk`, `journal`, `mood`, `morning-paper`, and `bundle`
-promotions and review fixes:
+After the core `desk`, `journal`, `mood`, `morning-paper`, `self-memory`, and
+`bundle` promotions and review fixes:
 
 ```text
 uv run pytest -q
-783 passed, 6 subtests passed
+786 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass
