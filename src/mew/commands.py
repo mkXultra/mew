@@ -1305,38 +1305,62 @@ def _work_resume_command(args, task_id, session=None):
     return shlex.join(parts)
 
 
-def work_cli_control_commands(session, args):
+def work_cli_control_items(session, args):
     if not session:
-        return [f"{mew_executable()} work <task-id> --start-session"]
+        return [{"label": "start a work session", "command": f"{mew_executable()} work <task-id> --start-session"}]
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        return [_work_resume_command(args, task_id, session=session), mew_command("work", task_id, "--start-session")]
+        return [
+            {"label": "review closed session", "command": _work_resume_command(args, task_id, session=session)},
+            {"label": "start a new session", "command": mew_command("work", task_id, "--start-session")},
+        ]
     controls = []
     if session.get("stop_requested_at"):
-        return [_work_resume_command(args, task_id, session=session), mew_command("chat")]
+        return [
+            {"label": "review stop request", "command": _work_resume_command(args, task_id, session=session)},
+            {"label": "open chat", "command": mew_command("chat")},
+        ]
     resume = build_work_session_resume(session)
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
         task_part = f" {task_id}" if task_id is not None else ""
         controls.append(
-            f"{mew_executable()} work{task_part} --session --resume --allow-read . --auto-recover-safe"
+            {
+                "label": "auto-recover safe read",
+                "command": f"{mew_executable()} work{task_part} --session --resume --allow-read . --auto-recover-safe",
+            }
         )
     controls.extend(
         [
-            _work_live_continue_command(args, task_id, session=session),
-            _work_live_continue_command(args, task_id, session=session, max_steps=3),
-            _work_live_continue_command(args, task_id, session=session, max_steps=10, follow=True),
-            mew_command("work", task_id, "--stop-session", "--stop-reason", "pause"),
-            _work_resume_command(args, task_id, session=session),
-            mew_command("chat"),
+            {"label": "one live step", "command": _work_live_continue_command(args, task_id, session=session)},
+            {
+                "label": "short live burst",
+                "command": _work_live_continue_command(args, task_id, session=session, max_steps=3),
+            },
+            {
+                "label": "follow loop",
+                "command": _work_live_continue_command(args, task_id, session=session, max_steps=10, follow=True),
+            },
+            {
+                "label": "pause at boundary",
+                "command": mew_command("work", task_id, "--stop-session", "--stop-reason", "pause"),
+            },
+            {"label": "resume snapshot", "command": _work_resume_command(args, task_id, session=session)},
+            {"label": "open chat", "command": mew_command("chat")},
         ]
     )
     return controls
 
 
+def work_cli_control_commands(session, args):
+    return [item["command"] for item in work_cli_control_items(session, args)]
+
+
 def format_work_cli_controls(session, args):
     lines = ["", "Next CLI controls"]
-    lines.extend(work_cli_control_commands(session, args))
+    for item in work_cli_control_items(session, args):
+        label = item.get("label") or "run"
+        lines.append(f"{label}: {item.get('command')}")
     return "\n".join(lines)
 
 

@@ -1875,8 +1875,12 @@ class WorkSessionTests(unittest.TestCase):
 
                 self.assertIn("Work session #1 [active] task=#1", output)
                 self.assertIn("Next CLI controls", output)
-                self.assertIn("mew work 1 --live --model-backend codex --allow-read .", output)
-                self.assertIn("mew work 1 --follow --model-backend codex --allow-read .", output)
+                self.assertIn("one live step: mew work 1 --live --model-backend codex --allow-read .", output)
+                self.assertIn("short live burst: mew work 1 --live --model-backend codex --allow-read .", output)
+                self.assertIn("follow loop: mew work 1 --follow --model-backend codex --allow-read .", output)
+                self.assertIn("pause at boundary: mew work 1 --stop-session --stop-reason pause", output)
+                self.assertIn("resume snapshot: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("open chat: mew chat", output)
                 self.assertNotIn("--auth auth.json", output)
                 self.assertIn("--max-steps 3", output)
                 self.assertIn("--max-steps 10", output)
@@ -1887,6 +1891,7 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertIn("mew chat", data["next_cli_controls"])
                 self.assertTrue(any(command.startswith("mew work 1 --live") for command in data["next_cli_controls"]))
+                self.assertFalse(any("one live step:" in command for command in data["next_cli_controls"]))
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)

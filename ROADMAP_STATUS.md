@@ -347,6 +347,10 @@ Next action:
 ## Latest Validation
 
 - `uv run pytest -q` current: `675 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_show_active_includes_next_cli_controls tests/test_work_session.py::WorkSessionTests::test_work_session_controls_prefer_local_mew_executable tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step` current: `3 passed`.
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `305 passed, 4 subtests passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-labeled-cli-controls --json` current: pass across 36 commands.
+- `./mew self-improve --native --start-session --force --ready --focus "Pick the next smallest Milestone 2 improvement..."` created task #52/session #75; read-only `./mew work 52 --live ...` identified unlabeled active `Next CLI controls` as the next small live/follow UX slice.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_shows_search_matches tests/test_work_session.py::WorkSessionTests::test_work_live_result_pane_falls_back_to_search_snippets_without_matches` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py` current: `305 passed, 4 subtests passed`.
 - `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-compact-live-search --json` current: pass across 36 commands.
