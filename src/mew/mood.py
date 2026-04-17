@@ -12,6 +12,7 @@ from .desk import (
     open_questions_for_desk,
     open_tasks_for_desk,
 )
+from .report_io import write_generated_report
 
 
 MAX_ITEMS = 8
@@ -320,6 +321,5 @@ def format_mood_view(view_model: dict[str, Any]) -> str:
 
 def write_mood_report(view_model: dict[str, Any], output_dir: Path) -> Path:
     path = mood_path(output_dir, view_model["date"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_mood_markdown(view_model), encoding="utf-8")
+    write_generated_report(path, render_mood_markdown(view_model))
     return path

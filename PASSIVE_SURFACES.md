@@ -136,6 +136,8 @@ self-memory reports. `mew journal --write`, `mew mood --write`, and
 `--generate-core` can generate journal and mood first; `--morning-feed` adds the
 static morning-paper source report before composing. Generated source reports
 are written under `--reports-root`, then composed into `--output-dir`.
+When a generated report would overwrite different existing content, mew writes
+a sibling `.bak` file first.
 
 ## Experiments
 
@@ -177,7 +179,7 @@ promotions and review fixes:
 
 ```text
 uv run pytest -q
-781 passed, 6 subtests passed
+783 passed, 6 subtests passed
 
 ./mew dogfood --scenario all --cleanup --json
 status: pass

@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .report_io import write_generated_report
+
 
 MAX_ITEMS = 8
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -280,6 +282,5 @@ def format_morning_paper_view(view_model: dict[str, Any]) -> str:
 
 def write_morning_paper_report(view_model: dict[str, Any], output_dir: Path) -> Path:
     path = morning_paper_path(output_dir, view_model["date"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_morning_paper_markdown(view_model), encoding="utf-8")
+    write_generated_report(path, render_morning_paper_markdown(view_model))
     return path

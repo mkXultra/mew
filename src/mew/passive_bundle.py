@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+from .report_io import write_generated_report
+
 
 @dataclass(frozen=True)
 class ReportSpec:
@@ -124,8 +126,7 @@ def generate_bundle(reports_root: Path, output_dir: Path, explicit_date: str | N
     found, missing = collect_reports(reports_root, day)
     text = render_bundle(day, found, missing)
     path = bundle_path(output_dir, day)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    write_generated_report(path, text)
     return BundleResult(
         path=path,
         text=text,

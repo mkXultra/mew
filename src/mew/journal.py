@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .desk import active_work_sessions_for_desk, open_questions_for_desk, open_tasks_for_desk
+from .report_io import write_generated_report
 
 
 MAX_ITEMS = 8
@@ -300,6 +301,5 @@ def format_journal_view(view_model: dict[str, Any]) -> str:
 
 def write_journal_report(view_model: dict[str, Any], output_dir: Path) -> Path:
     path = journal_path(output_dir, view_model["date"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_journal_markdown(view_model), encoding="utf-8")
+    write_generated_report(path, render_journal_markdown(view_model))
     return path
