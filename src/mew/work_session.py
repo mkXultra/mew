@@ -578,6 +578,10 @@ def command_failure_reason(record):
     return "command did not exit"
 
 
+def format_exit_code(value):
+    return value if value is not None else "unavailable"
+
+
 def summarize_work_tool_result(tool, result):
     if tool in READ_ONLY_WORK_TOOLS:
         return summarize_read_result(tool, result or {})
@@ -1201,7 +1205,7 @@ def format_work_session_resume(resume):
         for command in commands:
             lines.append(
                 f"#{command.get('tool_call_id')} {command.get('tool')} "
-                f"exit={command.get('exit_code')} {command.get('command') or ''}"
+                f"exit={format_exit_code(command.get('exit_code'))} {command.get('command') or ''}"
             )
             if command.get("stdout"):
                 lines.append("  stdout:")
@@ -1236,7 +1240,7 @@ def format_work_session_resume(resume):
         for failure in failures:
             lines.append(
                 f"#{failure.get('tool_call_id')} {failure.get('tool')} "
-                f"exit={failure.get('exit_code')} {failure.get('error') or failure.get('summary') or ''}"
+                f"exit={format_exit_code(failure.get('exit_code'))} {failure.get('error') or failure.get('summary') or ''}"
             )
     else:
         lines.append("(none)")
@@ -1654,7 +1658,7 @@ def format_work_session_tests(session, task=None, limit=8):
             outcome = "unknown"
         lines.append(
             f"#{entry.get('tool_call_id')} [{outcome}] {entry.get('kind')} "
-            f"exit={entry.get('exit_code')} {entry.get('command') or ''}"
+            f"exit={format_exit_code(entry.get('exit_code'))} {entry.get('command') or ''}"
         )
         if entry.get("cwd"):
             lines.append(f"cwd: {entry.get('cwd')}")
@@ -1708,7 +1712,7 @@ def format_work_session_commands(session, task=None, limit=8):
     for entry in entries:
         lines.append(
             f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
-            f"exit={entry.get('exit_code')} {entry.get('command') or ''}"
+            f"exit={format_exit_code(entry.get('exit_code'))} {entry.get('command') or ''}"
         )
         if entry.get("cwd"):
             lines.append(f"cwd: {entry.get('cwd')}")

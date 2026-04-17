@@ -1367,6 +1367,8 @@ def work_ai_progress(args):
         return None
 
     def emit(line):
+        if getattr(args, "live", False):
+            sys.stdout.flush()
         print(f"mew work ai: {line}", file=sys.stderr, flush=True)
 
     return emit
@@ -6677,6 +6679,28 @@ def _work_read_flags_from_options(option_text, session=None):
     return shlex.join(flags)
 
 
+def _replace_work_allow_read_options(option_text, roots):
+    try:
+        parts = shlex.split(option_text or "")
+    except ValueError:
+        parts = []
+    kept = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        if token == "--allow-read":
+            index += 2
+            continue
+        if token.startswith("--allow-read="):
+            index += 1
+            continue
+        kept.append(token)
+        index += 1
+    for root in roots or []:
+        kept.extend(["--allow-read", root])
+    return shlex.join(kept)
+
+
 def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False):
     state = state or load_state()
     if session is None:
@@ -6967,7 +6991,12 @@ def chat_work_session(rest, chat_state=None):
             print("")
         print(format_work_session_resume(resume))
         if resume:
-            print(format_work_cockpit_controls(state=state, session=session, continue_options=(chat_state or {}).get("work_continue_options", "")))
+            continue_options = (chat_state or {}).get("work_continue_options", "") or work_chat_continue_options(session)
+            if allow_read:
+                continue_options = _replace_work_allow_read_options(continue_options, allow_read)
+                if chat_state is not None:
+                    chat_state["work_continue_options"] = continue_options
+            print(format_work_cockpit_controls(state=state, session=session, continue_options=continue_options))
         return
 
     if action == "timeline":

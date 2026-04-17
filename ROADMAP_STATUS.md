@@ -148,7 +148,10 @@ Evidence:
 - `mew digest` exposes the chat digest as a top-level command, making recent autonomous activity review available without entering the chat REPL.
 - Active sessions remember start/live read/write/verify/model/approval options and reuse them in later CLI/chat controls, reducing repeated gate flag entry after reentry.
 - Chat work-session Inspect and Advanced controls now reuse the active session's saved/default read roots instead of falling back to `--allow-read .`, keeping scoped cockpits from suggesting broader or invalid read gates.
+- Chat `/work-session resume <task> --allow-read <root>` now carries that explicit read root into the printed Next controls and cached `/c` options, so scoped resume does not immediately suggest broader `--allow-read .` follow-ups.
 - Manual `run_tests` / `run_command` calls no longer store the parser's default `--path .` as a touched file, so non-file actions do not create noisy `.` world-state warnings.
+- Missing-executable verification failures now keep JSON `exit_code: null` but render human-facing resume/commands/tests output as `exit=unavailable` with `executable not found: ...` context.
+- Live work progress now flushes stdout before stderr progress lines, reducing apparent reordering where model delta prose could appear after `ACT ok` progress in mixed streams.
 - Partial reentry-option updates now preserve existing read/write/verify/model defaults and add new explicit roots, so a later read-only command does not erase previously useful write or verification gates.
 - CLI live controls now prefer the current command's explicit tool gates over saved broader defaults, so read-only reentry does not suggest stale write, shell, or verification permissions.
 - Starting a new work session for a task with only closed sessions now clones the latest closed session defaults, preserving cockpit gates across closed-session restart.
@@ -314,9 +317,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `626 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `628 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_codex_api.py tests/test_work_session.py::WorkSessionTests::test_work_ai_can_stream_model_deltas_to_progress tests/test_work_session.py::WorkSessionTests::test_work_follow_streams_model_deltas_by_default` current: `4 passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `132 passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py` current: `134 passed`.
 - `uv run pytest -q tests/test_work_session.py tests/test_write_tools.py` current: `98 passed` (last observed before the latest approval-continuity tests).
 - `uv run pytest -q tests/test_commands.py` current: `131 passed, 4 subtests passed`.
@@ -366,6 +369,8 @@ Next action:
 - Focused local validation verified that chat `/work-session` Inspect and Advanced controls now preserve a scoped `--allow-read sample` default and no longer suggest `--allow-read .` for that session.
 - `codex-ultra` isolated human-role E2E after search-snippet/live-delta work judged mew usable for bounded supervised coding/task work and found six papercuts: model-delta ordering, mid-word guidance clipping, chat read-gate broadening, `.` touched-file noise, missing top-level workbench reentry notes, and missing-executable `exit=None` wording. This session fixed the read-gate broadening, guidance clipping, touched-file noise, top-level reentry block, and missing-executable wording.
 - `claude-ultra` priority review ranked `mew work <task>` missing reentry guidance as the highest-leverage front-door issue and mid-word guidance clipping second; both are fixed in this session.
+- `codex-ultra` retest after those fixes found that CLI scoped resume preserved read roots, but chat `/work-session resume <task> --allow-read <root>` still printed broadened Next controls and command/test panes still showed `exit=None`; both follow-up issues are now fixed with regression tests.
+- Mew dogfood session #48 used Codex Web API as a read-only buddy after the front-door workbench change; it reentered task #46, inspected `ROADMAP_STATUS.md`, and recorded the next non-duplicative Milestone 2 slice as stabilizing the continuous reasoning/status pane and reducing repeated reentry material during long sessions.
 
 ## Current Roadmap Focus
 

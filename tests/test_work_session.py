@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from mew.cli import main
@@ -43,6 +44,28 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_live_work_progress_flushes_stdout_before_stderr(self):
+        from mew.commands import work_ai_progress
+
+        class FlushSpy(StringIO):
+            def __init__(self):
+                super().__init__()
+                self.flush_count = 0
+
+            def flush(self):
+                self.flush_count += 1
+                super().flush()
+
+        stdout = FlushSpy()
+        stderr = StringIO()
+        args = SimpleNamespace(live=True, progress=False, json=False)
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            work_ai_progress(args)("THINK ok")
+
+        self.assertEqual(stdout.flush_count, 1)
+        self.assertIn("mew work ai: THINK ok", stderr.getvalue())
+
     def test_work_live_step_result_groups_sections_and_tool_duration(self):
         text = format_work_live_step_result(
             {
@@ -619,6 +642,24 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("exit_code: unavailable", call["summary"])
                 self.assertIn("failure: executable not found: mew-missing-test-command", call["summary"])
                 self.assertIsNone(call["result"]["exit_code"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                resume_text = stdout.getvalue()
+                self.assertIn("exit=unavailable", resume_text)
+                self.assertNotIn("exit=None", resume_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--commands"]), 0)
+                command_text = stdout.getvalue()
+                self.assertIn("exit=unavailable", command_text)
+                self.assertNotIn("exit=None", command_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--tests"]), 0)
+                tests_text = stdout.getvalue()
+                self.assertIn("exit=unavailable", tests_text)
+                self.assertNotIn("exit=None", tests_text)
             finally:
                 os.chdir(old_cwd)
 
@@ -4620,6 +4661,41 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("- /work-session recover --allow-read sample", output)
                 self.assertNotIn("- /work-session resume --allow-read .", output)
                 self.assertNotIn("- /work-session recover --allow-read .", output)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_resume_controls_reuse_explicit_read_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("sample").mkdir()
+                Path("sample/README.md").write_text("scoped\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--tool", "read_file", "--path", "sample/README.md", "--allow-read", "sample"]), 0)
+
+                chat_state = {}
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session resume 1 --allow-read sample", chat_state),
+                        "continue",
+                    )
+
+                output = stdout.getvalue()
+                self.assertIn("- /c --allow-read sample", output)
+                self.assertIn("- /work-session resume --allow-read sample", output)
+                self.assertIn("- /work-session live --allow-read sample --max-steps 3", output)
+                self.assertIn("- /work-session recover --allow-read sample", output)
+                self.assertNotIn("- /c --allow-read .", output)
+                self.assertEqual(chat_state["work_continue_options"], "--allow-read sample")
             finally:
                 os.chdir(old_cwd)
 
