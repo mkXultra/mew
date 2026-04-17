@@ -67,7 +67,20 @@ def _read_text_if_exists(path):
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _unified_diff(path, before, after, max_chars=DEFAULT_DIFF_MAX_CHARS):
+def _diff_line_counts(diff):
+    added = 0
+    removed = 0
+    for line in (diff or "").splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return {"added": added, "removed": removed}
+
+
+def _unified_diff_text(path, before, after):
     display_path = str(path).lstrip("/")
     lines = difflib.unified_diff(
         before.splitlines(keepends=True),
@@ -75,8 +88,7 @@ def _unified_diff(path, before, after, max_chars=DEFAULT_DIFF_MAX_CHARS):
         fromfile=f"a/{display_path}",
         tofile=f"b/{display_path}",
     )
-    return clip_output("".join(lines), max_chars)
-
+    return "".join(lines)
 
 def _atomic_write_text(path, content):
     tmp_path = None
@@ -142,6 +154,7 @@ def write_file(path, content, allowed_roots, create=False, dry_run=False, max_ch
     after = content
     changed = before != after
     started_at = now_iso()
+    diff = _unified_diff_text(resolved, before, after)
     if changed and not dry_run:
         if create:
             resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +168,8 @@ def write_file(path, content, allowed_roots, create=False, dry_run=False, max_ch
         "dry_run": bool(dry_run),
         "written": bool(changed and not dry_run),
         "size": len(after),
-        "diff": _unified_diff(resolved, before, after),
+        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "diff_stats": _diff_line_counts(diff),
         "started_at": started_at,
         "finished_at": now_iso(),
     }
@@ -188,6 +202,7 @@ def edit_file(
     if edit_size > max_chars:
         raise ValueError(f"edited content is too large: {edit_size} chars; max={max_chars}")
     started_at = now_iso()
+    diff = _unified_diff_text(resolved, before, after)
     if before != after and not dry_run:
         _atomic_write_text(resolved, after)
 
@@ -199,7 +214,8 @@ def edit_file(
         "changed": before != after,
         "dry_run": bool(dry_run),
         "written": bool(before != after and not dry_run),
-        "diff": _unified_diff(resolved, before, after),
+        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "diff_stats": _diff_line_counts(diff),
         "started_at": started_at,
         "finished_at": now_iso(),
     }

@@ -15,7 +15,7 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
-from mew.work_session import format_work_action
+from mew.work_session import format_diff_preview, format_work_action
 
 
 def add_coding_task(state):
@@ -129,6 +129,14 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("line_start=42", text)
         self.assertIn("line_count=12", text)
         self.assertIn("max_chars=12000", text)
+
+    def test_diff_preview_can_use_unclipped_diff_stats(self):
+        clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
+
+        preview = format_diff_preview(clipped_diff, max_chars=80, diff_stats={"added": 1, "removed": 1})
+
+        self.assertIn("Diff preview (+1 -1)", preview)
+        self.assertIn("... output truncated ...", preview)
 
     def test_work_live_step_result_marks_stale_working_memory(self):
         text = format_work_live_step_result(

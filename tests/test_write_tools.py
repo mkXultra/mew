@@ -75,6 +75,17 @@ class WriteToolsTests(unittest.TestCase):
             self.assertIn("new_call()", path.read_text(encoding="utf-8"))
             self.assertNotIn("old_call()", path.read_text(encoding="utf-8"))
 
+    def test_edit_diff_stats_use_unclipped_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large.py"
+            path.write_text("prefix " + ("x" * 20000) + " old_call()\n", encoding="utf-8")
+
+            result = edit_file(str(path), "old_call()", "new_call()", [tmp], dry_run=True, max_chars=100)
+
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["diff_stats"], {"added": 1, "removed": 1})
+            self.assertIn("... output truncated ...", result["diff"])
+
     def test_snapshot_restore_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "notes.md"

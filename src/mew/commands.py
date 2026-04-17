@@ -938,7 +938,13 @@ def _format_live_tool_call_result(call):
         else:
             lines.extend(_format_live_search_snippet_preview(result.get("snippets") or []))
     if result.get("diff"):
-        lines.append(format_diff_preview(result.get("diff") or "", max_chars=800))
+        lines.append(
+            format_diff_preview(
+                result.get("diff") or "",
+                max_chars=800,
+                diff_stats=result.get("diff_stats"),
+            )
+        )
     if call.get("tool") in WRITE_WORK_TOOLS and result.get("dry_run") and result.get("changed") and not call.get("approval_status"):
         lines.append("pending_approval: yes")
     return lines
@@ -1467,7 +1473,7 @@ def prompt_live_write_approval(tool_call, verify_command=""):
     parameters = (tool_call or {}).get("parameters") or {}
     path = result.get("path") or parameters.get("path") or ""
     if result.get("diff"):
-        print(format_diff_preview(result.get("diff") or "", max_chars=2000))
+        print(format_diff_preview(result.get("diff") or "", max_chars=2000, diff_stats=result.get("diff_stats")))
     if verify_command:
         print(f"Verify on approval: {verify_command}")
     else:

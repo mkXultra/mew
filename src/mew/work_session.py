@@ -91,10 +91,17 @@ def clip_inline_text(text, limit=240):
     return f"{prefix}{marker}"
 
 
-def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS):
+def _result_diff_stats(result, diff):
+    stats = (result or {}).get("diff_stats")
+    if isinstance(stats, dict) and "added" in stats and "removed" in stats:
+        return {"added": stats.get("added") or 0, "removed": stats.get("removed") or 0}
+    return diff_line_counts(diff)
+
+
+def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS, diff_stats=None):
     if not diff:
         return ""
-    counts = diff_line_counts(diff)
+    counts = diff_stats if diff_stats is not None else diff_line_counts(diff)
     return (
         f"Diff preview (+{counts['added']} -{counts['removed']})\n"
         f"{clip_output(diff, max_chars)}"
@@ -1276,14 +1283,15 @@ def build_work_session_resume(session, task=None, limit=8):
             tool_call_id = call.get("id")
             write_path = path or "."
             diff = result.get("diff") or ""
+            diff_stats = _result_diff_stats(result, diff)
             pending_approvals.append(
                 {
                     "tool_call_id": tool_call_id,
                     "tool": call.get("tool"),
                     "path": path,
                     "summary": call.get("summary") or "",
-                    "diff_stats": diff_line_counts(diff),
-                    "diff_preview": format_diff_preview(diff, max_chars=1200),
+                    "diff_stats": diff_stats,
+                    "diff_preview": format_diff_preview(diff, max_chars=1200, diff_stats=diff_stats),
                     "approve_hint": (
                         f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
                         f"--allow-verify --verify-command {verify_command_hint}"
@@ -1856,6 +1864,7 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
         diff = result.get("diff") or ""
         if not diff:
             continue
+        diff_stats = _result_diff_stats(result, diff)
         finished_at = call.get("finished_at") or ""
         entries.append(
             {
@@ -1871,8 +1880,8 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
                 "approval_status": call.get("approval_status") or "",
                 "finished_at": finished_at,
                 "recorded_at": finished_at,
-                "diff_stats": diff_line_counts(diff),
-                "diff_preview": format_diff_preview(diff, max_chars=max_chars),
+                "diff_stats": diff_stats,
+                "diff_preview": format_diff_preview(diff, max_chars=max_chars, diff_stats=diff_stats),
             }
         )
     return entries[-limit:]
@@ -2094,13 +2103,15 @@ def format_work_session(session, task=None, limit=8, details=False):
         if write_calls:
             for call in write_calls[-limit:]:
                 result = call.get("result") or {}
+                diff = result.get("diff") or ""
+                diff_stats = _result_diff_stats(result, diff)
                 approval = f" approval={call.get('approval_status')}" if call.get("approval_status") else ""
                 lines.append(
                     f"#{call.get('id')} [{call.get('status')}] {call.get('tool')} "
                     f"written={result.get('written')} rolled_back={result.get('rolled_back')} "
                     f"verification_exit_code={result.get('verification_exit_code')}{approval}"
                 )
-                lines.append(format_diff_preview(result.get("diff") or ""))
+                lines.append(format_diff_preview(diff, diff_stats=diff_stats))
         else:
             lines.append("(none)")
 
