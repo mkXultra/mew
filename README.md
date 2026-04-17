@@ -645,6 +645,12 @@ self-improvement runs can inspect and verify work through the safe layer.
 
 ## Self-Improvement
 
+Turn an idea into a native self-improvement work session:
+
+```sh
+uv run mew self-improve --start-session --focus "Make the coding cockpit calmer"
+```
+
 Create a planned self-improvement task without starting an agent:
 
 ```sh
