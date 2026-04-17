@@ -3768,6 +3768,30 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_command_hides_runtime_activity_by_default(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Improve cockpit", "--kind", "coding"]), 0)
+
+                captured = []
+
+                def fake_chat(args):
+                    captured.append(args)
+                    return 0
+
+                with patch("mew.commands.cmd_chat", side_effect=fake_chat):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        self.assertEqual(main(["code", "1"]), 0)
+                        self.assertEqual(main(["code", "1", "--activity"]), 0)
+
+                self.assertFalse(captured[0].activity)
+                self.assertTrue(captured[1].activity)
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_read_only_clears_cloned_side_effect_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
