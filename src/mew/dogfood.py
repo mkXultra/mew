@@ -684,6 +684,7 @@ def run_work_session_scenario(workspace, env=None):
         encoding="utf-8",
     )
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
+    (workspace / "large_no_newline.py").write_text("x" * 120000 + " old_call()", encoding="utf-8")
 
     run(["task", "add", "Native work task", "--kind", "coding"])
     start_result = run(["work", "1", "--start-session", "--json"])
@@ -759,6 +760,23 @@ def run_work_session_scenario(workspace, env=None):
             "edit_file",
             "--path",
             "large.py",
+            "--old",
+            "old_call()",
+            "--new",
+            "new_call()",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    large_no_newline_edit_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "edit_file",
+            "--path",
+            "large_no_newline.py",
             "--old",
             "old_call()",
             "--new",
@@ -1011,6 +1029,7 @@ def run_work_session_scenario(workspace, env=None):
     edit_data = _json_stdout(edit_result)
     line_read_data = _json_stdout(line_read_result)
     large_edit_data = _json_stdout(large_edit_result)
+    large_no_newline_edit_data = _json_stdout(large_no_newline_edit_result)
     approve_data = _json_stdout(approve_result)
     approve_all_first_data = _json_stdout(approve_all_first_result)
     approve_all_second_data = _json_stdout(approve_all_second_result)
@@ -1114,6 +1133,16 @@ def run_work_session_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "work_edit_file_large_no_newline_diff_stats",
+        large_no_newline_edit_result.get("exit_code") == 0
+        and ((large_no_newline_edit_data.get("tool_call") or {}).get("result") or {}).get("diff_stats")
+        == {"added": 1, "removed": 1}
+        and "old_call()" in (workspace / "large_no_newline.py").read_text(encoding="utf-8"),
+        observed=large_no_newline_edit_data.get("tool_call"),
+        expected="large no-newline dry-run edit reports full +1/-1 diff stats",
+    )
+    _scenario_check(
+        checks,
         "work_approve_exact_new_file_write_root",
         approve_dry_run_result.get("exit_code") == 0
         and approve_result.get("exit_code") == 0
@@ -1205,7 +1234,7 @@ def run_work_session_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 10
+        len(tool_calls) == 11
         and [call.get("tool") for call in tool_calls]
         == [
             "read_file",
@@ -1214,6 +1243,7 @@ def run_work_session_scenario(workspace, env=None):
             "run_command",
             "edit_file",
             "read_file",
+            "edit_file",
             "edit_file",
             "write_file",
             "write_file",
@@ -1227,6 +1257,7 @@ def run_work_session_scenario(workspace, env=None):
             "run_command",
             "edit_file",
             "read_file",
+            "edit_file",
             "edit_file",
             "write_file",
             "write_file",
