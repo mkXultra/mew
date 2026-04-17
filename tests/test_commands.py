@@ -3937,6 +3937,55 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_continue_keeps_next_controls_terse(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {"id": 1, "title": "Improve cockpit", "status": "todo", "kind": "coding"}
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {
+                        "auth": "auth.json",
+                        "model_backend": "codex",
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_verify": True,
+                        "verify_command": "uv run pytest -q",
+                        "act_mode": "deterministic",
+                        "compact_live": True,
+                        "prompt_approval": True,
+                    }
+                    save_state(state)
+
+                chat_state = {
+                    "kind": "coding",
+                    "compact_controls": True,
+                    "work_continue_options": (
+                        "--auth auth.json --model-backend codex --allow-read . --allow-write . "
+                        "--allow-verify --verify-command 'uv run pytest -q' --act-mode deterministic"
+                    ),
+                }
+                with (
+                    patch("mew.commands.cmd_work_ai", return_value=0),
+                    redirect_stdout(StringIO()) as stdout,
+                ):
+                    self.assertEqual(run_chat_slash_command("/continue keep it focused", chat_state), "continue")
+
+                controls = stdout.getvalue().split("Next controls", 1)[1]
+                self.assertIn("- /c\n", controls)
+                self.assertIn("- /follow\n", controls)
+                self.assertNotIn("- /c --auth", controls)
+                self.assertNotIn("- /follow --auth", controls)
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_read_only_clears_cloned_side_effect_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

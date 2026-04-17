@@ -7204,6 +7204,7 @@ def chat_work_session(rest, chat_state=None):
                     session=session,
                     continue_options=(chat_state or {}).get("work_continue_options", ""),
                     compact=True,
+                    terse=bool((chat_state or {}).get("compact_controls")),
                 )
             )
         return
@@ -8783,6 +8784,7 @@ def cmd_chat(args):
         "kind": kind,
         "work_mode": bool(getattr(args, "work_mode", False)),
         "blank_continue_ready": False,
+        "compact_controls": bool(getattr(args, "compact_controls", False)),
     }
     prompt_state = {"needed": True}
     deadline = time.monotonic() + max(0.0, args.timeout) if args.timeout is not None else None
