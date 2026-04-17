@@ -929,6 +929,18 @@ def _format_live_tool_summary(call):
                 f"exit_code: {result.get('exit_code')}",
             ]
         )
+    if call.get("tool") in WRITE_WORK_TOOLS:
+        parameters = call.get("parameters") or {}
+        path = _compact_live_path_text(result.get("path") or parameters.get("path") or "")
+        stats = result.get("diff_stats") or {}
+        stat_text = ""
+        if isinstance(stats, dict) and ("added" in stats or "removed" in stats):
+            stat_text = f" diff=+{stats.get('added', 0) or 0} -{stats.get('removed', 0) or 0}"
+        return (
+            f"{result.get('operation') or call.get('tool')} {path} "
+            f"changed={result.get('changed')} dry_run={result.get('dry_run')} "
+            f"written={result.get('written')}{stat_text}"
+        ).strip()
     return _compact_live_path_text(compact_work_tool_summary(call))
 
 

@@ -282,6 +282,7 @@ Evidence:
 - Real Codex Web API dogfood tasks #87 and #88 exercised the cell stream itself: #87 identified noisy completed-cell dumps after batch actions, then #88 verified compact completed cells with a `--cells` detail hint after that fix.
 - Follow planning output now uses a compact `plan: <action>` line plus model-stream stats instead of repeating the full live planning summary/reason block.
 - `mew work --follow --quiet` now suppresses default `mew work ai:` progress lines unless `--progress` is explicitly passed, leaving a cleaner stdout-only cell stream for humans and scripted captures.
+- A fresh `codex-ultra` human-role compact follow test verified active cells, compact completed cells, pending approval controls, approval apply/reject, and closed-session unavailable approvals; its remaining findings are now addressed by concrete resume verifier hints, retryable failed-approval cells, and raw-diff-free compact final reports.
 
 Missing proof:
 
@@ -413,8 +414,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `798 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `188 passed`.
+- `uv run pytest -q` current: `800 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `190 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
 - `codex-ultra` human-role cells dogfood current: verified stable CLI/chat cell rendering and exposed five approval/control issues; the current code fixes four directly and narrows the remaining active in-flight cell work.

@@ -357,20 +357,27 @@ def approval_cell(session, call):
     task_ref = (session or {}).get("task_id") or "<task-id>"
     write_root = shlex.quote(path or "<path>")
     unavailable = (session or {}).get("status") != "active"
+    approval_status = call.get("approval_status") or ""
+    retryable_failure = approval_status == "failed"
     approve_command = (
         f"mew work {task_ref} --approve-tool {call.get('id')} "
         f"--allow-write {write_root} {_verify_flags_text(session)}"
     )
     reject_command = f"mew work {task_ref} --reject-tool {call.get('id')}"
     reject_feedback_command = f"{reject_command} --reject-reason <feedback>"
-    preview_prefix = "approval unavailable in closed session" if unavailable else "approval needed"
+    if unavailable:
+        preview_prefix = "approval unavailable in closed session"
+    elif retryable_failure:
+        preview_prefix = "approval failed; retry or reject"
+    else:
+        preview_prefix = "approval needed"
     preview = f"{preview_prefix} for {call.get('tool')} #{call.get('id')} {path}".strip()
     cell = _cell_base(
         session,
         "tool_call",
         "approval",
         call.get("id"),
-        "unavailable" if unavailable else "pending",
+        "unavailable" if unavailable else ("failed" if retryable_failure else "pending"),
         call.get("finished_at") or call.get("started_at"),
         "",
         preview,
@@ -392,6 +399,8 @@ def approval_cell(session, call):
             "operation: file_write",
             f"path: {path}" if path else "",
             "dry_run: true",
+            f"approval_status: {approval_status}" if approval_status else "",
+            f"approval_error: {clip_inline_text(call.get('approval_error'), 240)}" if call.get("approval_error") else "",
             "approval_unavailable: session is not active" if unavailable else "",
             f"approve_once: {approve_command}" if not unavailable else "",
             f"reject: {reject_command}" if not unavailable else "",

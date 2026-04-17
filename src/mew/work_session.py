@@ -1216,7 +1216,11 @@ def build_work_session_resume(session, task=None, limit=8):
         return None
     calls = list(session.get("tool_calls") or [])
     turns = list(session.get("model_turns") or [])
-    verify_command = latest_work_verify_command(calls, task=task)
+    default_options = (session or {}).get("default_options") or {}
+    if default_options.get("verify_disabled"):
+        verify_command = ""
+    else:
+        verify_command = default_options.get("verify_command") or latest_work_verify_command(calls, task=task)
     verify_command_hint = shlex.quote(verify_command) if verify_command else '"<command>"'
     paths = []
     commands = []
@@ -1278,7 +1282,7 @@ def build_work_session_resume(session, task=None, limit=8):
             call.get("tool") in WRITE_WORK_TOOLS
             and result.get("dry_run")
             and result.get("changed")
-            and not call.get("approval_status")
+            and call.get("approval_status") not in ("applying", "applied", "rejected")
         ):
             tool_call_id = call.get("id")
             write_path = path or "."
@@ -1290,6 +1294,8 @@ def build_work_session_resume(session, task=None, limit=8):
                     "tool": call.get("tool"),
                     "path": path,
                     "summary": call.get("summary") or "",
+                    "approval_status": call.get("approval_status") or "",
+                    "approval_error": call.get("approval_error") or "",
                     "diff_stats": diff_stats,
                     "diff_preview": format_diff_preview(diff, max_chars=1200, diff_stats=diff_stats),
                     "approve_hint": (

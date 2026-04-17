@@ -409,10 +409,51 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approval_unavailable: session is not active", text)
         self.assertNotIn("--approve-tool 4", text)
 
-    def test_work_session_tests_include_failed_verify_gate(self):
+    def test_work_session_cells_mark_failed_approval_retryable(self):
         session = {
             "id": 8,
             "task_id": 14,
+            "status": "active",
+            "default_options": {"verify_command": "python3 -m py_compile sample.py", "allow_verify": True},
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"path": "sample.py"},
+                    "approval_status": "failed",
+                    "approval_error": "verification failed: executable not found: python",
+                    "result": {
+                        "path": "sample.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/sample.py\n+++ b/sample.py\n@@ -0,0 +1 @@\n+bad\n",
+                        "diff_stats": {"added": 1, "removed": 0},
+                    },
+                }
+            ],
+        }
+
+        from mew.work_session import build_work_session_resume
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(cells[1]["kind"], "approval")
+        self.assertEqual(cells[1]["status"], "failed")
+        self.assertIn("--verify-command 'python3 -m py_compile sample.py'", cells[1]["actions"]["approve_once"])
+        self.assertIn("approval failed; retry or reject", text)
+        self.assertIn("approval_error: verification failed: executable not found: python", text)
+        self.assertEqual(resume["pending_approvals"][0]["approval_status"], "failed")
+        self.assertIn("--verify-command 'python3 -m py_compile sample.py'", resume["pending_approvals"][0]["approve_hint"])
+
+    def test_work_session_tests_include_failed_verify_gate(self):
+        session = {
+            "id": 9,
+            "task_id": 15,
             "status": "active",
             "tool_calls": [
                 {
@@ -3549,6 +3590,44 @@ class WorkSessionTests(unittest.TestCase):
         )
 
         self.assertIn("#1 [completed] edit_file tool_call=#7 inline_approval=rejected", text)
+
+    def test_compact_work_ai_report_summarizes_write_without_raw_diff(self):
+        from mew.commands import format_work_ai_report
+
+        text = format_work_ai_report(
+            {
+                "steps": [
+                    {
+                        "index": 1,
+                        "status": "completed",
+                        "action": {"type": "write_file"},
+                        "tool_call": {
+                            "id": 7,
+                            "tool": "write_file",
+                            "status": "completed",
+                            "result": {
+                                "operation": "write_file",
+                                "path": "generated.py",
+                                "changed": True,
+                                "dry_run": True,
+                                "written": False,
+                                "diff": "--- a/generated.py\n+++ b/generated.py\n@@ -0,0 +1 @@\n+print('ok')\n",
+                                "diff_stats": {"added": 1, "removed": 0},
+                            },
+                        },
+                    }
+                ],
+                "max_steps": 1,
+                "stop_reason": "pending_approval",
+                "session_id": 1,
+                "task_id": 1,
+            },
+            compact=True,
+        )
+
+        self.assertIn("write_file generated.py changed=True dry_run=True written=False diff=+1 -0", text)
+        self.assertNotIn("--- a", text)
+        self.assertNotIn("+++ b", text)
 
     def test_work_session_resume_next_action_uses_latest_tool_status(self):
         old_cwd = os.getcwd()
