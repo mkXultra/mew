@@ -7979,6 +7979,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 result", output)
                 self.assertIn("action: read_file", output)
                 self.assertIn("Next controls", output)
+                self.assertIn("/work-session resume --allow-read .", output)
                 self.assertIn("/help work for details", output)
                 self.assertNotIn("Advanced", output)
                 self.assertNotIn("/work-session tests", output)
