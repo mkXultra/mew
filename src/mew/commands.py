@@ -208,6 +208,14 @@ RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
 MAX_OUTBOX_TEXT_CHARS = 2000
 
 
+def task_json_data(task):
+    data = dict(task)
+    data["effective_kind"] = task_kind(task)
+    data["plan_count"] = len(task.get("plans") or [])
+    data["run_count"] = len(task.get("runs") or [])
+    return data
+
+
 def cmd_task_add(args):
     with state_lock():
         state = load_state()
@@ -236,7 +244,7 @@ def cmd_task_add(args):
         state["tasks"].append(task)
         save_state(state)
     if getattr(args, "json", False):
-        print(json.dumps({"task": task}, ensure_ascii=False, indent=2))
+        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
         return 0
     print(format_task(task))
     return 0
@@ -259,6 +267,15 @@ def cmd_task_list(args):
             print("mew: task list --limit must be positive", file=sys.stderr)
             return 1
         tasks = tasks[:limit]
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {"tasks": [task_json_data(task) for task in tasks], "count": len(tasks)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if not tasks:
         print("No tasks.")
         return 0
@@ -348,11 +365,7 @@ def cmd_task_show(args):
         return 1
 
     if getattr(args, "json", False):
-        task_data = dict(task)
-        task_data["effective_kind"] = task_kind(task)
-        task_data["plan_count"] = len(task.get("plans") or [])
-        task_data["run_count"] = len(task.get("runs") or [])
-        print(json.dumps({"task": task_data}, ensure_ascii=False, indent=2))
+        print(json.dumps({"task": task_json_data(task)}, ensure_ascii=False, indent=2))
         return 0
 
     print(format_task(task))

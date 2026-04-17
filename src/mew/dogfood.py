@@ -845,6 +845,7 @@ def run_work_session_scenario(workspace, env=None):
 
     task_add_json_result = run(["task", "add", "Native work task", "--kind", "coding", "--json"])
     task_show_json_result = run(["task", "show", "1", "--json"])
+    task_list_json_result = run(["task", "list", "--kind", "coding", "--json"])
     start_result = run(["work", "1", "--start-session", "--json"])
     read_result = run(
         ["work", "1", "--tool", "read_file", "--path", "README.md", "--allow-read", ".", "--json"]
@@ -1298,6 +1299,7 @@ def run_work_session_scenario(workspace, env=None):
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
     task_show_json_data = _json_stdout(task_show_json_result)
+    task_list_json_data = _json_stdout(task_list_json_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
     test_data = _json_stdout(test_result)
@@ -1367,6 +1369,16 @@ def run_work_session_scenario(workspace, env=None):
         and (task_show_json_data.get("task") or {}).get("effective_kind") == "coding",
         observed=task_show_json_data,
         expected="task show --json returns the selected task without text parsing",
+    )
+    _scenario_check(
+        checks,
+        "work_task_list_json_returns_tasks",
+        task_list_json_result.get("exit_code") == 0
+        and task_list_json_data.get("count") == 1
+        and ((task_list_json_data.get("tasks") or [{}])[0]).get("id") == 1
+        and ((task_list_json_data.get("tasks") or [{}])[0]).get("effective_kind") == "coding",
+        observed=task_list_json_data,
+        expected="task list --json returns matching tasks without text parsing",
     )
     _scenario_check(
         checks,

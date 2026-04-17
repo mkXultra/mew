@@ -114,6 +114,7 @@ the implementation run command before starting anything:
 ```sh
 uv run mew task classify --mismatches
 uv run mew task classify <task-id> --apply
+uv run mew task list --kind coding --json
 uv run mew task add "Implement the next small fix" --kind coding --json
 uv run mew task show <task-id> --json
 uv run mew buddy --task <task-id>

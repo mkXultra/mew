@@ -367,6 +367,22 @@ class CommandTests(unittest.TestCase):
 
         self.assertIn("No tasks.", stdout.getvalue())
 
+    def test_task_default_list_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Default JSON list", "--kind", "coding"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["count"], 1)
+                self.assertEqual(data["tasks"][0]["title"], "Default JSON list")
+                self.assertEqual(data["tasks"][0]["effective_kind"], "coding")
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_add_ready_shortcut(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,6 +434,25 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(data["task"]["notes"], "keep full")
                 self.assertEqual(data["task"]["plan_count"], 0)
                 self.assertEqual(data["task"]["run_count"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_task_list_can_print_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "First list JSON", "--kind", "coding"]), 0)
+                    self.assertEqual(main(["task", "add", "Second list JSON", "--kind", "research"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "list", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["count"], 1)
+                self.assertEqual(data["tasks"][0]["id"], 1)
+                self.assertEqual(data["tasks"][0]["title"], "First list JSON")
+                self.assertEqual(data["tasks"][0]["kind"], "coding")
+                self.assertEqual(data["tasks"][0]["effective_kind"], "coding")
             finally:
                 os.chdir(old_cwd)
 

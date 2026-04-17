@@ -1395,6 +1395,7 @@ def build_parser():
     desires_show_parser.set_defaults(func=cmd_desires_show)
 
     task_parser = subparsers.add_parser("task", help="manage tasks")
+    task_parser.add_argument("--json", action="store_true", help="print the default task list as JSON")
     task_parser.set_defaults(func=cmd_task_list)
     task_subparsers = task_parser.add_subparsers(dest="task_command")
 
@@ -1427,6 +1428,7 @@ def build_parser():
         help="filter by task status across all tasks; pending/open means not done",
     )
     list_parser.add_argument("--limit", type=int, help="show at most N tasks")
+    list_parser.add_argument("--json", action="store_true", help="print tasks as JSON")
     list_parser.set_defaults(func=cmd_task_list)
 
     classify_parser = task_subparsers.add_parser("classify", help="inspect or update task kind inference")
