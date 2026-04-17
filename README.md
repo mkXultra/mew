@@ -441,6 +441,7 @@ uv run mew work 1 --tool edit_file --path README.md --old "old" --new "new" --al
 uv run mew work 1 --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
 uv run mew code 1
 uv run mew code 1 --read-only --no-verify
+uv run mew code 1 --quiet --timeout 0
 uv run mew do 1 --work-guidance "make the smallest verified fix"
 uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in the resume bundle"
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
@@ -459,6 +460,9 @@ Runtime activity is also hidden by default; use `--activity` when you want the
 background runtime log in the cockpit.
 Its startup brief is a compact status and next-action line rather than the full
 general chat brief.
+Use `--quiet` for scripted checks or attach-style probes where the chat banner,
+scope line, work-mode line, brief, unread messages, and startup controls should
+all stay silent.
 Use `--read-only --no-verify` to enter without inheriting older write, shell, or
 verification gates from a previous session. `mew next` and `mew focus` point
 coding work back to this cockpit, whether the task is fresh or already active,
