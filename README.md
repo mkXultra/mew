@@ -348,10 +348,12 @@ session. Work-mode `send_message` writes to outbox;
 `ask_user` creates a normal question. The model can also choose a read-only
 `batch` action to run up to five inspection tools in one work turn; writes and
 shell commands remain outside batch mode. In `mew chat`, live work steps print
-`Next controls` after execution. `/continue` remembers the previous live-step
-options for the chat session, and a fresh chat can recover the active work
-session's stored defaults, so `/continue <guidance>` can steer the next step
-without retyping gates such as `--allow-read .`. A long work loop can be asked
+compact `Next controls` after execution: primary continue/follow commands plus
+resume/help, while full controls stay available from startup and `/work-session`.
+`/continue` remembers the previous live-step options for the chat session, and a
+fresh chat can recover the active work session's stored defaults, so
+`/continue <guidance>` can steer the next step without retyping gates such as
+`--allow-read .`. A long work loop can be asked
 to pause at the next model/tool boundary with `mew work --stop-session` or
 `/work-session stop`. Work steps are journaled before THINK/ACT starts, and stop
 requests are checked again after planning before any selected tool is started.

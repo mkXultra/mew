@@ -114,7 +114,7 @@ Evidence:
 - `glob` now skips common generated/cache directories such as `.git`, `.pytest_cache`, `.venv`, `__pycache__`, and `node_modules`, reducing noisy read-only navigation for resident models.
 - Codex Web API dogfood for batch exposed a missing `read_file.path` failure, after which batch normalization was hardened to skip invalid read subtools; retrying the same dogfood task completed `inspect_dir` and `read_file README.md` in one model turn without writes.
 - Work-session resume next-action selection now keys off the latest tool result, so an old failure no longer dominates the suggested next action after a successful retry.
-- Chat live work now prints `Next controls` after live steps, approvals, and rejections, making continue/resume/details/close actions visible without remembering commands.
+- Chat live work now prints compact `Next controls` after live steps, keeping primary continue/follow plus resume/help visible while leaving full controls to startup and `/work-session`.
 - `/continue` now remembers the previous live-step options for the current chat session and treats plain text as `--work-guidance`, so a user can steer the next resident step without retyping gates.
 - `mew chat --work-mode`, `/work-mode on`, and `/c` reduce cockpit typing: text becomes `/continue` guidance, blank lines repeat only after a work step has run, and `/c` is a short continue alias.
 - `mew work --follow` and chat `/follow` provide a compact continuous live loop that defaults to 10 steps, streams model progress, and stops at existing resident boundaries such as finish, failures, stop requests, pending approvals, or user interrupt.

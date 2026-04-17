@@ -5095,6 +5095,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work live step #1 result", output)
                 self.assertIn("action: read_file", output)
                 self.assertIn("Next controls", output)
+                self.assertIn("/help work for details", output)
+                self.assertNotIn("Advanced", output)
+                self.assertNotIn("/work-session tests", output)
                 self.assertIn("continue content", load_state()["work_sessions"][0]["tool_calls"][0]["result"]["text"])
             finally:
                 os.chdir(old_cwd)
@@ -5147,10 +5150,7 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 self.assertIn("focus on the README summary", prompts[-1])
                 self.assertIn("Next controls", output)
-                self.assertIn(
-                    "/continue --auth auth.json --allow-read . --act-mode deterministic --prompt-approval",
-                    output,
-                )
+                self.assertIn("/c --auth auth.json --allow-read . --act-mode deterministic --prompt-approval", output)
                 self.assertIn("/continue <guidance>", output)
                 self.assertIn("--prompt-approval", output)
                 self.assertIn("/work-session resume 1", output)
@@ -5186,7 +5186,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(chat_state["work_continue_options"], "--allow-read .")
                 output = stdout.getvalue()
                 self.assertIn("Next controls", output)
-                self.assertIn("/continue --allow-read .", output)
+                self.assertIn("/c --allow-read .", output)
                 self.assertNotIn("bad.json", output)
                 self.assertIn("auth file not found: bad.json", stderr.getvalue())
             finally:

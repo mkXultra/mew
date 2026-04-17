@@ -6380,7 +6380,7 @@ def _parse_chat_work_resume_args(parts):
     return task_id, allow_read, auto_recover_safe, ""
 
 
-def format_work_cockpit_controls(state=None, session=None, continue_options=""):
+def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False):
     state = state or load_state()
     if session is None:
         session = active_work_session(state)
@@ -6416,6 +6416,11 @@ def format_work_cockpit_controls(state=None, session=None, continue_options=""):
         lines.append("- /follow --allow-read . --max-steps 10")
         lines.append("- /continue --allow-read .")
         lines.append('- /continue --allow-read . --work-guidance "focus ..."')
+    if compact:
+        lines.append("Inspect")
+        lines.append("- /work-session resume")
+        lines.append("- /help work for details, diffs, tests, commands, manage, and advanced controls")
+        return "\n".join(lines)
     lines.append("Inspect")
     lines.append("- /work-session resume")
     lines.append("- /work-session resume --allow-read .")
@@ -6626,6 +6631,7 @@ def chat_work_session(rest, chat_state=None):
                     state=state,
                     session=session,
                     continue_options=(chat_state or {}).get("work_continue_options", ""),
+                    compact=True,
                 )
             )
         return
