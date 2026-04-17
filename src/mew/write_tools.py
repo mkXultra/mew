@@ -67,16 +67,17 @@ def _read_text_if_exists(path):
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _diff_line_counts(diff):
+def _text_diff_line_counts(before, after):
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    matcher = difflib.SequenceMatcher(a=before_lines, b=after_lines)
     added = 0
     removed = 0
-    for line in (diff or "").splitlines():
-        if line.startswith("+++") or line.startswith("---"):
+    for tag, before_start, before_end, after_start, after_end in matcher.get_opcodes():
+        if tag == "equal":
             continue
-        if line.startswith("+"):
-            added += 1
-        elif line.startswith("-"):
-            removed += 1
+        removed += before_end - before_start
+        added += after_end - after_start
     return {"added": added, "removed": removed}
 
 
@@ -169,7 +170,7 @@ def write_file(path, content, allowed_roots, create=False, dry_run=False, max_ch
         "written": bool(changed and not dry_run),
         "size": len(after),
         "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
-        "diff_stats": _diff_line_counts(diff),
+        "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
     }
@@ -215,7 +216,7 @@ def edit_file(
         "dry_run": bool(dry_run),
         "written": bool(before != after and not dry_run),
         "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
-        "diff_stats": _diff_line_counts(diff),
+        "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
     }
