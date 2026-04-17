@@ -899,6 +899,7 @@ def build_parser():
         help="record a durable note on the active native work session, or latest task session when task_id is provided",
     )
     work_parser.add_argument("--steer", help="queue guidance for the next live/follow work step")
+    work_parser.add_argument("--queue-followup", help="queue a follow-up message for a later live/follow work step")
     work_parser.add_argument(
         "--reply-file",
         help="apply a structured follow reply JSON file with steer/note/stop/reject actions",

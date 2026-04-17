@@ -424,7 +424,7 @@ to pause at the next model/tool boundary with `mew work --stop-session` or
 `/work-session stop`. Work steps are journaled before THINK/ACT starts, and stop
 requests are checked again after planning before any selected tool is started.
 CLI live runs end with `Next CLI controls` so the next continue, follow, steer,
-stop, resume, or chat command is visible. Work-mode `remember` records
+queue-followup, stop, resume, or chat command is visible. Work-mode `remember` records
 durable session notes that appear in the resume bundle and future model context;
 humans can add the same kind of note with `mew work --session-note` or
 `/work-session note`. With an explicit task id, `mew work <task-id>
@@ -435,7 +435,11 @@ the next live/follow step, records the consumed steer as a note, and then clears
 it. Session, resume, and live result panes show the queued steer while it is
 still pending; model/API failures preserve it for the next real step instead of
 silently dropping it. If more than one work session is active, `--steer` asks
-for an explicit task id before queuing. Approving a dry-run write can reuse the
+for an explicit task id before queuing. For follow-up input that should wait in
+FIFO order instead of replacing the next steer, use
+`mew work --queue-followup "..."` or `/work-session queue ...`; the next
+live/follow step consumes one queued follow-up only when no pending steer is
+waiting. Approving a dry-run write can reuse the
 latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
@@ -555,9 +559,9 @@ Live and follow runs also write `.mew/follow/latest.json` plus
 `.mew/follow/session-<id>.json`, containing the latest step, resume, cells, and
 next controls for another model or UI to observe without scraping terminal text.
 That observer can write a JSON reply file and apply it with
-`mew work --reply-file reply.json`; supported safe actions are `steer`, `note`,
-`stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and
-reply contract, including the stale-snapshot guard, or run
+`mew work --reply-file reply.json`; supported safe actions are `steer`,
+`followup`, `note`, `stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md`
+for the snapshot and reply contract, including the stale-snapshot guard, or run
 `mew work <task-id> --reply-schema --json` to print a session-specific template.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.

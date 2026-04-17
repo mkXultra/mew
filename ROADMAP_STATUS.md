@@ -20,9 +20,9 @@ Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
 change the roadmap goal, but it narrowed the cockpit target to stable
 `mew work --follow` cells plus explicit mid-loop control lanes. The useful cell
-slice and first one-time steer lane now exist, so the next cockpit work should
-complete the remaining control semantics instead of adding more ad hoc log
-output.
+slice, one-time steer lane, and FIFO queued follow-up lane now exist, so the
+next cockpit work should focus on the remaining immediate interrupt-and-submit
+semantics instead of adding more ad hoc log output.
 
 Already shipped: readable diff panes,
 command/test output panes, chat work-mode, bounded follow loops, compact live
@@ -298,11 +298,11 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- TTY redraw, cell-level collapse/expand, queued follow-up, immediate interrupt-and-submit, and configurable command/test tail controls are not implemented.
+- TTY redraw, cell-level collapse/expand, immediate interrupt-and-submit, and configurable command/test tail controls are not implemented.
 
 Next action:
 
-- Finish the remaining mid-loop control semantics around queued follow-up versus immediate interrupt, then dogfood a real coding change through `mew code <task-id>` to see whether the live/follow cockpit feels calmer than a reactive CLI.
+- Finish the remaining immediate interrupt-and-submit semantics, then dogfood a real coding change through `mew code <task-id>` to see whether the live/follow cockpit feels calmer than a reactive CLI.
 
 ## Milestone 3: Persistent Advantage
 
@@ -437,10 +437,10 @@ Next action:
 - `./mew self-improve --start-session --focus 'Dogfood native follow output' --force --ready` current: printed both `continue:` and `follow:` native work commands.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 44 commands and the structured reply-file snapshot check.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 44 commands, including CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, structured reply-file snapshot acknowledgement, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
-- `uv run pytest -q` current: `815 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `205 passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 45 commands and the session-specific reply-schema check.
-- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 45 commands, including the session-specific reply-schema check, CLI/chat one-time steer queuing, exact new-file approval, approve-all for multiple pending writes, structured reply-file snapshot acknowledgement, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
+- `uv run pytest -q` current: `818 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `208 passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 47 commands and the session-specific reply-schema plus FIFO follow-up checks.
+- `./mew dogfood --scenario work-session --cleanup --json` current: pass across 47 commands, including the session-specific reply-schema check, CLI/chat one-time steer queuing, CLI/chat FIFO follow-up queuing, exact new-file approval, approve-all for multiple pending writes, structured reply-file snapshot acknowledgement, pending diff preview in resume, command-output previews in resume, working-memory resume surfacing, focused chat diff/test/command previews, line-based read, large-file dry-run edit, workbench/global work-session ledgers, chat resume world state, timeline surfacing, side-effect recovery review context, and safe read auto-recovery.
 - `uv run python -m py_compile src/mew/commands.py src/mew/cli.py src/mew/work_session.py src/mew/dogfood.py` current: pass.
 - `uv run pytest -q` last observed before the steer lane: `802 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_work_session.py` last observed before the steer lane: `192 passed`.
@@ -646,18 +646,19 @@ Next action:
 - Mew buddy dogfood session #100 then inspected README/help/test command wording and exposed that idle resume `next_action` still pointed at a taskless `mew work --live`; resume now points at `mew work <task-id> --live` when the task id is known.
 - Mid-loop steer now has an explicit CLI/chat lane via `mew work --steer` and `/work-session steer`, with regression coverage for next-step model guidance injection and stop-request precedence.
 - Live/follow work runs now write `.mew/follow/latest.json` and `.mew/follow/session-<id>.json` with the latest step, resume bundle, cells, and next controls, creating the first structured follow cockpit artifact for another model or UI to observe.
-- `mew work --reply-file reply.json` now applies safe structured observer replies back into an active work session, covering `steer`, `note`, `stop`, and dry-run write `reject` actions while leaving approval gates explicit.
+- `mew work --reply-file reply.json` now applies safe structured observer replies back into an active work session, covering `steer`, `followup`, `note`, `stop`, and dry-run write `reject` actions while leaving approval gates explicit.
 - The follow snapshot contract now includes `schema_version`, heartbeat/process metadata, `session_updated_at`, `reply_command`, and `reply_template`; applying a reply file rewrites the snapshot with `mode=reply_file`, and no-active reply files fail nonzero instead of silently succeeding.
 - `docs/FOLLOW_REPLY_SCHEMA.md` documents the local snapshot/reply contract for another model or UI.
 - `mew work <task-id> --reply-schema --json` prints the current session's structured observer reply contract and ready-to-write template, so an external UI or model does not have to scrape `.mew/follow/latest.json` first.
+- `mew work --queue-followup "..."`, chat `/work-session queue ...`, and reply-file `followup` queue FIFO user input for later live/follow steps; pending steer still wins the next step, and queued follow-ups are consumed one at a time only after steer is clear.
 - Reply files can now include `observed_session_updated_at`; stale observer replies are rejected before mutation when the active session has moved on.
 - Reply-file `reject` now shares the pending dry-run write/edit guard, rejects replayed reject actions, and bumps the work-session `updated_at` like the other reply actions.
 - Reply files now require `schema_version: 1` and `observed_session_updated_at`, making the observer contract strict rather than best-effort.
-- `dogfood --scenario work-session` now covers a deterministic structured reply-file loop and verifies the follow snapshot acknowledgement, so the observer interface is part of recurring dogfood.
+- `dogfood --scenario work-session` now covers a deterministic structured reply-file loop, session-specific reply schema, and FIFO queued follow-up path, so the observer interface is part of recurring dogfood.
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 
 ## Current Roadmap Focus
 
 Milestone 2: Interactive Parity.
 
-The next implementation should finish the rest of the mid-loop control story: distinguish queued follow-up from immediate interrupt-and-submit, then dogfood a real coding change through `mew code <task-id>`. The front-door route is now coherent; the remaining Milestone 2 work is making the active coding loop itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's persistent memory and audit trail.
+The next implementation should finish the remaining immediate interrupt-and-submit story, then dogfood a real coding change through `mew code <task-id>`. The front-door route is now coherent; the remaining Milestone 2 work is making the active coding loop itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's persistent memory and audit trail.

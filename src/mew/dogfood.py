@@ -996,10 +996,16 @@ def run_work_session_scenario(workspace, env=None):
     stop_result = run(["work", "1", "--stop-session", "--stop-reason", "dogfood pause", "--json"])
     note_result = run(["work", "1", "--session-note", "dogfood note", "--json"])
     steer_result = run(["work", "1", "--steer", "dogfood steer", "--json"])
+    queue_followup_result = run(["work", "1", "--queue-followup", "dogfood queued follow-up", "--json"])
     chat_steer_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
         input_text="/work-session steer dogfood chat steer\n",
+    )
+    chat_queue_result = run(
+        ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
+        timeout=15,
+        input_text="/work-session queue dogfood chat follow-up\n",
     )
 
     state_path = workspace / STATE_FILE
@@ -1203,6 +1209,7 @@ def run_work_session_scenario(workspace, env=None):
                 "observed_session_updated_at": reply_session.get("updated_at"),
                 "actions": [
                     {"type": "steer", "text": "dogfood observer steer"},
+                    {"type": "followup", "text": "dogfood observer follow-up"},
                     {"type": "note", "text": "dogfood observer note"},
                 ],
             }
@@ -1230,6 +1237,7 @@ def run_work_session_scenario(workspace, env=None):
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
     steer_data = _json_stdout(steer_result)
+    queue_followup_data = _json_stdout(queue_followup_result)
     resume_data = _json_stdout(resume_result)
     verification_ledger_data = _json_stdout(verification_ledger_result, [])
     writes_ledger_data = _json_stdout(writes_ledger_result, [])
@@ -1373,13 +1381,16 @@ def run_work_session_scenario(workspace, env=None):
         and (reply_schema_data.get("reply_template") or {}).get("session_id") == reply_session.get("id")
         and reply_file_result.get("exit_code") == 0
         and any(action.get("type") == "steer" for action in reply_file_data.get("applied") or [])
+        and any(action.get("type") == "followup" for action in reply_file_data.get("applied") or [])
         and reply_snapshot_data.get("mode") == "reply_file"
         and reply_snapshot_data.get("session_id") == reply_session.get("id")
         and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("source") == "reply_file"
         and ((reply_snapshot_data.get("resume") or {}).get("pending_steer") or {}).get("text")
-        == "dogfood observer steer",
+        == "dogfood observer steer"
+        and (((reply_snapshot_data.get("resume") or {}).get("queued_followups") or [{}])[0]).get("text")
+        == "dogfood observer follow-up",
         observed={"schema": reply_schema_data, "reply": reply_file_data, "snapshot": reply_snapshot_data},
-        expected="reply-schema is session-specific and reply-file rewrites the follow snapshot",
+        expected="reply-schema is session-specific and reply-file rewrites steer/follow-up snapshot state",
     )
     _scenario_check(
         checks,
@@ -1448,6 +1459,26 @@ def run_work_session_scenario(workspace, env=None):
             "resume_pending_steer": (resume_data.get("resume") or {}).get("pending_steer"),
         },
         expected="CLI and chat can queue one-time steer guidance for the active session",
+    )
+    queued_followups = session.get("queued_followups") or []
+    resume_followups = (resume_data.get("resume") or {}).get("queued_followups") or []
+    _scenario_check(
+        checks,
+        "work_session_queue_followup_queues_fifo_input",
+        queue_followup_result.get("exit_code") == 0
+        and (queue_followup_data.get("queued_followup") or {}).get("text") == "dogfood queued follow-up"
+        and chat_queue_result.get("exit_code") == 0
+        and "queued follow-up for work session #1: dogfood chat follow-up" in (chat_queue_result.get("stdout") or "")
+        and any(item.get("text") == "dogfood queued follow-up" for item in queued_followups)
+        and any(item.get("text") == "dogfood chat follow-up" for item in queued_followups)
+        and any(item.get("text") == "dogfood chat follow-up" for item in resume_followups),
+        observed={
+            "cli": queue_followup_data,
+            "chat": command_result_tail(chat_queue_result),
+            "queued_followups": queued_followups,
+            "resume_queued_followups": resume_followups,
+        },
+        expected="CLI and chat can queue FIFO follow-up input for the active session",
     )
     _scenario_check(
         checks,

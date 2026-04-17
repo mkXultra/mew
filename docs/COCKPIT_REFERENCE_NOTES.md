@@ -292,14 +292,18 @@ Initial implementation status, 2026-04-18:
   latest step, resume bundle, cells, and next controls. This gives another
   model or UI a structured observation point without parsing terminal output.
 - `mew work --reply-file reply.json` applies the first safe structured reply
-  path back into an active session. The supported actions are `steer`, `note`,
-  `stop`, and dry-run write `reject`; approvals stay out of this path until
-  the gate/verification semantics are explicit enough.
+  path back into an active session. The supported actions are `steer`,
+  `followup`, `note`, `stop`, and dry-run write `reject`; approvals stay out of
+  this path until the gate/verification semantics are explicit enough.
 - The snapshot/reply contract is documented in `docs/FOLLOW_REPLY_SCHEMA.md`,
   and snapshots carry `schema_version`, heartbeat/process metadata, a reply
   command, and a reply template. Reply files can include
   `observed_session_updated_at` so stale observer actions fail instead of
   applying to a newer session state.
+- `mew work --queue-followup "..."`, `/work-session queue ...`, and reply-file
+  `followup` actions now provide a FIFO queued follow-up lane. Pending steer
+  still wins for the next step; queued follow-ups are consumed one at a time by
+  later live/follow steps and journaled when consumed.
 
 Remaining:
 
@@ -312,7 +316,7 @@ Estimated time: 1 to 2 days after cells exist.
 Rules to make explicit:
 
 - user message becomes pending steer (CLI/chat command lane exists)
-- user message becomes queued follow-up
+- user message becomes queued follow-up (CLI/chat/reply-file lane exists)
 - user message interrupts current turn and submits immediately
 
 The UI must show which route was chosen. Nothing should be silently dropped or

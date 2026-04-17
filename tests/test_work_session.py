@@ -2741,6 +2741,118 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_queue_followup_is_consumed_by_next_model_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("queued follow-up\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--queue-followup", "inspect the queue after this", "--json"]),
+                        0,
+                    )
+                queued = json.loads(stdout.getvalue())
+                self.assertEqual(queued["queued_followup"]["text"], "inspect the queue after this")
+                self.assertEqual(load_state()["work_sessions"][0]["queued_followups"][0]["source"], "user")
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("Queued follow-up for this step:", prompts[0])
+                self.assertIn("inspect the queue after this", prompts[0])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["queued_followups"][0]["status"], "consumed")
+                self.assertEqual(session["queued_followups"][0]["consumed_step_index"], 1)
+                self.assertEqual(session["notes"][0]["text"], "queued follow-up for step 1: inspect the queue after this")
+                self.assertIn("Queued follow-up for this step:", session["model_turns"][0]["guidance_snapshot"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_steer_defers_queued_followup(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("steer before queue\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(main(["work", "1", "--queue-followup", "second step guidance"]), 0)
+                    self.assertEqual(main(["work", "1", "--steer", "first step guidance"]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertIn("User steer for this step:", prompts[0])
+                self.assertIn("first step guidance", prompts[0])
+                self.assertNotIn("Queued follow-up for this step:", prompts[0])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["queued_followups"][0]["status"], "queued")
+                self.assertEqual(session["queued_followups"][0]["text"], "second step guidance")
+                self.assertNotIn("pending_steer", session)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_stop_preserves_pending_steer(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -7297,6 +7409,7 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 controls_block = output.split("Next CLI controls", 1)[1]
                 self.assertIn("steer next step: mew work 1 --steer <guidance>", controls_block)
+                self.assertIn("queue follow-up: mew work 1 --queue-followup <message>", controls_block)
             finally:
                 os.chdir(old_cwd)
 
@@ -8291,8 +8404,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(any(cell["kind"] == "model_turn" for cell in data["cells"]))
                 self.assertTrue(any(cell["kind"] == "tool_call" for cell in data["cells"]))
                 self.assertTrue(any(item["label"] == "steer next step" for item in data["controls"]))
+                self.assertTrue(any(item["label"] == "queue follow-up" for item in data["controls"]))
                 self.assertTrue(
                     any(item["command"].startswith("mew work 1 --steer") for item in data["controls"])
+                )
+                self.assertTrue(
+                    any(item["command"].startswith("mew work 1 --queue-followup") for item in data["controls"])
                 )
                 self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
                 self.assertEqual(data["reply_template"]["session_id"], 1)
@@ -8859,6 +8976,36 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_can_queue_followup(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session queue check this after current step", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("queued follow-up for work session #1: check this after current step", output)
+                self.assertIn("Next controls", output)
+                self.assertIn("/work-session queue <later follow-up>", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["queued_followups"][0]["text"], "check this after current step")
+                self.assertEqual(session["queued_followups"][0]["source"], "user")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session", {}), "continue")
+                self.assertIn("queued_followups: 1 next=check this after current step", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_can_queue_safe_follow_actions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -8904,6 +9051,7 @@ class WorkSessionTests(unittest.TestCase):
                             "observed_session_updated_at": observed_updated_at,
                             "actions": [
                                 {"type": "steer", "text": "inspect the rejected diff before continuing"},
+                                {"type": "followup", "text": "then decide the next queued move"},
                                 {"type": "note", "text": "observer saw a risky edit preview"},
                                 {"type": "reject", "tool_call_id": 1, "reason": "wrong direction"},
                                 {"type": "stop", "reason": "pause after observer reply"},
@@ -8918,6 +9066,7 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("applied reply file to work session #1", output)
                 self.assertIn("- steer: inspect the rejected diff before continuing", output)
+                self.assertIn("- followup: then decide the next queued move", output)
                 self.assertIn("- note: observer saw a risky edit preview", output)
                 self.assertIn("- rejected tool #1: wrong direction", output)
                 self.assertIn("- stop: pause after observer reply", output)
@@ -8925,6 +9074,8 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["pending_steer"]["text"], "inspect the rejected diff before continuing")
                 self.assertEqual(session["pending_steer"]["source"], "reply_file")
+                self.assertEqual(session["queued_followups"][0]["text"], "then decide the next queued move")
+                self.assertEqual(session["queued_followups"][0]["source"], "reply_file")
                 self.assertEqual(session["notes"][0]["text"], "observer saw a risky edit preview")
                 self.assertEqual(session["notes"][0]["source"], "reply_file")
                 self.assertEqual(session["stop_reason"], "pause after observer reply")
@@ -8938,6 +9089,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(snapshot["reply_template"]["observed_session_updated_at"], snapshot["session_updated_at"])
                 self.assertEqual(snapshot["resume"]["pending_steer"]["source"], "reply_file")
                 self.assertEqual(snapshot["resume"]["pending_steer"]["text"], "inspect the rejected diff before continuing")
+                self.assertEqual(snapshot["resume"]["queued_followups"][0]["source"], "reply_file")
+                self.assertEqual(snapshot["resume"]["queued_followups"][0]["text"], "then decide the next queued move")
             finally:
                 os.chdir(old_cwd)
 
@@ -8988,6 +9141,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["reply_command"], "mew work 1 --reply-file .mew/follow/reply.json")
                 self.assertEqual(data["reply_template"]["observed_session_updated_at"], session["updated_at"])
                 self.assertTrue(any(action["type"] == "reject" for action in data["supported_actions"]))
+                self.assertTrue(any(action["type"] == "followup" for action in data["supported_actions"]))
             finally:
                 os.chdir(old_cwd)
 

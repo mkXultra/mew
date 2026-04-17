@@ -1387,6 +1387,11 @@ def build_work_session_resume(session, task=None, limit=8):
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
+        "queued_followups": [
+            dict(item)
+            for item in (session.get("queued_followups") or [])
+            if item.get("status") == "queued" and str(item.get("text") or "").strip()
+        ][-limit:],
         "approve_all_hint": approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
@@ -1503,6 +1508,15 @@ def format_work_session_resume(resume):
         created_at = pending_steer.get("created_at") or ""
         prefix = f"{created_at} " if created_at else ""
         lines.append(f"- {prefix}[{source}] {clip_inline_text(pending_steer.get('text'), 500)}")
+
+    queued_followups = resume.get("queued_followups") or []
+    if queued_followups:
+        lines.extend(["", "Queued follow-ups"])
+        for item in queued_followups:
+            source = item.get("source") or "user"
+            created_at = item.get("created_at") or ""
+            prefix = f"{created_at} " if created_at else ""
+            lines.append(f"- #{item.get('id')} {prefix}[{source}] {clip_inline_text(item.get('text'), 500)}")
 
     lines.extend(["", "Failures"])
     failures = resume.get("failures") or []
@@ -2087,6 +2101,12 @@ def format_work_session(session, task=None, limit=8, details=False):
     pending_steer = (resume or {}).get("pending_steer") or {}
     if pending_steer.get("text"):
         lines.append(f"pending_steer: {clip_inline_text(pending_steer.get('text'), 240)}")
+    queued_followups = (resume or {}).get("queued_followups") or []
+    if queued_followups:
+        lines.append(
+            f"queued_followups: {len(queued_followups)} "
+            f"next={clip_inline_text(queued_followups[0].get('text'), 180)}"
+        )
     if details:
         paths = []
         for call in calls:

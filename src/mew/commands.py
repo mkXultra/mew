@@ -1045,6 +1045,12 @@ def format_work_live_step_result(step, resume=None):
         pending_steer = resume.get("pending_steer") or {}
         if pending_steer.get("text"):
             session_lines.append(f"pending_steer: {clip_inline_text(pending_steer.get('text'), 280)}")
+        queued_followups = resume.get("queued_followups") or []
+        if queued_followups:
+            session_lines.append(
+                f"queued_followups: {len(queued_followups)} "
+                f"next={clip_inline_text(queued_followups[0].get('text'), 220)}"
+            )
         memory = resume.get("working_memory") or {}
         if memory:
             if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
@@ -1553,6 +1559,10 @@ def work_cli_control_items(session, args):
     if task_id is not None:
         steer_parts.append(task_id)
     steer_parts.append("--steer")
+    followup_parts = ["work"]
+    if task_id is not None:
+        followup_parts.append(task_id)
+    followup_parts.append("--queue-followup")
     controls.extend(
         [
             {"label": "one live step", "command": _work_live_continue_command(args, task_id, session=session)},
@@ -1567,6 +1577,10 @@ def work_cli_control_items(session, args):
             {
                 "label": "steer next step",
                 "command": f"{mew_command(*steer_parts)} <guidance>",
+            },
+            {
+                "label": "queue follow-up",
+                "command": f"{mew_command(*followup_parts)} <message>",
             },
             {
                 "label": "pause at boundary",
@@ -1970,6 +1984,8 @@ def cmd_work(args):
         return cmd_work_close_session(args)
     if getattr(args, "steer", None):
         return cmd_work_steer(args)
+    if getattr(args, "queue_followup", None):
+        return cmd_work_queue_followup(args)
     if getattr(args, "session_note", None):
         return cmd_work_session_note(args)
     if getattr(args, "recover_session", False):
@@ -2233,6 +2249,69 @@ def complete_work_session_steer(session, steer, step_index):
     return True
 
 
+def _next_work_followup_id(session):
+    ids = []
+    for item in (session or {}).get("queued_followups") or []:
+        try:
+            ids.append(int(item.get("id")))
+        except (TypeError, ValueError):
+            continue
+    return (max(ids) if ids else 0) + 1
+
+
+def queue_work_session_followup(session, text, source="user"):
+    text = str(text or "").strip()
+    if not session or not text:
+        return None
+    current_time = now_iso()
+    followup = {
+        "id": _next_work_followup_id(session),
+        "text": text,
+        "source": source or "user",
+        "status": "queued",
+        "created_at": current_time,
+    }
+    items = session.setdefault("queued_followups", [])
+    items.append(followup)
+    del items[:-50]
+    session["updated_at"] = current_time
+    return followup
+
+
+def pending_work_session_followup(session):
+    for item in (session or {}).get("queued_followups") or []:
+        text = str(item.get("text") or "").strip()
+        if item.get("status") == "queued" and text:
+            pending = dict(item)
+            pending["text"] = text
+            return pending
+    return None
+
+
+def complete_work_session_followup(session, followup, step_index):
+    expected = followup or {}
+    expected_id = expected.get("id")
+    for item in (session or {}).get("queued_followups") or []:
+        if expected_id is not None and item.get("id") != expected_id:
+            continue
+        if item.get("status") != "queued":
+            return False
+        if str(item.get("text") or "").strip() != str(expected.get("text") or "").strip():
+            return False
+        current_time = now_iso()
+        item["status"] = "consumed"
+        item["consumed_at"] = current_time
+        item["consumed_step_index"] = step_index
+        add_work_session_note(
+            session,
+            f"queued follow-up for step {step_index}: {item.get('text')}",
+            source=item.get("source") or "user",
+            current_time=current_time,
+        )
+        return True
+    return False
+
+
 def pause_work_session_after_user_interrupt(session_id, step_index):
     current_time = now_iso()
     repairs = []
@@ -2483,8 +2562,11 @@ def cmd_work_ai(args):
             session = find_work_session(state, session_id)
             stop_request = consume_work_session_stop(session)
             pending_steer = None
+            pending_followup = None
             if not stop_request:
                 pending_steer = pending_work_session_steer(session)
+                if not pending_steer:
+                    pending_followup = pending_work_session_followup(session)
             task = work_session_task(state, session)
             if stop_request:
                 save_state(state)
@@ -2502,6 +2584,18 @@ def cmd_work_ai(args):
             )
             if progress:
                 progress(f"step #{index}: applying steer")
+        elif pending_followup:
+            pending_followup_text = pending_followup.get("text") or ""
+            step_guidance = "\n\n".join(
+                part
+                for part in (
+                    step_guidance,
+                    f"Queued follow-up for this step:\n{pending_followup_text}",
+                )
+                if part
+            )
+            if progress:
+                progress(f"step #{index}: applying queued follow-up")
 
         prompt_state = state
         prompt_session = session
@@ -2641,6 +2735,9 @@ def cmd_work_ai(args):
             state = load_state()
             session = find_work_session(state, session_id)
             steer_consumed = complete_work_session_steer(session, pending_steer, index) if pending_steer else False
+            followup_consumed = (
+                complete_work_session_followup(session, pending_followup, index) if pending_followup else False
+            )
             stop_request = consume_work_session_stop(session)
             if stop_request:
                 turn = update_work_model_turn_plan(
@@ -2659,10 +2756,12 @@ def cmd_work_ai(args):
                         4000,
                     )
                 save_state(state)
-            elif steer_consumed:
+            elif steer_consumed or followup_consumed:
                 save_state(state)
         if pending_steer and steer_consumed and progress:
             progress(f"step #{index}: consumed steer")
+        if pending_followup and followup_consumed and progress:
+            progress(f"step #{index}: consumed queued follow-up")
         if stop_request:
             report["steps"].append(
                 {
@@ -3637,6 +3736,9 @@ def _normalize_work_reply_actions(payload):
             if action_type in ("steer", "guidance"):
                 text = _coerce_work_reply_text(raw.get("text") or raw.get("guidance"))
                 actions.append({"type": "steer", "text": text})
+            elif action_type in ("followup", "follow_up", "queue", "queue_followup"):
+                text = _coerce_work_reply_text(raw.get("text") or raw.get("message") or raw.get("followup"))
+                actions.append({"type": "followup", "text": text})
             elif action_type in ("note", "session_note"):
                 text = _coerce_work_reply_text(raw.get("text") or raw.get("note"))
                 actions.append({"type": "note", "text": text})
@@ -3652,6 +3754,11 @@ def _normalize_work_reply_actions(payload):
     steer = _coerce_work_reply_text(payload.get("steer") or payload.get("pending_steer"))
     if steer:
         actions.append({"type": "steer", "text": steer})
+    followup = _coerce_work_reply_text(
+        payload.get("followup") or payload.get("follow_up") or payload.get("queued_followup")
+    )
+    if followup:
+        actions.append({"type": "followup", "text": followup})
     note = _coerce_work_reply_text(payload.get("note") or payload.get("session_note"))
     if note:
         actions.append({"type": "note", "text": note})
@@ -3669,7 +3776,7 @@ def _normalize_work_reply_actions(payload):
             reason = _coerce_work_reply_text(payload.get("reject_reason"))
         actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
     for action in actions:
-        if action["type"] in ("steer", "note") and not action.get("text"):
+        if action["type"] in ("steer", "followup", "note") and not action.get("text"):
             raise MewError(f"reply {action['type']} action requires text")
         if action["type"] == "reject":
             try:
@@ -3707,6 +3814,11 @@ def build_work_reply_schema(session=None):
             {
                 "type": "steer",
                 "description": "queue one-shot guidance for the next live/follow step",
+                "required": ["text"],
+            },
+            {
+                "type": "followup",
+                "description": "queue FIFO user input for a later live/follow step",
                 "required": ["text"],
             },
             {"type": "note", "description": "record durable observer context", "required": ["text"]},
@@ -3900,6 +4012,9 @@ def cmd_work_reply_file(args):
             if action["type"] == "steer":
                 steer = queue_work_session_steer(session, action["text"], source="reply_file")
                 applied.append({"type": "steer", "text": steer.get("text")})
+            elif action["type"] == "followup":
+                followup = queue_work_session_followup(session, action["text"], source="reply_file")
+                applied.append({"type": "followup", "id": followup.get("id"), "text": followup.get("text")})
             elif action["type"] == "note":
                 note = add_work_session_note(session, action["text"], source="reply_file")
                 applied.append({"type": "note", "text": note.get("text")})
@@ -3998,6 +4113,54 @@ def cmd_work_steer(args):
         print(json.dumps({"work_session_id": session.get("id"), "pending_steer": steer}, ensure_ascii=False, indent=2))
     else:
         print(f"queued steer for work session #{session['id']}: {steer['text']}")
+    return 0
+
+
+def cmd_work_queue_followup(args):
+    text = (getattr(args, "queue_followup", None) or "").strip()
+    if not text:
+        print("mew: --queue-followup requires text", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        if not getattr(args, "task_id", None):
+            active_sessions = _active_work_sessions_for_reply(state)
+            if len(active_sessions) > 1:
+                if getattr(args, "json", False):
+                    print(
+                        json.dumps(
+                            {
+                                "error": "multiple_active_work_sessions",
+                                "active_work_sessions": [
+                                    {"session_id": item.get("id"), "task_id": item.get("task_id")}
+                                    for item in active_sessions[-5:]
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print("Multiple active work sessions; pass a task id:")
+                    for item in active_sessions[-5:]:
+                        print(f"- {mew_command('work', item.get('task_id'), '--queue-followup')} <message>")
+                return 1
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        followup = queue_work_session_followup(session, text)
+        save_state(state)
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {"work_session_id": session.get("id"), "queued_followup": followup},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(f"queued follow-up for work session #{session['id']}: {followup['text']}")
     return 0
 
 
@@ -7712,7 +7875,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/note/steer/recover/ai/live/resume/timeline/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/steer/queue/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance; /c is alias
 /follow [opts|text]   run compact continuous live steps; defaults to 10 steps
 /work-mode [on|off]   toggle chat mode where text guides /continue and blank repeats after one work step
@@ -7810,6 +7973,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
 /work-session steer <text>            queue one-time guidance for the next live/follow step
+/work-session queue <text>            queue FIFO follow-up input for a later live/follow step
 /outside chat: mew work <task-id> --reply-schema --json
                                       print the structured observer reply template
 /work-session approve <id> ...        apply a dry-run write after explicit gates
@@ -8424,6 +8588,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     lines.append("Manage")
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session steer <next-step guidance>")
+    lines.append("- /work-session queue <later follow-up>")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     lines.append("Advanced")
@@ -8451,6 +8616,7 @@ def chat_work_session(rest, chat_state=None):
         "stop",
         "note",
         "steer",
+        "queue",
         "recover",
         "ai",
         "step",
@@ -8475,6 +8641,7 @@ def chat_work_session(rest, chat_state=None):
         "stop",
         "note",
         "steer",
+        "queue",
         "recover",
         "ai",
         "step",
@@ -8594,6 +8761,36 @@ def chat_work_session(rest, chat_state=None):
             scoped_task_id = session.get("task_id")
         args = SimpleNamespace(task_id=scoped_task_id, steer=" ".join(steer_parts), json=False)
         cmd_work_steer(args)
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
+        return
+
+    if action == "queue":
+        scoped_task_id = None
+        followup_parts = parts[1:]
+        if task_first:
+            scoped_task_id = task_id
+            followup_parts = parts[2:]
+        if scope_kind:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            scoped_task_id = session.get("task_id")
+        args = SimpleNamespace(
+            task_id=scoped_task_id,
+            queue_followup=" ".join(followup_parts),
+            json=False,
+        )
+        cmd_work_queue_followup(args)
         state = load_state()
         session = active_work_session_for_kind(state, scope_kind)
         print(
