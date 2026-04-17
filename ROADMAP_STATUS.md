@@ -407,4 +407,4 @@ Next action:
 
 Milestone 2: Interactive Parity.
 
-The next implementation should make the `mew chat --work-mode` / `/follow` path calmer in longer real coding sessions: improve the live reasoning/status pane, keep the front doors aligned with task-specific restart commands, and keep dogfooding against repository tasks until the cockpit feels preferable to delegating back to Claude Code or Codex CLI.
+The next implementation should dogfood a real coding change through `mew code <task-id>` and tune the live reasoning/status pane from that session. The front-door route is now coherent; the remaining Milestone 2 work is making the active coding loop itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's persistent memory and audit trail.
