@@ -2015,6 +2015,40 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("retry safe read", resume["next_action"])
         self.assertIn("first inspect missing touched paths: missing.py", resume["next_action"])
 
+    def test_work_resume_suggests_safe_reobserve_after_failed_edit(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover edit",
+            "goal": "Recover edit failure.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "README.md", "old": "missing", "new": "replacement"},
+                    "error": "old text was not found",
+                    "summary": "edit failed",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        reobserve = resume["suggested_safe_reobserve"]
+        self.assertEqual(reobserve["source_tool_call_id"], 4)
+        self.assertEqual(reobserve["action"], "read_file")
+        self.assertEqual(reobserve["parameters"]["path"], "README.md")
+        self.assertEqual(resume["failures"][0]["suggested_safe_reobserve"], reobserve)
+
+        text = format_work_session_resume(resume)
+        self.assertIn("reobserve: read_file path=README.md", text)
+        self.assertIn("safely re-read the target", text)
+
     def test_work_session_resume_auto_recovers_safe_read_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

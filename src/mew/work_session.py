@@ -697,6 +697,71 @@ def work_call_path(call):
     return result.get("path") or parameters.get("path") or ""
 
 
+def suggested_safe_reobserve_for_call(call):
+    if not isinstance(call, dict):
+        return {}
+    failure_record = work_tool_failure_record(call)
+    if call.get("status") not in ("failed", "interrupted") and not failure_record:
+        return {}
+
+    tool = call.get("tool")
+    parameters = call.get("parameters") or {}
+    path = work_call_path(call)
+
+    def suggestion(action, suggested_parameters, reason):
+        return {
+            "source_tool_call_id": call.get("id"),
+            "source_tool": tool,
+            "action": action,
+            "parameters": {key: value for key, value in suggested_parameters.items() if value not in (None, "")},
+            "reason": reason,
+        }
+
+    if tool in WRITE_WORK_TOOLS and path:
+        return suggestion(
+            "read_file",
+            {"path": path, "line_start": parameters.get("line_start"), "line_count": parameters.get("line_count")},
+            "write/edit failed; safely re-read the target before planning another edit",
+        )
+    if tool == "read_file" and path:
+        return suggestion(
+            "read_file",
+            {
+                "path": path,
+                "line_start": parameters.get("line_start"),
+                "line_count": parameters.get("line_count"),
+                "offset": parameters.get("offset"),
+            },
+            "read failed; retry the bounded read after checking current read gates",
+        )
+    if tool in ("inspect_dir", "search_text", "glob"):
+        suggested_parameters = {
+            "path": path or parameters.get("path"),
+            "query": parameters.get("query"),
+            "pattern": parameters.get("pattern"),
+            "max_matches": parameters.get("max_matches"),
+        }
+        return suggestion(tool, suggested_parameters, "inspection failed; retry the same safe observation if gates still allow it")
+    if tool in GIT_WORK_TOOLS:
+        return suggestion(
+            tool,
+            {
+                "cwd": parameters.get("cwd"),
+                "base": parameters.get("base"),
+                "staged": parameters.get("staged"),
+                "stat": parameters.get("stat"),
+            },
+            "git inspection failed; retry the read-only git observation before planning",
+        )
+    if tool in COMMAND_WORK_TOOLS:
+        return suggestion(
+            "review_command_output",
+            {"command": parameters.get("command"), "cwd": parameters.get("cwd")},
+            "command failed; review recorded stdout/stderr before rerunning side-effecting work",
+        )
+    return {}
+
+
 def _work_call_repeat_target(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
@@ -1104,6 +1169,7 @@ def build_work_session_resume(session, task=None, limit=8):
     commands = []
     failures = []
     pending_approvals = []
+    latest_safe_reobserve = {}
 
     for call in calls:
         path = work_call_path(call)
@@ -1140,17 +1206,20 @@ def build_work_session_resume(session, task=None, limit=8):
 
         failure_record = work_tool_failure_record(call)
         if call.get("status") in ("failed", "interrupted") or failure_record:
-            failures.append(
-                {
-                    "tool_call_id": call.get("id"),
-                    "tool": call.get("tool"),
-                    "error": call.get("error") or "",
-                    "summary": call.get("summary") or "",
-                    "exit_code": (failure_record or result).get("exit_code"),
-                    "recovery_status": call.get("recovery_status") or "",
-                    "recovered_by_tool_call_id": call.get("recovered_by_tool_call_id"),
-                }
-            )
+            safe_reobserve = suggested_safe_reobserve_for_call(call)
+            failure = {
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool"),
+                "error": call.get("error") or "",
+                "summary": call.get("summary") or "",
+                "exit_code": (failure_record or result).get("exit_code"),
+                "recovery_status": call.get("recovery_status") or "",
+                "recovered_by_tool_call_id": call.get("recovered_by_tool_call_id"),
+            }
+            if safe_reobserve:
+                failure["suggested_safe_reobserve"] = safe_reobserve
+                latest_safe_reobserve = safe_reobserve
+            failures.append(failure)
 
         if (
             call.get("tool") in WRITE_WORK_TOOLS
@@ -1268,6 +1337,7 @@ def build_work_session_resume(session, task=None, limit=8):
         ),
         "last_stop_request": session.get("last_stop_request") or {},
         "recovery_plan": recovery_plan,
+        "suggested_safe_reobserve": latest_safe_reobserve,
         "next_action": next_action,
     }
 
@@ -1375,6 +1445,15 @@ def format_work_session_resume(resume):
                 f"exit={format_exit_code(failure.get('exit_code'))}{recovered} "
                 f"{failure.get('error') or failure.get('summary') or ''}"
             )
+            reobserve = failure.get("suggested_safe_reobserve") or {}
+            if reobserve:
+                params = shlex.join(
+                    f"{key}={value}" for key, value in (reobserve.get("parameters") or {}).items()
+                )
+                suffix = f" {params}" if params else ""
+                lines.append(f"  reobserve: {reobserve.get('action')}{suffix}")
+                if reobserve.get("reason"):
+                    lines.append(f"  reason: {reobserve.get('reason')}")
     else:
         lines.append("(none)")
 

@@ -200,6 +200,7 @@ Evidence:
 - Work-mode prompts now tell the resident model that `run_command` is shlex-parsed without a shell, reducing failed probes that use `&&`, pipes, or redirection.
 - Work-mode prompts now steer code navigation toward `search_text` before broad `read_file`, then line-window reads from search hits, reducing wasted context in compact live dogfood.
 - Work-mode prompts now require exact `edit_file` old/new strings, and deterministic action normalization turns incomplete `edit_file` attempts with a path into a safe `read_file` re-observation instead of a failed write tool call.
+- Work-session resumes now include structured `suggested_safe_reobserve` metadata for the latest failed tool, turning edit/read/search/git/command failures into explicit safe re-observation or output-review suggestions for the next model turn and human resume.
 - Nonzero `run_command` exits now surface in work-session failure summaries and `phase=failed` without treating the command launch itself as a tool crash.
 - Work-mode prompts now treat one-shot `--work-guidance` / `/continue <guidance>` as the current instruction for that turn, reducing early `finish` decisions based only on older session notes.
 - Work-session model turns now retain a clipped `guidance_snapshot` copy of that one-shot guidance, and resume, timeline, details, and model context expose it for reentry and audit without making it current guidance again.
@@ -330,6 +331,7 @@ Evidence:
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
 - Native self-improvement dogfood session #69 used `mew self-improve --start-session` and `mew work --follow` with Codex Web API to implement a small True Recovery slice, then verified it with focused and full tests.
 - Native self-improvement dogfood session #70 used `mew work --follow` with Codex Web API to continue True Recovery work; it exposed malformed JSON and incomplete edit friction, then landed world-aware recovery `next_action` guidance after those cockpit fixes.
+- Native self-improvement dogfood session #71 used `mew work --follow` with Codex Web API to attempt the first post-error re-observer slice; it stalled on a stale edit after a partial patch, which directly shaped the manual structured `suggested_safe_reobserve` implementation.
 
 Missing proof:
 
@@ -344,7 +346,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `666 passed, 4 subtests passed`.
+- `uv run pytest -q` current: `667 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_resume_suggests_safe_reobserve_after_failed_edit tests/test_work_session.py::WorkSessionTests::test_work_session_resume_next_action_uses_latest_tool_status` current: `2 passed`.
+- `./mew dogfood --scenario work-session --workspace /tmp/mew-dogfood-safe-reobserve --json` current: pass across 36 commands.
 - `uv run pytest -q tests/test_brief.py::BriefTests::test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks tests/test_brief.py::BriefTests::test_next_move_coding_filter_in_empty_project_suggests_task_creation` current: `2 passed`.
 - `/Users/mk/dev/personal-pj/mew/mew focus --kind coding` and `/Users/mk/dev/personal-pj/mew/mew next --kind coding` in `/tmp/mew-empty-check` current: both suggest `mew task add ... --kind coding --ready`.
 - `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_session_stop_request_is_consumed_before_model_step tests/test_work_session.py::WorkSessionTests::test_work_session_recovers_interrupted_read_tool` current: `2 passed`.
