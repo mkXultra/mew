@@ -2853,6 +2853,34 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_resume_shows_queued_followups_in_fifo_order(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    for index in range(1, 10):
+                        self.assertEqual(main(["work", "1", "--queue-followup", f"follow {index}"]), 0)
+
+                from mew.work_session import build_work_session_resume, format_work_session
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                resume = build_work_session_resume(session, task=state["tasks"][0], limit=8)
+                self.assertEqual(len(resume["queued_followups"]), 8)
+                self.assertEqual(resume["queued_followups_total"], 9)
+                self.assertTrue(resume["queued_followups_truncated"])
+                self.assertEqual(resume["queued_followups"][0]["text"], "follow 1")
+                self.assertEqual(resume["queued_followups"][-1]["text"], "follow 8")
+                self.assertIn("queued_followups: 9 next=follow 1", format_work_session(session, task=state["tasks"][0]))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_interrupt_submit_sets_boundary_stop_and_pending_steer(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2883,6 +2911,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Stop request", text)
                 self.assertIn("action: interrupt_submit", text)
                 self.assertIn("Pending steer", text)
+                self.assertIn("continue to submit pending interrupt", resume["next_action"])
+                self.assertIn("mew work 1 --live", resume["next_action"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session"]), 0)
+                controls_block = stdout.getvalue().split("Next CLI controls", 1)[1]
+                self.assertIn("submit pending interrupt: mew work 1 --live", controls_block)
+                self.assertNotIn("stop requested snapshot", controls_block)
             finally:
                 os.chdir(old_cwd)
 
@@ -9167,6 +9203,8 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(run_chat_slash_command("/work-session interrupt submit this now", {}), "continue")
                 output = stdout.getvalue()
                 self.assertIn("interrupt-submit queued for work session #1: submit this now", output)
+                self.assertIn("Primary", output)
+                self.assertIn("/c", output)
                 self.assertIn("/work-session resume 1", output)
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["stop_action"], "interrupt_submit")

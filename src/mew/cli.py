@@ -906,7 +906,7 @@ def build_parser():
     )
     work_parser.add_argument(
         "--reply-file",
-        help="apply a structured follow reply JSON file with steer/note/stop/reject actions",
+        help="apply a structured follow reply JSON file with observer actions",
     )
     work_parser.add_argument(
         "--reply-schema",

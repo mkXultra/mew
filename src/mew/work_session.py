@@ -1110,6 +1110,16 @@ def work_session_phase(session, calls, turns, pending_approvals):
     return "idle"
 
 
+def work_session_has_running_activity(session):
+    if not session:
+        return False
+    calls = list(session.get("tool_calls") or [])
+    turns = list(session.get("model_turns") or [])
+    return any((call or {}).get("status") == "running" for call in calls) or any(
+        (turn or {}).get("status") == "running" for turn in turns
+    )
+
+
 def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
@@ -1363,7 +1373,17 @@ def build_work_session_resume(session, task=None, limit=8):
             start_command = mew_command("work", "--start-session")
         next_action = f"review this closed work session or start a new one with {start_command}"
     elif phase == "stop_requested":
-        next_action = "stop requested; the running work loop should pause at the next boundary"
+        if session.get("stop_action") == "interrupt_submit":
+            if work_session_has_running_activity(session):
+                next_action = "interrupt-submit requested; wait for the running step to reach a boundary"
+            else:
+                if task_id:
+                    live_command = mew_command("work", task_id, "--live")
+                else:
+                    live_command = mew_command("work", "--live")
+                next_action = f"continue to submit pending interrupt with /continue in chat or {live_command}"
+        else:
+            next_action = "stop requested; the running work loop should pause at the next boundary"
     elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
     elif phase == "running_tool":
@@ -1381,6 +1401,11 @@ def build_work_session_resume(session, task=None, limit=8):
             live_command = mew_command("work", "--live")
         next_action = f"continue the work session with /continue in chat or {live_command}"
 
+    queued_followups = [
+        dict(item)
+        for item in (session.get("queued_followups") or [])
+        if item.get("status") == "queued" and str(item.get("text") or "").strip()
+    ]
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
     if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
         next_action = recovery_plan["next_action"]
@@ -1399,11 +1424,9 @@ def build_work_session_resume(session, task=None, limit=8):
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
-        "queued_followups": [
-            dict(item)
-            for item in (session.get("queued_followups") or [])
-            if item.get("status") == "queued" and str(item.get("text") or "").strip()
-        ][-limit:],
+        "queued_followups": queued_followups[:limit],
+        "queued_followups_total": len(queued_followups),
+        "queued_followups_truncated": len(queued_followups) > limit,
         "approve_all_hint": approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
@@ -1525,7 +1548,9 @@ def format_work_session_resume(resume):
 
     queued_followups = resume.get("queued_followups") or []
     if queued_followups:
-        lines.extend(["", "Queued follow-ups"])
+        queued_total = int(resume.get("queued_followups_total") or len(queued_followups))
+        suffix = f" (showing {len(queued_followups)} of {queued_total})" if queued_total > len(queued_followups) else ""
+        lines.extend(["", f"Queued follow-ups{suffix}"])
         for item in queued_followups:
             source = item.get("source") or "user"
             created_at = item.get("created_at") or ""
@@ -2125,8 +2150,9 @@ def format_work_session(session, task=None, limit=8, details=False):
         lines.append(f"pending_steer: {clip_inline_text(pending_steer.get('text'), 240)}")
     queued_followups = (resume or {}).get("queued_followups") or []
     if queued_followups:
+        queued_total = int((resume or {}).get("queued_followups_total") or len(queued_followups))
         lines.append(
-            f"queued_followups: {len(queued_followups)} "
+            f"queued_followups: {queued_total} "
             f"next={clip_inline_text(queued_followups[0].get('text'), 180)}"
         )
     if details:

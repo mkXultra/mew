@@ -695,6 +695,7 @@ def run_chat_cockpit_scenario(workspace, env=None):
     )
     code_output = code_result.get("stdout") or ""
     code_controls = code_output.split("Next controls", 1)[1] if "Next controls" in code_output else code_output
+    code_primary_controls = code_controls.split("Inspect", 1)[0]
 
     _scenario_check(
         checks,
@@ -801,15 +802,16 @@ def run_chat_cockpit_scenario(workspace, env=None):
         checks,
         "code_startup_controls_stay_short",
         code_result.get("exit_code") == 0
-        and "- /c" in code_controls
-        and "- /follow" in code_controls
-        and "- /continue <guidance>" in code_controls
-        and "--auth" not in code_controls
-        and "--model-backend" not in code_controls
-        and "--allow-read" not in code_controls
-        and "--act-mode" not in code_controls,
+        and "- /c" in code_primary_controls
+        and "- /follow" in code_primary_controls
+        and "- /continue <guidance>" in code_primary_controls
+        and "--auth" not in code_primary_controls
+        and "--model-backend" not in code_primary_controls
+        and "--allow-read" not in code_primary_controls
+        and "--act-mode" not in code_primary_controls
+        and "/work-session resume --allow-read ." in code_controls,
         observed=command_result_tail(code_result),
-        expected="mew code startup keeps primary controls short and leaves full flags behind /help work",
+        expected="mew code startup keeps primary controls short while resume preserves read gates",
     )
     _scenario_check(
         checks,

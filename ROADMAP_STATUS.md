@@ -60,6 +60,11 @@ implicit `/work-session resume` now names the selected active task when more
 than one scoped session matches.
 Retesting then found and fixed the last diff-stat edge case: huge single-line
 edits without a trailing newline now count as `+1 -1` instead of `+0 -1`.
+Fresh Codex review of the follow/interrupt lanes found and fixed three smaller
+human-loop issues: queued follow-ups are now shown in FIFO order even when the
+resume view is truncated, idle `interrupt_submit` sessions now point directly
+at the continue command that will submit the pending interrupt, and reply-file
+help no longer under-documents supported observer actions.
 
 ## Milestone 1: Native Hands
 
@@ -289,6 +294,8 @@ Evidence:
 - `mew work --steer "..."` and `/work-session steer ...` queue one-time guidance for the next live/follow step; pending steer is exposed in session/resume/live output, then injected into model guidance, recorded as a work-session note, and cleared only after model planning succeeds. Stop requests and model/API errors preserve pending steer for the next actual step.
 - `mew work --steer` now refuses ambiguous taskless routing when multiple work sessions are active and prints task-qualified steer commands instead, preventing a queued instruction from landing in the wrong resident session.
 - `Next CLI controls` now include the `mew work <task-id> --steer <guidance>` lane, making the mid-loop control discoverable from live/follow output instead of only from chat help.
+- Queued follow-ups are surfaced in consumption order, with total/truncation metadata, so a long queue does not mislead the next-step preview.
+- Idle `interrupt_submit` sessions now render "submit pending interrupt" controls instead of generic pause controls, while still waiting at a boundary when a model/tool step is actually running.
 
 Missing proof:
 

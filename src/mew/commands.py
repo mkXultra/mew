@@ -196,6 +196,7 @@ from .work_session import (
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
     WRITE_WORK_TOOLS,
+    work_session_has_running_activity,
     work_session_task,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
@@ -1541,6 +1542,19 @@ def work_cli_control_items(session, args):
     resume = build_work_session_resume(session)
     approval_items = _work_cli_approval_items(session, resume)
     if session.get("stop_requested_at"):
+        if session.get("stop_action") == "interrupt_submit" and not work_session_has_running_activity(session):
+            return approval_items + [
+                {
+                    "label": "submit pending interrupt",
+                    "command": _work_live_continue_command(args, task_id, session=session),
+                },
+                {
+                    "label": "short live burst after interrupt",
+                    "command": _work_live_continue_command(args, task_id, session=session, max_steps=3),
+                },
+                {"label": "interrupt snapshot", "command": _work_resume_command(args, task_id, session=session)},
+                {"label": "open chat", "command": mew_command("chat")},
+            ]
         return approval_items + [
             {"label": "stop requested snapshot", "command": _work_resume_command(args, task_id, session=session)},
             {"label": "open chat", "command": mew_command("chat")},
@@ -8666,6 +8680,18 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         return "\n".join(lines)
     resume = build_work_session_resume(session, task=work_session_task(state, session))
     if session.get("stop_requested_at"):
+        cached = (continue_options or "").strip() or work_chat_continue_options(session)
+        if session.get("stop_action") == "interrupt_submit" and not work_session_has_running_activity(session):
+            lines.append("Primary")
+            if terse:
+                lines.append("- /c")
+                lines.append("- /continue <guidance>")
+            elif cached:
+                lines.append(f"- /c {cached}")
+                lines.append("- /continue <guidance>")
+            else:
+                lines.append("- /c --allow-read .")
+                lines.append("- /continue --allow-read .")
         if (resume or {}).get("approve_all_hint"):
             lines.append(f"- {(resume or {}).get('approve_all_hint')}")
         for approval in (resume or {}).get("pending_approvals") or []:

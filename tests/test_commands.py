@@ -4146,9 +4146,11 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("work-mode: on", output)
                 self.assertNotIn("Tool calls", output)
                 controls = output.split("Next controls", 1)[1]
+                primary_controls = controls.split("Inspect", 1)[0]
                 self.assertIn("- /c", controls)
                 self.assertIn("- /follow", controls)
-                self.assertNotIn("--allow-read src", controls)
+                self.assertNotIn("--allow-read src", primary_controls)
+                self.assertIn("- /work-session resume --allow-read src", controls)
 
                 from mew.state import load_state
 
