@@ -647,7 +647,11 @@ def build_parser():
         default=0.05,
         help="minimum minutes between dogfood verification runs",
     )
-    dogfood_parser.add_argument("--cleanup", action="store_true", help="remove a temporary dogfood workspace after reporting")
+    dogfood_parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="remove a mew-created temporary dogfood workspace after reporting; explicit --workspace paths are kept",
+    )
     dogfood_parser.add_argument("--report", help="write the structured dogfood report to this JSON file")
     dogfood_parser.add_argument(
         "--json",

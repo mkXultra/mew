@@ -1372,6 +1372,7 @@ def run_dogfood_scenario(args):
             raise ValueError(f"unknown dogfood scenario: {name}")
 
     passed = all(report.get("status") == "pass" for report in reports)
+    cleanup_skipped_reason = "explicit_workspace" if args.cleanup and not created_temp else ""
     report = {
         "generated_at": now_iso(),
         "workspace": str(workspace),
@@ -1380,6 +1381,8 @@ def run_dogfood_scenario(args):
         "status": "pass" if passed else "fail",
         "scenarios": reports,
     }
+    if cleanup_skipped_reason:
+        report["cleanup_skipped_reason"] = cleanup_skipped_reason
     if args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
     return report
@@ -2174,6 +2177,8 @@ def format_dogfood_scenario_report(report):
         f"workspace: {report.get('workspace')}",
         f"scenario: {report.get('scenario')} status={report.get('status')}",
     ]
+    if report.get("cleanup_skipped_reason"):
+        lines.append(f"cleanup_skipped: {report.get('cleanup_skipped_reason')}")
     for scenario in report.get("scenarios") or []:
         lines.append("")
         lines.append(
@@ -2215,6 +2220,7 @@ def summarize_dogfood_scenario_json(report):
         "generated_at": report.get("generated_at"),
         "workspace": report.get("workspace"),
         "kept": report.get("kept"),
+        "cleanup_skipped_reason": report.get("cleanup_skipped_reason") or "",
         "scenario": report.get("scenario"),
         "status": report.get("status"),
         "scenarios": scenarios,
@@ -2418,6 +2424,9 @@ def run_dogfood(args):
         report["cleanup_skipped_reason"] = "active_agent_runs"
     elif args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
+    elif args.cleanup and not created_temp:
+        report["kept"] = True
+        report["cleanup_skipped_reason"] = "explicit_workspace"
     return report
 
 
@@ -2456,6 +2465,8 @@ def run_dogfood_loop(args):
     cleanup_skipped_reason = ""
     if args.cleanup and created_temp and has_active_agent_runs(final_report):
         cleanup_skipped_reason = "active_agent_runs"
+    elif args.cleanup and not created_temp:
+        cleanup_skipped_reason = "explicit_workspace"
     elif args.cleanup and created_temp:
         shutil.rmtree(workspace, ignore_errors=True)
 

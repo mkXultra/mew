@@ -166,6 +166,25 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "trace-smoke")
             self.assertIn("trace-smoke: pass", text)
 
+    def test_run_dogfood_scenario_cleanup_keeps_explicit_workspace_with_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "dog"
+            args = SimpleNamespace(
+                workspace=str(workspace),
+                scenario="trace-smoke",
+                cleanup=True,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            summary = summarize_dogfood_scenario_json(report)
+
+            self.assertTrue(workspace.exists())
+            self.assertTrue(report["kept"])
+            self.assertEqual(report["cleanup_skipped_reason"], "explicit_workspace")
+            self.assertIn("cleanup_skipped: explicit_workspace", text)
+            self.assertEqual(summary["cleanup_skipped_reason"], "explicit_workspace")
+
     def test_run_dogfood_memory_search_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
