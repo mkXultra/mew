@@ -257,6 +257,7 @@ Evidence:
 - `mew dogfood --cleanup --workspace ...` now reports `cleanup_skipped_reason=explicit_workspace` instead of silently keeping the user-provided path, and native self-improvement output now prints the resolved `work cwd`.
 - When scoped chat has multiple active matching work sessions, implicit `/work-session resume` now names the selected task and points to `/work-session resume <task-id>` for explicit selection.
 - Write/edit diff stats now count line replacements from the before/after text rather than parsing unified diff text, covering no-trailing-newline replacements that `difflib` renders on one physical line.
+- `dogfood --scenario chat-cockpit` now covers `mew code --quiet`, preserving the silent scripted cockpit startup path.
 
 Missing proof:
 
@@ -388,6 +389,7 @@ Next action:
 
 - `uv run pytest -q` current: `702 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands, including no-trailing-newline large edit diff stats.
+- `./mew dogfood --scenario chat-cockpit --cleanup --json` current: pass across 11 commands, including `code_quiet_startup_is_silent`.
 - `codex-ultra` retest of prior human-role frictions current: scoped resume naming, self-improve work cwd, explicit dogfood cleanup reason, and code quiet passed; remaining no-trailing-newline diff-stat edge was reproduced and fixed in `85e2d07`.
 - `claude-ultra` review of `b18880d..5a6f3fd` current: no blockers for compact labels, unclipped diff stats, explicit dogfood cleanup skip reasons, and self-improve cwd output; minor notes were schema/memory/test-coupling caveats.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; temporary workspace removed.
