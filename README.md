@@ -439,7 +439,10 @@ for an explicit task id before queuing. For follow-up input that should wait in
 FIFO order instead of replacing the next steer, use
 `mew work --queue-followup "..."` or `/work-session queue ...`; the next
 live/follow step consumes one queued follow-up only when no pending steer is
-waiting. Approving a dry-run write can reuse the
+waiting. To stop the current step at the next model/tool boundary and submit
+new guidance immediately afterward, use `mew work --interrupt-submit "..."`
+or `/work-session interrupt ...`; if the current loop still has remaining
+steps, it continues with that submitted guidance. Approving a dry-run write can reuse the
 latest session
 verification command, so `--verify-command` does not need to be repeated when a
 recent `run_tests` or task command already defines it. A successful `run_tests`
@@ -560,7 +563,7 @@ Live and follow runs also write `.mew/follow/latest.json` plus
 next controls for another model or UI to observe without scraping terminal text.
 That observer can write a JSON reply file and apply it with
 `mew work --reply-file reply.json`; supported safe actions are `steer`,
-`followup`, `note`, `stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md`
+`followup`, `interrupt_submit`, `note`, `stop`, and `reject`. See `docs/FOLLOW_REPLY_SCHEMA.md`
 for the snapshot and reply contract, including the stale-snapshot guard, or run
 `mew work <task-id> --reply-schema --json` to print a session-specific template.
 Inline approval prompts show the clipped diff preview and the verification

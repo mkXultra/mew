@@ -1563,6 +1563,10 @@ def work_cli_control_items(session, args):
     if task_id is not None:
         followup_parts.append(task_id)
     followup_parts.append("--queue-followup")
+    interrupt_parts = ["work"]
+    if task_id is not None:
+        interrupt_parts.append(task_id)
+    interrupt_parts.append("--interrupt-submit")
     controls.extend(
         [
             {"label": "one live step", "command": _work_live_continue_command(args, task_id, session=session)},
@@ -1581,6 +1585,10 @@ def work_cli_control_items(session, args):
             {
                 "label": "queue follow-up",
                 "command": f"{mew_command(*followup_parts)} <message>",
+            },
+            {
+                "label": "interrupt and submit",
+                "command": f"{mew_command(*interrupt_parts)} <message>",
             },
             {
                 "label": "pause at boundary",
@@ -1986,6 +1994,8 @@ def cmd_work(args):
         return cmd_work_steer(args)
     if getattr(args, "queue_followup", None):
         return cmd_work_queue_followup(args)
+    if getattr(args, "interrupt_submit", None):
+        return cmd_work_interrupt_submit(args)
     if getattr(args, "session_note", None):
         return cmd_work_session_note(args)
     if getattr(args, "recover_session", False):
@@ -2312,6 +2322,27 @@ def complete_work_session_followup(session, followup, step_index):
     return False
 
 
+def request_work_session_interrupt_submit(session, text, source="user"):
+    text = str(text or "").strip()
+    if not session or not text:
+        return None, None
+    reason = f"interrupt and submit: {clip_inline_text(text, 240)}"
+    request_work_session_stop(
+        session,
+        reason=reason,
+        action="interrupt_submit",
+        submit_text=text,
+    )
+    stop_request = {
+        "requested_at": session.get("stop_requested_at"),
+        "reason": session.get("stop_reason") or reason,
+        "action": session.get("stop_action") or "interrupt_submit",
+        "submit_text": session.get("stop_submit_text") or text,
+    }
+    steer = queue_work_session_steer(session, text, source=source or "interrupt_submit")
+    return stop_request, steer
+
+
 def pause_work_session_after_user_interrupt(session_id, step_index):
     current_time = now_iso()
     repairs = []
@@ -2563,7 +2594,9 @@ def cmd_work_ai(args):
             stop_request = consume_work_session_stop(session)
             pending_steer = None
             pending_followup = None
-            if not stop_request:
+            if stop_request and stop_request.get("action") == "interrupt_submit":
+                pending_steer = pending_work_session_steer(session)
+            elif not stop_request:
                 pending_steer = pending_work_session_steer(session)
                 if not pending_steer:
                     pending_followup = pending_work_session_followup(session)
@@ -2571,11 +2604,16 @@ def cmd_work_ai(args):
             if stop_request:
                 save_state(state)
         if stop_request:
-            report["stop_reason"] = "stop_requested"
-            report["stop_request"] = stop_request
-            if progress:
-                progress(f"step #{index}: stop requested")
-            break
+            if stop_request.get("action") == "interrupt_submit" and pending_steer:
+                report.setdefault("interrupt_submits", []).append(stop_request)
+                if progress:
+                    progress(f"step #{index}: interrupt submit requested")
+            else:
+                report["stop_reason"] = "stop_requested"
+                report["stop_request"] = stop_request
+                if progress:
+                    progress(f"step #{index}: stop requested")
+                break
         step_guidance = work_ai_step_guidance(args, index, max_steps)
         if pending_steer:
             pending_steer_text = pending_steer.get("text") or ""
@@ -2777,6 +2815,13 @@ def cmd_work_ai(args):
             report["stop_request"] = stop_request
             if progress:
                 progress(f"step #{index}: stop requested after planning")
+            if stop_request.get("action") == "interrupt_submit" and index < max_steps:
+                report.setdefault("interrupt_submits", []).append(stop_request)
+                report["stop_reason"] = "max_steps"
+                report.pop("stop_request", None)
+                if progress:
+                    progress(f"step #{index}: continuing after interrupt submit")
+                continue
             break
         if getattr(args, "live", False):
             if not live_thinking_open:
@@ -2852,6 +2897,11 @@ def cmd_work_ai(args):
             if batch_step.get("stop_request"):
                 report["stop_reason"] = "stop_requested"
                 report["stop_request"] = batch_step.get("stop_request")
+                if batch_step.get("stop_request", {}).get("action") == "interrupt_submit" and index < max_steps:
+                    report.setdefault("interrupt_submits", []).append(batch_step.get("stop_request"))
+                    report["stop_reason"] = "max_steps"
+                    report.pop("stop_request", None)
+                    continue
                 break
             continue
         if action_type not in WORK_TOOLS:
@@ -2985,6 +3035,13 @@ def cmd_work_ai(args):
             report["stop_request"] = stop_request
             if progress:
                 progress(f"step #{index}: stop requested before tool start")
+            if stop_request.get("action") == "interrupt_submit" and index < max_steps:
+                report.setdefault("interrupt_submits", []).append(stop_request)
+                report["stop_reason"] = "max_steps"
+                report.pop("stop_request", None)
+                if progress:
+                    progress(f"step #{index}: continuing after interrupt submit")
+                continue
             break
         with state_lock():
             state = load_state()
@@ -3739,6 +3796,9 @@ def _normalize_work_reply_actions(payload):
             elif action_type in ("followup", "follow_up", "queue", "queue_followup"):
                 text = _coerce_work_reply_text(raw.get("text") or raw.get("message") or raw.get("followup"))
                 actions.append({"type": "followup", "text": text})
+            elif action_type in ("interrupt", "interrupt_submit"):
+                text = _coerce_work_reply_text(raw.get("text") or raw.get("message") or raw.get("submit"))
+                actions.append({"type": "interrupt_submit", "text": text})
             elif action_type in ("note", "session_note"):
                 text = _coerce_work_reply_text(raw.get("text") or raw.get("note"))
                 actions.append({"type": "note", "text": text})
@@ -3759,6 +3819,9 @@ def _normalize_work_reply_actions(payload):
     )
     if followup:
         actions.append({"type": "followup", "text": followup})
+    interrupt_submit = _coerce_work_reply_text(payload.get("interrupt_submit") or payload.get("interrupt"))
+    if interrupt_submit:
+        actions.append({"type": "interrupt_submit", "text": interrupt_submit})
     note = _coerce_work_reply_text(payload.get("note") or payload.get("session_note"))
     if note:
         actions.append({"type": "note", "text": note})
@@ -3776,7 +3839,7 @@ def _normalize_work_reply_actions(payload):
             reason = _coerce_work_reply_text(payload.get("reject_reason"))
         actions.append({"type": "reject", "tool_call_id": tool_call_id, "reason": reason})
     for action in actions:
-        if action["type"] in ("steer", "followup", "note") and not action.get("text"):
+        if action["type"] in ("steer", "followup", "interrupt_submit", "note") and not action.get("text"):
             raise MewError(f"reply {action['type']} action requires text")
         if action["type"] == "reject":
             try:
@@ -3819,6 +3882,11 @@ def build_work_reply_schema(session=None):
             {
                 "type": "followup",
                 "description": "queue FIFO user input for a later live/follow step",
+                "required": ["text"],
+            },
+            {
+                "type": "interrupt_submit",
+                "description": "stop at the next boundary and submit text as the next step",
                 "required": ["text"],
             },
             {"type": "note", "description": "record durable observer context", "required": ["text"]},
@@ -4015,6 +4083,19 @@ def cmd_work_reply_file(args):
             elif action["type"] == "followup":
                 followup = queue_work_session_followup(session, action["text"], source="reply_file")
                 applied.append({"type": "followup", "id": followup.get("id"), "text": followup.get("text")})
+            elif action["type"] == "interrupt_submit":
+                stop_request, steer = request_work_session_interrupt_submit(
+                    session,
+                    action["text"],
+                    source="reply_file",
+                )
+                applied.append(
+                    {
+                        "type": "interrupt_submit",
+                        "text": steer.get("text"),
+                        "reason": stop_request.get("reason"),
+                    }
+                )
             elif action["type"] == "note":
                 note = add_work_session_note(session, action["text"], source="reply_file")
                 applied.append({"type": "note", "text": note.get("text")})
@@ -4161,6 +4242,58 @@ def cmd_work_queue_followup(args):
         )
     else:
         print(f"queued follow-up for work session #{session['id']}: {followup['text']}")
+    return 0
+
+
+def cmd_work_interrupt_submit(args):
+    text = (getattr(args, "interrupt_submit", None) or "").strip()
+    if not text:
+        print("mew: --interrupt-submit requires text", file=sys.stderr)
+        return 1
+    with state_lock():
+        state = load_state()
+        if not getattr(args, "task_id", None):
+            active_sessions = _active_work_sessions_for_reply(state)
+            if len(active_sessions) > 1:
+                if getattr(args, "json", False):
+                    print(
+                        json.dumps(
+                            {
+                                "error": "multiple_active_work_sessions",
+                                "active_work_sessions": [
+                                    {"session_id": item.get("id"), "task_id": item.get("task_id")}
+                                    for item in active_sessions[-5:]
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                else:
+                    print("Multiple active work sessions; pass a task id:")
+                    for item in active_sessions[-5:]:
+                        print(f"- {mew_command('work', item.get('task_id'), '--interrupt-submit')} <message>")
+                return 1
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            print("No active work session.")
+            return 0
+        stop_request, steer = request_work_session_interrupt_submit(session, text, source="interrupt_submit")
+        save_state(state)
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "work_session_id": session.get("id"),
+                    "stop_request": stop_request,
+                    "pending_steer": steer,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(f"interrupt-submit queued for work session #{session['id']}: {steer['text']}")
     return 0
 
 
@@ -7875,7 +8008,7 @@ CHAT_HELP = """Commands:
 /tasks [all]          list open tasks, or all tasks
 /show <task-id>       show task details
 /work [task-id]       show task plan/runs/checks and next action
-/work-session [cmd]   show/start/close/stop/note/steer/queue/recover/ai/live/resume/timeline/approve/reject native work session; add details
+/work-session [cmd]   show/start/close/stop/note/steer/queue/interrupt/recover/ai/live/resume/timeline/approve/reject native work session; add details
 /continue [opts|text] run one live step; plain text becomes work guidance; /c is alias
 /follow [opts|text]   run compact continuous live steps; defaults to 10 steps
 /work-mode [on|off]   toggle chat mode where text guides /continue and blank repeats after one work step
@@ -7974,6 +8107,7 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session note <text>             save a durable note for future work context
 /work-session steer <text>            queue one-time guidance for the next live/follow step
 /work-session queue <text>            queue FIFO follow-up input for a later live/follow step
+/work-session interrupt <text>        stop at boundary and submit this as the next step
 /outside chat: mew work <task-id> --reply-schema --json
                                       print the structured observer reply template
 /work-session approve <id> ...        apply a dry-run write after explicit gates
@@ -8589,6 +8723,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     lines.append("- /work-session note <remember this>")
     lines.append("- /work-session steer <next-step guidance>")
     lines.append("- /work-session queue <later follow-up>")
+    lines.append("- /work-session interrupt <submit now>")
     lines.append("- /work-session stop <reason>")
     lines.append("- /work-session close")
     lines.append("Advanced")
@@ -8617,6 +8752,7 @@ def chat_work_session(rest, chat_state=None):
         "note",
         "steer",
         "queue",
+        "interrupt",
         "recover",
         "ai",
         "step",
@@ -8642,6 +8778,7 @@ def chat_work_session(rest, chat_state=None):
         "note",
         "steer",
         "queue",
+        "interrupt",
         "recover",
         "ai",
         "step",
@@ -8791,6 +8928,36 @@ def chat_work_session(rest, chat_state=None):
             json=False,
         )
         cmd_work_queue_followup(args)
+        state = load_state()
+        session = active_work_session_for_kind(state, scope_kind)
+        print(
+            format_work_cockpit_controls(
+                state=state,
+                session=session,
+                continue_options=(chat_state or {}).get("work_continue_options", ""),
+            )
+        )
+        return
+
+    if action == "interrupt":
+        scoped_task_id = None
+        interrupt_parts = parts[1:]
+        if task_first:
+            scoped_task_id = task_id
+            interrupt_parts = parts[2:]
+        if scope_kind:
+            state = load_state()
+            session = active_work_session_for_kind(state, scope_kind)
+            if not session:
+                print(format_no_active_work_session(state, kind=scope_kind))
+                return
+            scoped_task_id = session.get("task_id")
+        args = SimpleNamespace(
+            task_id=scoped_task_id,
+            interrupt_submit=" ".join(interrupt_parts),
+            json=False,
+        )
+        cmd_work_interrupt_submit(args)
         state = load_state()
         session = active_work_session_for_kind(state, scope_kind)
         print(

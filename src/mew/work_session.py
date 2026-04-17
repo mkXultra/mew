@@ -189,10 +189,18 @@ def close_work_session(session, current_time=None):
     return session
 
 
-def request_work_session_stop(session, reason="", current_time=None):
+def request_work_session_stop(session, reason="", current_time=None, action="", submit_text=""):
     current_time = current_time or now_iso()
     session["stop_requested_at"] = current_time
     session["stop_reason"] = reason or "stop requested"
+    if action:
+        session["stop_action"] = action
+    else:
+        session.pop("stop_action", None)
+    if submit_text:
+        session["stop_submit_text"] = submit_text
+    else:
+        session.pop("stop_submit_text", None)
     session["updated_at"] = current_time
     return session
 
@@ -218,11 +226,15 @@ def consume_work_session_stop(session, current_time=None):
     stop = {
         "requested_at": session.get("stop_requested_at"),
         "reason": session.get("stop_reason") or "stop requested",
+        "action": session.get("stop_action") or "",
+        "submit_text": session.get("stop_submit_text") or "",
     }
     session["last_stop_request"] = stop
     session["stop_acknowledged_at"] = current_time
     session.pop("stop_requested_at", None)
     session.pop("stop_reason", None)
+    session.pop("stop_action", None)
+    session.pop("stop_submit_text", None)
     session["updated_at"] = current_time
     return stop
 
@@ -1401,6 +1413,8 @@ def build_work_session_resume(session, task=None, limit=8):
             {
                 "requested_at": session.get("stop_requested_at"),
                 "reason": session.get("stop_reason") or "stop requested",
+                "action": session.get("stop_action") or "",
+                "submit_text": session.get("stop_submit_text") or "",
             }
             if session.get("stop_requested_at")
             else {}
@@ -1627,11 +1641,19 @@ def format_work_session_resume(resume):
     if stop_request:
         lines.extend(["", "Stop request"])
         lines.append(f"{stop_request.get('requested_at') or ''} {stop_request.get('reason') or ''}".strip())
+        if stop_request.get("action"):
+            lines.append(f"action: {stop_request.get('action')}")
+        if stop_request.get("submit_text"):
+            lines.append(f"submit: {clip_inline_text(stop_request.get('submit_text'), 500)}")
 
     last_stop = resume.get("last_stop_request") or {}
     if last_stop:
         lines.extend(["", "Last stop request"])
         lines.append(f"{last_stop.get('requested_at') or ''} {last_stop.get('reason') or ''}".strip())
+        if last_stop.get("action"):
+            lines.append(f"action: {last_stop.get('action')}")
+        if last_stop.get("submit_text"):
+            lines.append(f"submit: {clip_inline_text(last_stop.get('submit_text'), 500)}")
 
     recovery = resume.get("recovery_plan") or {}
     if recovery:

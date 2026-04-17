@@ -46,6 +46,7 @@ Supported actions:
 
 - `steer`: queue one-shot guidance for the next live/follow step.
 - `followup`: queue FIFO user input for a later live/follow step.
+- `interrupt_submit`: stop at the next model/tool boundary and submit text as the next step.
 - `note`: record durable session memory from the observer.
 - `stop`: request a stop at the next model/tool boundary.
 - `reject`: reject a pending dry-run `write_file` or `edit_file` tool call.

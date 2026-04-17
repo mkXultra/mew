@@ -1219,6 +1219,11 @@ def run_work_session_scenario(workspace, env=None):
     reply_file_result = run(["work", "--reply-file", str(reply_path), "--json"])
     reply_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
 
+    run(["task", "add", "Interrupt submit task", "--kind", "coding"])
+    interrupt_start_result = run(["work", "6", "--start-session", "--json"])
+    interrupt_submit_result = run(["work", "6", "--interrupt-submit", "dogfood interrupt submit", "--json"])
+    interrupt_resume_result = run(["work", "6", "--session", "--resume", "--json"])
+
     start_data = _json_stdout(start_result)
     read_data = _json_stdout(read_result)
     glob_data = _json_stdout(glob_result)
@@ -1233,6 +1238,8 @@ def run_work_session_scenario(workspace, env=None):
     approve_all_second_data = _json_stdout(approve_all_second_result)
     approve_all_data = _json_stdout(approve_all_result)
     reply_file_data = _json_stdout(reply_file_result)
+    interrupt_submit_data = _json_stdout(interrupt_submit_result)
+    interrupt_resume_data = _json_stdout(interrupt_resume_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1391,6 +1398,20 @@ def run_work_session_scenario(workspace, env=None):
         == "dogfood observer follow-up",
         observed={"schema": reply_schema_data, "reply": reply_file_data, "snapshot": reply_snapshot_data},
         expected="reply-schema is session-specific and reply-file rewrites steer/follow-up snapshot state",
+    )
+    _scenario_check(
+        checks,
+        "work_interrupt_submit_sets_boundary_stop_and_steer",
+        interrupt_start_result.get("exit_code") == 0
+        and interrupt_submit_result.get("exit_code") == 0
+        and (interrupt_submit_data.get("stop_request") or {}).get("action") == "interrupt_submit"
+        and (interrupt_submit_data.get("pending_steer") or {}).get("text") == "dogfood interrupt submit"
+        and ((interrupt_resume_data.get("resume") or {}).get("stop_request") or {}).get("action")
+        == "interrupt_submit"
+        and ((interrupt_resume_data.get("resume") or {}).get("pending_steer") or {}).get("source")
+        == "interrupt_submit",
+        observed={"submit": interrupt_submit_data, "resume": interrupt_resume_data},
+        expected="interrupt-submit records a boundary stop request and next-step steer",
     )
     _scenario_check(
         checks,

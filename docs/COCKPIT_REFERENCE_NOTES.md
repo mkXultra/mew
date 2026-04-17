@@ -293,8 +293,9 @@ Initial implementation status, 2026-04-18:
   model or UI a structured observation point without parsing terminal output.
 - `mew work --reply-file reply.json` applies the first safe structured reply
   path back into an active session. The supported actions are `steer`,
-  `followup`, `note`, `stop`, and dry-run write `reject`; approvals stay out of
-  this path until the gate/verification semantics are explicit enough.
+  `followup`, `interrupt_submit`, `note`, `stop`, and dry-run write `reject`;
+  approvals stay out of this path until the gate/verification semantics are
+  explicit enough.
 - The snapshot/reply contract is documented in `docs/FOLLOW_REPLY_SCHEMA.md`,
   and snapshots carry `schema_version`, heartbeat/process metadata, a reply
   command, and a reply template. Reply files can include
@@ -304,6 +305,11 @@ Initial implementation status, 2026-04-18:
   `followup` actions now provide a FIFO queued follow-up lane. Pending steer
   still wins for the next step; queued follow-ups are consumed one at a time by
   later live/follow steps and journaled when consumed.
+- `mew work --interrupt-submit "..."`, `/work-session interrupt ...`, and
+  reply-file `interrupt_submit` now provide the first safe immediate-submit
+  lane: request a stop at the next boundary, preserve the submitted text as
+  pending steer, skip the interrupted tool action, and continue the same
+  bounded loop when another step remains.
 
 Remaining:
 
@@ -318,6 +324,8 @@ Rules to make explicit:
 - user message becomes pending steer (CLI/chat command lane exists)
 - user message becomes queued follow-up (CLI/chat/reply-file lane exists)
 - user message interrupts current turn and submits immediately
+  (boundary-safe CLI/chat/reply-file lane exists; hard cancellation is not yet
+  implemented)
 
 The UI must show which route was chosen. Nothing should be silently dropped or
 surprisingly sent.

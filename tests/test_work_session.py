@@ -2853,6 +2853,148 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_interrupt_submit_sets_boundary_stop_and_pending_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--interrupt-submit", "switch to urgent check", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["stop_request"]["action"], "interrupt_submit")
+                self.assertEqual(data["stop_request"]["submit_text"], "switch to urgent check")
+                self.assertEqual(data["pending_steer"]["source"], "interrupt_submit")
+
+                from mew.work_session import build_work_session_resume, format_work_session_resume
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["stop_action"], "interrupt_submit")
+                self.assertEqual(session["pending_steer"]["text"], "switch to urgent check")
+                resume = build_work_session_resume(session, task=state["tasks"][0])
+                text = format_work_session_resume(resume)
+                self.assertIn("Stop request", text)
+                self.assertIn("action: interrupt_submit", text)
+                self.assertIn("Pending steer", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_interrupt_submit_continues_after_planning_boundary(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("interrupt me\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    if len(prompts) == 1:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(main(["work", "1", "--interrupt-submit", "urgent new direction"]), 0)
+                        return {"summary": "old plan", "action": {"type": "read_file", "path": "old.md"}}
+                    return {"summary": "new plan", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(len(prompts), 2)
+                self.assertNotIn("urgent new direction", prompts[0])
+                self.assertIn("urgent new direction", prompts[1])
+                report_text = stdout.getvalue()
+                self.assertIn("mew work ai: 2/2 step(s)", report_text)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertEqual(session["tool_calls"][0]["parameters"]["path"], "README.md")
+                self.assertEqual(session["last_stop_request"]["action"], "interrupt_submit")
+                self.assertNotIn("pending_steer", session)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_interrupt_submit_at_last_step_preserves_pending_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("interrupt final\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    with redirect_stdout(StringIO()):
+                        self.assertEqual(main(["work", "1", "--interrupt-submit", "final step input"]), 0)
+                    return {"summary": "old plan", "action": {"type": "read_file", "path": "old.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "1",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "stop_requested")
+                self.assertEqual(report["stop_request"]["action"], "interrupt_submit")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["last_stop_request"]["action"], "interrupt_submit")
+                self.assertEqual(session["pending_steer"]["text"], "final step input")
+                self.assertEqual(session.get("tool_calls") or [], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_stop_preserves_pending_steer(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -9006,6 +9148,31 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_can_interrupt_submit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session interrupt submit this now", {}), "continue")
+                output = stdout.getvalue()
+                self.assertIn("interrupt-submit queued for work session #1: submit this now", output)
+                self.assertIn("/work-session resume 1", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["stop_action"], "interrupt_submit")
+                self.assertEqual(session["pending_steer"]["text"], "submit this now")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_can_queue_safe_follow_actions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -9094,6 +9261,46 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_file_can_interrupt_submit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "interrupt_submit", "text": "observer says switch now"}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("- interrupt_submit: observer says switch now", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["stop_action"], "interrupt_submit")
+                self.assertEqual(session["pending_steer"]["source"], "reply_file")
+                self.assertEqual(session["pending_steer"]["text"], "observer says switch now")
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["resume"]["stop_request"]["action"], "interrupt_submit")
+                self.assertEqual(snapshot["resume"]["pending_steer"]["source"], "reply_file")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_without_active_session_fails(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -9142,6 +9349,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["reply_template"]["observed_session_updated_at"], session["updated_at"])
                 self.assertTrue(any(action["type"] == "reject" for action in data["supported_actions"]))
                 self.assertTrue(any(action["type"] == "followup" for action in data["supported_actions"]))
+                self.assertTrue(any(action["type"] == "interrupt_submit" for action in data["supported_actions"]))
             finally:
                 os.chdir(old_cwd)
 
