@@ -9,6 +9,7 @@ from .work_session import (
     compact_work_tool_summary,
     diff_line_counts,
     format_diff_preview,
+    latest_work_verify_command,
 )
 
 
@@ -199,7 +200,8 @@ def _command_detail(session, call, kind):
     elif call.get("status") == "completed":
         lines.append("output: (no output)")
     task_id = (session or {}).get("task_id")
-    pane = "--tests" if kind == "test" else "--commands"
+    permission_error = _permission_gate_error(call)
+    pane = "--cells" if permission_error else ("--tests" if kind == "test" else "--commands")
     task_part = f" {task_id}" if task_id is not None else ""
     lines.append(f"full_output: mew work{task_part} {pane}")
     if call.get("error"):
@@ -334,85 +336,145 @@ def has_pending_write_approval(call):
     return (call or {}).get("approval_status") not in ("applying", "applied", "rejected")
 
 
+def _session_verify_command(session):
+    defaults = (session or {}).get("default_options") or {}
+    if defaults.get("verify_disabled"):
+        return ""
+    return defaults.get("verify_command") or latest_work_verify_command((session or {}).get("tool_calls") or [])
+
+
+def _verify_flags_text(session):
+    command = _session_verify_command(session)
+    if command:
+        return f"--allow-verify --verify-command {shlex.quote(command)}"
+    return "--allow-verify --verify-command <cmd>"
+
+
 def approval_cell(session, call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
     path = result.get("path") or parameters.get("path") or ""
     task_ref = (session or {}).get("task_id") or "<task-id>"
     write_root = shlex.quote(path or "<path>")
+    unavailable = (session or {}).get("status") != "active"
     approve_command = (
         f"mew work {task_ref} --approve-tool {call.get('id')} "
-        f"--allow-write {write_root} --allow-verify --verify-command <cmd>"
+        f"--allow-write {write_root} {_verify_flags_text(session)}"
     )
     reject_command = f"mew work {task_ref} --reject-tool {call.get('id')}"
     reject_feedback_command = f"{reject_command} --reject-reason <feedback>"
-    preview = f"approval needed for {call.get('tool')} #{call.get('id')} {path}".strip()
+    preview_prefix = "approval unavailable in closed session" if unavailable else "approval needed"
+    preview = f"{preview_prefix} for {call.get('tool')} #{call.get('id')} {path}".strip()
     cell = _cell_base(
         session,
         "tool_call",
         "approval",
         call.get("id"),
-        "pending",
+        "unavailable" if unavailable else "pending",
         call.get("finished_at") or call.get("started_at"),
         "",
         preview,
     )
     cell["operation"] = "file_write"
     cell["target"] = path
-    cell["actions"] = {
-        "approve_once": approve_command,
-        "reject": reject_command,
-        "reject_with_feedback": reject_feedback_command,
-    }
+    cell["actions"] = (
+        {"review": f"mew work {task_ref} --session --resume"}
+        if unavailable
+        else {
+            "approve_once": approve_command,
+            "reject": reject_command,
+            "reject_with_feedback": reject_feedback_command,
+        }
+    )
     cell["detail"] = "\n".join(
         line
         for line in (
             "operation: file_write",
             f"path: {path}" if path else "",
             "dry_run: true",
-            f"approve_once: {approve_command}",
-            f"reject: {reject_command}",
-            f"reject_with_feedback: {reject_feedback_command}",
+            "approval_unavailable: session is not active" if unavailable else "",
+            f"approve_once: {approve_command}" if not unavailable else "",
+            f"reject: {reject_command}" if not unavailable else "",
+            f"reject_with_feedback: {reject_feedback_command}" if not unavailable else "",
+            f"review: mew work {task_ref} --session --resume" if unavailable else "",
         )
         if line
     )
     return cell
 
 
+def _permission_gate_error(call):
+    error = str((call or {}).get("error") or "")
+    tool = (call or {}).get("tool") or ""
+    if tool == "run_command" and "pass --allow-shell" in error:
+        return ("shell_command", "--allow-shell")
+    if tool == "run_tests" and "pass --allow-verify" in error:
+        return ("verification", "--allow-verify")
+    return None
+
+
+def _matching_permission_retry(source, candidate):
+    if not source or not candidate:
+        return False
+    if source.get("tool") != candidate.get("tool"):
+        return False
+    source_params = source.get("parameters") or {}
+    candidate_params = candidate.get("parameters") or {}
+    return (
+        (source_params.get("command") or "") == (candidate_params.get("command") or "")
+        and (source_params.get("cwd") or ".") == (candidate_params.get("cwd") or ".")
+    )
+
+
+def _permission_gate_resolved_by(session, call):
+    if not _permission_gate_error(call):
+        return None
+    source_id = call.get("id")
+    for candidate in (session or {}).get("tool_calls") or []:
+        if candidate is call:
+            continue
+        if source_id is not None and candidate.get("id") is not None and candidate.get("id") <= source_id:
+            continue
+        if not _matching_permission_retry(call, candidate):
+            continue
+        if _permission_gate_error(candidate):
+            continue
+        return candidate.get("id")
+    return None
+
+
 def permission_approval_cell(session, call):
+    gate_error = _permission_gate_error(call)
+    if not gate_error:
+        return None
+    operation, gate = gate_error
     error = str((call or {}).get("error") or "")
     tool = (call or {}).get("tool") or ""
     parameters = (call or {}).get("parameters") or {}
     task_ref = (session or {}).get("task_id") or "<task-id>"
     command = parameters.get("command") or ""
     cwd = parameters.get("cwd") or "."
-    if tool == "run_command" and "pass --allow-shell" in error:
-        operation = "shell_command"
-        gate = "--allow-shell"
-    elif tool == "run_tests" and "pass --allow-verify" in error:
-        operation = "verification"
-        gate = "--allow-verify"
-    else:
-        return None
     target = command or tool
+    resolved_by = _permission_gate_resolved_by(session, call)
     grant_command = (
         f"mew work {task_ref} --tool {tool} "
         f"--command {shlex.quote(command)} --cwd {shlex.quote(cwd)} {gate}"
     )
-    preview = f"approval needed for {operation} #{call.get('id')} {target}".strip()
+    preview_prefix = "approval granted" if resolved_by is not None else "approval needed"
+    preview = f"{preview_prefix} for {operation} #{call.get('id')} {target}".strip()
     cell = _cell_base(
         session,
         "tool_call",
         "approval",
         call.get("id"),
-        "required",
+        "resolved" if resolved_by is not None else "required",
         call.get("finished_at") or call.get("started_at"),
         "",
         preview,
     )
     cell["operation"] = operation
     cell["target"] = target
-    cell["actions"] = {"grant_once": grant_command}
+    cell["actions"] = {"resolved_by": f"#{resolved_by}"} if resolved_by is not None else {"grant_once": grant_command}
     cell["detail"] = "\n".join(
         line
         for line in (
@@ -420,7 +482,8 @@ def permission_approval_cell(session, call):
             f"target: {target}" if target else "",
             f"cwd: {cwd}" if cwd else "",
             f"required_gate: {gate}",
-            f"grant_once: {grant_command}",
+            f"resolved_by: #{resolved_by}" if resolved_by is not None else "",
+            f"grant_once: {grant_command}" if resolved_by is None else "",
             f"reason: {clip_inline_text(error, 240)}" if error else "",
         )
         if line

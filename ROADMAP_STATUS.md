@@ -276,6 +276,8 @@ Evidence:
 - Approval cells now carry structured `operation`, `target`, and `actions`; pending write/edit approvals expose approve-once, reject, and reject-with-feedback commands, and missing shell/verification gates can surface as required approval cells.
 - Direct `mew work 86 --cells` dogfood verified both approval anchor paths in a real ignored state session: a failed shell-gated command produced a required `shell_command` approval cell, and a dry-run write produced a pending `file_write` approval cell with reject-with-feedback guidance.
 - Diff cells now carry structured `operation`, `target`, `diff_stats`, `dry_run`, `applied`, and `approval_status` metadata plus a `full_diff` hint back to `mew work <task-id> --diffs`, so write previews are no longer just raw clipped patches.
+- `mew work --follow` now treats cells as the primary per-step result display: follow still shows thinking/progress, but it suppresses the older action/result panes whenever new cells are available.
+- `codex-ultra` human-role cells dogfood then found and drove fixes for pending-approval CLI controls, concrete verifier hints in approval cells, resolved shell/verify gate cells, failed verify-gate visibility in `--tests`, and unavailable approval actions on closed sessions.
 
 Missing proof:
 
@@ -284,7 +286,7 @@ Missing proof:
 - Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
-- `mew work --follow` now has stable cell anchors, but it still renders alongside the older thinking/action/result logs rather than as a fully cell-native stream.
+- `mew work --follow` now has stable cell anchors and suppresses duplicate action/result panes when cells are available, but it is not yet a fully live cell stream with active in-flight tool cells.
 - TTY redraw, cell-level collapse/expand, and configurable command/test tail controls are not implemented.
 
 Next action:
@@ -407,10 +409,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `793 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_work_session.py` current: `183 passed`.
+- `uv run pytest -q` current: `797 passed, 6 subtests passed`.
+- `uv run pytest -q tests/test_work_session.py` current: `187 passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 39 commands, including CLI/chat cell pane checks.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; work-session includes 39 commands and cell pane checks.
+- `codex-ultra` human-role cells dogfood current: verified stable CLI/chat cell rendering and exposed five approval/control issues; the current code fixes four directly and narrows the remaining active in-flight cell work.
 - `mew work 86 --follow --auth auth.json --allow-read . --act-mode deterministic --max-steps 2` current: real Codex Web API dogfood inspected the new cell implementation, produced stable cells after each step, and identified the row-noise polish that was fixed in this session.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session after the latest cockpit help/resume next-action changes.
 - `uv run pytest -q tests/test_work_session.py` current: `179 passed`, including task-specific idle resume `next_action`.

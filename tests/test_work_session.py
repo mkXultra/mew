@@ -16,7 +16,7 @@ from mew.cli import main
 from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
-from mew.work_session import format_diff_preview, format_work_action
+from mew.work_session import format_diff_preview, format_work_action, format_work_session_tests
 
 
 def add_coding_task(state):
@@ -194,6 +194,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(cells[3]["operation"], "file_write")
         self.assertEqual(cells[3]["target"], "README.md")
         self.assertIn("--approve-tool 3", cells[3]["actions"]["approve_once"])
+        self.assertIn("--verify-command 'uv run pytest -q'", cells[3]["actions"]["approve_once"])
         self.assertIn("--reject-reason <feedback>", cells[3]["actions"]["reject_with_feedback"])
         self.assertEqual(cells[2]["operation"], "edit_file")
         self.assertEqual(cells[2]["target"], "README.md")
@@ -216,6 +217,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("full_diff: mew work 9 --diffs", text)
         self.assertIn("- approval [pending] approval needed", text)
         self.assertIn("operation: file_write", text)
+        self.assertIn("approve_once: mew work 9 --approve-tool 3 --allow-write README.md --allow-verify --verify-command 'uv run pytest -q'", text)
         self.assertIn("reject_with_feedback: mew work 9 --reject-tool 3 --reject-reason <feedback>", text)
         self.assertIn("id: s3:approval:3", text)
 
@@ -336,6 +338,97 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("- approval [required] approval needed for shell_command", text)
         self.assertIn("required_gate: --allow-shell", text)
         self.assertIn("grant_once: mew work 11 --tool run_command", text)
+
+    def test_work_session_cells_mark_resolved_permission_gate(self):
+        session = {
+            "id": 6,
+            "task_id": 12,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "failed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"command": "printf ok", "cwd": "."},
+                    "error": "shell command execution is disabled; pass --allow-shell",
+                },
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:02Z",
+                    "finished_at": "2026-04-18T00:00:03Z",
+                    "parameters": {"command": "printf ok", "cwd": "."},
+                    "result": {"command": "printf ok", "cwd": ".", "exit_code": 0, "stdout": "ok", "stderr": ""},
+                },
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertEqual(cells[1]["kind"], "approval")
+        self.assertEqual(cells[1]["status"], "resolved")
+        self.assertEqual(cells[1]["actions"], {"resolved_by": "#2"})
+        self.assertIn("- approval [resolved] approval granted for shell_command", text)
+        self.assertIn("resolved_by: #2", text)
+        self.assertNotIn("grant_once:", text)
+
+    def test_work_session_cells_mark_closed_pending_approval_unavailable(self):
+        session = {
+            "id": 7,
+            "task_id": 13,
+            "status": "closed",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "parameters": {"path": "notes.md"},
+                    "result": {
+                        "path": "notes.md",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/notes.md\n+++ b/notes.md\n@@ -0,0 +1 @@\n+new\n",
+                        "diff_stats": {"added": 1, "removed": 0},
+                    },
+                }
+            ],
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertEqual(cells[1]["kind"], "approval")
+        self.assertEqual(cells[1]["status"], "unavailable")
+        self.assertEqual(cells[1]["actions"], {"review": "mew work 13 --session --resume"})
+        self.assertIn("approval_unavailable: session is not active", text)
+        self.assertNotIn("--approve-tool 4", text)
+
+    def test_work_session_tests_include_failed_verify_gate(self):
+        session = {
+            "id": 8,
+            "task_id": 14,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 5,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "printf verify-ok", "cwd": "."},
+                    "error": "verification execution is disabled; pass --allow-verify",
+                }
+            ],
+        }
+
+        text = format_work_session_tests(session, limit=None)
+
+        self.assertIn("#5 [failed] run_tests exit=unavailable printf verify-ok", text)
+        self.assertIn("error: verification execution is disabled; pass --allow-verify", text)
 
     def test_diff_preview_can_use_unclipped_diff_stats(self):
         clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
@@ -3611,6 +3704,61 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(rejected["rejected_tool_call"]["approval_status"], "rejected")
                 self.assertEqual(rejected["rejected_tool_call"]["rejection_reason"], "not needed")
                 self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_cli_controls_lead_with_pending_approvals(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                "true",
+                                "--allow-verify",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "pending.txt",
+                                "--content",
+                                "pending\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                controls = stdout.getvalue().split("Next CLI controls", 1)[1]
+
+                self.assertIn("approve tool #2: mew work 1 --approve-tool 2 --allow-write", controls)
+                self.assertIn("pending.txt --allow-verify --verify-command true", controls)
+                self.assertIn("reject tool #2: mew work 1 --reject-tool 2 --reject-reason <feedback>", controls)
+                self.assertLess(controls.index("approve tool #2"), controls.index("one live step"))
             finally:
                 os.chdir(old_cwd)
 
@@ -7540,6 +7688,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("id: s1:model_turn:1", output)
                 self.assertIn("- tool_call [completed] read_file", output)
                 self.assertIn("id: s1:tool_call:1", output)
+                self.assertNotIn("Work live step #1 action", output)
+                self.assertNotIn("Work live step #1 result", output)
                 self.assertIn("mew work ai: 2/10 step(s) stop=finish", output)
                 self.assertNotIn("Work live step #1 resume", output)
                 self.assertIn("Next CLI controls", output)

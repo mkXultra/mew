@@ -1413,6 +1413,76 @@ def _work_resume_command(args, task_id, session=None):
     return shlex.join(parts)
 
 
+def _work_cli_verify_suffix(session):
+    verify_command = work_session_default_verify_command(session)
+    if verify_command:
+        return shlex.join(["--allow-verify", "--verify-command", verify_command])
+    return "--allow-verify --verify-command <cmd>"
+
+
+def _work_cli_approve_command(session, tool_call_id, path):
+    task_id = (session or {}).get("task_id")
+    parts = [mew_executable(), "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.extend(["--approve-tool", str(tool_call_id), "--allow-write", path or "."])
+    return f"{shlex.join(parts)} {_work_cli_verify_suffix(session)}"
+
+
+def _work_cli_reject_command(session, tool_call_id):
+    task_id = (session or {}).get("task_id")
+    parts = [mew_executable(), "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.extend(["--reject-tool", str(tool_call_id), "--reject-reason"])
+    return f"{shlex.join(parts)} <feedback>"
+
+
+def _work_cli_approve_all_command(session, approvals):
+    task_id = (session or {}).get("task_id")
+    parts = [mew_executable(), "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.append("--approve-all")
+    paths = []
+    for approval in approvals or []:
+        path = approval.get("path") or "."
+        if path not in paths:
+            paths.append(path)
+    for path in paths:
+        parts.extend(["--allow-write", path])
+    return f"{shlex.join(parts)} {_work_cli_verify_suffix(session)}"
+
+
+def _work_cli_approval_items(session, resume):
+    if not session or session.get("status") != "active":
+        return []
+    approvals = (resume or {}).get("pending_approvals") or []
+    items = []
+    if len(approvals) > 1:
+        items.append(
+            {
+                "label": "approve all pending writes",
+                "command": _work_cli_approve_all_command(session, approvals),
+            }
+        )
+    for approval in approvals:
+        tool_call_id = approval.get("tool_call_id")
+        items.append(
+            {
+                "label": f"approve tool #{tool_call_id}",
+                "command": _work_cli_approve_command(session, tool_call_id, approval.get("path") or "."),
+            }
+        )
+        items.append(
+            {
+                "label": f"reject tool #{tool_call_id}",
+                "command": _work_cli_reject_command(session, tool_call_id),
+            }
+        )
+    return items
+
+
 def work_cli_control_items(session, args):
     if not session:
         return [{"label": "start a work session", "command": f"{mew_executable()} work <task-id> --start-session"}]
@@ -1423,12 +1493,14 @@ def work_cli_control_items(session, args):
             {"label": "start a new session", "command": mew_command("work", task_id, "--start-session")},
         ]
     controls = []
+    resume = build_work_session_resume(session)
+    approval_items = _work_cli_approval_items(session, resume)
     if session.get("stop_requested_at"):
-        return [
+        return approval_items + [
             {"label": "stop requested snapshot", "command": _work_resume_command(args, task_id, session=session)},
             {"label": "open chat", "command": mew_command("chat")},
         ]
-    resume = build_work_session_resume(session)
+    controls.extend(approval_items)
     recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
     if any(item.get("action") == "retry_tool" for item in recovery_items):
         task_part = f" {task_id}" if task_id is not None else ""
@@ -2122,6 +2194,17 @@ def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
     return len(cells)
 
 
+def print_work_live_step_output(args, index, step, resume, session, task, seen_count=0):
+    if getattr(args, "follow", False):
+        next_seen = maybe_print_work_live_cells(args, session, task, index, seen_count)
+        if next_seen != seen_count:
+            return next_seen
+    print("")
+    print(f"Work live step #{index} result")
+    print(format_work_live_step_result(step, resume=resume))
+    return maybe_print_work_live_cells(args, session, task, index, seen_count)
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -2426,7 +2509,7 @@ def cmd_work_ai(args):
                 )
             )
         if action_type == "batch":
-            if getattr(args, "live", False):
+            if getattr(args, "live", False) and not getattr(args, "follow", False):
                 print("")
                 print(f"Work live step #{index} action")
                 print(format_work_action(action))
@@ -2457,10 +2540,15 @@ def cmd_work_ai(args):
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
                 resume = build_work_session_resume(session, task=task)
-                print("")
-                print(f"Work live step #{index} result")
-                print(format_work_live_step_result(batch_step, resume=resume))
-                live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    batch_step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
                 if not getattr(args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
@@ -2474,7 +2562,7 @@ def cmd_work_ai(args):
                 break
             continue
         if action_type not in WORK_TOOLS:
-            if getattr(args, "live", False):
+            if getattr(args, "live", False) and not getattr(args, "follow", False):
                 print("")
                 print(f"Work live step #{index} action")
                 print(format_work_action(action))
@@ -2523,10 +2611,15 @@ def cmd_work_ai(args):
                     ),
                 }
                 resume = build_work_session_resume(session, task=task)
-                print("")
-                print(f"Work live step #{index} result")
-                print(format_work_live_step_result(control_step, resume=resume))
-                live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    control_step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
                 if not getattr(args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
@@ -2616,7 +2709,7 @@ def cmd_work_ai(args):
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id")
             save_state(state)
-        if getattr(args, "live", False):
+        if getattr(args, "live", False) and not getattr(args, "follow", False):
             print("")
             print(f"Work live step #{index} action")
             print(format_work_action(action, parameters=parameters, tool_call_id=tool_call_id))
@@ -2688,10 +2781,15 @@ def cmd_work_ai(args):
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session)
             resume = build_work_session_resume(session, task=task)
-            print("")
-            print(f"Work live step #{index} result")
-            print(format_work_live_step_result(report["steps"][-1], resume=resume))
-            live_cells_seen = maybe_print_work_live_cells(args, session, task, index, live_cells_seen)
+            live_cells_seen = print_work_live_step_output(
+                args,
+                index,
+                report["steps"][-1],
+                resume,
+                session,
+                task,
+                live_cells_seen,
+            )
             if not getattr(args, "compact_live", False):
                 print("")
                 print(f"Work live step #{index} resume")

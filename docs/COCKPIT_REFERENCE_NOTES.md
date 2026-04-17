@@ -220,6 +220,12 @@ Initial implementation status, 2026-04-18:
 - The first actions are approve once, reject, and reject with feedback.
 - Missing shell and verification gates can also surface as required approval
   cells, so a failed command cell can point at the exact gate needed to retry.
+- A `codex-ultra` human-role pass found real approval friction:
+  pending approvals were not first-class in CLI controls, cells used
+  `<cmd>` despite known verifier defaults, successful retries left older gate
+  cells looking active, verify-gate failures were missing from `--tests`, and
+  closed sessions showed dead approve commands. Those are now covered by
+  focused tests and fixed.
 
 Estimated time: 1 day after cells exist.
 
@@ -247,6 +253,23 @@ Initial implementation status, 2026-04-18:
   `full_diff: mew work <task-id> --diffs` hint.
 - The next useful step is not more diff metadata. It is making follow mode feel
   like a cell stream instead of old logs plus occasional cells.
+
+### P2: Cell-Native Follow
+
+Initial implementation status, 2026-04-18:
+
+- `mew work --follow` still prints thinking/progress so non-TTY logs show the
+  model turn starting.
+- Per-step action/result panes are now suppressed when new cells are available.
+  The new model/tool/diff/approval cells become the primary step result.
+- If no new cell appears, follow falls back to the old result pane rather than
+  going silent.
+
+Remaining:
+
+- show active in-flight tool/model cells before completion
+- reduce planning prose once the model-turn cell can carry enough summary
+- decide whether a TTY redraw mode should coexist with the line-oriented log
 
 ### P1: Interrupt/Steer Semantics
 
@@ -278,11 +301,11 @@ Resume should restore:
 ## Next Recommended Task
 
 Continue from the landed P0 cell slice, command/test cells, approval anchors,
-and initial diff-cell metadata into a calmer follow stream:
+initial diff-cell metadata, and first follow-cell rendering into active live
+cell state:
 
-> Make `mew work --follow` primarily readable as stable cells, reducing the
-> older thinking/action/result repetition while preserving enough detail for
-> non-TTY logs.
+> Show the current in-flight model/tool cell during follow, then settle it into
+> the durable completed cell instead of only printing cells after each step.
 
 Target duration:
 

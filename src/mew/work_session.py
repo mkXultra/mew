@@ -1928,7 +1928,7 @@ def build_work_session_test_entries(session, limit=8, max_chars=1200):
     for call in (session or {}).get("tool_calls") or []:
         result = call.get("result") or {}
         parameters = call.get("parameters") or {}
-        if call.get("tool") == "run_tests" and result.get("command"):
+        if call.get("tool") == "run_tests" and (result.get("command") or parameters.get("command")):
             entries.append(
                 {
                     "tool_call_id": call.get("id"),
@@ -1939,6 +1939,7 @@ def build_work_session_test_entries(session, limit=8, max_chars=1200):
                     "exit_code": result.get("exit_code"),
                     "stdout": clip_tail(result.get("stdout") or "", max_chars),
                     "stderr": clip_tail(result.get("stderr") or "", max_chars),
+                    "error": call.get("error") or "",
                     "finished_at": call.get("finished_at"),
                 }
             )
@@ -1954,9 +1955,12 @@ def build_work_session_test_entries(session, limit=8, max_chars=1200):
                     "exit_code": verification.get("exit_code"),
                     "stdout": clip_tail(verification.get("stdout") or "", max_chars),
                     "stderr": clip_tail(verification.get("stderr") or "", max_chars),
+                    "error": "",
                     "finished_at": verification.get("finished_at") or call.get("finished_at"),
                 }
             )
+    if limit is None:
+        return entries
     return entries[-limit:]
 
 
@@ -1976,7 +1980,7 @@ def format_work_session_tests(session, task=None, limit=8):
     for entry in entries:
         outcome = "passed" if entry.get("exit_code") == 0 else "failed"
         if entry.get("exit_code") is None:
-            outcome = "unknown"
+            outcome = "failed" if entry.get("status") == "failed" else "unknown"
         lines.append(
             f"#{entry.get('tool_call_id')} [{outcome}] {entry.get('kind')} "
             f"exit={format_exit_code(entry.get('exit_code'))} {entry.get('command') or ''}"
@@ -1989,6 +1993,8 @@ def format_work_session_tests(session, task=None, limit=8):
         if entry.get("stderr"):
             lines.append("stderr:")
             lines.append(entry["stderr"])
+        if entry.get("error"):
+            lines.append(f"error: {entry.get('error')}")
     return "\n".join(lines)
 
 
