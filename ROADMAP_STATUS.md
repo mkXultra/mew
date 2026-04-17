@@ -258,6 +258,7 @@ Evidence:
 - When scoped chat has multiple active matching work sessions, implicit `/work-session resume` now names the selected task and points to `/work-session resume <task-id>` for explicit selection.
 - Write/edit diff stats now count line replacements from the before/after text rather than parsing unified diff text, covering no-trailing-newline replacements that `difflib` renders on one physical line.
 - `dogfood --scenario chat-cockpit` now covers `mew code --quiet`, preserving the silent scripted cockpit startup path.
+- `mew code --help` now describes the coding-cockpit create/reuse flow and common quiet/read-only entry commands.
 
 Missing proof:
 
@@ -387,7 +388,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `702 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `703 passed, 6 subtests passed`.
 - `./mew dogfood --scenario work-session --cleanup --json` current: pass across 37 commands, including no-trailing-newline large edit diff stats.
 - `./mew dogfood --scenario chat-cockpit --cleanup --json` current: pass across 11 commands, including `code_quiet_startup_is_silent`.
 - `claude-ultra` final review of `348677e..HEAD` current: no blockers; verified `702 passed`, no-newline diff stats, updated dogfood command counts, quiet code dogfood, and roadmap claims.
