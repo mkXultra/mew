@@ -485,6 +485,9 @@ Evidence:
   recovery plan's suggested command when one exists, so the user/model sees a
   classified path such as `retry_verification` or side-effect review instead of
   only a generic inspect/retry prompt.
+- Review follow-up tightened interrupted verifier recovery: `--allow-read` must
+  cover the verifier's recorded `cwd`, missing-gate reports include that cwd,
+  and only the latest interrupted verifier receives a runnable recovery hint.
 
 Missing proof:
 
@@ -574,6 +577,14 @@ Next action:
   classified recovery-plan commands, preserving the `retry_verification` or
   side-effect review path in the seeded runtime question. Validated with
   `uv run pytest -q tests/test_runtime.py` (`29 passed`), native-advance
+  dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`898 passed,
+  6 subtests passed`).
+- Follow-up task #112 current: claude-ultra/codex-ultra review of
+  `e5d2fb1..HEAD` found no regression but identified verifier cwd/read-root and
+  stale hint risks. Both are fixed: verifier recovery now requires read roots to
+  cover the recorded cwd and only the latest interrupted verifier has a runnable
+  hint. Validated with focused work-session recovery tests,
+  `uv run pytest -q tests/test_work_session.py` (`239 passed`), work-session
   dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`898 passed,
   6 subtests passed`).
 - Real Codex Web API dogfood after the verification-recovery work current:
