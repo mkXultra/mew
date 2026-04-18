@@ -2078,6 +2078,53 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_interrupt_text_fallback_hint_uses_task_id(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["id"] = 7
+                    state["next_ids"]["work_session"] = 8
+                    save_state(state)
+
+                execute_patch = patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt)
+                mark_patch = patch("mew.commands.mark_work_tool_call_interrupted", return_value=[])
+                find_patch = patch("mew.commands.find_work_tool_call", return_value=None)
+                with execute_patch, mark_patch, find_patch:
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "run_tests",
+                                    "--command",
+                                    command,
+                                    "--allow-verify",
+                                ]
+                            ),
+                            130,
+                        )
+
+                output = stdout.getvalue()
+                self.assertIn("work tool #1 [interrupted] run_tests", output)
+                self.assertIn("recovery_hint: mew work 1 --session --resume --allow-read .", output)
+                self.assertNotIn("mew work 7 --session", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_uses_session_default_read_roots(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

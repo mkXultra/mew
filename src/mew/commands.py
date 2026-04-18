@@ -5844,8 +5844,13 @@ def cmd_work_tool(args):
         else:
             print(f"work tool #{tool_call['id']} [{tool_call['status']}] {tool_call['tool']}")
             print(tool_call.get("summary") or tool_call.get("error") or "")
-            if tool_call.get("recovery_hint"):
-                print(f"recovery_hint: {tool_call.get('recovery_hint')}")
+            fallback_task_id = tool_call.get("task_id") or (session or {}).get("task_id") or getattr(args, "task_id", None)
+            fallback_task_arg = f" {fallback_task_id}" if fallback_task_id is not None else ""
+            recovery_hint = (
+                tool_call.get("recovery_hint")
+                or f"{mew_executable()} work{fallback_task_arg} --session --resume --allow-read ."
+            )
+            print(f"recovery_hint: {recovery_hint}")
         if progress:
             progress(f"tool #{tool_call_id} interrupted")
         return 130
