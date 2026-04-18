@@ -428,6 +428,11 @@ Evidence:
   `mew work --live --max-steps 1` step without spending model tokens, and
   runtime status now preserves a bounded skip-reason history for later dogfood
   diagnosis.
+- Failed passive native-work advances no longer cause blind retries. If the
+  last native advance failed for the same runtime-owned session and no newer
+  session activity has occurred, the next passive tick records
+  `previous_native_work_step_failed` and leaves recovery to the visible
+  runtime/model path or a human/manual session update.
 
 Missing proof:
 
@@ -523,8 +528,9 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `894 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `897 passed, 6 subtests passed`.
 - `./mew dogfood --scenario native-advance --cleanup --json` current: pass; validates passive runtime selection of a runtime-owned work session, the configured `MEW_EXECUTABLE` handoff, quiet one-step live flags, completed runtime status, and dogfood advance metrics.
+- Focused native-work runtime tests current: `11 passed`; covers failed passive-native-advance classification, no blind retry on the next tick, and retry allowance after newer session activity.
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 80 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-seed-note.json --json` completed startup plus two passive ticks; `native_work_advance.attempts=2`, `by_outcome.completed=2`, `last_native_work_step.outcome=completed`, and the earlier refused-complete warning is gone because the dogfood seed task is now marked as self-proposed.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
@@ -783,7 +789,8 @@ Next action:
   multi-hour autonomy. Its highest-leverage next 1-2 hour recommendation is a
   deterministic failed passive-native-advance recovery slice: classify failed
   advance outcomes and route the next tick toward a safe recovery/ask-user path
-  instead of blind retry.
+  instead of blind retry. That first deterministic recovery slice is now
+  implemented; the next gap is richer recovery action selection after the skip.
 
 ## Current Roadmap Focus
 
