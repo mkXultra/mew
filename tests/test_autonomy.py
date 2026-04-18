@@ -3264,6 +3264,8 @@ class AutonomyTests(unittest.TestCase):
             if decision.get("task_id") == task["id"]
         ]
         self.assertNotIn("ask_user", task_decisions)
+        self.assertNotIn("plan_task", task_decisions)
+        self.assertNotIn("dispatch_task", task_decisions)
 
     def test_start_work_session_action_creates_native_session(self):
         state = default_state()

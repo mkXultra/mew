@@ -753,33 +753,55 @@ def append_autonomous_decisions(
 
     if autonomy_level == "act" and allow_native_work:
         for task in autonomous_task_candidates:
+            eligibility = native_work_start_eligibility(
+                state,
+                event,
+                task.get("id"),
+                True,
+                autonomy_level,
+                allow_native_work,
+            )
+            if eligibility["ok"]:
+                eligible_task = eligibility["task"]
+                if not eligible_task:
+                    continue
+                ready_question = task_question(eligible_task)
+                decisions[:] = [
+                    decision for decision in decisions
+                    if not (
+                        decision.get("type") == "ask_user"
+                        and str(decision.get("task_id")) == str(eligible_task.get("id"))
+                        and decision.get("question") == ready_question
+                    )
+                ]
+                decisions.append(
+                    {
+                        "type": "start_work_session",
+                        "task_id": eligible_task["id"],
+                        "reason": "Ready coding task can continue in native work session.",
+                    }
+                )
+                return
             if (
-                is_programmer_task(task)
-                and task.get("status") == "ready"
-                and not pending_question_for_task(state, task.get("id"))
-                and not work_session_for_task(state, task.get("id"))
+                eligibility.get("task")
+                and str(eligibility.get("related_task_id")) == str(task.get("id"))
+                and work_session_for_task(state, task.get("id"))
             ):
                 decisions[:] = [
                     decision for decision in decisions
                     if not (
                         decision.get("type") == "ask_user"
                         and str(decision.get("task_id")) == str(task.get("id"))
+                        and decision.get("question") == task_question(task)
                     )
                 ]
-                decisions.append(
-                    {
-                        "type": "start_work_session",
-                        "task_id": task["id"],
-                        "reason": "Ready coding task can continue in native work session.",
-                    }
-                )
-                return
 
     if autonomy_level in ("propose", "act"):
         for task in autonomous_task_candidates:
             if (
                 task_needs_programmer_plan(task)
                 and not pending_question_for_task(state, task.get("id"))
+                and not work_session_for_task(state, task.get("id"))
             ):
                 decisions.append(
                     {
@@ -800,6 +822,7 @@ def append_autonomous_decisions(
                 and task.get("status") == "ready"
                 and task.get("auto_execute")
                 and not pending_question_for_task(state, task.get("id"))
+                and not work_session_for_task(state, task.get("id"))
             ):
                 decisions.append(
                     {
@@ -2019,6 +2042,81 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
     return 1
 
 
+def native_work_start_eligibility(state, event, task_id, autonomous, autonomy_level, allow_native_work):
+    task = task_by_id(state, task_id)
+    related_task_id = task.get("id") if task else task_id
+    if not programmer_action_allowed(event, autonomous, autonomy_level, "act"):
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": related_task_id,
+            "reason": (
+                f"Refused start_work_session for task #{task_id}: "
+                "autonomy level does not allow native work."
+            ),
+        }
+    if not allow_native_work:
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": related_task_id,
+            "reason": f"Refused start_work_session for task #{task_id}: --allow-native-work is required.",
+        }
+    if not task:
+        return {
+            "ok": False,
+            "task": None,
+            "related_task_id": task_id,
+            "reason": f"Cannot start native work for missing task #{task_id}",
+        }
+    if not is_programmer_task(task):
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": task["id"],
+            "reason": (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"task kind {task_kind(task)!r} is not a coding task."
+            ),
+        }
+    if task.get("status") == "done":
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": task["id"],
+            "reason": f"Refused start_work_session for task #{task['id']}: task is already done.",
+        }
+    if task.get("status") != "ready":
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": task["id"],
+            "reason": (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"task status {task.get('status')!r} is not ready."
+            ),
+        }
+    pending_question = pending_question_for_task(state, task["id"])
+    if pending_question:
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": task["id"],
+            "reason": (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"question #{pending_question.get('id')} is still unanswered."
+            ),
+        }
+    if work_session_for_task(state, task["id"]):
+        return {
+            "ok": False,
+            "task": task,
+            "related_task_id": task["id"],
+            "reason": f"Skipped start_work_session for task #{task['id']}: native work session is already active.",
+        }
+    return {"ok": True, "task": task, "related_task_id": task["id"], "reason": ""}
+
+
 def apply_start_work_session_action(
     state,
     event,
@@ -2034,74 +2132,24 @@ def apply_start_work_session_action(
     verify_command="",
 ):
     task_id = action.get("task_id")
-    if not programmer_action_allowed(event, autonomous, autonomy_level, "act"):
+    eligibility = native_work_start_eligibility(
+        state,
+        event,
+        task_id,
+        autonomous,
+        autonomy_level,
+        allow_native_work,
+    )
+    if not eligibility["ok"]:
         add_outbox_message(
             state,
             "warning",
-            f"Refused start_work_session for task #{task_id}: autonomy level does not allow native work.",
+            eligibility["reason"],
             event_id=event["id"],
-            related_task_id=task_id,
+            related_task_id=eligibility.get("related_task_id"),
         )
         return 1
-    if not allow_native_work:
-        add_outbox_message(
-            state,
-            "warning",
-            f"Refused start_work_session for task #{task_id}: --allow-native-work is required.",
-            event_id=event["id"],
-            related_task_id=task_id,
-        )
-        return 1
-    task = task_by_id(state, task_id)
-    if not task:
-        add_outbox_message(state, "warning", f"Cannot start native work for missing task #{task_id}", event_id=event["id"])
-        return 1
-    if not is_programmer_task(task):
-        add_outbox_message(
-            state,
-            "warning",
-            (
-                f"Refused start_work_session for task #{task['id']}: "
-                f"task kind {task_kind(task)!r} is not a coding task."
-            ),
-            event_id=event["id"],
-            related_task_id=task["id"],
-        )
-        return 1
-    if task.get("status") == "done":
-        add_outbox_message(
-            state,
-            "warning",
-            f"Refused start_work_session for task #{task['id']}: task is already done.",
-            event_id=event["id"],
-            related_task_id=task["id"],
-        )
-        return 1
-    if task.get("status") != "ready":
-        add_outbox_message(
-            state,
-            "warning",
-            (
-                f"Refused start_work_session for task #{task['id']}: "
-                f"task status {task.get('status')!r} is not ready."
-            ),
-            event_id=event["id"],
-            related_task_id=task["id"],
-        )
-        return 1
-    pending_question = pending_question_for_task(state, task["id"])
-    if pending_question:
-        add_outbox_message(
-            state,
-            "warning",
-            (
-                f"Refused start_work_session for task #{task['id']}: "
-                f"question #{pending_question.get('id')} is still unanswered."
-            ),
-            event_id=event["id"],
-            related_task_id=task["id"],
-        )
-        return 1
+    task = eligibility["task"]
     session, created = create_work_session(state, task, current_time=current_time)
     seed_work_session_runtime_defaults(
         session,
