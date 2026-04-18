@@ -211,8 +211,12 @@ def build_runtime_command(args, workspace):
 def dogfood_subprocess_env():
     env = os.environ.copy()
     src_root = str(Path(__file__).resolve().parents[1])
+    repo_root = Path(__file__).resolve().parents[2]
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = src_root if not existing else src_root + os.pathsep + existing
+    source_cli = repo_root / "mew"
+    if source_cli.is_file() and os.access(source_cli, os.X_OK):
+        env["MEW_EXECUTABLE"] = str(source_cli)
     return env
 
 
