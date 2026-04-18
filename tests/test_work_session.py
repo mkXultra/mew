@@ -70,6 +70,25 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_create_work_session_refreshes_existing_task_snapshot(self):
+        state = {"tasks": [], "work_sessions": [], "next_ids": {"work_session": 1}}
+        task = add_coding_task(state)
+        session, created = create_work_session(state, task, current_time="first")
+
+        self.assertTrue(created)
+        self.assertEqual(session["title"], "Build native hands")
+        self.assertEqual(session["goal"], "Exercise a native work session.")
+
+        task["title"] = "Build sharper hands"
+        task["description"] = "Use the latest task focus."
+        reused, reused_created = create_work_session(state, task, current_time="second")
+
+        self.assertFalse(reused_created)
+        self.assertEqual(reused["id"], session["id"])
+        self.assertEqual(reused["title"], "Build sharper hands")
+        self.assertEqual(reused["goal"], "Use the latest task focus.")
+        self.assertEqual(reused["updated_at"], "second")
+
     def test_recovery_plan_item_selection_follows_next_action_priority(self):
         plan = {
             "items": [

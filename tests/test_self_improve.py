@@ -395,6 +395,30 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_start_session_refreshes_reused_session_goal(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    first_code = main(["self-improve", "--start-session", "--focus", "First focus"])
+                self.assertEqual(first_code, 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    second_code = main(["self-improve", "--start-session", "--focus", "Second focus", "--json"])
+
+                self.assertEqual(second_code, 0)
+                data = json.loads(stdout.getvalue())
+                self.assertFalse(data["created"])
+                self.assertFalse(data["session_created"])
+                self.assertIn("Second focus", data["task"]["description"])
+                self.assertIn("Second focus", data["work_session"]["goal"])
+                self.assertNotIn("First focus", data["work_session"]["goal"])
+                state = load_state()
+                self.assertIn("Second focus", state["work_sessions"][0]["goal"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_controls_use_task_cwd_read_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as workdir:

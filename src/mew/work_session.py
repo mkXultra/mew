@@ -249,6 +249,10 @@ def create_work_session(state, task, current_time=None, inherit_defaults=True):
     current_time = current_time or now_iso()
     existing = work_session_for_task(state, task.get("id"))
     if existing:
+        existing["title"] = task.get("title") or existing.get("title") or ""
+        task_goal = task.get("description") or task.get("title") or ""
+        if task_goal:
+            existing["goal"] = task_goal
         existing["updated_at"] = current_time
         return existing, False
 
