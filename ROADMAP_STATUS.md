@@ -996,6 +996,11 @@ Next action:
   failed `tests/**` edits no longer satisfy source pairing, and passive
   native-work recovery for unpaired source approvals is resume-first while
   exposing the blocked approve command plus explicit override command.
+- Native self-improve dogfood task #118/session #140 used mew as the coding
+  buddy for a small self-improve control copy change. The resident first
+  produced an unpaired source dry-run and was correctly stopped by
+  `pairing_status: missing_test_edit`; after paired test dry-runs were added,
+  the source edit was approved with focused pytest.
 
 ## Current Roadmap Focus
 

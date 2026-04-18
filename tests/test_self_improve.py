@@ -200,7 +200,7 @@ class SelfImproveTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
-                self.assertIn("native work: mew work 1 --start-session", output)
+                self.assertIn("start session: mew work 1 --start-session", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
@@ -280,7 +280,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("started work session #1", output)
-                self.assertNotIn("native work: mew work 1 --start-session", output)
+                self.assertNotIn("start session: mew work 1 --start-session", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
