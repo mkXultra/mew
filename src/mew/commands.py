@@ -141,7 +141,15 @@ from .state import (
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
-from .read_tools import glob_paths, inspect_dir, is_sensitive_path, read_file, search_text, summarize_read_result
+from .read_tools import (
+    glob_paths,
+    inspect_dir,
+    is_sensitive_path,
+    read_file,
+    resolve_allowed_path,
+    search_text,
+    summarize_read_result,
+)
 from .tasks import (
     clip_output,
     find_task,
@@ -4978,6 +4986,12 @@ def interrupted_run_tests_command(call):
     return result.get("command") or parameters.get("command") or ""
 
 
+def interrupted_run_tests_cwd(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    return result.get("cwd") or parameters.get("cwd") or "."
+
+
 def work_recover_verification_blocker(args, session, source_call, *, safe_only=False):
     if safe_only:
         return {
@@ -4999,6 +5013,20 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "reason": "verification recovery needs explicit --allow-read roots for world-state review",
             "source_tool_call_id": source_call.get("id"),
             "tool": source_call.get("tool"),
+            "cwd": interrupted_run_tests_cwd(source_call),
+        }
+    source_cwd = interrupted_run_tests_cwd(source_call)
+    try:
+        resolve_allowed_path(source_cwd, getattr(args, "allow_read", None) or [])
+    except ValueError as exc:
+        return {
+            "action": "needs_read_gate",
+            "reason": "verification recovery needs --allow-read to cover the interrupted verifier cwd",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "cwd": source_cwd,
+            "allow_read": list(getattr(args, "allow_read", None) or []),
+            "error": str(exc),
         }
     if not getattr(args, "allow_verify", False):
         return {
@@ -5006,6 +5034,7 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "reason": "verification recovery needs explicit --allow-verify",
             "source_tool_call_id": source_call.get("id"),
             "tool": source_call.get("tool"),
+            "cwd": source_cwd,
         }
     source_command = interrupted_run_tests_command(source_call)
     requested_command = getattr(args, "verify_command", None) or getattr(args, "command", None) or ""
@@ -5016,6 +5045,7 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "source_tool_call_id": source_call.get("id"),
             "tool": source_call.get("tool"),
             "command": source_command,
+            "cwd": source_cwd,
         }
     if requested_command != source_command:
         return {
@@ -5025,6 +5055,7 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "tool": source_call.get("tool"),
             "command": source_command,
             "requested_command": requested_command,
+            "cwd": source_cwd,
         }
     return None
 
@@ -5176,9 +5207,13 @@ def print_work_recovery_report(report):
         return
     if action == "needs_read_gate":
         print(recovery.get("reason") or "Safe recovery needs explicit --allow-read roots.")
+        if recovery.get("cwd"):
+            print(f"cwd: {recovery.get('cwd')}")
         return
     if action in {"needs_verify_gate", "needs_verify_command", "needs_matching_verifier"}:
         print(recovery.get("reason") or "Verification recovery needs explicit verifier gates.")
+        if recovery.get("cwd"):
+            print(f"cwd: {recovery.get('cwd')}")
         if recovery.get("command"):
             print(f"command: {recovery.get('command')}")
         if recovery.get("requested_command"):

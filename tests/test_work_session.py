@@ -3537,6 +3537,36 @@ class WorkSessionTests(unittest.TestCase):
                 no_gate = json.loads(stdout.getvalue())
                 self.assertEqual(no_gate["recovery"]["action"], "needs_verify_gate")
 
+                with tempfile.TemporaryDirectory() as outside_tmp:
+                    with state_lock():
+                        state = load_state()
+                        state["work_sessions"][0]["tool_calls"][0]["parameters"]["cwd"] = outside_tmp
+                        save_state(state)
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--recover-session",
+                                    "--allow-read",
+                                    ".",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    command,
+                                    "--json",
+                                ]
+                            ),
+                            0,
+                        )
+                    outside_gate = json.loads(stdout.getvalue())
+                    self.assertEqual(outside_gate["recovery"]["action"], "needs_read_gate")
+                    self.assertEqual(outside_gate["recovery"]["cwd"], outside_tmp)
+                    with state_lock():
+                        state = load_state()
+                        state["work_sessions"][0]["tool_calls"][0]["parameters"]["cwd"] = "."
+                        save_state(state)
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
                         main(
@@ -4142,6 +4172,8 @@ class WorkSessionTests(unittest.TestCase):
             "tool_calls": [
                 {"id": 1, "tool": "read_file", "status": "interrupted", "parameters": {"path": "a.md"}},
                 {"id": 2, "tool": "glob", "status": "interrupted", "parameters": {"path": ".", "pattern": "*.py"}},
+                {"id": 3, "tool": "run_tests", "status": "interrupted", "parameters": {"command": "python -V"}},
+                {"id": 4, "tool": "run_tests", "status": "interrupted", "parameters": {"command": "python -m pytest"}},
             ],
             "model_turns": [],
         }
@@ -4150,6 +4182,9 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("hint", items[0])
         self.assertIn("recover-session", items[1]["hint"])
+        self.assertNotIn("hint", items[2])
+        self.assertIn("--allow-verify", items[3]["hint"])
+        self.assertIn("python -m pytest", items[3]["command"])
 
     def test_work_recovery_plan_includes_side_effect_review_context(self):
         from mew.commands import format_work_cockpit_controls

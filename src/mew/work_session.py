@@ -1339,11 +1339,17 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         if call.get("status") == "interrupted" and not call.get("recovery_status")
     }
     latest_retryable_tool_id = None
+    latest_verification_tool_id = None
     for call in calls:
         if call.get("status") != "interrupted" or call.get("recovery_status"):
             continue
         if call.get("tool") in READ_ONLY_WORK_TOOLS or call.get("tool") in GIT_WORK_TOOLS:
             latest_retryable_tool_id = call.get("id")
+        if call.get("tool") == "run_tests":
+            result = call.get("result") or {}
+            parameters = call.get("parameters") or {}
+            if result.get("command") or parameters.get("command"):
+                latest_verification_tool_id = call.get("id")
     for call in calls:
         if call.get("status") != "interrupted" or call.get("recovery_status"):
             continue
@@ -1406,7 +1412,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read {read_arg} --auto-recover-safe"
             if path:
                 item["path"] = path
-        if action == "retry_verification":
+        if action == "retry_verification" and call.get("id") == latest_verification_tool_id:
             read_root = work_recovery_read_root(call)
             read_arg = shlex.quote(read_root)
             command_arg = shlex.quote(command)
