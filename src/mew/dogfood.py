@@ -2848,6 +2848,33 @@ def runtime_effect_summary(state, limit=5):
     }
 
 
+def native_work_advance_metrics(state, limit=5):
+    advances = []
+    for session in state.get("work_sessions", []) or []:
+        for note in session.get("notes") or []:
+            text = note.get("text") or ""
+            prefix = "runtime passive advance step "
+            if note.get("source") != "runtime" or prefix not in text:
+                continue
+            outcome = text.split(prefix, 1)[1].split(":", 1)[0].strip() or "unknown"
+            advances.append(
+                {
+                    "session_id": session.get("id"),
+                    "task_id": session.get("task_id"),
+                    "at": note.get("created_at"),
+                    "outcome": outcome,
+                    "text": text,
+                }
+            )
+    return {
+        "attempts": len(advances),
+        "by_outcome": count_by(advances, "outcome"),
+        "latest": advances[-limit:],
+        "last_step": (state.get("runtime_status") or {}).get("last_native_work_step") or {},
+        "last_skip": (state.get("runtime_status") or {}).get("last_native_work_step_skip"),
+    }
+
+
 def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=True):
     workspace = Path(workspace)
     state = read_json_file(workspace / STATE_FILE, {})
@@ -2888,6 +2915,7 @@ def build_dogfood_report(workspace, command, exit_code, duration_seconds, kept=T
         "tasks": count_by(state.get("tasks", []), "status"),
         "agent_runs": agent_run_summary(state.get("agent_runs", [])),
         "programmer_loop": programmer_loop_metrics(state),
+        "native_work_advance": native_work_advance_metrics(state),
         "verification_runs": len(state.get("verification_runs", [])),
         "write_runs": len(state.get("write_runs", [])),
         "runtime_effects": runtime_effect_summary(state),
@@ -3049,6 +3077,7 @@ def format_dogfood_report(report):
         f"tasks: {report.get('tasks')}",
         f"agent_runs: {report.get('agent_runs')}",
         f"programmer_loop: {report.get('programmer_loop')}",
+        f"native_work_advance: {report.get('native_work_advance')}",
         f"verification_runs: {report.get('verification_runs')} write_runs: {report.get('write_runs')}",
         "runtime_effects: " + format_runtime_effect_summary(report.get("runtime_effects")),
         f"model_enabled: {bool(report.get('model_enabled'))}",

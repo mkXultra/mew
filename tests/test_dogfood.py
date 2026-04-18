@@ -442,6 +442,25 @@ class DogfoodTests(unittest.TestCase):
                     "write_run_ids": [],
                 }
             )
+            state["work_sessions"].append(
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "notes": [
+                        {
+                            "created_at": "later",
+                            "source": "runtime",
+                            "text": "runtime passive advance step completed: mew work 1 --live",
+                        }
+                    ],
+                }
+            )
+            state["runtime_status"]["last_native_work_step"] = {
+                "session_id": 1,
+                "task_id": 1,
+                "outcome": "completed",
+            }
             (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             (workspace / LOG_FILE).write_text(
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
@@ -508,6 +527,9 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["programmer_loop"]["review_runs"], 1)
             self.assertEqual(report["programmer_loop"]["reviews_with_followup_processed"], 1)
             self.assertEqual(report["programmer_loop"]["followup_task_ids"], [3])
+            self.assertEqual(report["native_work_advance"]["attempts"], 1)
+            self.assertEqual(report["native_work_advance"]["by_outcome"], {"completed": 1})
+            self.assertEqual(report["native_work_advance"]["last_step"]["outcome"], "completed")
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
@@ -522,6 +544,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("read_inspection:", text)
             self.assertIn("agent_runs:", text)
             self.assertIn("programmer_loop:", text)
+            self.assertIn("native_work_advance:", text)
             self.assertIn("agent_reflex_results: 1", text)
             self.assertIn("run #9 exit=1 timed_out=True", text)
             self.assertEqual(len(report["runtime_output_tail"]), 3)
