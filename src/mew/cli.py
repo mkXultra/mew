@@ -1144,6 +1144,7 @@ def build_parser():
             "  mew self-improve --start-session --json --focus \"Make the coding cockpit calmer\"\n"
             "  mew work <task-id> --live --allow-read . --compact-live --max-steps 1\n"
             "  mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10\n\n"
+            "  mew work <task-id> --session --resume --allow-read .\n"
             "  mew work <task-id> --follow-status --json\n\n"
             "Planned dispatcher flow:\n"
             "  mew self-improve --focus \"Improve stale agent-run handling\"\n"
