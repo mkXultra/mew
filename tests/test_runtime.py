@@ -2,6 +2,7 @@ import os
 import shlex
 import sys
 from io import StringIO
+from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -27,6 +28,57 @@ from mew.work_session import create_work_session, mark_work_session_runtime_owne
 
 
 class RuntimeTests(unittest.TestCase):
+    def seed_interrupted_dry_run_write_session(self):
+        Path("target.txt").write_text("before\n", encoding="utf-8")
+        with state_lock():
+            state = load_state()
+            task = {
+                "id": 1,
+                "title": "Improve mew",
+                "description": "",
+                "status": "ready",
+                "kind": "coding",
+                "plans": [],
+                "runs": [],
+            }
+            state["tasks"].append(task)
+            session, _ = create_work_session(state, task)
+            mark_work_session_runtime_owned(session, event_id=99, current_time="2026-04-18T05:00:00Z")
+            session["default_options"] = {"allow_read": ["."], "allow_write": ["."]}
+            session["tool_calls"].append(
+                {
+                    "id": 1,
+                    "session_id": session.get("id"),
+                    "task_id": task.get("id"),
+                    "tool": "edit_file",
+                    "status": "interrupted",
+                    "parameters": {
+                        "path": "target.txt",
+                        "old": "before\n",
+                        "new": "after\n",
+                        "apply": False,
+                        "allowed_write_roots": ["."],
+                    },
+                    "result": None,
+                    "summary": "interrupted dry-run edit",
+                    "error": "Interrupted before the dry-run diff completed.",
+                    "started_at": "2026-04-18T05:00:00Z",
+                    "finished_at": "2026-04-18T05:00:00Z",
+                }
+            )
+            session["last_tool_call_id"] = 1
+            state["next_ids"]["work_tool_call"] = 2
+            state.setdefault("runtime_status", {})["last_native_work_step"] = {
+                "finished_at": "2026-04-18T05:00:10Z",
+                "session_id": session.get("id"),
+                "task_id": task.get("id"),
+                "command": "mew work 1 --live --allow-read . --allow-write . --max-steps 1",
+                "exit_code": 1,
+                "timed_out": False,
+                "outcome": "failed",
+            }
+            save_state(state)
+
     def test_guidance_with_runtime_focus_appends_transient_focus(self):
         guidance = guidance_with_runtime_focus("Base guidance.", "Review current changes")
 
@@ -1323,6 +1375,112 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(recovery["tool"], "read_file")
                 self.assertEqual(recovery["source_tool_call_id"], 1)
                 self.assertEqual(recovery["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_auto_recovers_interrupted_dry_run_write_preview(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                self.seed_interrupted_dry_run_write_session()
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                native_runner.assert_not_called()
+                self.assertEqual(Path("target.txt").read_text(encoding="utf-8"), "before\n")
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+                self.assertEqual(session["tool_calls"][1]["tool"], "edit_file")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertTrue(session["tool_calls"][1]["result"]["dry_run"])
+                self.assertFalse(session["tool_calls"][1]["result"]["written"])
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "auto_retry_dry_run_write_completed")
+                self.assertEqual(recovery["tool"], "edit_file")
+                self.assertEqual(recovery["source_tool_call_id"], 1)
+                self.assertEqual(recovery["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_does_not_auto_recover_dry_run_write_without_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                self.seed_interrupted_dry_run_write_session()
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--allow-read",
+                                ".",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                native_runner.assert_not_called()
+                self.assertEqual(Path("target.txt").read_text(encoding="utf-8"), "before\n")
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertNotIn("recovery_status", session["tool_calls"][0])
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "ask_user_seeded_question")
+                self.assertEqual(recovery["recovery_plan_action"], "retry_dry_run_write")
             finally:
                 os.chdir(old_cwd)
 

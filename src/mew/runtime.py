@@ -57,6 +57,7 @@ from .repair import repair_incomplete_runtime_effects
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
+from .write_tools import resolve_allowed_write_path
 from .work_session import (
     active_work_sessions,
     add_work_session_note,
@@ -77,6 +78,7 @@ from .work_session import (
     work_session_task,
     work_recovery_read_root,
     work_tool_result_error,
+    WRITE_WORK_TOOLS,
 )
 
 
@@ -546,6 +548,33 @@ def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, cur
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         recovery_kind = "tool"
         recovery_reason = "previous passive native advance left an interrupted safe read/git tool"
+    elif selected_action == "retry_dry_run_write" and selected_tool in WRITE_WORK_TOOLS:
+        write_root = work_recovery_read_root(source_call)
+        recovery["path"] = write_root
+        if not getattr(args, "allow_write", None):
+            recovery["reason"] = "runtime dry-run write recovery needs explicit --allow-write roots"
+            runtime_status["last_native_work_recovery"] = recovery
+            return None
+        try:
+            resolve_allowed_write_path(
+                write_root,
+                getattr(args, "allow_write", None) or [],
+                create=bool((source_call.get("parameters") or {}).get("create")),
+            )
+        except ValueError as exc:
+            recovery["reason"] = "runtime dry-run write recovery needs --allow-write to cover the interrupted tool path"
+            recovery["allow_write"] = list(getattr(args, "allow_write", None) or [])
+            recovery["error"] = str(exc)
+            runtime_status["last_native_work_recovery"] = recovery
+            return None
+        parameters = dict(source_call.get("parameters") or {})
+        parameters["recovered_from_tool_call_id"] = source_call.get("id")
+        parameters["apply"] = False
+        parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
+        for key in ("approved_from_tool_call_id", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
+            parameters.pop(key, None)
+        recovery_kind = "dry_run_write"
+        recovery_reason = "previous passive native advance left an interrupted dry-run write preview"
     else:
         recovery["reason"] = "runtime recovery only auto-runs the selected safe recovery-plan item"
         runtime_status["last_native_work_recovery"] = recovery

@@ -1506,6 +1506,10 @@ Next action:
 - Compact live/follow session output now shares the same stale working-memory
   source hints as workbench reentry, including the later tool call or model turn
   that made the recorded `next_step` unsafe to trust blindly.
+- Passive runtime recovery now has a narrow write-shaped safe path: interrupted
+  dry-run `write_file`/`edit_file` previews can be retried under a fresh
+  `--allow-write` gate, while real apply/approval and indeterminate side effects
+  remain on the human-review path.
 
 ## Current Roadmap Focus
 

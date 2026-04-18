@@ -55,7 +55,13 @@ WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
-RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
+RECOVERY_PLAN_ACTION_PRIORITY = (
+    "needs_user_review",
+    "retry_tool",
+    "retry_dry_run_write",
+    "retry_verification",
+    "replan",
+)
 WORK_RECOVERY_EFFECT_PRIORITY = (
     "rollback_needed",
     "verify_pending",
@@ -1719,6 +1725,25 @@ def work_session_has_running_activity(session):
     )
 
 
+def work_interrupted_dry_run_write_retryable(call, *, effect_classification=None):
+    if (call or {}).get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    parameters = (call or {}).get("parameters") or {}
+    result = (call or {}).get("result") or {}
+    effect = effect_classification or work_recovery_effect_classification(call)
+    if effect != "no_action":
+        return False
+    if parameters.get("apply") or result.get("applied"):
+        return False
+    if parameters.get("approved_from_tool_call_id"):
+        return False
+    if (call or {}).get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
+        return False
+    if result.get("written") and not result.get("dry_run"):
+        return False
+    return True
+
+
 def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
@@ -1748,20 +1773,27 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         parameters = call.get("parameters") or {}
         path = work_call_path(call)
         command = result.get("command") or parameters.get("command") or ""
+        effect_classification = work_recovery_effect_classification(call)
         if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
             action = "retry_tool"
             safety = "read_only"
             reason = "interrupted read/git inspection can be retried after verifying read roots"
             review_steps = []
         elif tool in WRITE_WORK_TOOLS:
-            action = "needs_user_review"
-            safety = "write"
-            reason = "interrupted write must be reviewed before retry or rollback"
-            review_steps = [
-                "open the resume with live world state",
-                "inspect git status/diff and the touched path before retrying",
-                "retry or re-apply only after the verifier is known",
-            ]
+            if work_interrupted_dry_run_write_retryable(call, effect_classification=effect_classification):
+                action = "retry_dry_run_write"
+                safety = "dry_run_write"
+                reason = "interrupted dry-run write preview can be retried after checking write roots"
+                review_steps = []
+            else:
+                action = "needs_user_review"
+                safety = "write"
+                reason = "interrupted write must be reviewed before retry or rollback"
+                review_steps = [
+                    "open the resume with live world state",
+                    "inspect git status/diff and the touched path before retrying",
+                    "retry or re-apply only after the verifier is known",
+                ]
         elif tool == "run_tests" and command:
             action = "retry_verification"
             safety = "verification"
@@ -1787,7 +1819,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "tool": tool,
             "action": action,
             "safety": safety,
-            "effect_classification": work_recovery_effect_classification(call),
+            "effect_classification": effect_classification,
             "reason": reason,
             "source_summary": call.get("summary") or "",
             "source_error": call.get("error") or "",
@@ -1812,6 +1844,17 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 f"--allow-verify --verify-command {command_arg}"
             )
             item["command"] = command
+        if action == "retry_dry_run_write":
+            write_root = work_recovery_read_root(call)
+            write_arg = shlex.quote(write_root)
+            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-write {write_arg}"
+            item["auto_hint"] = (
+                f"{mew_executable()} work{task_arg} --session --resume --allow-write {write_arg} "
+                f"--auto-recover-safe"
+            )
+            item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-write {write_arg} --auto-recover-safe"
+            if path:
+                item["path"] = path
         if action == "needs_user_review":
             review_arg = shlex.quote(work_recovery_read_root(call))
             item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read {review_arg}"
@@ -1849,6 +1892,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         next_action = "verify the world and review interrupted side-effecting work before retry"
     elif any(item.get("action") == "retry_tool" for item in items):
         next_action = "verify the world, then retry recoverable interrupted read/git tool after checking read roots"
+    elif any(item.get("action") == "retry_dry_run_write" for item in items):
+        next_action = "verify the world, then retry interrupted dry-run write preview after checking write roots"
     elif any(item.get("action") == "retry_verification" for item in items):
         next_action = "verify the world, then rerun the interrupted verifier with the same explicit command"
     else:

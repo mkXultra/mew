@@ -5966,6 +5966,70 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_work_session_resume_auto_recovers_dry_run_write_preview(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                Path("README.md").write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Chat auto recover dry-run write.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": {
+                                        "path": "README.md",
+                                        "old": "before\n",
+                                        "new": "after\n",
+                                        "apply": False,
+                                    },
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    state["next_ids"]["work_tool_call"] = 2
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session resume --allow-write . --auto-recover-safe", {}),
+                        "continue",
+                    )
+                output = stdout.getvalue()
+                self.assertIn("Auto recovery", output)
+                self.assertIn("recovered work tool #1 -> #2 [completed] edit_file", output)
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "before\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertTrue(session["tool_calls"][1]["result"]["dry_run"])
+                self.assertFalse(session["tool_calls"][1]["result"]["written"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_auto_recovery_hint_keeps_task_scope_with_multiple_sessions(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -6173,20 +6237,57 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(items[0]["command"], "python mutate.py")
         self.assertIn("--session --resume --allow-read", items[0]["review_hint"])
         self.assertIn("idempotent", " ".join(items[0]["review_steps"]))
-        self.assertEqual(items[1]["safety"], "write")
+        self.assertEqual(items[1]["action"], "retry_dry_run_write")
+        self.assertEqual(items[1]["safety"], "dry_run_write")
         self.assertEqual(items[1]["effect_classification"], "no_action")
         self.assertEqual(items[1]["path"], "README.md")
-        self.assertIn("git status/diff", " ".join(items[1]["review_steps"]))
+        self.assertIn("--recover-session --allow-write README.md", items[1]["hint"])
 
         text = format_work_session_resume(resume)
         self.assertIn("effect=action_committed", text)
         self.assertIn("effect=no_action", text)
         self.assertIn("review: ./mew work 1 --session --resume --allow-read .", text)
-        self.assertIn("review: ./mew work 1 --session --resume --allow-read README.md", text)
+        self.assertIn("hint: ./mew work 1 --recover-session --allow-write README.md", text)
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
         controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
         self.assertIn("./mew work 1 --session --resume --allow-read .", controls)
+
+    def test_work_recovery_plan_keeps_interrupted_apply_on_review_path(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover apply.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "interrupted",
+                    "parameters": {
+                        "path": "README.md",
+                        "old": "old",
+                        "new": "new",
+                        "apply": True,
+                        "verify_command": "uv run pytest -q",
+                    },
+                    "result": {"path": "README.md", "written": True, "applied": True},
+                    "approval_status": "indeterminate",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        item = build_work_session_resume(session)["recovery_plan"]["items"][0]
+
+        self.assertEqual(item["action"], "needs_user_review")
+        self.assertEqual(item["safety"], "write")
+        self.assertEqual(item["effect_classification"], "verify_pending")
+        self.assertIn("git status/diff", " ".join(item["review_steps"]))
 
     def test_work_recover_session_reports_review_context_for_side_effects(self):
         old_cwd = os.getcwd()

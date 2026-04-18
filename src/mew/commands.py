@@ -217,6 +217,7 @@ from .work_session import (
     WRITE_WORK_TOOLS,
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
+    work_recovery_read_root,
     work_session_runtime_command,
     work_session_task,
     work_write_pairing_status,
@@ -224,6 +225,7 @@ from .work_session import (
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
 from .work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from .work_world import build_work_world_state
+from .write_tools import resolve_allowed_write_path
 
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
@@ -1840,6 +1842,14 @@ def work_cli_control_items(session, args, task=None):
                 "command": f"{mew_executable()} work{task_part} --session --resume --allow-read . --auto-recover-safe",
             }
         )
+    if any(item.get("action") == "retry_dry_run_write" for item in recovery_items):
+        task_part = f" {task_id}" if task_id is not None else ""
+        controls.append(
+            {
+                "label": "auto-recover dry-run preview",
+                "command": f"{mew_executable()} work{task_part} --session --resume --allow-write . --auto-recover-safe",
+            }
+        )
     steer_parts = ["work"]
     if task_id is not None:
         steer_parts.append(task_id)
@@ -1972,6 +1982,16 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
             "--allow-verify",
             "--verify-command",
             item.get("command") or "<command>",
+        )
+    elif action == "retry_dry_run_write":
+        kind = "retry_dry_run_write"
+        command = item.get("auto_hint") or item.get("hint") or _work_task_command(
+            task_id,
+            "--session",
+            "--resume",
+            "--allow-write",
+            ".",
+            "--auto-recover-safe",
         )
     elif action == "replan":
         kind = "replannable"
@@ -5648,6 +5668,45 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
     return None
 
 
+def work_recovery_plan_item_for_call(state, session, source_call):
+    if not source_call:
+        return {}
+    resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
+    for item in (resume.get("recovery_plan") or {}).get("items") or []:
+        if str(item.get("tool_call_id")) == str(source_call.get("id")):
+            return item
+    return {}
+
+
+def work_recover_dry_run_write_blocker(args, source_call):
+    write_root = work_recovery_read_root(source_call)
+    if not getattr(args, "allow_write", None):
+        return {
+            "action": "needs_write_gate",
+            "reason": "dry-run write recovery needs explicit --allow-write roots",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "path": write_root,
+        }
+    try:
+        resolve_allowed_write_path(
+            write_root,
+            getattr(args, "allow_write", None) or [],
+            create=bool((source_call.get("parameters") or {}).get("create")),
+        )
+    except ValueError as exc:
+        return {
+            "action": "needs_write_gate",
+            "reason": "dry-run write recovery needs --allow-write to cover the interrupted tool path",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "path": write_root,
+            "allow_write": list(getattr(args, "allow_write", None) or []),
+            "error": str(exc),
+        }
+    return None
+
+
 def _work_recover_session_once(args, progress=None, safe_only=False):
     progress = progress if progress is not None else work_tool_progress(args)
     with state_lock():
@@ -5659,28 +5718,27 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         if not source_call:
             return 0, {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
         tool = source_call.get("tool")
+        recovery_item = work_recovery_plan_item_for_call(state, session, source_call)
         if tool == "run_tests":
             blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
             if blocker:
                 return 0, {"recovery": blocker}
+        elif tool in WRITE_WORK_TOOLS and recovery_item.get("action") == "retry_dry_run_write":
+            blocker = work_recover_dry_run_write_blocker(args, source_call)
+            if blocker:
+                return 0, {"recovery": blocker}
         elif tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
-            resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
-            review_item = {}
-            for item in (resume.get("recovery_plan") or {}).get("items") or []:
-                if str(item.get("tool_call_id")) == str(source_call.get("id")):
-                    review_item = item
-                    break
             report = {
                 "recovery": {
                     "action": "needs_user",
                     "reason": f"interrupted {tool} is not safe to retry automatically",
                     "source_tool_call_id": source_call.get("id"),
                     "tool": tool,
-                    "review_item": review_item,
+                    "review_item": recovery_item,
                 }
             }
             return 0, report
-        if safe_only and not getattr(args, "allow_read", None):
+        if safe_only and tool in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and not getattr(args, "allow_read", None):
             return 0, {
                 "recovery": {
                     "action": "needs_read_gate",
@@ -5715,16 +5773,37 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
             if blocker:
                 return 0, {"recovery": blocker}
+        elif tool in WRITE_WORK_TOOLS:
+            recovery_item = work_recovery_plan_item_for_call(state, session, source_call)
+            if recovery_item.get("action") != "retry_dry_run_write":
+                return 0, {
+                    "recovery": {
+                        "action": "needs_user",
+                        "reason": f"interrupted {tool} is not safe to retry automatically",
+                        "source_tool_call_id": source_call.get("id"),
+                        "tool": tool,
+                        "review_item": recovery_item,
+                    }
+                }
+            blocker = work_recover_dry_run_write_blocker(args, source_call)
+            if blocker:
+                return 0, {"recovery": blocker}
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         if tool == "run_tests":
             parameters["command"] = interrupted_run_tests_command(source_call)
             parameters["allow_verify"] = True
+        elif tool in WRITE_WORK_TOOLS:
+            parameters["apply"] = False
+            parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
+            for key in ("approved_from_tool_call_id", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
+                parameters.pop(key, None)
         tool_call = start_work_tool_call(state, session, tool, parameters)
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
         save_state(state)
 
+    recovery_action = "retry_dry_run_write" if tool in WRITE_WORK_TOOLS else "retry_tool"
     if progress:
         progress(f"recover tool #{source_call.get('id')} -> #{tool_call_id} {tool} start")
     try:
@@ -5752,7 +5831,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             save_state(state)
         report = {
             "recovery": {
-                "action": "retry_tool",
+                "action": recovery_action,
                 "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
                 "tool": tool,
                 "status": tool_call.get("status"),
@@ -5785,7 +5864,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         save_state(state)
     report = {
         "recovery": {
-            "action": "retry_tool",
+            "action": recovery_action,
             "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
             "tool": tool,
             "status": tool_call.get("status"),
@@ -5828,6 +5907,11 @@ def print_work_recovery_report(report):
         if recovery.get("cwd"):
             print(f"cwd: {recovery.get('cwd')}")
         return
+    if action == "needs_write_gate":
+        print(recovery.get("reason") or "Safe dry-run write recovery needs explicit --allow-write roots.")
+        if recovery.get("path"):
+            print(f"path: {recovery.get('path')}")
+        return
     if action in {"needs_verify_gate", "needs_verify_command", "needs_matching_verifier"}:
         print(recovery.get("reason") or "Verification recovery needs explicit verifier gates.")
         if recovery.get("cwd"):
@@ -5837,7 +5921,7 @@ def print_work_recovery_report(report):
         if recovery.get("requested_command"):
             print(f"requested_command: {recovery.get('requested_command')}")
         return
-    if action == "retry_tool":
+    if action in {"retry_tool", "retry_dry_run_write"}:
         tool_call = (report or {}).get("tool_call") or {}
         if report.get("interrupted") or tool_call.get("status") == "interrupted":
             print(
@@ -9646,8 +9730,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-session resume [task-id]        show a compact reentry bundle
 /work-session <task-id> resume        same as resume; task-first order is accepted
 /work-session resume --allow-read .   add live git/file world state to the reentry bundle
-/work-session resume --auto-recover-safe --allow-read .
-                                      retry one interrupted read/git tool before showing resume
+/work-session resume --auto-recover-safe --allow-read .|--allow-write .
+                                      retry one interrupted safe tool before showing resume
 /work-session start <task-id>         start or reuse a native work session
 /outside chat: mew code <task-id>     enter coding scoped work-mode chat
 /outside chat: mew do <task-id>       run the common supervised coding loop
@@ -10137,6 +10221,7 @@ def chat_set_work_mode(rest, chat_state):
 def _parse_chat_work_resume_args(parts):
     task_id = None
     allow_read = []
+    allow_write = []
     auto_recover_safe = False
     index = 1
     while index < len(parts):
@@ -10153,6 +10238,14 @@ def _parse_chat_work_resume_args(parts):
             allow_read.append(token.partition("=")[2])
             index += 1
             continue
+        if token == "--allow-write" and index + 1 < len(parts):
+            allow_write.append(parts[index + 1])
+            index += 2
+            continue
+        if token.startswith("--allow-write="):
+            allow_write.append(token.partition("=")[2])
+            index += 1
+            continue
         if token == "--auto-recover-safe":
             auto_recover_safe = True
             index += 1
@@ -10161,8 +10254,8 @@ def _parse_chat_work_resume_args(parts):
             task_id = token.lstrip("#")
             index += 1
             continue
-        return None, None, False, f"mew: unsupported resume option: {token}"
-    return task_id, allow_read, auto_recover_safe, ""
+        return None, None, None, False, f"mew: unsupported resume option: {token}"
+    return task_id, allow_read, allow_write, auto_recover_safe, ""
 
 
 def _work_read_flags_from_options(option_text, session=None):
@@ -10620,7 +10713,7 @@ def chat_work_session(rest, chat_state=None):
         return
 
     if action == "resume":
-        task_id, allow_read, auto_recover_safe, error = _parse_chat_work_resume_args(parts)
+        task_id, allow_read, allow_write, auto_recover_safe, error = _parse_chat_work_resume_args(parts)
         if error:
             print(error)
             return
@@ -10630,7 +10723,13 @@ def chat_work_session(rest, chat_state=None):
             session = _latest_work_session_for_task(state, task_id)
         auto_recovery = None
         if auto_recover_safe:
-            recover_args = SimpleNamespace(task_id=task_id, allow_read=allow_read, progress=False, json=False)
+            recover_args = SimpleNamespace(
+                task_id=task_id,
+                allow_read=allow_read,
+                allow_write=allow_write,
+                progress=False,
+                json=False,
+            )
             _, auto_recovery = _work_recover_session_once(recover_args, safe_only=True)
             state = load_state()
             session = active_work_session_for_kind(state, scope_kind)
