@@ -15,6 +15,7 @@ from .work_session import build_work_session_effort, format_work_effort_brief
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_DETAIL_ITEMS = 3
 MAX_DETAIL_SUMMARY_LENGTH = 140
+MAX_ACTION_ITEMS = 8
 
 
 def validate_date(value: str) -> str:
@@ -208,6 +209,129 @@ def attention_detail_item(item: dict[str, Any]) -> dict[str, Any]:
     return detail
 
 
+def question_action_item(question: dict[str, Any]) -> dict[str, Any]:
+    question_id = question.get("id") or question.get("question_id")
+    action = {
+        "kind": "reply",
+        "label": "Reply to question",
+        "command": mew_command("chat"),
+    }
+    if question_id is not None:
+        action["id"] = question_id
+        action["question_id"] = question_id
+        action["label"] = f"Reply to question #{question_id}"
+        action["command"] = mew_command("reply", question_id, "<reply>")
+    related_task_id = question.get("related_task_id")
+    if related_task_id is not None:
+        action["task_id"] = related_task_id
+    return action
+
+
+def work_session_action_item(session: dict[str, Any]) -> dict[str, Any]:
+    task_id = session.get("task_id")
+    session_id = session.get("id")
+    action = {
+        "kind": "resume_work",
+        "label": "Resume active work",
+        "command": mew_command("work", "--session", "--resume", "--allow-read", "."),
+    }
+    if task_id is not None:
+        action["task_id"] = task_id
+        action["label"] = f"Resume task #{task_id}"
+        action["command"] = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+    if session_id is not None:
+        action["id"] = session_id
+        action["session_id"] = session_id
+    effort = build_work_session_effort(session)
+    effort_summary = format_work_effort_brief(effort)
+    if effort_summary:
+        action["effort_summary"] = effort_summary
+    return action
+
+
+def task_action_item(task: dict[str, Any]) -> dict[str, Any]:
+    task_id = task.get("id")
+    if task_id is None:
+        return {"kind": "open_task", "label": "Open next task", "command": mew_command("task", "list")}
+    kind = normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
+    command = mew_command("code", task_id) if kind == "coding" else mew_command("task", "show", task_id)
+    return {
+        "kind": "open_task",
+        "label": f"Open task #{task_id}",
+        "command": command,
+        "id": task_id,
+        "task_id": task_id,
+        "task_kind": kind,
+    }
+
+
+def attention_action_item(item: dict[str, Any]) -> dict[str, Any]:
+    attention_id = item.get("id")
+    action = {
+        "kind": "review_attention",
+        "label": "Review attention",
+        "command": mew_command("attention"),
+    }
+    if attention_id is not None:
+        action["id"] = attention_id
+        action["attention_id"] = attention_id
+        action["label"] = f"Review attention #{attention_id}"
+    for key in ("task_id", "agent_run_id", "question_id"):
+        if item.get(key) is not None:
+            action[key] = item.get(key)
+    return action
+
+
+def action_identity(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def _append_unique_action(actions: list[dict[str, Any]], seen: set[tuple[Any, ...]], action: dict[str, Any]) -> None:
+    key = (
+        action.get("kind"),
+        action_identity(action.get("id")),
+        action_identity(action.get("task_id")),
+        action_identity(action.get("question_id")),
+        action_identity(action.get("session_id")),
+        action_identity(action.get("attention_id")),
+        action.get("command"),
+    )
+    if key in seen:
+        return
+    seen.add(key)
+    actions.append(action)
+
+
+def desk_actions_for_desk(
+    questions: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    sessions: list[dict[str, Any]],
+    attention: list[dict[str, Any]],
+    limit: int = MAX_ACTION_ITEMS,
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    question_ids = {
+        action_identity(question.get("id") or question.get("question_id"))
+        for question in questions
+        if question.get("id") is not None or question.get("question_id") is not None
+    }
+    active_task_ids = {action_identity(session.get("task_id")) for session in sessions if session.get("task_id") is not None}
+    for question in questions:
+        _append_unique_action(actions, seen, question_action_item(question))
+    for session in reversed(sessions):
+        _append_unique_action(actions, seen, work_session_action_item(session))
+    for item in attention:
+        if action_identity(item.get("question_id")) in question_ids:
+            continue
+        _append_unique_action(actions, seen, attention_action_item(item))
+    for task in tasks:
+        if action_identity(task.get("id")) in active_task_ids:
+            continue
+        _append_unique_action(actions, seen, task_action_item(task))
+    return actions[: max(0, int(limit))]
+
+
 def desk_detail_items(
     questions: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
@@ -224,57 +348,17 @@ def desk_detail_items(
 
 def primary_action_for_desk(state: dict[str, Any]) -> dict[str, Any] | None:
     questions = open_questions_for_desk(state)
-    if questions:
-        question = questions[0]
-        question_id = question.get("id") or question.get("question_id")
-        action = {
-            "kind": "reply",
-            "label": "Reply to question",
-            "command": mew_command("chat"),
-        }
-        if question_id is not None:
-            action["question_id"] = question_id
-            action["label"] = f"Reply to question #{question_id}"
-            action["command"] = mew_command("reply", question_id, "<reply>")
-        related_task_id = question.get("related_task_id")
-        if related_task_id is not None:
-            action["task_id"] = related_task_id
-        return action
-
-    sessions = active_work_sessions_for_desk(state)
-    if sessions:
-        session = sessions[-1]
-        task_id = session.get("task_id")
-        session_id = session.get("id")
-        action = {
-            "kind": "resume_work",
-            "label": "Resume active work",
-            "command": mew_command("work", "--session", "--resume", "--allow-read", "."),
-        }
-        if task_id is not None:
-            action["task_id"] = task_id
-            action["label"] = f"Resume task #{task_id}"
-            action["command"] = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
-        if session_id is not None:
-            action["session_id"] = session_id
-        return action
-
     tasks = open_tasks_for_desk(state)
-    if tasks:
-        task = tasks[0]
-        task_id = task.get("id")
-        if task_id is None:
-            return {"kind": "open_task", "label": "Open next task", "command": mew_command("task", "list")}
-        kind = normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
-        command = mew_command("code", task_id) if kind == "coding" else mew_command("task", "show", task_id)
-        return {
-            "kind": "open_task",
-            "label": f"Open task #{task_id}",
-            "command": command,
-            "task_id": task_id,
-        }
+    sessions = active_work_sessions_for_desk(state)
+    attention = open_attention_for_desk(state)
+    actions = desk_actions_for_desk(questions, tasks, sessions, attention, limit=1)
+    return actions[0] if actions else None
 
-    return None
+
+def action_display_identity(action: dict[str, Any] | None) -> tuple[str, str]:
+    if not isinstance(action, dict):
+        return ("", "")
+    return (normalize_text(action.get("kind")), normalize_text(action.get("command")))
 
 
 def focus_summary(state: dict[str, Any]) -> str:
@@ -298,12 +382,14 @@ def build_desk_view_model(state: dict[str, Any], explicit_date: str | None = Non
     tasks = open_tasks_for_desk(state)
     sessions = active_work_sessions_for_desk(state)
     attention = open_attention_for_desk(state)
-    primary_action = primary_action_for_desk(state)
+    actions = desk_actions_for_desk(questions, tasks, sessions, attention)
+    primary_action = actions[0] if actions else None
     return {
         "date": day,
         "pet_state": choose_pet_state(state),
         "focus": focus_summary(state),
         "primary_action": primary_action,
+        "actions": actions,
         "counts": {
             "open_tasks": len(tasks),
             "open_questions": len(questions),
@@ -329,6 +415,27 @@ def format_desk_view(view_model: dict[str, Any]) -> str:
             lines.append(f"primary_action: {label}")
         if command:
             lines.append(f"primary_command: {command}")
+    actions = view_model.get("actions")
+    if isinstance(actions, list) and actions:
+        action_lines = []
+        primary_identity = action_display_identity(action)
+        for item in actions[:MAX_ACTION_ITEMS]:
+            if not isinstance(item, dict):
+                continue
+            if primary_identity != ("", "") and action_display_identity(item) == primary_identity:
+                continue
+            label = normalize_text(item.get("label")) or normalize_text(item.get("kind")) or "action"
+            command = normalize_text(item.get("command"))
+            effort_summary = normalize_text(item.get("effort_summary"))
+            detail = f"  - {label}"
+            if effort_summary:
+                detail += f" [{effort_summary}]"
+            if command:
+                detail += f" -> {command}"
+            action_lines.append(detail)
+        if action_lines:
+            lines.append("actions:")
+            lines.extend(action_lines)
     lines.extend(
         [
             f"open_tasks: {counts['open_tasks']}",

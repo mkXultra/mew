@@ -9,6 +9,7 @@ from typing import Any, TextIO
 
 
 MAX_FOCUS_LENGTH = 160
+MAX_ACTION_ITEMS = 4
 MAX_DETAIL_ITEMS = 3
 MAX_DETAIL_TEXT_LENGTH = 180
 DEFAULT_REFRESH_SECONDS = 10
@@ -122,6 +123,39 @@ def render_primary_action(view_model: dict[str, Any]) -> str:
     return f'<div class="action">{label_node}{command_node}</div>'
 
 
+def action_identity(action: Any) -> tuple[str, str]:
+    if not isinstance(action, dict):
+        return ("", "")
+    kind = " ".join(str(action.get("kind") or "").split())
+    command = " ".join(str(action.get("command") or "").split())
+    return (kind, command)
+
+
+def render_actions(view_model: dict[str, Any]) -> str:
+    actions = view_model.get("actions")
+    if not isinstance(actions, list):
+        return ""
+    primary_identity = action_identity(view_model.get("primary_action"))
+    nodes = []
+    for raw_action in actions[:MAX_ACTION_ITEMS]:
+        if not isinstance(raw_action, dict):
+            continue
+        if primary_identity != ("", "") and action_identity(raw_action) == primary_identity:
+            continue
+        label = compact_detail_value(raw_action.get("label") or raw_action.get("kind"))
+        command = compact_detail_value(raw_action.get("command"))
+        effort = compact_detail_value(raw_action.get("effort_summary"))
+        if not label and not command and not effort:
+            continue
+        label_node = f"<strong>{html.escape(label)}</strong>" if label else ""
+        effort_node = f"<span>{html.escape(effort)}</span>" if effort else ""
+        command_node = f"<code>{html.escape(command)}</code>" if command else ""
+        nodes.append(f'<div class="action-item">{label_node}{effort_node}{command_node}</div>')
+    if not nodes:
+        return ""
+    return f'<div class="actions"><h2>Actions</h2>{"".join(nodes)}</div>'
+
+
 def compact_detail_value(value: Any) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= MAX_DETAIL_TEXT_LENGTH:
@@ -182,6 +216,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
     cat = "\n".join(PET_FRAMES[state])
     count_nodes = render_count_items(counts)
     action_node = render_primary_action(view_model)
+    actions_node = render_actions(view_model)
     details_node = render_detail_sections(view_model)
     refresh_meta = render_refresh_meta(refresh_seconds)
 
@@ -307,6 +342,31 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
       line-height: 1.35;
       color: var(--muted);
     }}
+    .actions {{
+      display: grid;
+      gap: 8px;
+    }}
+    .action-item {{
+      display: grid;
+      gap: 4px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+    }}
+    .action-item strong {{
+      font-size: 13px;
+      line-height: 1.2;
+    }}
+    .action-item span {{
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }}
+    .action-item code {{
+      color: var(--muted);
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }}
     ul {{
       list-style: none;
       margin: 0;
@@ -397,6 +457,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
       </div>
       <p class="focus">{html.escape(focus)}</p>
       {action_node}
+      {actions_node}
       {details_node}
       <ul aria-label="counts">
         {count_nodes}

@@ -23,6 +23,14 @@ def test_render_browser_pet_for_alerting_state() -> None:
             "pet_state": "alerting",
             "focus": "Waiting for reply",
             "primary_action": {"label": "Reply to question #1", "command": 'mew reply 1 "<reply>"'},
+            "actions": [
+                {"label": "Reply to question #1", "command": 'mew reply 1 "<reply>"'},
+                {
+                    "label": "Resume task #2",
+                    "command": "mew work 2 --session --resume",
+                    "effort_summary": "effort=medium steps=24/30 failures=2",
+                },
+            ],
             "details": {
                 "questions": [
                     {
@@ -46,7 +54,11 @@ def test_render_browser_pet_for_alerting_state() -> None:
     assert "( O.O )" in html
     assert "Needs input" in html
     assert "Reply to question #1" in html
+    assert html.count("Reply to question #1") == 1
     assert "mew reply 1 &quot;&lt;reply&gt;&quot;" in html
+    assert "Resume task #2" in html
+    assert "effort=medium steps=24/30 failures=2" in html
+    assert "mew work 2 --session --resume" in html
     assert "Questions" in html
     assert "Need input" in html
     assert "Task #2" in html
@@ -67,6 +79,28 @@ def test_primary_action_escapes_label_and_command() -> None:
     assert "<b>Do it</b>" not in html
     assert "&lt;b&gt;Do it&lt;/b&gt;" in html
     assert "mew reply 1 &quot;&lt;script&gt;&quot;" in html
+
+
+def test_actions_escape_and_limit_items() -> None:
+    html = browser_pet.render_browser_pet(
+        {
+            "pet_state": "typing",
+            "actions": [
+                {"label": "<b>Action</b>", "command": 'mew reply 1 "<bad>"'},
+                *[
+                    {"label": f"Action #{index}", "command": f"mew task show {index}"}
+                    for index in range(2, 7)
+                ],
+            ],
+            "counts": {},
+        }
+    )
+
+    assert "<b>Action</b>" not in html
+    assert "&lt;b&gt;Action&lt;/b&gt;" in html
+    assert "mew reply 1 &quot;&lt;bad&gt;&quot;" in html
+    assert "Action #4" in html
+    assert "Action #5" not in html
 
 
 def test_detail_sections_escape_nested_items() -> None:
