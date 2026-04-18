@@ -12,14 +12,18 @@ The snapshot is a local contract for another model or UI. It includes:
 - `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
 - `pending_approvals`: top-level pending dry-run write approvals for observers
-  with both chat-style `approve_hint`/`reject_hint` and CLI-style
-  `cli_approve_hint`/`cli_reject_hint`
+  with chat-style `approve_hint`/`reject_hint` and CLI-style
+  `cli_approve_hint`/`cli_reject_hint` when approval is currently allowed
   - approvals may include an advisory `pairing_status`. For `src/mew/**`
     writes, `missing_test_edit` means no changed `tests/**` write/edit has been
     produced in the same work session yet; `ok` points at the paired test tool
     call. `missing_test_edit` blocks approval by default; CLI approvals require
     `--allow-unpaired-source-edit`, and reply-file `approve` / `approve_all`
     actions require `"allow_unpaired_source_edit": true` to override it.
+  - blocked approvals leave `approve_hint` and `cli_approve_hint` empty, and
+    expose `approval_blocked_reason`, `override_approve_hint`, and
+    `cli_override_approve_hint` instead. `approve_all` follows the same pattern
+    with `approve_all_blocked_reason` and `override_approve_all_hint`.
 - `suggested_recovery`: a machine-readable recovery hint when the resume has a
   retryable interrupted read, side-effecting interruption, or replannable model
   turn. When the source is known, `effect_classification` explains the risk
@@ -27,9 +31,10 @@ The snapshot is a local contract for another model or UI. It includes:
   `write_started`, or `rollback_needed`
 - `supported_actions`: the safe reply actions this mew version accepts
 - `reply_command`: where to submit a reply file
-- `reply_template`: a minimal safe reply payload. When pending approvals exist,
-  this template points at the first pending `approve` action; otherwise it uses
-  a `steer` action.
+- `reply_template`: a minimal safe reply payload. When pending approvals are
+  safe to approve, this template points at an `approve` action. If any visible
+  or approve-all-blocking `src/mew/**` source edit still needs a paired test,
+  it uses `steer` instead of presenting plain approval.
 
 To refresh the snapshot without spending a model turn, run either live or
 follow with zero steps:

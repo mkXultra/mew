@@ -590,7 +590,7 @@ That observer can write a JSON reply file and apply it with
 `followup`, `interrupt_submit`, `note`, `stop`, `reject`, `approve`, and
 `approve_all`. Follow snapshots include `supported_actions`, top-level
 `pending_approvals`, and a context-aware `reply_template` so observers can
-approve pending dry-run writes without scraping terminal text. See
+resolve pending dry-run writes without scraping terminal text. See
 `docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and reply contract, including
 the stale-snapshot guard and `mew work <task-id> --follow-status --json`, or run
 `mew work <task-id> --reply-schema --json` to print a session-specific template.
@@ -599,6 +599,8 @@ an advisory `pairing_status`; `missing_test_edit` means the same work session
 has not yet produced a paired changed write/edit under `tests/**`.
 Approving that source edit is blocked by default until a paired test write/edit
 exists; use `--allow-unpaired-source-edit` only for an explicit audited override.
+Blocked source approvals leave plain approve hints empty and steer observers
+toward adding tests or using the explicit override path.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 
