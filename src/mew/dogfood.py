@@ -999,6 +999,10 @@ def run_native_work_scenario(workspace, env=None):
         question for question in state.get("questions", [])
         if str(question.get("related_task_id")) == str(task_id)
     ]
+    native_messages = [
+        message for message in state.get("outbox", [])
+        if "native work session" in (message.get("text") or "")
+    ]
     outbox_text = "\n".join(message.get("text") or "" for message in state.get("outbox", []))
     action_types = [
         action_type
@@ -1039,6 +1043,16 @@ def run_native_work_scenario(workspace, env=None):
         f"./mew code {task_id}" in outbox_text and "native work session" in outbox_text,
         observed=outbox_text,
         expected="outbox tells the user how to continue the native work session",
+    )
+    _scenario_check(
+        checks,
+        "native_work_start_message_is_visible",
+        any(
+            message.get("type") == "assistant" and not message.get("read_at")
+            for message in native_messages
+        ),
+        observed=native_messages,
+        expected="native work start message remains visible to attach/outbox listeners",
     )
     _scenario_check(
         checks,

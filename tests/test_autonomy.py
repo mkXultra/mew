@@ -3287,6 +3287,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(state["work_sessions"]), 1)
         self.assertEqual(state["work_sessions"][0]["task_id"], task["id"])
         self.assertIn("./mew code 1", state["outbox"][-1]["text"])
+        self.assertEqual(state["outbox"][-1]["type"], "assistant")
+        self.assertIsNone(state["outbox"][-1]["read_at"])
 
     def test_start_work_session_action_requires_native_work_gate(self):
         state = default_state()

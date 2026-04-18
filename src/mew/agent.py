@@ -2088,7 +2088,7 @@ def apply_start_work_session_action(state, event, action, current_time, autonomo
     verb = "Started" if created else "Reused"
     add_outbox_message(
         state,
-        "info",
+        "assistant",
         f"{verb} native work session #{session['id']} for task #{task['id']}. Continue with ./mew code {task['id']}.",
         event_id=event["id"],
         related_task_id=task["id"],
