@@ -3201,6 +3201,84 @@ class AutonomyTests(unittest.TestCase):
         ]
         self.assertNotIn("Fix Verification run #7 failed", titles)
 
+    def test_autonomous_act_starts_native_work_when_allowed(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+
+        blocked_plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=False,
+        )
+        allowed_plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+        )
+
+        self.assertNotIn(
+            "start_work_session",
+            [decision["type"] for decision in blocked_plan["decisions"]],
+        )
+        self.assertIn(
+            "start_work_session",
+            [decision["type"] for decision in allowed_plan["decisions"]],
+        )
+
+    def test_start_work_session_action_creates_native_session(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "start native work", "decisions": []},
+            {"summary": "start native work", "actions": [{"type": "start_work_session", "task_id": task["id"]}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+        )
+
+        self.assertEqual(len(state["work_sessions"]), 1)
+        self.assertEqual(state["work_sessions"][0]["task_id"], task["id"])
+        self.assertIn("./mew code 1", state["outbox"][-1]["text"])
+
+    def test_start_work_session_action_requires_native_work_gate(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "blocked native work", "decisions": []},
+            {"summary": "blocked native work", "actions": [{"type": "start_work_session", "task_id": task["id"]}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=False,
+        )
+
+        self.assertEqual(state["work_sessions"], [])
+        self.assertIn("--allow-native-work is required", state["outbox"][-1]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

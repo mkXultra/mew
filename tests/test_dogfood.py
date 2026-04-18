@@ -78,6 +78,7 @@ class DogfoodTests(unittest.TestCase):
             allow_verify=False,
             execute_tasks=False,
             allow_agent_run=False,
+            allow_native_work=False,
             agent_stale_minutes=None,
             agent_result_timeout=None,
             agent_start_timeout=None,
@@ -110,6 +111,7 @@ class DogfoodTests(unittest.TestCase):
                     allow_verify=False,
                     execute_tasks=False,
                     allow_agent_run=False,
+                    allow_native_work=False,
                     agent_stale_minutes=None,
                     agent_result_timeout=None,
                     agent_start_timeout=None,
@@ -139,6 +141,7 @@ class DogfoodTests(unittest.TestCase):
             allow_verify=False,
             execute_tasks=True,
             allow_agent_run=True,
+            allow_native_work=True,
             agent_stale_minutes=3.0,
             agent_result_timeout=4.0,
             agent_start_timeout=5.0,
@@ -153,6 +156,7 @@ class DogfoodTests(unittest.TestCase):
 
         self.assertIn("--execute-tasks", command)
         self.assertIn("--allow-agent-run", command)
+        self.assertIn("--allow-native-work", command)
         self.assertEqual(command[command.index("--agent-stale-minutes") + 1], "3.0")
         self.assertEqual(command[command.index("--agent-result-timeout") + 1], "4.0")
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
@@ -250,6 +254,21 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "resident-loop")
             self.assertIn("resident_loop_processes_multiple_events", text)
+
+    def test_run_dogfood_native_work_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="native-work",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "native-work")
+            self.assertIn("native_work_session_created_for_ready_coding_task", text)
 
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

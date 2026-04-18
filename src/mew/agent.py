@@ -80,6 +80,7 @@ from .thoughts import (
     normalize_thread_list,
     record_thought_journal_entry,
 )
+from .work_session import create_work_session, work_session_for_task
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -122,6 +123,7 @@ def build_think_prompt(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     allow_write=False,
@@ -139,6 +141,7 @@ def build_think_prompt(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -154,9 +157,10 @@ def build_think_prompt(
         "If thought_thread_warning is present, explicitly carry those dropped threads forward or mark them resolved.\n"
         "Decision types you may emit: remember, send_message, ask_user, wait_for_user, "
         "execute_task, complete_task, run_verification, update_memory, inspect_dir, read_file, search_text, self_review, propose_task, refine_task, "
-        "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
+        "write_file, edit_file, plan_task, start_work_session, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
+        f"allow_native_work is {str(bool(allow_native_work)).lower()}.\n"
         f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
         "When autonomous mode is false, do not do self-directed work unless it directly answers the user.\n"
@@ -168,12 +172,13 @@ def build_think_prompt(
         "Do not keep investigating across passive ticks if you can give a useful partial answer now.\n"
         "Autonomy levels: observe can remember and self_review; propose can also propose_task and plan_task for coding tasks only; "
         "act can also use allowed read-only inspection and programmer-loop actions. "
+        "Starting native work sessions requires start_work_session plus allow_native_work. "
         "Starting agent runs requires allow_agent_run in local state, even at act level. "
         "Local task command execution still requires allow_task_execution. "
         "Verification command execution requires run_verification plus allow_verify and a configured verify command. "
         "File writes require write_file/edit_file plus allow_write, allowed_write_roots, and a configured verification command unless dry_run=true. "
         "Omitting dry_run is treated as dry_run=true; set dry_run=false explicitly to write. "
-        "Agent runs require dispatch_task and allow_agent_run.\n"
+        "Native work sessions require start_work_session and allow_native_work. Agent runs require dispatch_task and allow_agent_run.\n"
         "If you are waiting for the user because specific input is needed, prefer ask_user. "
         "If you emit wait_for_user, include a question when the missing input should be visible to the user.\n"
         "Use execute_task only when a task is ready, has command, has auto_execute=true, "
@@ -241,6 +246,7 @@ def build_act_prompt(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     allow_write=False,
@@ -258,6 +264,7 @@ def build_act_prompt(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -272,9 +279,10 @@ def build_act_prompt(
         "If thought_thread_warning is present, do not silently drop those threads again.\n"
         "Allowed action types: record_memory, send_message, ask_user, wait_for_user, execute_task, complete_task, run_verification, "
         "update_memory, inspect_dir, read_file, search_text, self_review, propose_task, refine_task, "
-        "write_file, edit_file, plan_task, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
+        "write_file, edit_file, plan_task, start_work_session, dispatch_task, collect_agent_result, review_agent_run, followup_review.\n"
         f"Autonomous mode is {str(bool(autonomous)).lower()} with level={autonomy_level}.\n"
         f"allow_agent_run is {str(bool(allow_agent_run)).lower()}.\n"
+        f"allow_native_work is {str(bool(allow_native_work)).lower()}.\n"
         f"allow_verify is {str(bool(allow_verify)).lower()} and verify_command_configured is {str(bool(verify_command)).lower()}.\n"
         f"allow_write is {str(bool(allow_write)).lower()}.\n"
         "Respect the autonomy level: observe may record_memory and self_review only; propose may propose_task/plan_task for coding tasks only; "
@@ -283,6 +291,7 @@ def build_act_prompt(
         "If State JSON contains reflex_observations, normalize actions using those just-collected read-only results. "
         "For user_message events that ask for an evaluation, status, report, or answer, include a send_message when the available evidence is enough for a useful partial answer. "
         "Do not turn a report request into an open-ended passive investigation.\n"
+        "Starting native work sessions requires start_work_session plus allow_native_work. "
         "Starting agent runs requires allow_agent_run in local state. "
         "Local task command execution still requires allow_task_execution. "
         "Verification command execution requires run_verification plus allow_verify and a configured verify command.\n"
@@ -657,6 +666,7 @@ def append_autonomous_decisions(
     autonomy_level,
     desires,
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_interval_seconds=3600,
@@ -728,6 +738,23 @@ def append_autonomous_decisions(
     tasks = sorted(open_tasks(state), key=task_sort_key)
     running_tasks = [task for task in tasks if task.get("status") == "running"]
     autonomous_task_candidates = running_tasks or tasks
+
+    if autonomy_level == "act" and allow_native_work:
+        for task in autonomous_task_candidates:
+            if (
+                is_programmer_task(task)
+                and task.get("status") == "ready"
+                and not pending_question_for_task(state, task.get("id"))
+                and not work_session_for_task(state, task.get("id"))
+            ):
+                decisions.append(
+                    {
+                        "type": "start_work_session",
+                        "task_id": task["id"],
+                        "reason": "Ready coding task can continue in native work session.",
+                    }
+                )
+                return
 
     if autonomy_level in ("propose", "act"):
         for task in autonomous_task_candidates:
@@ -831,6 +858,7 @@ def deterministic_decision_plan(
     autonomy_level="off",
     desires="",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_interval_seconds=3600,
@@ -871,6 +899,7 @@ def deterministic_decision_plan(
                 autonomy_level,
                 desires,
                 allow_agent_run=allow_agent_run,
+                allow_native_work=allow_native_work,
                 allow_verify=allow_verify,
                 verify_command=verify_command,
                 verify_interval_seconds=verify_interval_seconds,
@@ -893,6 +922,7 @@ def deterministic_decision_plan(
                 autonomy_level,
                 desires,
                 allow_agent_run=allow_agent_run,
+                allow_native_work=allow_native_work,
                 allow_verify=allow_verify,
                 verify_command=verify_command,
                 verify_interval_seconds=verify_interval_seconds,
@@ -1022,6 +1052,7 @@ REQUIRED_MODEL_GUARDRAIL_DECISIONS = {
     "propose_task",
     "refine_task",
     "plan_task",
+    "start_work_session",
     "dispatch_task",
 }
 
@@ -1075,6 +1106,7 @@ def think_phase(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_interval_seconds=3600,
@@ -1096,6 +1128,7 @@ def think_phase(
         autonomy_level=autonomy_level,
         desires=desires,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         verify_interval_seconds=verify_interval_seconds,
@@ -1127,6 +1160,7 @@ def think_phase(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -1215,6 +1249,7 @@ def deterministic_action_plan(decision_plan):
             "propose_task",
             "refine_task",
             "plan_task",
+            "start_work_session",
             "dispatch_task",
             "collect_agent_result",
             "review_agent_run",
@@ -1334,6 +1369,7 @@ def act_phase(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     allow_write=False,
@@ -1386,6 +1422,7 @@ def act_phase(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -1962,6 +1999,64 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
         return 1
     return 1
 
+
+def apply_start_work_session_action(state, event, action, current_time, autonomous, autonomy_level, allow_native_work):
+    task_id = action.get("task_id")
+    if not programmer_action_allowed(event, autonomous, autonomy_level, "act"):
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused start_work_session for task #{task_id}: autonomy level does not allow native work.",
+            event_id=event["id"],
+            related_task_id=task_id,
+        )
+        return 1
+    if not allow_native_work:
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused start_work_session for task #{task_id}: --allow-native-work is required.",
+            event_id=event["id"],
+            related_task_id=task_id,
+        )
+        return 1
+    task = task_by_id(state, task_id)
+    if not task:
+        add_outbox_message(state, "warning", f"Cannot start native work for missing task #{task_id}", event_id=event["id"])
+        return 1
+    if not is_programmer_task(task):
+        add_outbox_message(
+            state,
+            "warning",
+            (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"task kind {task_kind(task)!r} is not a coding task."
+            ),
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+    if task.get("status") == "done":
+        add_outbox_message(
+            state,
+            "warning",
+            f"Refused start_work_session for task #{task['id']}: task is already done.",
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+    session, created = create_work_session(state, task, current_time=current_time)
+    verb = "Started" if created else "Reused"
+    add_outbox_message(
+        state,
+        "info",
+        f"{verb} native work session #{session['id']} for task #{task['id']}. Continue with ./mew code {task['id']}.",
+        event_id=event["id"],
+        related_task_id=task["id"],
+    )
+    return 1
+
+
 def apply_collect_agent_result_action(state, event, action, result_timeout=None):
     run = find_agent_run(state, action.get("run_id"))
     if not run:
@@ -2504,6 +2599,7 @@ def apply_action_plan(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
@@ -2616,6 +2712,16 @@ def apply_action_plan(
                 current_time,
                 autonomous,
                 autonomy_level,
+            )
+        elif action_type == "start_work_session":
+            counts["messages"] += apply_start_work_session_action(
+                state,
+                event,
+                action,
+                current_time,
+                autonomous,
+                autonomy_level,
+                allow_native_work,
             )
         elif action_type == "dispatch_task":
             counts["messages"] += apply_dispatch_task_action(
@@ -2804,6 +2910,7 @@ def plan_event(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_interval_seconds=3600,
@@ -2824,6 +2931,7 @@ def plan_event(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -2846,6 +2954,7 @@ def plan_event(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         verify_interval_seconds=verify_interval_seconds,
@@ -2910,6 +3019,7 @@ def plan_event(
                 autonomous=autonomous,
                 autonomy_level=autonomy_level,
                 allow_agent_run=allow_agent_run,
+                allow_native_work=allow_native_work,
                 allow_verify=allow_verify,
                 verify_command=verify_command,
                 verify_interval_seconds=verify_interval_seconds,
@@ -2943,6 +3053,7 @@ def plan_event(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         allow_write=allow_write,
@@ -2975,6 +3086,7 @@ def apply_event_plans(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
@@ -2998,6 +3110,7 @@ def apply_event_plans(
         autonomous=autonomous,
         autonomy_level=autonomy_level,
         allow_agent_run=allow_agent_run,
+        allow_native_work=allow_native_work,
         allow_verify=allow_verify,
         verify_command=verify_command,
         verify_timeout=verify_timeout,
@@ -3056,6 +3169,7 @@ def process_events(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
@@ -3094,6 +3208,7 @@ def process_events(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
             allow_agent_run=allow_agent_run,
+            allow_native_work=allow_native_work,
             allow_verify=allow_verify,
             verify_command=verify_command,
             verify_interval_seconds=verify_interval_seconds,
@@ -3116,6 +3231,7 @@ def process_events(
             autonomous=autonomous,
             autonomy_level=autonomy_level,
             allow_agent_run=allow_agent_run,
+            allow_native_work=allow_native_work,
             allow_verify=allow_verify,
             verify_command=verify_command,
             verify_timeout=verify_timeout,

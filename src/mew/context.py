@@ -320,7 +320,16 @@ def conversation_item_count(state):
     return count
 
 
-def autonomy_for_context(state, autonomous, autonomy_level, allow_agent_run, allow_verify, verify_command, allow_write):
+def autonomy_for_context(
+    state,
+    autonomous,
+    autonomy_level,
+    allow_agent_run,
+    allow_native_work,
+    allow_verify,
+    verify_command,
+    allow_write,
+):
     autonomy = dict(state.get("autonomy", {}))
     for key in ("pause_reason", "level_override", "last_cycle_reason", "last_desire"):
         if key in autonomy:
@@ -330,10 +339,12 @@ def autonomy_for_context(state, autonomous, autonomy_level, allow_agent_run, all
             "requested_enabled": bool(autonomous),
             "requested_level": autonomy_level,
             "allow_agent_run": bool(allow_agent_run),
+            "allow_native_work": bool(allow_native_work),
             "allow_verify": bool(allow_verify),
             "verify_command_configured": bool(verify_command),
             "allow_write": bool(allow_write),
             "configured_allow_agent_run": bool(state.get("autonomy", {}).get("allow_agent_run")),
+            "configured_allow_native_work": bool(state.get("autonomy", {}).get("allow_native_work")),
         }
     )
     return autonomy
@@ -791,6 +802,7 @@ def build_context(
     autonomous=False,
     autonomy_level="off",
     allow_agent_run=False,
+    allow_native_work=False,
     allow_verify=False,
     verify_command="",
     allow_write=False,
@@ -839,6 +851,7 @@ def build_context(
             autonomous,
             autonomy_level,
             allow_agent_run,
+            allow_native_work,
             allow_verify,
             verify_command,
             allow_write,

@@ -41,6 +41,7 @@ DOGFOOD_SCENARIOS = (
     "memory-search",
     "runtime-focus",
     "resident-loop",
+    "native-work",
     "chat-cockpit",
     "work-session",
 )
@@ -188,6 +189,8 @@ def build_runtime_command(args, workspace):
         command.append("--execute-tasks")
     if getattr(args, "allow_agent_run", False):
         command.append("--allow-agent-run")
+    if getattr(args, "allow_native_work", False):
+        command.append("--allow-native-work")
     if getattr(args, "agent_stale_minutes", None) is not None:
         command.extend(["--agent-stale-minutes", str(args.agent_stale_minutes)])
     if getattr(args, "agent_result_timeout", None) is not None:
@@ -913,6 +916,134 @@ def run_resident_loop_scenario(workspace, env=None):
         expected="runtime stdout includes repeated passive_tick summaries",
     )
     return _scenario_report("resident-loop", workspace, commands, checks)
+
+
+def run_native_work_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Native work session smoke task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    runtime_args = SimpleNamespace(
+        interval=2.0,
+        poll_interval=0.1,
+        autonomy_level="act",
+        model_timeout=20.0,
+        ai=False,
+        auth=None,
+        model_backend="",
+        model="",
+        base_url="",
+        allow_write=False,
+        allow_verify=False,
+        verify_command="",
+        verify_interval_minutes=0.05,
+        execute_tasks=False,
+        allow_agent_run=False,
+        allow_native_work=True,
+        agent_stale_minutes=None,
+        agent_result_timeout=None,
+        agent_start_timeout=None,
+        review_model=None,
+        trace_model=False,
+        max_reflex_rounds=0,
+        startup_timeout=5.0,
+        message_timeout=5.0,
+        send_message=[],
+        duration=3.0,
+        cleanup=False,
+        stop_timeout=10.0,
+        wait_agent_runs=0.0,
+    )
+    resident_report = _run_dogfood_in_workspace(
+        runtime_args,
+        workspace,
+        created_temp=False,
+    )
+    commands.append(
+        {
+            "command": resident_report.get("command") or [],
+            "exit_code": resident_report.get("exit_code"),
+            "stdout": "\n".join(resident_report.get("runtime_output_tail") or []),
+            "stderr": "",
+        }
+    )
+
+    state = read_json_file(Path(workspace) / STATE_FILE, {})
+    sessions = [
+        session for session in state.get("work_sessions", [])
+        if str(session.get("task_id")) == str(task_id)
+    ]
+    active_sessions = [session for session in sessions if session.get("status") == "active"]
+    outbox_text = "\n".join(message.get("text") or "" for message in state.get("outbox", []))
+    action_types = [
+        action_type
+        for effect in state.get("runtime_effects", [])
+        for action_type in effect.get("action_types", [])
+    ]
+
+    _scenario_check(
+        checks,
+        "native_work_starts_and_stops",
+        task_result.get("exit_code") == 0
+        and resident_report.get("exit_code") == 0
+        and (resident_report.get("duration_seconds") or 0) >= 2.0,
+        observed={
+            "task": task_data,
+            "exit_code": resident_report.get("exit_code"),
+            "duration_seconds": resident_report.get("duration_seconds"),
+        },
+        expected="resident runtime starts, runs briefly, and stops cleanly",
+    )
+    _scenario_check(
+        checks,
+        "native_work_session_created_for_ready_coding_task",
+        bool(active_sessions),
+        observed=active_sessions[-3:],
+        expected="an active work session is attached to the ready coding task",
+    )
+    _scenario_check(
+        checks,
+        "native_work_records_start_action",
+        "start_work_session" in action_types,
+        observed=runtime_effect_summary(state),
+        expected="runtime effect action_types include start_work_session",
+    )
+    _scenario_check(
+        checks,
+        "native_work_routes_user_to_code_cockpit",
+        f"./mew code {task_id}" in outbox_text and "native work session" in outbox_text,
+        observed=outbox_text,
+        expected="outbox tells the user how to continue the native work session",
+    )
+    _scenario_check(
+        checks,
+        "native_work_does_not_start_external_agent_run",
+        not state.get("agent_runs"),
+        observed=state.get("agent_runs"),
+        expected="native work dogfood keeps external agent runs disabled",
+    )
+    return _scenario_report("native-work", workspace, commands, checks)
 
 
 def run_chat_cockpit_scenario(workspace, env=None):
@@ -2168,6 +2299,8 @@ def run_dogfood_scenario(args):
             reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
         elif name == "resident-loop":
             reports.append(run_resident_loop_scenario(scenario_workspace, env=env))
+        elif name == "native-work":
+            reports.append(run_native_work_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":

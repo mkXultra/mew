@@ -102,6 +102,7 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
     autonomy.setdefault("paused_at", None)
     autonomy.setdefault("resumed_at", None)
     autonomy["allow_agent_run"] = bool(args.allow_agent_run)
+    autonomy["allow_native_work"] = bool(getattr(args, "allow_native_work", False))
     autonomy["allow_verify"] = bool(args.allow_verify)
     autonomy["verify_command_configured"] = bool(args.verify_command)
     autonomy["allow_write"] = bool(args.allow_write)
@@ -112,6 +113,8 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
         "autonomous": autonomous_for_cycle,
         "autonomy_level": effective_level if autonomous_for_cycle else "off",
         "allow_agent_run": bool(args.allow_agent_run) and autonomous_for_cycle,
+        "allow_native_work": bool(getattr(args, "allow_native_work", False))
+        and autonomous_for_cycle,
     }
 
 def plan_runtime_event(
@@ -148,6 +151,7 @@ def plan_runtime_event(
         autonomous=autonomy_controls["autonomous"],
         autonomy_level=autonomy_controls["autonomy_level"],
         allow_agent_run=autonomy_controls["allow_agent_run"],
+        allow_native_work=autonomy_controls["allow_native_work"],
         allow_verify=args.allow_verify,
         verify_command=args.verify_command or "",
         verify_interval_seconds=max(0.0, args.verify_interval_minutes * 60.0),
@@ -182,6 +186,7 @@ def apply_runtime_event_plans(
         autonomous=autonomy_controls["autonomous"],
         autonomy_level=autonomy_controls["autonomy_level"],
         allow_agent_run=autonomy_controls["allow_agent_run"],
+        allow_native_work=autonomy_controls["allow_native_work"],
         allow_verify=args.allow_verify,
         verify_command=args.verify_command or "",
         verify_timeout=args.verify_timeout,
@@ -487,6 +492,8 @@ def run_runtime(args):
             print(f"autonomous mode enabled level={args.autonomy_level}")
         if args.allow_agent_run:
             print("autonomous agent runs allowed")
+        if getattr(args, "allow_native_work", False):
+            print("autonomous native work sessions allowed")
         if args.allow_verify:
             print("runtime verification allowed")
             if args.verify_command:
@@ -528,6 +535,7 @@ def run_runtime(args):
                 "autonomous": False,
                 "autonomy_level": "off",
                 "allow_agent_run": False,
+                "allow_native_work": False,
             }
             outbox_ids_before = set()
             with state_lock():

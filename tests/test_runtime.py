@@ -10,6 +10,7 @@ from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
 from mew.errors import ModelBackendError
 from mew.runtime import (
+    apply_runtime_autonomy_controls,
     compact_agent_reflex_report,
     guidance_with_runtime_focus,
     run_runtime_post_run_pipeline,
@@ -86,6 +87,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(kwargs["collect"])
         self.assertFalse(kwargs["start_reviews"])
         self.assertTrue(kwargs["followup"])
+
+    def test_apply_runtime_autonomy_controls_gates_native_work_to_autonomous_cycle(self):
+        state = default_state()
+        args = SimpleNamespace(
+            autonomous=True,
+            autonomy_level="act",
+            allow_agent_run=False,
+            allow_native_work=True,
+            allow_verify=False,
+            verify_command="",
+            allow_write=False,
+        )
+
+        controls = apply_runtime_autonomy_controls(state, args, pending_user=False, current_time="now")
+        blocked = apply_runtime_autonomy_controls(state, args, pending_user=True, current_time="later")
+
+        self.assertTrue(controls["allow_native_work"])
+        self.assertTrue(state["autonomy"]["allow_native_work"])
+        self.assertFalse(blocked["allow_native_work"])
 
     def test_should_defer_commit_for_new_user_message(self):
         state = default_state()

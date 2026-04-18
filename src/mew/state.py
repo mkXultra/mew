@@ -108,6 +108,7 @@ def default_state():
             "last_autonomous_action_at": None,
             "last_desire": "",
             "allow_agent_run": False,
+            "allow_native_work": False,
             "allow_verify": False,
             "verify_command_configured": False,
             "allow_write": False,
@@ -330,6 +331,7 @@ def migrate_state(state):
     state["autonomy"].setdefault("last_autonomous_action_at", None)
     state["autonomy"].setdefault("last_desire", "")
     state["autonomy"].setdefault("allow_agent_run", False)
+    state["autonomy"].setdefault("allow_native_work", False)
     state["autonomy"].setdefault("allow_verify", False)
     state["autonomy"].setdefault("verify_command_configured", False)
     state["autonomy"].setdefault("allow_write", False)

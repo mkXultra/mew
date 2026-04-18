@@ -403,14 +403,18 @@ Evidence:
 - Ready coding task questions now point to the native coding cockpit with
   `./mew code <task-id>` instead of the older agent/command/backend workflow,
   and interrupted-focus dogfood checks that routing.
+- Autonomous act-level runtime can now start a native work session for a ready
+  coding task when `--allow-native-work` is explicitly enabled. The
+  `native-work` dogfood scenario proves this starts a `mew code` reentry path
+  without launching an external agent run.
 
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
-- Watcher-driven passive output now has controlled, real-repo one-shot, and
-  short resident-loop proofs, but not yet a long-running cadence proof across
-  several hours or days.
+- Watcher-driven passive output now has controlled, real-repo one-shot,
+  short resident-loop, and native-work-start proofs, but not yet a long-running
+  cadence proof across several hours or days.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
@@ -498,8 +502,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `869 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
+- `uv run pytest -q` current: `874 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task without external agent runs, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `36 passed`.
