@@ -198,6 +198,7 @@ from .work_session import (
     latest_work_verify_command,
     mark_running_work_interrupted,
     request_work_session_stop,
+    select_work_recovery_plan_item,
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
@@ -1711,7 +1712,7 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
     items = (recovery_plan or {}).get("items") or []
     if not items:
         return {}
-    item = items[-1]
+    item = select_work_recovery_plan_item(recovery_plan)
     action = item.get("action") or "review"
     if action == "retry_tool":
         kind = "retry_read"

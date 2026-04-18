@@ -52,6 +52,7 @@ READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
 DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 WORK_ACTION_DISPLAY_FIELDS = (
@@ -1462,6 +1463,17 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
     else:
         next_action = "verify world state and replan the interrupted model step"
     return {"next_action": next_action, "items": items}
+
+
+def select_work_recovery_plan_item(recovery_plan):
+    items = list((recovery_plan or {}).get("items") or [])
+    if not items:
+        return {}
+    for action in RECOVERY_PLAN_ACTION_PRIORITY:
+        matches = [item for item in items if item.get("action") == action]
+        if matches:
+            return matches[-1]
+    return items[-1]
 
 
 def build_work_session_resume(session, task=None, limit=8):

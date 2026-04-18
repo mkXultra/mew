@@ -13,10 +13,17 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from mew.cli import main
-from mew.commands import format_work_live_step_result
+from mew.commands import format_work_live_step_result, work_recovery_suggestion_from_plan
+from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
-from mew.work_session import create_work_session, format_diff_preview, format_work_action, format_work_session_tests
+from mew.work_session import (
+    create_work_session,
+    format_diff_preview,
+    format_work_action,
+    format_work_session_tests,
+    select_work_recovery_plan_item,
+)
 
 
 def add_coding_task(state):
@@ -46,6 +53,42 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_recovery_plan_item_selection_follows_next_action_priority(self):
+        plan = {
+            "items": [
+                {"action": "retry_verification", "id": "verify"},
+                {"action": "needs_user_review", "id": "write-1"},
+                {"action": "replan", "id": "turn"},
+                {"action": "needs_user_review", "id": "write-2"},
+            ]
+        }
+
+        self.assertEqual(select_work_recovery_plan_item(plan)["id"], "write-2")
+
+    def test_recovery_suggestions_prefer_side_effect_review_over_later_verifier(self):
+        plan = {
+            "next_action": "verify the world and review interrupted side-effecting work before retry",
+            "items": [
+                {
+                    "action": "retry_verification",
+                    "hint": "mew work 1 --recover-session --allow-read . --allow-verify --verify-command pytest",
+                },
+                {
+                    "action": "needs_user_review",
+                    "review_hint": "mew work 1 --session --resume --allow-read .",
+                    "tool_call_id": 7,
+                },
+            ],
+        }
+
+        command_suggestion = work_recovery_suggestion_from_plan(plan, task_id=1)
+        runtime_suggestion = native_work_recovery_suggestion_from_plan(plan, task_id=1)
+
+        self.assertEqual(command_suggestion["kind"], "needs_human_review")
+        self.assertEqual(command_suggestion["command"], "mew work 1 --session --resume --allow-read .")
+        self.assertEqual(runtime_suggestion["action"], "needs_user_review")
+        self.assertEqual(runtime_suggestion["command"], "mew work 1 --session --resume --allow-read .")
+
     def test_live_work_progress_flushes_stdout_before_stderr(self):
         from mew.commands import work_ai_progress
 

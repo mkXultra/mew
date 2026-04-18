@@ -64,6 +64,7 @@ from .work_session import (
     build_work_session_resume,
     find_work_session,
     mark_work_session_running_interrupted,
+    select_work_recovery_plan_item,
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_session_runtime_command,
@@ -406,7 +407,7 @@ def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
     items = (recovery_plan or {}).get("items") or []
     if not items:
         return {}
-    item = items[-1]
+    item = select_work_recovery_plan_item(recovery_plan)
     action = item.get("action") or ""
     command = item.get("hint") or item.get("auto_hint") or item.get("review_hint") or ""
     label = action.replace("_", " ") if action else "review"
