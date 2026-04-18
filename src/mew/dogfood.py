@@ -42,6 +42,7 @@ DOGFOOD_SCENARIOS = (
     "runtime-focus",
     "resident-loop",
     "native-work",
+    "native-advance",
     "chat-cockpit",
     "work-session",
 )
@@ -1097,6 +1098,165 @@ def run_native_work_scenario(workspace, env=None):
         expected="native work dogfood keeps external agent runs disabled",
     )
     return _scenario_report("native-work", workspace, commands, checks)
+
+
+def write_fake_mew_executable(path):
+    script = f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+log_path = pathlib.Path(os.environ["MEW_FAKE_WORK_LOG"])
+records = []
+if log_path.exists():
+    records = json.loads(log_path.read_text(encoding="utf-8"))
+records.append({{"argv": sys.argv[1:]}})
+log_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+sys.exit(0)
+"""
+    path.write_text(script, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def run_native_advance_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Native advance smoke task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+
+    fake_log = Path(workspace) / "fake-mew-calls.json"
+    fake_mew = write_fake_mew_executable(Path(workspace) / "fake-mew")
+    scenario_env = dict(env or os.environ)
+    scenario_env["MEW_EXECUTABLE"] = str(fake_mew)
+    scenario_env["MEW_FAKE_WORK_LOG"] = str(fake_log)
+    runtime_args = SimpleNamespace(
+        interval=1.0,
+        poll_interval=0.05,
+        autonomy_level="act",
+        model_timeout=20.0,
+        ai=False,
+        auth=None,
+        model_backend="",
+        model="",
+        base_url="",
+        allow_write=False,
+        allow_verify=False,
+        verify_command=f"{sys.executable} -V",
+        verify_interval_minutes=0.05,
+        execute_tasks=False,
+        allow_agent_run=False,
+        allow_native_work=True,
+        allow_native_advance=True,
+        agent_stale_minutes=None,
+        agent_result_timeout=None,
+        agent_start_timeout=None,
+        review_model=None,
+        trace_model=False,
+        max_reflex_rounds=0,
+        startup_timeout=5.0,
+        message_timeout=5.0,
+        send_message=[],
+        duration=3.5,
+        cleanup=False,
+        stop_timeout=10.0,
+        wait_agent_runs=0.0,
+    )
+    resident_report = _run_dogfood_in_workspace(
+        runtime_args,
+        workspace,
+        created_temp=False,
+        env=scenario_env,
+    )
+    commands.append(
+        {
+            "command": resident_report.get("command") or [],
+            "exit_code": resident_report.get("exit_code"),
+            "stdout": "\n".join(resident_report.get("runtime_output_tail") or []),
+            "stderr": "",
+        }
+    )
+
+    state = read_json_file(Path(workspace) / STATE_FILE, {})
+    fake_calls = read_json_file(fake_log, [])
+    latest_step = state.get("runtime_status", {}).get("last_native_work_step") or {}
+    advance_metrics = native_work_advance_metrics(state)
+    work_calls = [call for call in fake_calls if (call.get("argv") or [])[:2] == ["work", str(task_id)]]
+    latest_work_args = (work_calls[-1].get("argv") if work_calls else [])
+
+    _scenario_check(
+        checks,
+        "native_advance_starts_and_stops",
+        task_result.get("exit_code") == 0
+        and resident_report.get("exit_code") == 0
+        and (resident_report.get("duration_seconds") or 0) >= 3.0,
+        observed={
+            "task": task_data,
+            "exit_code": resident_report.get("exit_code"),
+            "duration_seconds": resident_report.get("duration_seconds"),
+        },
+        expected="resident runtime starts, processes passive native advance, and stops cleanly",
+    )
+    _scenario_check(
+        checks,
+        "native_advance_invokes_mew_work_live_once_per_tick",
+        bool(work_calls)
+        and "--live" in latest_work_args
+        and "--max-steps" in latest_work_args
+        and "1" in latest_work_args
+        and "--quiet" in latest_work_args
+        and "--compact-live" in latest_work_args
+        and "--no-prompt-approval" in latest_work_args,
+        observed=fake_calls,
+        expected="runtime native advance invokes the configured mew executable with one quiet live step",
+    )
+    _scenario_check(
+        checks,
+        "native_advance_records_completed_step",
+        latest_step.get("outcome") == "completed"
+        and latest_step.get("exit_code") == 0
+        and advance_metrics.get("by_outcome", {}).get("completed", 0) >= 1,
+        observed={
+            "last_native_work_step": latest_step,
+            "native_work_advance": advance_metrics,
+        },
+        expected="runtime status and dogfood metrics record a completed native advance",
+    )
+    _scenario_check(
+        checks,
+        "native_advance_preserves_runtime_owned_session",
+        any(
+            session.get("runtime_managed") is True
+            and session.get("owner") == "runtime"
+            and str(session.get("task_id")) == str(task_id)
+            for session in state.get("work_sessions", [])
+        ),
+        observed=state.get("work_sessions", []),
+        expected="advance scenario uses an explicitly runtime-owned work session",
+    )
+    return _scenario_report("native-advance", workspace, commands, checks)
 
 
 def run_chat_cockpit_scenario(workspace, env=None):
@@ -2354,6 +2514,8 @@ def run_dogfood_scenario(args):
             reports.append(run_resident_loop_scenario(scenario_workspace, env=env))
         elif name == "native-work":
             reports.append(run_native_work_scenario(scenario_workspace, env=env))
+        elif name == "native-advance":
+            reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":
@@ -3353,7 +3515,7 @@ def prepopulate_project_snapshot(workspace):
     return state["dogfood"]["pre_snapshot"]
 
 
-def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, pre_snapshot=None):
+def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, pre_snapshot=None, env=None):
     command = build_runtime_command(args, workspace)
     state_dir = workspace / STATE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -3361,7 +3523,9 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
     started_at = time.monotonic()
     exit_code = None
 
-    env = dogfood_subprocess_env()
+    runtime_env = dogfood_subprocess_env()
+    if env:
+        runtime_env.update(env)
     with output_path.open("ab") as output:
         process = subprocess.Popen(
             command,
@@ -3369,7 +3533,7 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
             stdout=output,
             stderr=subprocess.STDOUT,
             text=True,
-            env=env,
+            env=runtime_env,
             start_new_session=True,
         )
 
