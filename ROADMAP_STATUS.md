@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-18
+Last updated: 2026-04-19
 
 This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conservative.
 
@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and passive auto-recovery for interrupted verifier plus safe read/git cases exist; broader automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -1446,6 +1446,13 @@ Next action:
   small cockpit consistency fix: native self-improve follow commands now use
   the same 10-step compact follow loop as the normal work/code cockpit, and the
   README self-improvement example shows the matching follow-status check.
+- WHY_MEW bake-off task #141/session #160 proved the interrupted-verifier
+  recovery path with a real Ctrl-C. The initial run exposed a gap where manual
+  `mew work --tool` interruption printed a Python traceback and left the tool
+  call `running` until `mew repair`; that path now catches `KeyboardInterrupt`,
+  records the tool call as `interrupted`, returns structured JSON under
+  `--json`, exits 130, and can be recovered with the normal
+  `recover-session` verifier retry flow.
 
 ## Current Roadmap Focus
 

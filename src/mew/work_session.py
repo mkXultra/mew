@@ -555,6 +555,37 @@ def mark_work_session_running_interrupted(session, current_time=None):
         session["updated_at"] = current_time
     return repairs
 
+
+def mark_work_tool_call_interrupted(session, tool_call_id, current_time=None):
+    current_time = current_time or now_iso()
+    if not isinstance(session, dict):
+        return []
+    call = find_work_tool_call(session, tool_call_id)
+    if not isinstance(call, dict) or call.get("status") != "running":
+        return []
+    recovery_hint = (
+        f"Review work session #{session.get('id')} resume, verify world state, then retry or choose a new action."
+    )
+    call["status"] = "interrupted"
+    call["finished_at"] = current_time
+    call["error"] = call.get("error") or "Interrupted before the work tool completed."
+    call["summary"] = call.get("summary") or "interrupted work tool call"
+    call["recovery_hint"] = recovery_hint
+    session["updated_at"] = current_time
+    return [
+        {
+            "type": "interrupted_work_tool_call",
+            "session_id": session.get("id"),
+            "task_id": session.get("task_id"),
+            "tool_call_id": call.get("id"),
+            "tool": call.get("tool"),
+            "old_status": "running",
+            "new_status": "interrupted",
+            "recovery_hint": recovery_hint,
+        }
+    ]
+
+
 def start_work_tool_call(state, session, tool, parameters):
     current_time = now_iso()
     tool_call = {

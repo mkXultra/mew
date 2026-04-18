@@ -1929,6 +1929,155 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_interrupt_marks_call_recoverable(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "run_tests",
+                                    "--command",
+                                    command,
+                                    "--allow-verify",
+                                    "--json",
+                                ]
+                            ),
+                            130,
+                        )
+
+                interrupted = json.loads(stdout.getvalue())
+                self.assertTrue(interrupted["interrupted"])
+                self.assertEqual(interrupted["tool_call"]["status"], "interrupted")
+                self.assertEqual(interrupted["tool_call"]["tool"], "run_tests")
+                self.assertIn("retry", interrupted["tool_call"]["recovery_hint"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(resume["phase"], "interrupted")
+                self.assertEqual(resume["recovery_plan"]["items"][0]["action"], "retry_verification")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                recovered = json.loads(stdout.getvalue())
+                self.assertEqual(recovered["recovery"]["action"], "retry_tool")
+                self.assertEqual(recovered["tool_call"]["status"], "completed")
+                self.assertIn("verify ok", recovered["tool_call"]["result"]["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tool_interrupt_text_marks_only_current_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    session.setdefault("tool_calls", []).append(
+                        {
+                            "id": 99,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "tool": "read_file",
+                            "status": "running",
+                            "parameters": {"path": "README.md"},
+                            "result": None,
+                            "summary": "",
+                            "error": "",
+                            "started_at": "then",
+                            "finished_at": None,
+                        }
+                    )
+                    session.setdefault("model_turns", []).append(
+                        {
+                            "id": 88,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "status": "running",
+                            "decision_plan": {},
+                            "action_plan": {},
+                            "action": {"type": "read_file", "path": "README.md"},
+                            "tool_call_id": 99,
+                            "summary": "",
+                            "error": "",
+                            "started_at": "then",
+                            "finished_at": None,
+                        }
+                    )
+                    state["next_ids"]["work_tool_call"] = 100
+                    state["next_ids"]["work_model_turn"] = 89
+                    save_state(state)
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "run_tests",
+                                    "--command",
+                                    command,
+                                    "--allow-verify",
+                                ]
+                            ),
+                            130,
+                        )
+
+                output = stdout.getvalue()
+                self.assertIn("work tool #100 [interrupted] run_tests", output)
+                self.assertIn("recovery_hint: Review work session #1 resume", output)
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "running")
+                self.assertEqual(session["model_turns"][0]["status"], "running")
+                self.assertEqual(session["tool_calls"][1]["status"], "interrupted")
+                self.assertEqual(session["tool_calls"][1]["id"], 100)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_uses_session_default_read_roots(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

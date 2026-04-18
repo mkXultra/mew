@@ -215,3 +215,62 @@ Judgment:
   gate can create false confidence even when the native tool loop works.
 - Fresh review again improved breadth. It caught the non-gate default edge case
   before commit.
+
+#### B4: Interrupted Verifier Recovery
+
+Setup:
+
+- Created task #141 for an interrupted-verifier recovery proof.
+- Started a resident work session with read and verify gates:
+  `mew work 141 --start-session --allow-read . --allow-verify
+  --verify-command "uv run python -m unittest
+  tests.test_commands.CommandTests.test_workbench_active_session_next_action_reuses_defaults"
+  --json`.
+- Ran `mew work 141 --tool run_tests --command "sleep 30" --allow-verify
+  --json` in a PTY and interrupted it with Ctrl-C.
+
+Observed mew advantage:
+
+- Even before the fix, the started tool call existed in the work-session ledger
+  with its command, cwd, and gate defaults. `mew repair --force --json` could
+  mark the orphaned `running` verifier as `interrupted`.
+- After repair, `mew work 141 --session --resume --allow-read .` produced a
+  concrete recovery plan with the exact command:
+  `./mew work 141 --recover-session --allow-read . --allow-verify
+  --verify-command 'sleep 30'`.
+- `recover-session` reran the verifier, recorded the world state before retry,
+  completed the new tool call, and superseded the interrupted one.
+
+Observed mew weakness:
+
+- The first Ctrl-C path printed a Python traceback and left the call in
+  `running_tool`. `recover-session` then reported `no interrupted work tool to
+  recover` until `mew repair` was run manually. That is not good enough for a
+  resident shell: interruption should become durable state immediately.
+
+Change shipped:
+
+- `mew work --tool ...` now catches `KeyboardInterrupt`, marks the running
+  work-session tool call as `interrupted`, stores the recovery hint, prints
+  structured JSON when `--json` is present, and exits with code 130 instead of
+  a traceback.
+
+Validation:
+
+- Focused interrupt/recovery regression:
+  `tests.test_work_session.WorkSessionTests.test_work_tool_interrupt_marks_call_recoverable`.
+- Existing verifier recovery regression:
+  `tests.test_work_session.WorkSessionTests.test_work_session_recovers_interrupted_run_tests_with_verify_gate`.
+- Both focused tests passed.
+- Live proof after the fix: Ctrl-C returned JSON with `status:
+  interrupted`, then `recover-session --verify-command "sleep 30"` completed
+  and recorded the retry as tool call #837.
+
+Judgment:
+
+- B4 is the clearest evidence so far for mew over a fresh one-shot coding CLI.
+  A fresh session can reconstruct what happened only from terminal scrollback;
+  mew now converts the interruption into task-local, recoverable state.
+- The remaining gap is broader polish: approval and recovery subcommands should
+  be audited for the same Ctrl-C durability, and the recovery flow should avoid
+  making the human know when `repair` is necessary.

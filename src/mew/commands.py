@@ -201,6 +201,7 @@ from .work_session import (
     latest_unresolved_failure,
     latest_work_verify_command,
     mark_running_work_interrupted,
+    mark_work_tool_call_interrupted,
     APPROVAL_STATUS_INDETERMINATE,
     clip_tail,
     request_work_session_stop,
@@ -5817,6 +5818,37 @@ def cmd_work_tool(args):
             work_tool_output_progress(progress, tool_call_id),
         )
         error = work_tool_result_error(args.tool, result)
+    except KeyboardInterrupt:
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            repairs = mark_work_tool_call_interrupted(session, tool_call_id)
+            tool_call = find_work_tool_call(session, tool_call_id)
+            if not tool_call:
+                tool_call = {
+                    "id": tool_call_id,
+                    "tool": args.tool,
+                    "status": "interrupted",
+                    "error": "work tool was interrupted before the result could be recorded",
+                    "summary": "interrupted work tool call",
+                }
+            save_state(state)
+        if args.json:
+            print(
+                json.dumps(
+                    {"tool_call": tool_call, "interrupted": True, "repairs": repairs},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(f"work tool #{tool_call['id']} [{tool_call['status']}] {tool_call['tool']}")
+            print(tool_call.get("summary") or tool_call.get("error") or "")
+            if tool_call.get("recovery_hint"):
+                print(f"recovery_hint: {tool_call.get('recovery_hint')}")
+        if progress:
+            progress(f"tool #{tool_call_id} interrupted")
+        return 130
     except (OSError, ValueError) as exc:
         result = None
         error = str(exc)
