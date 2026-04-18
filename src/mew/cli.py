@@ -2,6 +2,7 @@
 import argparse
 import os
 
+from .dogfood import DOGFOOD_SCENARIOS
 from .commands import (
     CHAT_HELP,
     cmd_attach,
@@ -628,16 +629,7 @@ def build_parser():
     dogfood_parser = subparsers.add_parser("dogfood", help="run a short isolated mew runtime dogfood")
     dogfood_parser.add_argument(
         "--scenario",
-        choices=(
-            "all",
-            "interrupted-focus",
-            "trace-smoke",
-            "memory-search",
-            "runtime-focus",
-            "resident-loop",
-            "chat-cockpit",
-            "work-session",
-        ),
+        choices=("all", *DOGFOOD_SCENARIOS),
         help="run a deterministic CLI dogfood scenario instead of a timed runtime dogfood",
     )
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")

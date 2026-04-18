@@ -8,8 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from mew.cli import build_parser
 from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
+    DOGFOOD_SCENARIOS,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
     build_dogfood_report,
@@ -37,6 +39,13 @@ from mew.state import add_event, add_outbox_message, default_state
 
 
 class DogfoodTests(unittest.TestCase):
+    def test_cli_dogfood_scenario_choices_follow_registered_scenarios(self):
+        parser = build_parser()
+
+        for scenario in DOGFOOD_SCENARIOS:
+            args = parser.parse_args(["dogfood", "--scenario", scenario, "--json"])
+            self.assertEqual(args.scenario, scenario)
+
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
 

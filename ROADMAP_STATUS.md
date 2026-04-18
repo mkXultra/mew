@@ -495,11 +495,11 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `867 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `868 passed, 6 subtests passed`.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_dogfood.py` current: `34 passed`.
+- `uv run pytest -q tests/test_dogfood.py` current: `35 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `158 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `203 passed`.
