@@ -3659,6 +3659,40 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_git_tool_defaults_to_task_cwd_outside_repo(self):
+        if not shutil.which("git"):
+            self.skipTest("git not found")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            outside = Path(tmp) / "observer"
+            repo.mkdir()
+            outside.mkdir()
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            (repo / "app.py").write_text("print('new')\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(repo)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", str(repo)]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_status", "--allow-read", str(repo), "--json"]),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(result["exit_code"], 0)
+                self.assertEqual(Path(result["cwd"]), repo.resolve())
+                self.assertIn("app.py", result["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_progress_streams_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

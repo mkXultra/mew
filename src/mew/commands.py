@@ -6330,7 +6330,21 @@ def cmd_work_recover_session(args):
     return code
 
 
-def _work_tool_parameters(args, session=None, gate_options=None):
+def _work_tool_task_cwd(task):
+    cwd = (task or {}).get("cwd") or "."
+    return cwd if cwd != "." else ""
+
+
+def _work_tool_effective_cwd(args, task=None):
+    cwd = getattr(args, "cwd", None)
+    if cwd not in (None, "", "."):
+        return cwd
+    if getattr(args, "tool", "") in (GIT_WORK_TOOLS | {"run_command", "run_tests"}):
+        return _work_tool_task_cwd(task) or cwd
+    return cwd
+
+
+def _work_tool_parameters(args, session=None, gate_options=None, task=None):
     path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file"}
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
     parameters = {
@@ -6347,7 +6361,7 @@ def _work_tool_parameters(args, session=None, gate_options=None):
         "create": getattr(args, "create", False),
         "replace_all": getattr(args, "replace_all", False),
         "apply": getattr(args, "apply", False),
-        "cwd": getattr(args, "cwd", None),
+        "cwd": _work_tool_effective_cwd(args, task=task),
         "timeout": getattr(args, "timeout", None),
         "allowed_write_roots": options.get("allow_write") or [],
         "allow_shell": options.get("allow_shell"),
@@ -6391,7 +6405,8 @@ def cmd_work_tool(args):
             print(format_no_work_tool_session(state, args), file=sys.stderr)
             return 1
         gate_options = _work_tool_gate_options(args, session)
-        parameters = _work_tool_parameters(args, session=session, gate_options=gate_options)
+        task = work_session_task(state, session)
+        parameters = _work_tool_parameters(args, session=session, gate_options=gate_options, task=task)
         tool_call = start_work_tool_call(state, session, args.tool, parameters)
         if review_probe:
             tool_call["review_probe"] = True
