@@ -28,8 +28,11 @@ from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
 from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
+    DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
+    append_work_tool_running_output,
     build_work_session_resume,
     create_work_session,
+    finish_work_tool_call,
     format_diff_preview,
     format_work_action,
     format_work_session_resume,
@@ -1176,6 +1179,77 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("#5 [failed] run_tests exit=unavailable printf verify-ok", text)
         self.assertIn("error: verification execution is disabled; pass --allow-verify", text)
+
+    def test_running_tool_output_surfaces_in_resume_and_cells(self):
+        state = {
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "updated_at": "2026-04-18T00:00:00Z",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "running",
+                            "parameters": {"command": "pytest -q", "cwd": "."},
+                            "result": None,
+                            "started_at": "2026-04-18T00:00:00Z",
+                        }
+                    ],
+                }
+            ]
+        }
+        long_output = "start\n" + ("x" * (DEFAULT_RUNNING_OUTPUT_MAX_CHARS + 100)) + "\nstill running\n"
+
+        running = append_work_tool_running_output(state, 1, 4, "stdout", long_output)
+        session = state["work_sessions"][0]
+        resume = build_work_session_resume(session)
+        cells = build_work_session_cells(session, limit=None)
+        test_cell = next(cell for cell in cells if cell["kind"] == "test")
+
+        self.assertIsNotNone(running)
+        self.assertEqual(session["updated_at"], "2026-04-18T00:00:00Z")
+        self.assertEqual(resume["commands"][0]["status"], "running")
+        self.assertTrue(resume["commands"][0]["output_running"])
+        self.assertTrue(resume["commands"][0]["stdout_truncated"])
+        self.assertIn("still running", resume["commands"][0]["stdout"])
+        self.assertEqual(test_cell["tail"][0]["stream"], "stdout")
+        self.assertIn("still running", "\n".join(test_cell["tail"][0]["lines"]))
+        self.assertIn("output_updated_at:", test_cell["detail"])
+
+    def test_finished_tool_clears_running_output_tail(self):
+        state = {
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_command",
+                            "status": "running",
+                            "parameters": {"command": "printf done", "cwd": "."},
+                            "result": None,
+                        }
+                    ],
+                }
+            ]
+        }
+        append_work_tool_running_output(state, 1, 4, "stdout", "partial\n")
+
+        call = finish_work_tool_call(
+            state,
+            1,
+            4,
+            result={"command": "printf done", "cwd": ".", "exit_code": 0, "stdout": "done\n", "stderr": ""},
+        )
+
+        self.assertNotIn("running_output", call)
+        resume = build_work_session_resume(state["work_sessions"][0])
+        self.assertEqual(resume["commands"][0]["stdout"], "done\n")
 
     def test_diff_preview_can_use_unclipped_diff_stats(self):
         clipped_diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + ("x" * 2000)
@@ -10208,6 +10282,132 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["pending_approvals"][0]["cli_reject_hint"], "mew work 1 --reject-tool 3 --reject-reason '<reason>'")
                 self.assertEqual(data["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
                 self.assertTrue(any(action["type"] == "approve_all" for action in data["supported_actions"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_snapshot_surfaces_running_tool_output_tail(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import write_work_follow_snapshot
+
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Running output snapshot",
+                    "updated_at": "2026-04-18T00:00:00Z",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "run_tests",
+                            "status": "running",
+                            "started_at": "2026-04-18T00:00:00Z",
+                            "parameters": {"command": "pytest -q", "cwd": "."},
+                            "running_output": {
+                                "stdout": "collecting\nstill running\n",
+                                "stdout_truncated": False,
+                                "updated_at": "2026-04-18T00:00:01Z",
+                                "max_chars": DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
+                            },
+                        }
+                    ],
+                }
+                resume = build_work_session_resume(session, task={"id": 1, "title": "Running output snapshot"})
+                path = write_work_follow_snapshot(
+                    SimpleNamespace(live=True, follow=True),
+                    {"steps": [], "stop_reason": "work_already_running"},
+                    session,
+                    {"id": 1, "title": "Running output snapshot"},
+                    resume,
+                    force=True,
+                )
+
+                data = json.loads(path.read_text(encoding="utf-8"))
+                test_cell = next(cell for cell in data["cells"] if cell["kind"] == "test")
+                self.assertEqual(data["resume"]["commands"][0]["status"], "running")
+                self.assertTrue(data["resume"]["commands"][0]["output_running"])
+                self.assertIn("still running", data["resume"]["commands"][0]["stdout"])
+                self.assertEqual(test_cell["tail"][0]["stream"], "stdout")
+                self.assertIn("still running", "\n".join(test_cell["tail"][0]["lines"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_quiet_tool_output_progress_mirrors_running_output_to_snapshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import (
+                    RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS,
+                    work_tool_output_progress,
+                    write_work_follow_snapshot,
+                )
+                import time
+
+                task = {"id": 1, "title": "Quiet running output", "status": "running"}
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Quiet running output",
+                    "updated_at": "2026-04-18T00:00:00Z",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "run_command",
+                            "status": "running",
+                            "started_at": "2026-04-18T00:00:00Z",
+                            "parameters": {"command": "printf quiet", "cwd": "."},
+                            "result": None,
+                        }
+                    ],
+                }
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(task)
+                    state["work_sessions"].append(session)
+                    save_state(state)
+
+                snapshot_calls = []
+
+                def snapshot():
+                    snapshot_calls.append("called")
+                    with state_lock():
+                        state = load_state()
+                        current_session = state["work_sessions"][0]
+                        current_task = state["tasks"][0]
+                        resume = build_work_session_resume(current_session, task=current_task)
+                    write_work_follow_snapshot(
+                        SimpleNamespace(live=True, follow=True, quiet=True),
+                        {"steps": [], "stop_reason": "work_already_running"},
+                        current_session,
+                        current_task,
+                        resume,
+                        force=True,
+                    )
+
+                emit = work_tool_output_progress(None, 3, session_id=1, on_state_update=snapshot)
+
+                emit("stdout", "quiet partial\n")
+                emit("stdout", "buffered partial\n")
+
+                data = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                command_cell = next(cell for cell in data["cells"] if cell["kind"] == "command")
+                self.assertTrue(data["resume"]["commands"][0]["output_running"])
+                self.assertIn("quiet partial", data["resume"]["commands"][0]["stdout"])
+                self.assertNotIn("buffered partial", data["resume"]["commands"][0]["stdout"])
+                self.assertIn("quiet partial", "\n".join(command_cell["tail"][0]["lines"]))
+                self.assertEqual(data["session_updated_at"], "2026-04-18T00:00:00Z")
+                self.assertEqual(len(snapshot_calls), 1)
+
+                time.sleep(RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS + 0.1)
+
+                self.assertEqual(len(snapshot_calls), 2)
+                data = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertIn("buffered partial", data["resume"]["commands"][0]["stdout"])
+                self.assertEqual(data["session_updated_at"], "2026-04-18T00:00:00Z")
             finally:
                 os.chdir(old_cwd)
 

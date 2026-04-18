@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -171,6 +172,7 @@ from .work_session import (
     active_work_session,
     active_work_sessions,
     add_work_session_note,
+    append_work_tool_running_output,
     attach_work_resume_world_state,
     build_work_session_resume,
     close_work_session,
@@ -198,6 +200,7 @@ from .work_session import (
     latest_work_verify_command,
     mark_running_work_interrupted,
     APPROVAL_STATUS_INDETERMINATE,
+    clip_tail,
     request_work_session_stop,
     select_work_recovery_plan_item,
     start_work_model_turn,
@@ -221,6 +224,8 @@ from .work_world import build_work_world_state
 
 RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
 MAX_OUTBOX_TEXT_CHARS = 2000
+RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
+RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
 
 
 def task_json_data(task):
@@ -1976,10 +1981,21 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         targets.append(follow_dir / f"session-{session_id}.json")
     encoded = json.dumps(payload, ensure_ascii=False, indent=2)
     for path in targets:
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.{time.monotonic_ns()}.tmp")
         tmp.write_text(encoded + "\n", encoding="utf-8")
         os.replace(tmp, path)
     return latest_path
+
+
+def refresh_work_follow_snapshot(args, report, session_id, task_id=None):
+    if not getattr(args, "live", False):
+        return None
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        task = work_session_task(state, session) or find_task(state, task_id)
+        resume = build_work_session_resume(session, task=task)
+    return write_work_follow_snapshot(args, report, session, task, resume, force=True)
 
 
 def work_ai_has_tool_gates(options):
@@ -2130,13 +2146,91 @@ def work_tool_progress(args):
     return emit
 
 
-def work_tool_output_progress(progress, tool_call_id):
-    if not progress:
+def work_tool_output_progress(progress, tool_call_id, session_id=None, on_state_update=None):
+    if not progress and session_id is None:
         return None
+    mirror_lock = threading.Lock()
+    buffered = {"stdout": "", "stderr": ""}
+    last_mirror_at = 0.0
+    last_snapshot_at = 0.0
+    flush_timer = None
+
+    def flush_buffer_locked(current_time):
+        nonlocal flush_timer, last_mirror_at, last_snapshot_at
+        state_updated = False
+        chunks = {name: value for name, value in buffered.items() if value}
+        if not chunks:
+            flush_timer = None
+            return False
+        buffered["stdout"] = ""
+        buffered["stderr"] = ""
+        if flush_timer is not None:
+            flush_timer.cancel()
+            flush_timer = None
+        last_mirror_at = current_time
+        try:
+            with state_lock():
+                state = load_state()
+                for name, value in chunks.items():
+                    state_updated = bool(
+                        append_work_tool_running_output(
+                            state,
+                            session_id,
+                            tool_call_id,
+                            name,
+                            value,
+                        )
+                    ) or state_updated
+                if state_updated:
+                    save_state(state)
+        except Exception as exc:  # pragma: no cover - output mirroring must not break the tool
+            if progress:
+                progress(f"tool #{tool_call_id} output mirror failed: {clip_output(str(exc), 200)}")
+            return False
+        snapshot_due = (
+            last_snapshot_at == 0.0
+            or current_time - last_snapshot_at >= RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS
+        )
+        if state_updated and on_state_update and snapshot_due:
+            try:
+                last_snapshot_at = current_time
+                on_state_update()
+            except Exception as exc:  # pragma: no cover - snapshot writes are advisory
+                if progress:
+                    progress(f"tool #{tool_call_id} follow snapshot failed: {clip_output(str(exc), 200)}")
+        return state_updated
+
+    def flush_buffer_from_timer():
+        with mirror_lock:
+            flush_buffer_locked(time.monotonic())
+
+    def schedule_flush_locked(current_time):
+        nonlocal flush_timer
+        if flush_timer is not None:
+            return
+        delay = max(0.01, RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS - (current_time - last_mirror_at))
+        flush_timer = threading.Timer(delay, flush_buffer_from_timer)
+        flush_timer.daemon = True
+        flush_timer.start()
 
     def emit(stream_name, text):
-        for line in (text or "").splitlines():
-            progress(f"tool #{tool_call_id} {stream_name}: {clip_output(line, 500)}")
+        if session_id is not None:
+            with mirror_lock:
+                if stream_name in buffered and text:
+                    buffered[stream_name] = clip_tail(
+                        f"{buffered[stream_name]}{text}",
+                        RUNNING_OUTPUT_MIRROR_BUFFER_CHARS,
+                    )
+                buffered_chars = sum(len(value) for value in buffered.values())
+                current_time = time.monotonic()
+                due = last_mirror_at == 0.0 or current_time - last_mirror_at >= RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS
+                if due and buffered_chars:
+                    flush_buffer_locked(current_time)
+                elif buffered_chars:
+                    schedule_flush_locked(current_time)
+        if progress:
+            for line in (text or "").splitlines():
+                progress(f"tool #{tool_call_id} {stream_name}: {clip_output(line, 500)}")
 
     return emit
 
@@ -3122,6 +3216,7 @@ def cmd_work_ai(args):
             )
             planning_turn_id = planning_turn.get("id")
             save_state(state)
+        refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "model_turn", planning_turn_id)
 
         try:
@@ -3482,6 +3577,7 @@ def cmd_work_ai(args):
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id")
             save_state(state)
+        refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)
         if getattr(args, "live", False) and not getattr(args, "follow", False):
             print("")
@@ -3495,7 +3591,16 @@ def cmd_work_ai(args):
                 action_type,
                 parameters,
                 effective_args.allow_read or [],
-                work_tool_output_progress(progress, tool_call_id),
+                work_tool_output_progress(
+                    progress,
+                    tool_call_id,
+                    session_id=session_id if getattr(args, "live", False) else None,
+                    on_state_update=(
+                        (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
+                        if getattr(args, "live", False)
+                        else None
+                    ),
+                ),
             )
             error = work_tool_result_error(action_type, result)
         except KeyboardInterrupt:

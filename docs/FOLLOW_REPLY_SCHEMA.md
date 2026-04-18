@@ -11,6 +11,10 @@ The snapshot is a local contract for another model or UI. It includes:
 - `session_id` and `task_id`
 - `session_updated_at`: the session timestamp this snapshot observed
 - `last_step`, `resume`, `cells`, and `controls`
+- running command/test cells may include bounded stdout/stderr `tail` entries
+  while the tool is still active. The same partial output appears in
+  `resume.commands[]` with `output_running: true` and `output_updated_at`; when
+  the tool finishes, the final command result replaces the running tail.
 - `pending_approvals`: top-level pending dry-run write approvals for observers
   with chat-style `approve_hint`/`reject_hint` and CLI-style
   `cli_approve_hint`/`cli_reject_hint` when approval is currently allowed

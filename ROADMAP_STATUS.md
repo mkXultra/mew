@@ -669,6 +669,19 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: running `run_command`/`run_tests` output is mirrored as a
+  bounded tail into work-session state and follow snapshots without changing
+  the stale-reply `session_updated_at` token; quiet follow still writes a
+  timer-flushed snapshot, and completed tools clear the running tail in favor
+  of the final result. `codex-ultra` twice found blockers in the first draft
+  (temp-file races, unthrottled churn, stale reply tokens, and silent buffered
+  chunks); the final re-review returned `NO_BLOCKERS`. Validated with targeted
+  running-output/follow tests (`3 passed`), combined
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py`
+  (`442 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`962 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), and `./mew dogfood --scenario all` (pass).
 - Follow-up current: pending write approvals in resume/follow JSON now include
   a capped machine-review `diff` plus `diff_truncated` and `diff_max_chars`,
   so observer agents can review the exact dry-run change from
@@ -1151,6 +1164,11 @@ Next action:
   preview. Resume/follow JSON now includes a capped machine-review `diff` with
   `diff_truncated` and `diff_max_chars`, while terminal resume output stays on
   the concise preview.
+- Follow snapshots now also carry bounded running stdout/stderr tails for
+  active `run_command` and `run_tests` cells, mirrored into `resume.commands[]`
+  without advancing `session_updated_at`. The mirror is timer-flushed and
+  rate-capped so observer replies do not go stale just because command output
+  arrived.
 
 ## Current Roadmap Focus
 

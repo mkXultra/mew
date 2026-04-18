@@ -110,6 +110,12 @@ def _command_result(call):
     return (call or {}).get("result") or {}
 
 
+def _command_output_record(call):
+    if (call or {}).get("status") == "running" and (call or {}).get("running_output"):
+        return (call or {}).get("running_output") or {}
+    return _command_result(call)
+
+
 def _command_text(call):
     result = _command_result(call)
     parameters = (call or {}).get("parameters") or {}
@@ -204,6 +210,7 @@ def _command_preview(call):
 
 def _command_detail(session, call, kind):
     result = _command_result(call)
+    output_record = _command_output_record(call)
     parameters = (call or {}).get("parameters") or {}
     lines = []
     command = _command_text(call)
@@ -219,11 +226,13 @@ def _command_detail(session, call, kind):
         lines.append("timeout: yes")
     if result.get("error_type"):
         lines.append(f"error_type: {result.get('error_type')}")
-    stdout = result.get("stdout") or ""
-    stderr = result.get("stderr") or ""
+    stdout = output_record.get("stdout") or ""
+    stderr = output_record.get("stderr") or ""
     if stdout or stderr:
         lines.append(_stream_metric("stdout", stdout))
         lines.append(_stream_metric("stderr", stderr))
+        if call.get("status") == "running" and output_record.get("updated_at"):
+            lines.append(f"output_updated_at: {output_record.get('updated_at')}")
     elif call.get("status") == "completed":
         lines.append("output: (no output)")
     task_id = (session or {}).get("task_id")
@@ -253,7 +262,7 @@ def command_or_test_cell(session, call, tail_max_lines=None):
     )
     cell["detail"] = _command_detail(session, call, kind)
     cell["tail"] = _command_tail(
-        _command_result(call),
+        _command_output_record(call),
         expanded=_command_cell_failed(call),
         tail_max_lines=tail_max_lines,
     )

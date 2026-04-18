@@ -75,6 +75,7 @@ WORK_RECOVERY_EFFECT_CLASSES = {
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
 DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS = 50_000
 DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
+DEFAULT_RUNNING_OUTPUT_MAX_CHARS = 4_000
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
     "query",
@@ -783,6 +784,33 @@ def clip_tail(text, max_chars=1200):
     if line_break >= 0:
         tail = tail[line_break + 1 :]
     return "[...snip...]\n" + tail
+
+
+def append_work_tool_running_output(
+    state,
+    session_id,
+    tool_call_id,
+    stream_name,
+    text,
+    max_chars=DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
+):
+    if stream_name not in ("stdout", "stderr") or not text:
+        return None
+    session = find_work_session(state, session_id)
+    tool_call = find_work_tool_call(session, tool_call_id)
+    if not tool_call or tool_call.get("status") != "running":
+        return None
+    running_output = tool_call.setdefault("running_output", {})
+    current = running_output.get(stream_name) or ""
+    combined = f"{current}{text}"
+    clipped = clip_tail(combined, max_chars)
+    truncated = bool(running_output.get(f"{stream_name}_truncated")) or len(combined) > max_chars
+    current_time = now_iso()
+    running_output[stream_name] = clipped
+    running_output[f"{stream_name}_truncated"] = truncated or clipped.startswith("[...snip...]")
+    running_output["updated_at"] = current_time
+    running_output["max_chars"] = max_chars
+    return running_output
 
 
 def format_command_failure_summary(record, max_chars=1200):
@@ -1645,17 +1673,34 @@ def build_work_session_resume(session, task=None, limit=8):
         result = call.get("result") or {}
         parameters = call.get("parameters") or {}
         if call.get("tool") in COMMAND_WORK_TOOLS:
-            commands.append(
-                {
-                    "tool_call_id": call.get("id"),
-                    "tool": call.get("tool"),
-                    "command": result.get("command") or parameters.get("command"),
-                    "cwd": result.get("cwd") or parameters.get("cwd"),
-                    "exit_code": result.get("exit_code"),
-                    "stdout": clip_tail(result.get("stdout") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
-                    "stderr": clip_tail(result.get("stderr") or "", DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS),
-                }
-            )
+            running_output = call.get("running_output") or {}
+            command_record = {
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool"),
+                "command": result.get("command") or parameters.get("command"),
+                "cwd": result.get("cwd") or parameters.get("cwd"),
+                "exit_code": result.get("exit_code"),
+                "stdout": clip_tail(
+                    result.get("stdout") or running_output.get("stdout") or "",
+                    DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
+                ),
+                "stderr": clip_tail(
+                    result.get("stderr") or running_output.get("stderr") or "",
+                    DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
+                ),
+            }
+            if running_output:
+                command_record.update(
+                    {
+                        "status": call.get("status"),
+                        "output_running": call.get("status") == "running",
+                        "output_updated_at": running_output.get("updated_at") or "",
+                        "output_max_chars": running_output.get("max_chars") or DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
+                        "stdout_truncated": bool(running_output.get("stdout_truncated")),
+                        "stderr_truncated": bool(running_output.get("stderr_truncated")),
+                    }
+                )
+            commands.append(command_record)
         verification = result.get("verification") or {}
         if verification:
             commands.append(
@@ -2310,6 +2355,7 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
     else:
         tool_call["status"] = "completed"
         tool_call["summary"] = clip_output(summarize_work_tool_result(tool_call.get("tool"), result or {}), 4000)
+    tool_call.pop("running_output", None)
     tool_call["finished_at"] = finished_at
     if session:
         session["updated_at"] = finished_at
