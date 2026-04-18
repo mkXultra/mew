@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, and short passive native-work advancement now exist; day-scale reentry is not yet proven. |
-| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, safe read/git retries, and passive native-advance failure questions exist; broader automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and a proven passive native-advance recovery loop exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -100,6 +100,12 @@ have JSON surfaces with top-level aliases, `mew observe` aliases the passive
 workspace perception view, zero-step follow refresh supports `--json`, and
 `follow-status` returns `producer_health` plus `suggested_recovery` commands
 for absent, stale, dead, or recovery-plan-bearing snapshots.
+The latest True Recovery pass proves the passive native failure loop can close:
+a failed runtime-owned native advance asks a classified recovery question,
+`recover-session` reruns the interrupted verifier, marks the old call
+superseded, and the next passive tick resumes native advance. Recovery
+suggestions now use the recovery plan's action priority, so side-effect review
+is not hidden by a later verifier retry hint.
 
 ## Milestone 1: Native Hands
 
@@ -491,6 +497,15 @@ Evidence:
 - Verifier recovery now accepts quote-only command differences when
   `shlex.split` produces the same argv, reducing false `needs_matching_verifier`
   rejections while preserving exact interrupted-command recovery semantics.
+- `dogfood --scenario passive-recovery-loop` now proves the end-to-end passive
+  recovery path: failed native advance, classified recovery question,
+  explicit verifier recovery, superseded interrupted call, and a following
+  passive tick that advances the runtime-owned session instead of staying
+  blocked on `previous_native_work_step_failed`.
+- Recovery suggestions now select the highest-priority recovery action
+  (`needs_user_review`, safe retry, verifier retry, then replan) rather than
+  blindly using the last item in the recovery plan, keeping side-effect review
+  visible when multiple interrupted items exist.
 
 Missing proof:
 
@@ -555,6 +570,14 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: passive native-work recovery now has a deterministic
+  `passive-recovery-loop` dogfood scenario, and recovery suggestions now follow
+  recovery-plan action priority. Validated with
+  `uv run pytest -q tests/test_dogfood.py` (`40 passed`),
+  `./mew dogfood --scenario passive-recovery-loop --cleanup --json` (pass),
+  `uv run pytest -q tests/test_work_session.py tests/test_runtime.py`
+  (`270 passed`), `./mew dogfood --scenario all --cleanup --json` (pass), and
+  full `uv run pytest -q` (`902 passed, 6 subtests passed`).
 - `uv run pytest -q` current: `897 passed, 6 subtests passed`.
 - `./mew dogfood --scenario native-advance --cleanup --json` current: pass; validates passive runtime selection of a runtime-owned work session, the configured `MEW_EXECUTABLE` handoff, quiet one-step live flags, completed runtime status, and dogfood advance metrics.
 - Focused native-work runtime tests current: `11 passed`; covers failed passive-native-advance classification, no blind retry on the next tick, and retry allowance after newer session activity.
