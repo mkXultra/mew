@@ -95,6 +95,7 @@ from .programmer import (
     format_task_plan,
     latest_task_plan,
 )
+from .question_view import format_question_context
 from .self_improve import create_self_improve_task, ensure_self_improve_plan
 from .self_memory import (
     build_self_memory_view_model,
@@ -810,7 +811,8 @@ def format_workbench(data):
     lines.append("Open questions")
     if data.get("open_questions"):
         for question in data["open_questions"]:
-            lines.append(f"#{question.get('id')} {question.get('text') or ''}")
+            context = format_question_context(question)
+            lines.append(f"#{question.get('id')}{context} {question.get('text') or ''}")
     else:
         lines.append("(none)")
 
@@ -7601,7 +7603,8 @@ def cmd_questions(args):
         status = question.get("status")
         task = question.get("related_task_id")
         task_text = f" task=#{task}" if task else ""
-        print(f"#{question['id']} [{status}]{task_text} {question['text']}")
+        context = format_question_context(question)
+        print(f"#{question['id']} [{status}]{task_text}{context} {question['text']}")
     return 0
 
 def cmd_attention(args):
@@ -9978,7 +9981,8 @@ def print_chat_questions(show_all=False, kind=None):
         status = question.get("status")
         task = question.get("related_task_id")
         task_text = f" task=#{task}" if task else ""
-        print(f"#{question['id']} [{status}]{task_text} {question['text']}")
+        context = format_question_context(question)
+        print(f"#{question['id']} [{status}]{task_text}{context} {question['text']}")
 
 
 def chat_defer_question(rest):

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
+from .question_view import format_question_context, question_view_metadata
 from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
@@ -199,14 +200,21 @@ def _attention_item(item):
     }
 
 
-def _question_item(question):
+def _question_item(question, current_time=None):
+    metadata = question_view_metadata(question, current_time=current_time)
     return {
         "id": question.get("id"),
         "text": question.get("text"),
         "related_task_id": question.get("related_task_id"),
         "status": question.get("status"),
         "created_at": question.get("created_at"),
+        "updated_at": question.get("updated_at"),
         "acknowledged_at": question.get("acknowledged_at"),
+        "deferred_at": question.get("deferred_at"),
+        "defer_reason": question.get("defer_reason"),
+        "activity_at": metadata.get("activity_at"),
+        "waiting_hours": metadata.get("waiting_hours"),
+        "waiting_for": metadata.get("waiting_for"),
     }
 
 
@@ -510,6 +518,7 @@ def format_activity(state, limit=10, kind=None):
 
 
 def build_brief_data(state, limit=5, kind=None):
+    generated_at = now_iso()
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
     deep = memory.get("deep", {})
@@ -552,7 +561,7 @@ def build_brief_data(state, limit=5, kind=None):
         followup_waiting = [run for run in followup_waiting if str(run.get("task_id")) in task_ids]
 
     return {
-        "generated_at": now_iso(),
+        "generated_at": generated_at,
         "kind": kind or "",
         "runtime": state.get("runtime_status", {}),
         "agent": state.get("agent_status", {}),
@@ -569,7 +578,7 @@ def build_brief_data(state, limit=5, kind=None):
         "recent_activity": activity,
         "thought_journal": [_thought_item(thought) for thought in thoughts],
         "attention": [_attention_item(item) for item in attention[:limit]],
-        "open_questions": [_question_item(question) for question in questions[:limit]],
+        "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "open_tasks": [_task_item(task) for task in tasks[:limit]],
         "open_task_count": len(tasks),
         "running_agents": [_agent_run_item(run) for run in running_runs[:limit]],
@@ -634,6 +643,7 @@ def filter_messages_for_tasks(messages, tasks, kind=None):
 
 
 def build_focus_data(state, limit=3, kind=None):
+    generated_at = now_iso()
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     coding_tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind="coding") if not kind else []
     coding_active_work = active_work_session_items(state, limit=1, kind="coding") if not kind else []
@@ -654,12 +664,13 @@ def build_focus_data(state, limit=3, kind=None):
     unread = filter_messages_for_tasks(open_unread_messages(state), tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
     return {
+        "generated_at": generated_at,
         "next_move": next_move(state, kind=kind),
         "coding_next_move": coding_next_move,
         "kind": kind or "",
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
-        "open_questions": [_question_item(question) for question in questions[:limit]],
+        "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "active_work_sessions": active_work_session_items(state, limit=limit, kind=kind),
         "tasks": [
@@ -790,7 +801,12 @@ def format_focus(data):
         lines.append("Questions")
         for question in questions:
             task = f" task=#{question.get('related_task_id')}" if question.get("related_task_id") else ""
-            lines.append(f"- #{question.get('id')}{task}: {question.get('text')}")
+            context = format_question_context(
+                question,
+                current_time=data.get("generated_at"),
+                include_defer_reason=False,
+            )
+            lines.append(f"- #{question.get('id')}{task}{context}: {question.get('text')}")
 
     attention = data.get("attention") or []
     if attention:
@@ -935,6 +951,7 @@ def next_move(state, kind=None):
 
 
 def build_brief(state, limit=5, kind=None):
+    generated_at = now_iso()
     runtime = state.get("runtime_status", {})
     agent = state.get("agent_status", {})
     user = state.get("user_status", {})
@@ -1030,7 +1047,12 @@ def build_brief(state, limit=5, kind=None):
         lines.append("Open questions")
         for question in questions[:limit]:
             task = f" task=#{question.get('related_task_id')}" if question.get("related_task_id") else ""
-            lines.append(f"- #{question.get('id')}{task}: {question.get('text')}")
+            context = format_question_context(
+                question,
+                current_time=generated_at,
+                include_defer_reason=False,
+            )
+            lines.append(f"- #{question.get('id')}{task}{context}: {question.get('text')}")
         lines.append("")
 
     if tasks:

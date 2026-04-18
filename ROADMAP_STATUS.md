@@ -390,6 +390,10 @@ Evidence:
   user-visible outbox question instead of staying silent: old task question #3
   was deferred with a reason, new task question #5 was opened, and the same
   cycle kept other task questions as `wait_for_user`.
+- Question reentry views now expose old open prompts as `waiting=...`; all-question
+  listings such as `mew questions --all` expose deferred stale prompts with
+  `defer_reason=...`, so humans can see why passive work is waiting or why an
+  older prompt was superseded.
 
 Missing proof:
 
@@ -484,7 +488,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `863 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `865 passed, 6 subtests passed`.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.

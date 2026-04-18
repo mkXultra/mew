@@ -1740,6 +1740,68 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_questions_text_shows_waiting_age_and_defer_reason(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Question task",
+                            "description": "Exercise question visibility.",
+                            "kind": "coding",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "2026-04-16T00:00:00Z",
+                            "updated_at": "2026-04-16T00:00:00Z",
+                        }
+                    )
+                    add_question(state, "Old question?", related_task_id=1)
+                    question = state["questions"][0]
+                    question["created_at"] = "2026-04-16T00:00:00Z"
+                    question["updated_at"] = None
+                    save_state(state)
+
+                with patch("mew.question_view.now_iso", return_value="2026-04-18T00:00:00Z"):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["questions"]), 0)
+                self.assertIn("#1 [open] task=#1 (waiting=2.0d) Old question?", stdout.getvalue())
+
+                with patch("mew.question_view.now_iso", return_value="2026-04-18T00:00:00Z"):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1"]), 0)
+                self.assertIn("#1 (waiting=2.0d) Old question?", stdout.getvalue())
+
+                with patch("mew.question_view.now_iso", return_value="2026-04-18T00:00:00Z"):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(commands_module.run_chat_slash_command("/questions", {}), "continue")
+                self.assertIn("#1 [open] task=#1 (waiting=2.0d) Old question?", stdout.getvalue())
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["questions", "--defer", "1", "--reason", "superseded by #2"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["questions", "--all"]), 0)
+                self.assertIn("defer_reason=superseded by #2", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_list_can_filter_by_kind(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

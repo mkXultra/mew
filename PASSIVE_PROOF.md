@@ -411,6 +411,13 @@ uv run pytest -q tests/test_autonomy.py
 status: pass, including runtime_passive_refreshes_stale_question_once
 ```
 
+Human-facing visibility:
+
+```text
+mew questions / mew focus now show old open questions with waiting=...
+mew questions --all shows deferred stale questions with defer_reason=...
+```
+
 Judgment:
 
 - The previous real-repo silence is fixed for stale task-bound questions.

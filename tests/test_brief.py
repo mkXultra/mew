@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from mew.brief import build_brief, build_brief_data, build_focus_data, format_focus, next_move, review_runs_needing_followup
 from mew.programmer import (
@@ -732,6 +733,23 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Mew focus (coding)", focus)
         self.assertIn("Which file?", focus)
         self.assertNotIn("Which area?", focus)
+
+    def test_focus_shows_question_waiting_age(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Answer old prompt", kind="coding")
+        add_question(state, "Still relevant?", related_task_id=1)
+        state["questions"][0]["created_at"] = "2026-04-16T00:00:00Z"
+        state["questions"][0]["updated_at"] = None
+
+        with patch("mew.brief.now_iso", return_value="2026-04-18T00:00:00Z"):
+            data = build_focus_data(state, limit=3)
+            focus = format_focus(data)
+            brief = build_brief(state, limit=3)
+
+        self.assertEqual(data["open_questions"][0]["waiting_hours"], 48.0)
+        self.assertEqual(data["open_questions"][0]["waiting_for"], "2.0d")
+        self.assertIn("- #1 task=#1 (waiting=2.0d): Still relevant?", focus)
+        self.assertIn("- #1 task=#1 (waiting=2.0d): Still relevant?", brief)
 
     def test_next_move_surfaces_latest_failed_verification(self):
         state = default_state()
