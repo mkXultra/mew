@@ -214,6 +214,10 @@ resume/workbench path: changed `src/mew/**` work-session writes surface a
 code paths on the same surface were checked, while no-op dry-runs and stale
 pre-edit notes do not satisfy it. The deterministic work-session dogfood now
 covers this alongside the existing paired-test advisory.
+Follow-up self-improve dogfood then used the new native session path to choose
+a tiny reentry-doc fix: `01e9f2a` aligns `mew self-improve --help` with the
+actual generated resume control by documenting `mew work <task-id> --session
+--resume --allow-read .`.
 
 ## Milestone 1: Native Hands
 
@@ -812,6 +816,12 @@ Next action:
   tests.test_commands` (`536 tests`, pass), full `uv run python -m unittest`
   (`980 tests`, pass), and `codex-ultra` review with two rounds of findings
   fixed followed by re-review PASS.
+- Follow-up native self-improve dogfood task #172 used read-only `mew work
+  --live` steps to inspect the self-improve controls surface, then aligned
+  `mew self-improve --help` with the actual resume control in `01e9f2a`.
+  Validation: focused self-improve help test (pass), ruff on changed files
+  (pass), direct `./mew self-improve --help` output check, and full
+  `uv run python -m unittest` (`980 tests`, pass).
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
