@@ -777,6 +777,13 @@ Next action:
   `mew task update <id> --status ready` instead of an impossible
   `mew work <id> --start-session`, and `work-session` dogfood preserves that
   contract.
+- `claude-ultra` evaluation after passive native-work advance answered
+  `CONDITIONAL`: mew is worth inhabiting for bounded, observable,
+  gate-limited passive coding, but not yet for dense interactive or unattended
+  multi-hour autonomy. Its highest-leverage next 1-2 hour recommendation is a
+  deterministic failed passive-native-advance recovery slice: classify failed
+  advance outcomes and route the next tick toward a safe recovery/ask-user path
+  instead of blind retry.
 
 ## Current Roadmap Focus
 
