@@ -207,6 +207,20 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "memory-search")
 
+    def test_run_dogfood_interrupted_focus_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="interrupted-focus",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertIn("ready_coding_question_points_to_code_cockpit", text)
+
     def test_run_dogfood_runtime_focus_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

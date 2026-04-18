@@ -350,6 +350,10 @@ outcome=Task #1 is ready but has no command or agent backend. Should I dispatch 
 outbox #1 [question]: Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?
 ```
 
+Note: this proof captured the older coding-task question wording. The current
+wording routes ready coding tasks to `./mew code <task-id>` instead of the
+older agent/command/backend prompt.
+
 Judgment:
 
 - A clean no-input passive tick can create a user-visible outbox proposal under

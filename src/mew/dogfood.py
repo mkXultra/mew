@@ -293,6 +293,8 @@ def run_interrupted_focus_scenario(workspace, env=None):
     focus_data = _json_stdout(run(["focus", "--json"]))
     work_data = _json_stdout(run(["work", "--json"]))
     explicit_b = _json_stdout(run(["work", "1", "--json"]))
+    explicit_b_questions = explicit_b.get("open_questions") or []
+    explicit_b_question_text = (explicit_b_questions[0] or {}).get("text") if explicit_b_questions else ""
 
     _scenario_check(
         checks,
@@ -319,12 +321,19 @@ def run_interrupted_focus_scenario(workspace, env=None):
         checks,
         "explicit_workbench_can_select_background_question_task",
         (explicit_b.get("task") or {}).get("id") == 1
-        and bool(explicit_b.get("open_questions")),
+        and bool(explicit_b_questions),
         observed={
             "task_id": (explicit_b.get("task") or {}).get("id"),
-            "open_questions": len(explicit_b.get("open_questions") or []),
+            "open_questions": len(explicit_b_questions),
         },
         expected={"task_id": 1, "open_questions": ">=1"},
+    )
+    _scenario_check(
+        checks,
+        "ready_coding_question_points_to_code_cockpit",
+        "./mew code 1" in explicit_b_question_text,
+        observed=explicit_b_question_text,
+        expected="ready coding passive question mentions ./mew code 1",
     )
     return _scenario_report("interrupted-focus", workspace, commands, checks)
 

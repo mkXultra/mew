@@ -99,7 +99,7 @@ class TaskKindTests(unittest.TestCase):
         self.assertIn("research criteria", question)
         self.assertNotIn("What should I execute", question)
 
-    def test_ready_coding_task_question_offers_agent_or_command(self):
+    def test_ready_coding_task_question_points_to_coding_cockpit(self):
         question = task_question(
             {
                 "id": 21,
@@ -111,8 +111,10 @@ class TaskKindTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("dispatch it to an agent", question)
-        self.assertIn("add a command", question)
+        self.assertIn("ready coding work", question)
+        self.assertIn("./mew code 21", question)
+        self.assertIn("add constraints", question)
+        self.assertNotIn("dispatch it to an agent", question)
 
 
 if __name__ == "__main__":

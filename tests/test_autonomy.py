@@ -2155,7 +2155,7 @@ class AutonomyTests(unittest.TestCase):
         task["agent_backend"] = ""
         question, _ = add_question(
             state,
-            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            "Task #1 is ready coding work. Open the coding cockpit with ./mew code 1, add constraints, or block it?",
             related_task_id=task["id"],
         )
         question["status"] = "answered"
@@ -2180,7 +2180,7 @@ class AutonomyTests(unittest.TestCase):
         task["agent_backend"] = ""
         old_question, _ = add_question(
             state,
-            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            "Task #1 is ready coding work. Open the coding cockpit with ./mew code 1, add constraints, or block it?",
             related_task_id=task["id"],
         )
         old_question["created_at"] = "2026-04-17T00:00:00Z"
@@ -2232,7 +2232,7 @@ class AutonomyTests(unittest.TestCase):
         task["agent_backend"] = ""
         question, _ = add_question(
             state,
-            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            "Task #1 is ready coding work. Open the coding cockpit with ./mew code 1, add constraints, or block it?",
             related_task_id=task["id"],
         )
         question["created_at"] = "2026-04-17T00:00:00Z"
@@ -2260,7 +2260,7 @@ class AutonomyTests(unittest.TestCase):
         task["agent_backend"] = ""
         question, _ = add_question(
             state,
-            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            "Task #1 is ready coding work. Open the coding cockpit with ./mew code 1, add constraints, or block it?",
             related_task_id=task["id"],
         )
         question["created_at"] = "2026-04-18T11:00:00Z"

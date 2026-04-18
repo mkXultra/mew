@@ -286,7 +286,10 @@ def task_question(task):
     if task.get("status") == "ready" and not task.get("command") and not task.get("agent_backend"):
         kind = task_kind(task)
         if kind == "coding":
-            return f"Task #{task['id']} is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?"
+            return (
+                f"Task #{task['id']} is ready coding work. "
+                f"Open the coding cockpit with ./mew code {task['id']}, add constraints, or block it?"
+            )
         if kind == "research":
             return f"Task #{task['id']} is ready research work. Should I assign it to an agent, add research criteria, or block it?"
         if kind in ("personal", "admin"):
