@@ -995,6 +995,10 @@ def run_native_work_scenario(workspace, env=None):
         if str(session.get("task_id")) == str(task_id)
     ]
     active_sessions = [session for session in sessions if session.get("status") == "active"]
+    task_questions = [
+        question for question in state.get("questions", [])
+        if str(question.get("related_task_id")) == str(task_id)
+    ]
     outbox_text = "\n".join(message.get("text") or "" for message in state.get("outbox", []))
     action_types = [
         action_type
@@ -1035,6 +1039,13 @@ def run_native_work_scenario(workspace, env=None):
         f"./mew code {task_id}" in outbox_text and "native work session" in outbox_text,
         observed=outbox_text,
         expected="outbox tells the user how to continue the native work session",
+    )
+    _scenario_check(
+        checks,
+        "native_work_skips_redundant_ready_question",
+        not task_questions,
+        observed=task_questions,
+        expected="starting native work does not also leave a redundant task question open",
     )
     _scenario_check(
         checks,

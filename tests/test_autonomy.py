@@ -32,6 +32,7 @@ from mew.state import (
 )
 from mew.thoughts import format_thought_entry, record_thought_journal_entry
 from mew.timeutil import now_iso
+from mew.work_session import create_work_session
 
 
 def add_planned_ready_task(state):
@@ -3233,6 +3234,36 @@ class AutonomyTests(unittest.TestCase):
             "start_work_session",
             [decision["type"] for decision in allowed_plan["decisions"]],
         )
+        self.assertNotIn(
+            "ask_user",
+            [
+                decision["type"]
+                for decision in allowed_plan["decisions"]
+                if decision.get("task_id") == task["id"]
+            ],
+        )
+
+    def test_passive_decision_skips_ready_question_when_work_session_exists(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        create_work_session(state, task)
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        task_decisions = [
+            decision["type"]
+            for decision in plan["decisions"]
+            if decision.get("task_id") == task["id"]
+        ]
+        self.assertNotIn("ask_user", task_decisions)
 
     def test_start_work_session_action_creates_native_session(self):
         state = default_state()
@@ -3278,6 +3309,52 @@ class AutonomyTests(unittest.TestCase):
 
         self.assertEqual(state["work_sessions"], [])
         self.assertIn("--allow-native-work is required", state["outbox"][-1]["text"])
+
+    def test_start_work_session_action_requires_ready_task(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        task["status"] = "todo"
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "blocked native work", "decisions": []},
+            {"summary": "blocked native work", "actions": [{"type": "start_work_session", "task_id": task["id"]}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+        )
+
+        self.assertEqual(state["work_sessions"], [])
+        self.assertIn("is not ready", state["outbox"][-1]["text"])
+
+    def test_start_work_session_action_respects_pending_question(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        add_question(state, "Need constraints?", related_task_id=task["id"])
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "blocked native work", "decisions": []},
+            {"summary": "blocked native work", "actions": [{"type": "start_work_session", "task_id": task["id"]}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+        )
+
+        self.assertEqual(state["work_sessions"], [])
+        self.assertIn("is still unanswered", state["outbox"][-1]["text"])
 
 
 if __name__ == "__main__":

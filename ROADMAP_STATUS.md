@@ -406,7 +406,8 @@ Evidence:
 - Autonomous act-level runtime can now start a native work session for a ready
   coding task when `--allow-native-work` is explicitly enabled. The
   `native-work` dogfood scenario proves this starts a `mew code` reentry path
-  without launching an external agent run.
+  without launching an external agent run or leaving a redundant ready-task
+  question open.
 
 Missing proof:
 
@@ -502,8 +503,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `874 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task without external agent runs, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
+- `uv run pytest -q` current: `877 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task without external agent runs or redundant ready-task questions, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `36 passed`.

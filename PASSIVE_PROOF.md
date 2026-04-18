@@ -419,7 +419,8 @@ status: pass, including resident_loop_processes_multiple_events and resident_loo
 
 ./mew dogfood --scenario native-work --cleanup --json
 status: pass, including native_work_session_created_for_ready_coding_task,
-native_work_records_start_action, and native_work_does_not_start_external_agent_run
+native_work_records_start_action, native_work_skips_redundant_ready_question,
+and native_work_does_not_start_external_agent_run
 ```
 
 Human-facing visibility:
@@ -435,7 +436,7 @@ Judgment:
 - mew still respects a fresh unanswered question and waits instead of spamming.
 - With explicit `--allow-native-work`, act-level passive runtime can now start
   a native `mew code` work session for ready coding tasks without delegating to
-  external agents.
+  external agents or leaving an extra ready-task question open.
 - Remaining cadence work: decide whether global/non-task questions should also
   age into a summary/reminder path, and tune the 24-hour threshold after longer
   dogfood.

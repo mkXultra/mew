@@ -593,6 +593,13 @@ def append_passive_decisions(
             execution_added = True
             continue
 
+        if (
+            task.get("status") == "ready"
+            and is_programmer_task(task)
+            and work_session_for_task(state, task_id)
+        ):
+            continue
+
         question = task_question(task)
         if (
             question
@@ -747,6 +754,13 @@ def append_autonomous_decisions(
                 and not pending_question_for_task(state, task.get("id"))
                 and not work_session_for_task(state, task.get("id"))
             ):
+                decisions[:] = [
+                    decision for decision in decisions
+                    if not (
+                        decision.get("type") == "ask_user"
+                        and str(decision.get("task_id")) == str(task.get("id"))
+                    )
+                ]
                 decisions.append(
                     {
                         "type": "start_work_session",
@@ -2041,6 +2055,31 @@ def apply_start_work_session_action(state, event, action, current_time, autonomo
             state,
             "warning",
             f"Refused start_work_session for task #{task['id']}: task is already done.",
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+    if task.get("status") != "ready":
+        add_outbox_message(
+            state,
+            "warning",
+            (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"task status {task.get('status')!r} is not ready."
+            ),
+            event_id=event["id"],
+            related_task_id=task["id"],
+        )
+        return 1
+    pending_question = pending_question_for_task(state, task["id"])
+    if pending_question:
+        add_outbox_message(
+            state,
+            "warning",
+            (
+                f"Refused start_work_session for task #{task['id']}: "
+                f"question #{pending_question.get('id')} is still unanswered."
+            ),
             event_id=event["id"],
             related_task_id=task["id"],
         )
