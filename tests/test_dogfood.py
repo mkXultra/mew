@@ -294,6 +294,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "native-advance")
             self.assertIn("native_advance_invokes_mew_work_live_once_per_tick", text)
 
+    def test_run_dogfood_passive_recovery_loop_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="passive-recovery-loop",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "passive-recovery-loop")
+            self.assertIn("passive_recovery_loop_recovers_interrupted_verifier", text)
+            self.assertIn("passive_recovery_loop_resumes_native_advance", text)
+
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

@@ -43,6 +43,7 @@ DOGFOOD_SCENARIOS = (
     "resident-loop",
     "native-work",
     "native-advance",
+    "passive-recovery-loop",
     "chat-cockpit",
     "work-session",
 )
@@ -1333,6 +1334,239 @@ def run_native_advance_scenario(workspace, env=None):
         expected="failed passive native advance asks a seeded recovery question and does not blindly retry",
     )
     return _scenario_report("native-advance", workspace, commands, checks)
+
+
+def run_passive_recovery_loop_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, scenario_env=None):
+        result = run_command(
+            _scenario_command(*args),
+            workspace,
+            timeout=timeout,
+            env=scenario_env if scenario_env is not None else env,
+        )
+        commands.append(result)
+        return result
+
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Passive recovery loop task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    verify_command = f"{sys.executable} -V"
+
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=15,
+    )
+    start_data = _json_stdout(start_result)
+    session = start_data.get("work_session") or {}
+    session_id = session.get("id")
+
+    state_path = Path(workspace) / STATE_FILE
+    state = read_json_file(state_path, {})
+    state = reconcile_next_ids(migrate_state(state))
+    runtime_session = None
+    for candidate in state.get("work_sessions") or []:
+        if str(candidate.get("id")) == str(session_id):
+            runtime_session = candidate
+            break
+    if runtime_session:
+        before = "2026-04-18T05:00:00Z"
+        failed_at = "2026-04-18T05:00:10Z"
+        runtime_session["owner"] = "runtime"
+        runtime_session["runtime_managed"] = True
+        runtime_session["runtime_started_at"] = before
+        runtime_session["runtime_started_event_id"] = 999
+        tool_call_id = next_id(state, "work_tool_call")
+        runtime_session.setdefault("tool_calls", []).append(
+            {
+                "id": tool_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "run_tests",
+                "status": "interrupted",
+                "parameters": {
+                    "command": verify_command,
+                    "cwd": ".",
+                    "allow_verify": True,
+                    "timeout": 300,
+                },
+                "result": {"command": verify_command, "cwd": ".", "timed_out": True},
+                "summary": "interrupted dogfood verifier",
+                "error": "Interrupted before the verifier completed.",
+                "started_at": before,
+                "finished_at": before,
+            }
+        )
+        runtime_session["last_tool_call_id"] = tool_call_id
+        runtime_session["updated_at"] = before
+        runtime_status = state.setdefault("runtime_status", {})
+        runtime_status["last_native_work_step"] = {
+            "finished_at": failed_at,
+            "session_id": session_id,
+            "task_id": task_id,
+            "command": f"mew work {task_id} --live --allow-read . --max-steps 1",
+            "exit_code": 1,
+            "timed_out": False,
+            "outcome": "failed",
+        }
+        runtime_status["last_action"] = "seeded failed native work step for dogfood"
+        write_json_file(state_path, state)
+
+    fake_log = Path(workspace) / "fake-mew-recovery-loop-calls.json"
+    fake_mew = write_fake_mew_executable(Path(workspace) / "fake-mew-recovery-loop")
+    scenario_env = dict(env or os.environ)
+    scenario_env["MEW_EXECUTABLE"] = str(fake_mew)
+    scenario_env["MEW_FAKE_WORK_LOG"] = str(fake_log)
+
+    recovery_question_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "act",
+            "--allow-native-advance",
+            "--poll-interval",
+            "0.01",
+            "--echo-outbox",
+        ],
+        timeout=30,
+        scenario_env=scenario_env,
+    )
+    recovery_state = read_json_file(state_path, {})
+    recovery_runtime = recovery_state.get("runtime_status") or {}
+    recovery = recovery_runtime.get("last_native_work_recovery") or {}
+    recovery_questions = [
+        question
+        for question in recovery_state.get("questions") or []
+        if str(question.get("related_task_id")) == str(task_id)
+    ]
+
+    recover_result = run(
+        [
+            "work",
+            str(task_id),
+            "--recover-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=30,
+    )
+    recover_data = _json_stdout(recover_result)
+    recovered_state = read_json_file(state_path, {})
+    recovered_session = next(
+        (
+            candidate
+            for candidate in recovered_state.get("work_sessions") or []
+            if str(candidate.get("id")) == str(session_id)
+        ),
+        {},
+    )
+    source_call = ((recovered_session.get("tool_calls") or [])[:1] or [{}])[0]
+
+    resume_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "act",
+            "--allow-native-advance",
+            "--poll-interval",
+            "0.01",
+        ],
+        timeout=30,
+        scenario_env=scenario_env,
+    )
+    final_state = read_json_file(state_path, {})
+    final_runtime = final_state.get("runtime_status") or {}
+    latest_step = final_runtime.get("last_native_work_step") or {}
+    fake_calls = read_json_file(fake_log, [])
+    fake_work_calls = [
+        call for call in fake_calls if (call.get("argv") or [])[:2] == ["work", str(task_id)]
+    ]
+    latest_fake_args = (fake_work_calls[-1].get("argv") if fake_work_calls else [])
+
+    _scenario_check(
+        checks,
+        "passive_recovery_loop_asks_for_verifier_recovery",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and recovery_question_result.get("exit_code") == 0
+        and recovery_runtime.get("last_native_work_step_skip") == "previous_native_work_step_failed"
+        and recovery.get("recovery_plan_action") == "retry_verification"
+        and bool(recovery.get("recovery_plan_command"))
+        and bool(recovery_questions),
+        observed={
+            "last_native_work_step_skip": recovery_runtime.get("last_native_work_step_skip"),
+            "last_native_work_recovery": recovery,
+            "questions": recovery_questions,
+        },
+        expected="failed passive native work asks a recovery question with a retry_verification command",
+    )
+    _scenario_check(
+        checks,
+        "passive_recovery_loop_recovers_interrupted_verifier",
+        recover_result.get("exit_code") == 0
+        and (recover_data.get("recovery") or {}).get("status") == "completed"
+        and source_call.get("recovery_status") == "superseded"
+        and source_call.get("recovered_by_tool_call_id"),
+        observed={
+            "recovery": recover_data.get("recovery"),
+            "source_call": source_call,
+        },
+        expected="recover-session reruns the interrupted verifier and marks the original call superseded",
+    )
+    _scenario_check(
+        checks,
+        "passive_recovery_loop_resumes_native_advance",
+        resume_result.get("exit_code") == 0
+        and latest_step.get("outcome") == "completed"
+        and latest_step.get("exit_code") == 0
+        and final_runtime.get("last_native_work_step_skip") != "previous_native_work_step_failed"
+        and bool(fake_work_calls)
+        and "--live" in latest_fake_args
+        and "--max-steps" in latest_fake_args,
+        observed={
+            "last_native_work_step": latest_step,
+            "last_native_work_step_skip": final_runtime.get("last_native_work_step_skip"),
+            "fake_calls": fake_calls,
+        },
+        expected="after manual recovery, the next passive tick advances the runtime-owned work session",
+    )
+    return _scenario_report("passive-recovery-loop", workspace, commands, checks)
 
 
 def run_chat_cockpit_scenario(workspace, env=None):
@@ -2710,6 +2944,8 @@ def run_dogfood_scenario(args):
             reports.append(run_native_work_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
+        elif name == "passive-recovery-loop":
+            reports.append(run_passive_recovery_loop_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":
