@@ -1664,6 +1664,7 @@ class WorkSessionTests(unittest.TestCase):
         )
 
         self.assertIn("memory: stale; refresh before relying on next_step", text)
+        self.assertIn("stale_after_tool_call: #9 (run_tests ran)", text)
         self.assertIn("stale_memory_next: Use the old plan.", text)
         self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 

@@ -647,18 +647,7 @@ def _format_workbench_reentry(resume, task):
     if memory:
         if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
             lines.append("memory: stale; refresh before relying on next_step")
-            if memory.get("stale_after_model_turn_id"):
-                latest = ""
-                if memory.get("latest_model_turn_id"):
-                    latest = f"; latest=#{memory.get('latest_model_turn_id')}"
-                lines.append(
-                    f"stale_after_model_turn: #{memory.get('stale_after_model_turn_id')}{latest}"
-                )
-            if memory.get("stale_after_tool_call_id"):
-                stale_tool = memory.get("stale_after_tool") or "tool"
-                lines.append(
-                    f"stale_after_tool_call: #{memory.get('stale_after_tool_call_id')} ({stale_tool} ran)"
-                )
+            lines.extend(_format_stale_working_memory_source_lines(memory))
         for key in ("hypothesis", "next_step", "last_verified_state"):
             value = memory.get(key)
             if value:
@@ -718,6 +707,25 @@ def _format_workbench_reentry(resume, task):
         lines.append(
             f"resume: {mew_command('work', task_id, '--session', '--resume')} "
             f"(chat: /work-session resume {task_id})"
+        )
+    return lines
+
+
+def _format_stale_working_memory_source_lines(memory):
+    lines = []
+    if not memory:
+        return lines
+    if memory.get("stale_after_model_turn_id"):
+        latest = ""
+        if memory.get("latest_model_turn_id"):
+            latest = f"; latest=#{memory.get('latest_model_turn_id')}"
+        lines.append(
+            f"stale_after_model_turn: #{memory.get('stale_after_model_turn_id')}{latest}"
+        )
+    if memory.get("stale_after_tool_call_id"):
+        stale_tool = memory.get("stale_after_tool") or "tool"
+        lines.append(
+            f"stale_after_tool_call: #{memory.get('stale_after_tool_call_id')} ({stale_tool} ran)"
         )
     return lines
 
@@ -1176,6 +1184,7 @@ def format_work_live_step_result(step, resume=None):
         if memory:
             if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
                 session_lines.append("memory: stale; refresh before relying on next_step")
+                session_lines.extend(_format_stale_working_memory_source_lines(memory))
             if memory.get("hypothesis"):
                 session_lines.append(f"memory_hypothesis: {clip_inline_text(memory.get('hypothesis'), 280)}")
             if memory.get("next_step"):

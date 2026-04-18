@@ -1503,6 +1503,9 @@ Next action:
 - Verifier coverage warnings are no longer trapped in the full resume view:
   compact live session output and `work --follow-status` now surface the short
   warning when the latest green verifier appears to miss the edited mew source.
+- Compact live/follow session output now shares the same stale working-memory
+  source hints as workbench reentry, including the later tool call or model turn
+  that made the recorded `next_step` unsafe to trust blindly.
 
 ## Current Roadmap Focus
 
