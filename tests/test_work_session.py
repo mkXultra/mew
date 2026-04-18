@@ -527,10 +527,12 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         from mew.work_session import build_work_session_resume
+        from mew.commands import work_cli_control_items
 
         cells = build_work_session_cells(session, limit=None)
         text = format_work_session_cells(session, limit=None)
         resume = build_work_session_resume(session)
+        controls = work_cli_control_items(session, SimpleNamespace(), task={"id": 15, "status": "ready"})
 
         self.assertEqual(cells[1]["kind"], "approval")
         self.assertEqual(cells[1]["status"], "failed")
@@ -539,6 +541,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approval_error: verification failed: executable not found: python", text)
         self.assertEqual(resume["pending_approvals"][0]["approval_status"], "failed")
         self.assertIn("--verify-command 'python3 -m py_compile sample.py'", resume["pending_approvals"][0]["approve_hint"])
+        self.assertEqual(controls[0]["label"], "retry failed approval #4")
 
     def test_work_session_tests_include_failed_verify_gate(self):
         session = {

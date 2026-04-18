@@ -1562,9 +1562,15 @@ def _work_cli_approval_items(session, resume):
         )
     for approval in approvals:
         tool_call_id = approval.get("tool_call_id")
+        approval_status = approval.get("approval_status") or ""
+        approve_label = (
+            f"retry failed approval #{tool_call_id}"
+            if approval_status == "failed"
+            else f"approve tool #{tool_call_id}"
+        )
         items.append(
             {
-                "label": f"approve tool #{tool_call_id}",
+                "label": approve_label,
                 "command": _work_cli_approve_command(session, tool_call_id, approval.get("path") or "."),
             }
         )
