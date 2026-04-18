@@ -683,6 +683,20 @@ Next action:
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
   (pass), and `./mew dogfood --scenario all --cleanup --json` (pass across
   all scenarios, including the running-output follow snapshot check).
+- Native self-improve dogfood task #128 current: mew identified that native
+  self-improve still advertised a three-step follow loop while work/code
+  cockpit controls use ten-step follow. The entry output, help, README example,
+  and assertions now use `--follow --quiet --compact-live --max-steps 10`.
+  Validated with
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_self_improve.py tests/test_commands.py -k self_improve`
+  (`28 passed, 157 deselected, 6 subtests passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py src/mew/cli.py tests/test_self_improve.py tests/test_commands.py`
+  (pass), and
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_self_improve.py tests/test_commands.py`
+  (`185 passed, 10 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`963 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), and `./mew dogfood --scenario all --cleanup --json` (pass).
 - Follow-up current: running `run_command`/`run_tests` output is mirrored as a
   bounded tail into work-session state and follow snapshots without changing
   the stale-reply `session_updated_at` token; quiet follow still writes a
@@ -1203,6 +1217,10 @@ Next action:
   observer discoverability follow-up: native self-improve output and help now
   show the task-scoped `mew work <task-id> --follow-status --json` command
   beside continue, follow, and resume.
+- Native self-improve dogfood task #128/session #150 then selected another
+  small cockpit consistency fix: native self-improve follow commands now use
+  the same 10-step compact follow loop as the normal work/code cockpit, and the
+  README self-improvement example shows the matching follow-status check.
 
 ## Current Roadmap Focus
 
