@@ -4881,6 +4881,237 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_recover_session_interrupt_marks_retry_interrupted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover verification.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": None,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "run_tests",
+                                    "status": "interrupted",
+                                    "parameters": {"command": command, "cwd": "."},
+                                    "result": None,
+                                    "summary": "interrupted verifier",
+                                    "error": "Interrupted before the verifier completed.",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--recover-session",
+                                    "--allow-read",
+                                    ".",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    command,
+                                    "--json",
+                                ]
+                            ),
+                            130,
+                        )
+
+                report = json.loads(stdout.getvalue())
+                self.assertTrue(report["interrupted"])
+                self.assertEqual(report["recovery"]["action"], "retry_tool")
+                self.assertEqual(report["recovery"]["status"], "interrupted")
+                self.assertEqual(report["tool_call"]["status"], "interrupted")
+                self.assertEqual(report["tool_call"]["parameters"]["recovered_from_tool_call_id"], 1)
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "interrupted")
+                self.assertNotIn("recovery_status", session["tool_calls"][0])
+                self.assertEqual(session["tool_calls"][1]["status"], "interrupted")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_interrupted_retry_success_resolves_chain(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover verification.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": None,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "run_tests",
+                                    "status": "interrupted",
+                                    "parameters": {"command": command, "cwd": "."},
+                                    "result": None,
+                                    "summary": "interrupted verifier",
+                                    "error": "Interrupted before the verifier completed.",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    with redirect_stdout(StringIO()):
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--recover-session",
+                                    "--allow-read",
+                                    ".",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    command,
+                                    "--json",
+                                ]
+                            ),
+                            130,
+                        )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["source_tool_call_id"], 2)
+                self.assertEqual(report["tool_call"]["status"], "completed")
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["status"] for call in session["tool_calls"]], ["interrupted", "interrupted", "completed"])
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 3)
+                self.assertEqual(session["tool_calls"][1]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][1]["recovered_by_tool_call_id"], 3)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)
+                no_more = json.loads(stdout.getvalue())
+                self.assertEqual(no_more["recovery"]["action"], "none")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_interrupt_text_says_interrupted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover verification.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": None,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "run_tests",
+                                    "status": "interrupted",
+                                    "parameters": {"command": command, "cwd": "."},
+                                    "result": None,
+                                    "summary": "interrupted verifier",
+                                    "error": "Interrupted before the verifier completed.",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--recover-session",
+                                    "--allow-read",
+                                    ".",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    command,
+                                ]
+                            ),
+                            130,
+                        )
+
+                output = stdout.getvalue()
+                self.assertIn("recovery interrupted for work tool #1 -> #2 [interrupted] run_tests", output)
+                self.assertNotIn("recovered work tool #1 -> #2 [interrupted]", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recovery_next_action_prioritizes_missing_touched_paths(self):
         from mew.work_session import attach_work_resume_world_state
 

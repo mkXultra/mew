@@ -1464,6 +1464,10 @@ Next action:
   `indeterminate`, and pending approval controls disappear until the user/model
   reviews the resume. This avoids blind re-approval when write side effects may
   be unknown.
+- `recover-session` itself is also Ctrl-C durable for retried safe tools and
+  verifiers: the retry tool call is marked `interrupted`, returns code 130, and
+  the original interrupted source remains unresolved rather than being falsely
+  superseded.
 
 ## Current Roadmap Focus
 

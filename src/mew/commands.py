@@ -3928,6 +3928,25 @@ def _missing_finished_work_tool_call(tool, tool_call_id, error=WORK_TOOL_RESULT_
     }
 
 
+def _mark_work_recovery_chain(session, source_call, status, recovered_by_tool_call_id, recovered_at):
+    seen = set()
+    current = source_call
+    while isinstance(current, dict) and current.get("id") not in seen:
+        seen.add(current.get("id"))
+        if not current.get("recovery_status"):
+            current["recovery_status"] = status
+            current["recovered_by_tool_call_id"] = recovered_by_tool_call_id
+            current["recovered_at"] = recovered_at
+            for turn in (session or {}).get("model_turns") or []:
+                if turn.get("tool_call_id") != current.get("id"):
+                    continue
+                turn["recovery_status"] = status
+                turn["recovered_by_tool_call_id"] = recovered_by_tool_call_id
+                turn["recovered_at"] = recovered_at
+        parent_id = (current.get("parameters") or {}).get("recovered_from_tool_call_id")
+        current = find_work_tool_call(session, parent_id) if parent_id is not None else None
+
+
 def _work_unpaired_source_approval_error(session, source_call, args):
     pairing = work_write_pairing_status(session, source_call)
     if pairing.get("status") != "missing_test_edit":
@@ -5672,6 +5691,37 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             work_tool_output_progress(progress, tool_call_id),
         )
         error = work_tool_result_error(tool, result)
+    except KeyboardInterrupt:
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            repairs = mark_work_tool_call_interrupted(session, tool_call_id)
+            tool_call = find_work_tool_call(session, tool_call_id)
+            if not tool_call:
+                tool_call = {
+                    "id": tool_call_id,
+                    "tool": tool,
+                    "status": "interrupted",
+                    "error": "recovery work tool was interrupted before the result could be recorded",
+                    "summary": "interrupted recovery work tool call",
+                }
+            save_state(state)
+        report = {
+            "recovery": {
+                "action": "retry_tool",
+                "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
+                "tool": tool,
+                "status": tool_call.get("status"),
+            },
+            "tool_call": tool_call,
+            "interrupted": True,
+            "repairs": repairs,
+        }
+        if world_state_before:
+            report["recovery"]["world_state_before"] = world_state_before
+        if progress:
+            progress(f"recover tool #{tool_call_id} interrupted")
+        return 130, report
     except (OSError, ValueError) as exc:
         result = None
         error = str(exc)
@@ -5685,15 +5735,9 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             error = WORK_TOOL_RESULT_STALE_ERROR
             tool_call = _missing_finished_work_tool_call(tool, tool_call_id, error)
         if source_call:
-            source_call["recovery_status"] = "superseded" if not error else "retry_failed"
-            source_call["recovered_by_tool_call_id"] = tool_call_id
-            source_call["recovered_at"] = now_iso()
-            for turn in session.get("model_turns") or []:
-                if turn.get("tool_call_id") != source_call.get("id"):
-                    continue
-                turn["recovery_status"] = source_call["recovery_status"]
-                turn["recovered_by_tool_call_id"] = tool_call_id
-                turn["recovered_at"] = source_call["recovered_at"]
+            recovered_at = now_iso()
+            recovery_status = "superseded" if not error else "retry_failed"
+            _mark_work_recovery_chain(session, source_call, recovery_status, tool_call_id, recovered_at)
         save_state(state)
     report = {
         "recovery": {
@@ -5751,6 +5795,13 @@ def print_work_recovery_report(report):
         return
     if action == "retry_tool":
         tool_call = (report or {}).get("tool_call") or {}
+        if report.get("interrupted") or tool_call.get("status") == "interrupted":
+            print(
+                f"recovery interrupted for work tool #{recovery.get('source_tool_call_id')} "
+                f"-> #{tool_call.get('id')} [{tool_call.get('status')}] {recovery.get('tool')}"
+            )
+            print(tool_call.get("summary") or tool_call.get("error") or "")
+            return
         print(
             f"recovered work tool #{recovery.get('source_tool_call_id')} "
             f"-> #{tool_call.get('id')} [{tool_call.get('status')}] {recovery.get('tool')}"
