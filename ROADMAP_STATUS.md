@@ -563,6 +563,12 @@ Evidence:
 - `codex-ultra` human-role dogfood reported noisy quick chat startup; `mew chat --quiet` now starts without the brief, unread backlog, runtime activity, or startup controls while preserving existing `--no-brief`/`--no-unread` behavior.
 - Native self-improvement dogfood session #90 returned to the long task-list friction; `mew task list` now accepts `--limit N`, preserving existing default output while allowing bounded done/status listings.
 - Native self-improvement task #89/session #114 used `mew work --follow` with Codex Web API after the one-time steer slice; it recommended making the native self-improve entrypoint show a bounded follow command, and the CLI/help output now does.
+- Native self-improvement task #116/session #138 used `mew work --follow` with
+  Codex Web API after the day-reentry proof. The resident inspected
+  self-improve native/start-session code and tests, decided not to make an
+  ungrounded code edit, and recommended a narrow assertion-only hardening; the
+  resulting tests now prove plain `--native` advertises continue/follow/resume
+  controls without creating a work session.
 - Native self-improvement task #106/session #133 used `mew work --follow` with Codex Web API to choose and attempt a real cockpit/recovery improvement. It selected recovery controls correctly and verification rollback caught the first implementation-only edit, but the resident then failed to produce a paired implementation+test edit without supervisor help. The landed change now surfaces concrete recovery commands from the recovery plan in cockpit controls, including side-effect review commands, and the friction is recorded on the work session.
 - Follow-up dogfood task #107 clarified the rollback friction without changing the retryable-approval model: failed approvals remain available for retry, but CLI controls now label them as `retry failed approval #<id>` instead of the misleading plain `approve tool #<id>`.
 - Native self-improvement task #108/session #134 targeted the deeper rollback-context gap from #106. The resident found the right context slice but again produced an implementation-only dry-run; the supervisor landed the paired test. Resident context now places verification stdout/stderr tails beside write-run records when `verification_run_id` is available, so failed write/rollback recovery can see the failing test output near the write that caused it.
@@ -595,6 +601,12 @@ Next action:
   (`217 passed, 6 subtests passed`), day-reentry dogfood (pass),
   all-scenario dogfood (pass), and full `uv run pytest -q` (`906 passed,
   6 subtests passed`).
+- Native self-improve dogfood task #116 current: mew selected assertion-only
+  hardening instead of an ungrounded code edit; CLI/chat `--native` tests now
+  assert continue/follow/resume controls are printed while no work session is
+  created. Validated with targeted native self-improve tests and
+  `uv run pytest -q tests/test_self_improve.py tests/test_commands.py -k self_improve`
+  (`24 passed, 154 deselected, 2 subtests passed`).
 - Follow-up current: passive native-work recovery now has a deterministic
   `passive-recovery-loop` dogfood scenario, and recovery suggestions now follow
   recovery-plan action priority. Recovery plan items and observer

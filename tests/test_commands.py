@@ -5137,12 +5137,16 @@ class CommandTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("created #1 [todo/normal/coding] Improve mew itself", output)
                 self.assertIn("native work: mew work 1 --start-session", output)
+                self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
+                self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
                 self.assertNotIn("created plan", output)
 
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["latest_plan_id"], None)
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(state["agent_runs"], [])
+                self.assertEqual(state["work_sessions"], [])
             finally:
                 os.chdir(old_cwd)
 

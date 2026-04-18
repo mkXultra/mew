@@ -203,12 +203,14 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("native work: mew work 1 --start-session", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --max-steps 1", output)
+                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --max-steps 3", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
                 state = load_state()
                 self.assertEqual(len(state["tasks"]), 1)
                 self.assertEqual(state["tasks"][0]["latest_plan_id"], None)
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(len(state["agent_runs"]), 0)
+                self.assertEqual(state["work_sessions"], [])
             finally:
                 os.chdir(old_cwd)
 
