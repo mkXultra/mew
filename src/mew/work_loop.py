@@ -314,6 +314,7 @@ def build_work_session_context(
         "goal": session.get("goal"),
         "created_at": session.get("created_at"),
         "updated_at": session.get("updated_at"),
+        "effort": (resume or {}).get("effort") or {},
         "resume": resume,
         "world_state": world_state,
         "session_knowledge": build_session_knowledge(tool_calls, recent_count=recent_tool_count),
@@ -375,7 +376,7 @@ def build_work_model_context(
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
-    resume = build_work_session_resume(session, task=task, limit=8, state=state)
+    resume = build_work_session_resume(session, task=task, limit=8, state=state, current_time=current_time)
     world_state = build_work_world_state(
         resume,
         allowed_read_roots or [],

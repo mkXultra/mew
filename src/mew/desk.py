@@ -9,6 +9,7 @@ from typing import Any
 from .cli_command import mew_command
 from .state import open_questions as canonical_open_questions
 from .tasks import task_kind
+from .work_session import build_work_session_effort, format_work_effort_brief
 
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -167,12 +168,17 @@ def task_detail_item(task: dict[str, Any]) -> dict[str, Any]:
 def work_session_detail_item(session: dict[str, Any]) -> dict[str, Any]:
     session_id = session.get("id")
     task_id = session.get("task_id")
+    effort = build_work_session_effort(session)
+    effort_summary = format_work_effort_brief(effort)
     item = {
         "kind": "work_session",
         "label": f"Work session #{session_id}" if session_id is not None else "Work session",
         "summary": compact_detail_summary(session.get("goal"), session.get("title")) or "active work",
         "status": normalize_text(session.get("status")) or "active",
+        "effort": effort,
     }
+    if effort_summary:
+        item["effort_summary"] = effort_summary
     if session_id is not None:
         item["id"] = session_id
     if task_id is not None:
@@ -343,10 +349,13 @@ def format_desk_view(view_model: dict[str, Any]) -> str:
                     continue
                 label = normalize_text(item.get("label")) or key
                 summary = normalize_text(item.get("summary"))
+                effort_summary = normalize_text(item.get("effort_summary"))
                 command = normalize_text(item.get("command"))
                 detail = f"  - {label}"
                 if summary:
                     detail += f": {summary}"
+                if effort_summary:
+                    detail += f" [{effort_summary}]"
                 if command:
                     detail += f" -> {command}"
                 lines.append(detail)

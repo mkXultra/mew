@@ -30,12 +30,14 @@ from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
     DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
     append_work_tool_running_output,
+    build_work_session_effort,
     build_work_session_resume,
     create_work_session,
     finish_work_tool_call,
     first_unquoted_shell_operator,
     format_diff_preview,
     format_work_action,
+    format_work_effort_brief,
     format_work_session_resume,
     format_work_session_tests,
     latest_work_verify_command,
@@ -73,6 +75,97 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Budgeted work",
+            "goal": "Keep resident work bounded.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T01:10:00Z",
+            "tool_calls": [
+                {
+                    "id": index + 1,
+                    "tool": "read_file",
+                    "status": "failed" if index < 2 else "completed",
+                    "started_at": "2026-04-17T00:00:00Z",
+                    "finished_at": "2026-04-17T00:00:02Z",
+                    "parameters": {"path": "README.md"},
+                    "result": {"path": "README.md", "text": "body"},
+                }
+                for index in range(20)
+            ],
+            "model_turns": [
+                {
+                    "id": index + 1,
+                    "status": "completed",
+                    "started_at": "2026-04-17T00:00:10Z",
+                    "finished_at": "2026-04-17T00:00:13Z",
+                    "action": {"type": "read_file"},
+                }
+                for index in range(4)
+            ],
+        }
+        task = {"id": 1, "title": "Budgeted work", "status": "ready", "kind": "coding"}
+
+        effort = build_work_session_effort(session, current_time="2026-04-17T01:10:00Z")
+        resume = build_work_session_resume(session, task=task, current_time="2026-04-17T01:10:00Z")
+        resume_text = format_work_session_resume(resume)
+        from mew.work_loop import build_work_model_context
+
+        context = build_work_model_context(
+            {"tasks": [task]},
+            session,
+            task,
+            "2026-04-17T01:10:00Z",
+        )
+
+        self.assertEqual(effort["steps"]["used"], 24)
+        self.assertEqual(effort["steps"]["budget"], 30)
+        self.assertEqual(effort["steps"]["remaining"], 6)
+        self.assertEqual(effort["steps"]["status"], "near_limit")
+        self.assertEqual(effort["tool_calls"]["failed"], 2)
+        self.assertEqual(effort["model_turns"]["completed"], 4)
+        self.assertEqual(effort["failures"], 2)
+        self.assertEqual(effort["effective_tool_failures"], 2)
+        self.assertEqual(effort["tool_seconds"], 40.0)
+        self.assertEqual(effort["model_seconds"], 12.0)
+        self.assertEqual(effort["observed_active_seconds"], 5.0)
+        self.assertEqual(effort["wall_elapsed_seconds"], 4200.0)
+        self.assertEqual(effort["pressure"], "medium")
+        self.assertIn("step_budget_near", effort["warnings"])
+        self.assertIn("failure_budget_near", effort["warnings"])
+        self.assertIn("wall_time_near", effort["warnings"])
+        self.assertEqual(format_work_effort_brief(effort), "effort=medium steps=24/30 failures=2")
+        self.assertEqual(resume["effort"]["steps"]["used"], 24)
+        self.assertIn("Effort budget", resume_text)
+        self.assertIn("pressure=medium steps=24/30 remaining=6 failures=2", resume_text)
+        self.assertIn("warnings: step_budget_near, failure_budget_near, wall_time_near", resume_text)
+        self.assertEqual(context["work_session"]["effort"]["pressure"], "medium")
+        self.assertEqual(context["work_session"]["resume"]["effort"]["steps"]["used"], 24)
+
+    def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
+        active_session = {
+            "id": 1,
+            "status": "active",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:05:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        closed_session = dict(active_session, status="closed")
+
+        with patch("mew.work_session.now_iso", return_value="2026-04-17T04:00:00Z"):
+            active_effort = build_work_session_effort(active_session)
+            closed_effort = build_work_session_effort(closed_session)
+
+        self.assertEqual(active_effort["wall_elapsed_seconds"], 14400.0)
+        self.assertEqual(active_effort["pressure"], "high")
+        self.assertIn("wall_time_high", active_effort["warnings"])
+        self.assertEqual(closed_effort["wall_elapsed_seconds"], 300.0)
+        self.assertEqual(closed_effort["pressure"], "low")
+
     def test_work_tool_repeat_guard_detects_consecutive_and_total_repeats(self):
         parameters = {"path": "README.md", "max_chars": 12000}
         session = {

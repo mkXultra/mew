@@ -75,7 +75,32 @@ class DeskTests(unittest.TestCase):
             explicit_date="2026-04-17",
         )
         typing = build_desk_view_model(
-            {"work_sessions": [{"id": 1, "status": "active", "goal": "Continue work"}]},
+            {
+                "work_sessions": [
+                    {
+                        "id": 1,
+                        "status": "active",
+                        "goal": "Continue work",
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "read_file",
+                                "status": "completed",
+                                "started_at": "2026-04-17T00:00:00Z",
+                                "finished_at": "2026-04-17T00:00:01Z",
+                            }
+                        ],
+                        "model_turns": [
+                            {
+                                "id": 1,
+                                "status": "completed",
+                                "started_at": "2026-04-17T00:00:01Z",
+                                "finished_at": "2026-04-17T00:00:03Z",
+                            }
+                        ],
+                    }
+                ]
+            },
             explicit_date="2026-04-17",
         )
 
@@ -90,6 +115,11 @@ class DeskTests(unittest.TestCase):
             mew_command("work", "--session", "--resume", "--allow-read", "."),
         )
         self.assertEqual(typing["details"]["active_work_sessions"][0]["label"], "Work session #1")
+        self.assertEqual(typing["details"]["active_work_sessions"][0]["effort"]["steps"]["used"], 2)
+        self.assertEqual(
+            typing["details"]["active_work_sessions"][0]["effort_summary"],
+            "effort=low steps=2/30 failures=0",
+        )
         self.assertEqual(
             typing["details"]["active_work_sessions"][0]["command"],
             mew_command("work", "--session", "--resume", "--allow-read", "."),

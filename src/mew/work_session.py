@@ -16,7 +16,7 @@ from .read_tools import (
 )
 from .state import next_id
 from .tasks import clip_output, find_task
-from .timeutil import now_iso
+from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
 from .write_tools import (
     edit_file,
@@ -87,6 +87,12 @@ DEFAULT_RESUME_USER_PREFERENCES_LIMIT = 5
 DEFAULT_RESUME_USER_PREFERENCE_MAX_CHARS = 300
 WORK_REPEAT_CONSECUTIVE_LIMIT = 2
 WORK_REPEAT_TOTAL_LIMIT = 4
+WORK_SESSION_STEP_BUDGET = 30
+WORK_SESSION_NEAR_STEP_RATIO = 0.8
+WORK_SESSION_WALL_NEAR_SECONDS = 60 * 60
+WORK_SESSION_WALL_HIGH_SECONDS = 3 * 60 * 60
+WORK_SESSION_FAILURE_NEAR_COUNT = 2
+WORK_SESSION_FAILURE_HIGH_COUNT = 4
 WORK_REPEAT_SIGNATURE_IGNORED_FIELDS = {
     "reason",
     "summary",
@@ -1970,6 +1976,187 @@ def build_work_context_metrics(calls, turns):
     }
 
 
+def _duration_seconds(started_at, finished_at):
+    start = parse_time(started_at)
+    end = parse_time(finished_at)
+    if not start or not end:
+        return None
+    try:
+        return max(0.0, (end - start).total_seconds())
+    except TypeError:
+        return None
+
+
+def _round_seconds(value):
+    if value is None:
+        return None
+    return round(float(value), 1)
+
+
+def _status_counts(items):
+    counts = {"total": 0, "completed": 0, "failed": 0, "interrupted": 0, "running": 0}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        counts["total"] += 1
+        status = item.get("status")
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+def _sum_observed_seconds(items, reference_time):
+    total = 0.0
+    known = 0
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        finished_at = item.get("finished_at")
+        if not finished_at and item.get("status") == "running":
+            finished_at = reference_time
+        seconds = _duration_seconds(item.get("started_at"), finished_at)
+        if seconds is None:
+            continue
+        total += seconds
+        known += 1
+    return total, known
+
+
+def _intervals_for_items(items, reference_time):
+    intervals = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        finished_at = item.get("finished_at")
+        if not finished_at and item.get("status") == "running":
+            finished_at = reference_time
+        start = parse_time(item.get("started_at"))
+        end = parse_time(finished_at)
+        if not start or not end:
+            continue
+        try:
+            if end < start:
+                continue
+        except TypeError:
+            continue
+        intervals.append((start, end))
+    return intervals
+
+
+def _union_interval_seconds(intervals):
+    normalized = sorted(intervals or [], key=lambda item: item[0])
+    if not normalized:
+        return 0.0
+    merged = []
+    current_start, current_end = normalized[0]
+    for start, end in normalized[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+            continue
+        merged.append((current_start, current_end))
+        current_start, current_end = start, end
+    merged.append((current_start, current_end))
+    return sum(max(0.0, (end - start).total_seconds()) for start, end in merged)
+
+
+def _work_effort_reference_time(session, current_time):
+    if parse_time(current_time):
+        return current_time
+    if (session or {}).get("status") == "active":
+        return now_iso()
+    return (session or {}).get("updated_at") or now_iso()
+
+
+def build_work_session_effort(session, *, current_time=None, step_budget=WORK_SESSION_STEP_BUDGET):
+    if not session:
+        return {}
+    calls = list(session.get("tool_calls") or [])
+    turns = list(session.get("model_turns") or [])
+    reference_time = _work_effort_reference_time(session, current_time)
+    tool_counts = _status_counts(calls)
+    turn_counts = _status_counts(turns)
+    effective_tool_failures = sum(
+        1
+        for call in calls
+        if isinstance(call, dict)
+        and (call.get("status") in ("failed", "interrupted") or bool(work_tool_failure_record(call)))
+    )
+    tool_seconds, tool_seconds_known = _sum_observed_seconds(calls, reference_time)
+    model_seconds, model_seconds_known = _sum_observed_seconds(turns, reference_time)
+    active_seconds = _union_interval_seconds(
+        _intervals_for_items(calls, reference_time) + _intervals_for_items(turns, reference_time)
+    )
+    wall_seconds = _duration_seconds(session.get("created_at"), reference_time)
+    steps_used = tool_counts["total"] + turn_counts["total"]
+    budget = max(1, int(step_budget or WORK_SESSION_STEP_BUDGET))
+    remaining = max(0, budget - steps_used)
+    ratio = steps_used / budget
+    failure_count = effective_tool_failures + turn_counts["failed"] + turn_counts["interrupted"]
+    warnings = []
+    if steps_used >= budget:
+        warnings.append("step_budget_exhausted")
+    elif ratio >= WORK_SESSION_NEAR_STEP_RATIO:
+        warnings.append("step_budget_near")
+    if failure_count >= WORK_SESSION_FAILURE_HIGH_COUNT:
+        warnings.append("failure_budget_exhausted")
+    elif failure_count >= WORK_SESSION_FAILURE_NEAR_COUNT:
+        warnings.append("failure_budget_near")
+    if wall_seconds is not None:
+        if wall_seconds >= WORK_SESSION_WALL_HIGH_SECONDS:
+            warnings.append("wall_time_high")
+        elif wall_seconds >= WORK_SESSION_WALL_NEAR_SECONDS:
+            warnings.append("wall_time_near")
+
+    if any(reason in warnings for reason in ("step_budget_exhausted", "failure_budget_exhausted", "wall_time_high")):
+        pressure = "high"
+        recommendation = "summarize current state and replan before continuing"
+    elif warnings:
+        pressure = "medium"
+        recommendation = "continue, but prefer a narrow next action and refresh working memory soon"
+    else:
+        pressure = "low"
+        recommendation = "continue"
+
+    step_status = "over_limit" if steps_used >= budget else "near_limit" if ratio >= WORK_SESSION_NEAR_STEP_RATIO else "ok"
+    return {
+        "pressure": pressure,
+        "warnings": warnings,
+        "recommendation": recommendation,
+        "steps": {
+            "used": steps_used,
+            "budget": budget,
+            "remaining": remaining,
+            "ratio": round(ratio, 2),
+            "status": step_status,
+        },
+        "tool_calls": tool_counts,
+        "model_turns": turn_counts,
+        "failures": failure_count,
+        "effective_tool_failures": effective_tool_failures,
+        "wall_elapsed_seconds": _round_seconds(wall_seconds),
+        "tool_seconds": _round_seconds(tool_seconds),
+        "model_seconds": _round_seconds(model_seconds),
+        "observed_active_seconds": _round_seconds(active_seconds),
+        "observed_duration_counts": {
+            "tool_calls": tool_seconds_known,
+            "model_turns": model_seconds_known,
+        },
+    }
+
+
+def format_work_effort_brief(effort):
+    if not effort:
+        return ""
+    steps = effort.get("steps") or {}
+    used = steps.get("used")
+    budget = steps.get("budget")
+    pressure = effort.get("pressure") or "unknown"
+    failures = effort.get("failures")
+    if used is None or budget is None:
+        return f"effort={pressure}"
+    return f"effort={pressure} steps={used}/{budget} failures={failures or 0}"
+
+
 def work_session_phase(session, calls, turns, pending_approvals):
     if not session:
         return "none"
@@ -2232,7 +2419,7 @@ def select_work_recovery_plan_item(recovery_plan):
     return items[-1]
 
 
-def build_work_session_resume(session, task=None, limit=8, state=None):
+def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):
     if not session:
         return None
     calls = list(session.get("tool_calls") or [])
@@ -2497,6 +2684,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
         pending_approvals,
     )
     user_preferences = build_work_user_preferences(state, limit=limit)
+    effort = build_work_session_effort(session, current_time=current_time)
 
     return {
         "session_id": session.get("id"),
@@ -2529,6 +2717,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
         "recent_decisions": recent_decisions,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
+        "effort": effort,
         "context": build_work_context_metrics(calls, turns),
         "stop_request": (
             {
@@ -2790,6 +2979,22 @@ def format_work_session_resume(resume):
             lines.append(f"- {preference}")
         if preferences.get("truncated"):
             lines.append(f"... {preferences.get('total')} total preferences; older items omitted")
+
+    effort = resume.get("effort") or {}
+    if effort:
+        steps = effort.get("steps") or {}
+        lines.extend(["", "Effort budget"])
+        lines.append(
+            f"pressure={effort.get('pressure')} "
+            f"steps={steps.get('used')}/{steps.get('budget')} remaining={steps.get('remaining')} "
+            f"failures={effort.get('failures')} active_seconds={effort.get('observed_active_seconds')} "
+            f"wall_seconds={effort.get('wall_elapsed_seconds')}"
+        )
+        warnings = effort.get("warnings") or []
+        if warnings:
+            lines.append(f"warnings: {', '.join(warnings)}")
+        if effort.get("recommendation"):
+            lines.append(f"recommendation: {effort.get('recommendation')}")
 
     lines.extend(["", "Recent decisions"])
     decisions = resume.get("recent_decisions") or []
