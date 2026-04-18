@@ -476,13 +476,21 @@ Evidence:
   recovery question with concrete inspect/retry commands instead of silent wait
   or blind retry. Runtime-created recovery notes are ignored by the retry gate,
   so mew does not mistake its own bookkeeping for user/model/tool progress.
+- Interrupted `run_tests` is now classified as `retry_verification` rather than
+  generic side-effect review. `mew work <task> --recover-session` can rerun the
+  exact interrupted verifier when the user provides explicit read roots,
+  `--allow-verify`, and the matching `--verify-command`; arbitrary
+  `run_command`, write, and edit recovery still stay on the manual-review path.
 
 Missing proof:
 
 - Automatic `ask_user` recovery exists for failed passive native-work advances,
-  but not yet for all interrupted runtime effects or side-effecting
-  write/shell/verification work items.
-- World-state revalidation before retry exists for safe read/git work-session recovery, but not yet for runtime effects or side-effecting work.
+  and exact-command automatic retry exists for interrupted `run_tests`, but not
+  yet for all interrupted runtime effects or side-effecting write/shell work
+  items.
+- World-state revalidation before retry exists for safe read/git and
+  interrupted verifier work-session recovery, but not yet for runtime effects or
+  write/shell work.
 - Safe work-session auto-recovery is still opt-in and limited to one interrupted read/git tool per resume.
 
 Next action:
@@ -551,6 +559,13 @@ Next action:
   inspect/retry commands and does not blindly call `mew work <task>` again.
   Validated with full `uv run pytest -q` (`897 passed, 6 subtests passed`) and
   `./mew dogfood --scenario all --cleanup --json` (pass).
+- Self-improve task #110 current: after claude-ultra and codex-ultra both
+  identified True Recovery as the next trust blocker, interrupted `run_tests`
+  recovery gained a `retry_verification` plan, explicit verifier gates, and
+  work-session dogfood coverage. Validated with
+  `uv run pytest -q tests/test_work_session.py` (`239 passed`),
+  `./mew dogfood --scenario all --cleanup --json` (pass), and full
+  `uv run pytest -q` (`898 passed, 6 subtests passed`).
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 80 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-seed-note.json --json` completed startup plus two passive ticks; `native_work_advance.attempts=2`, `by_outcome.completed=2`, `last_native_work_step.outcome=completed`, and the earlier refused-complete warning is gone because the dogfood seed task is now marked as self-proposed.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
