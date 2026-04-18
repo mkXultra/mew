@@ -1409,6 +1409,74 @@ def remember_work_session_default_options(session, args):
     }
 
 
+def _pytest_invocation_args(command):
+    try:
+        argv = shlex.split(command or "")
+    except ValueError:
+        return []
+    for index, arg in enumerate(argv):
+        name = Path(arg).name
+        if name in ("pytest", "py.test"):
+            return argv[index + 1 :]
+        if arg == "-m" and index + 1 < len(argv) and argv[index + 1] == "pytest":
+            previous = Path(argv[index - 1]).name if index > 0 else ""
+            if previous.startswith("python"):
+                return argv[index + 2 :]
+    return []
+
+
+def _pytest_positional_selectors(args):
+    selectors = []
+    value_flags = {
+        "-c",
+        "-k",
+        "-m",
+        "-o",
+        "--basetemp",
+        "--confcutdir",
+        "--ignore",
+        "--ignore-glob",
+        "--import-mode",
+        "--junit-prefix",
+        "--junit-xml",
+        "--log-cli-format",
+        "--log-cli-level",
+        "--log-file",
+        "--log-file-format",
+        "--log-file-level",
+        "--maxfail",
+        "--rootdir",
+        "--tb",
+    }
+    skip_next = False
+    for arg in args or []:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in value_flags:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        selectors.append(arg)
+    return selectors
+
+
+def _is_narrow_pytest_verify_command(command, existing_command=""):
+    args = _pytest_invocation_args(command)
+    if not args:
+        return False
+    selection_flags = {"-k", "-m", "--deselect", "--lf", "--ff", "--failed-first", "--last-failed"}
+    for arg in args:
+        if arg in selection_flags or arg.startswith(("-k=", "-m=", "--deselect=", "--keyword=")):
+            return True
+    selectors = _pytest_positional_selectors(args)
+    if any("::" in selector for selector in selectors):
+        return True
+    existing_selectors = _pytest_positional_selectors(_pytest_invocation_args(existing_command))
+    return bool(existing_command and selectors and not existing_selectors)
+
+
 def remember_successful_work_verification(session, tool, result):
     if not session or not isinstance(result, dict):
         return
@@ -1421,6 +1489,10 @@ def remember_successful_work_verification(session, tool, result):
     if not command:
         return
     defaults = session.setdefault("default_options", {})
+    if defaults.get("verify_command") and _is_narrow_pytest_verify_command(command, defaults.get("verify_command")):
+        defaults["allow_verify"] = True
+        defaults["verify_disabled"] = False
+        return
     defaults["allow_verify"] = True
     defaults["verify_command"] = command
     defaults["verify_disabled"] = False
@@ -1536,6 +1608,10 @@ def _work_cli_approve_command(session, tool_call_id, path):
     return f"{shlex.join(parts)} {_work_cli_verify_suffix(session)}"
 
 
+def _work_cli_override_approve_command(session, tool_call_id, path):
+    return f"{_work_cli_approve_command(session, tool_call_id, path)} --allow-unpaired-source-edit"
+
+
 def _work_cli_reject_command(session, tool_call_id):
     task_id = (session or {}).get("task_id")
     parts = [mew_executable(), "work"]
@@ -1561,21 +1637,61 @@ def _work_cli_approve_all_command(session, approvals):
     return f"{shlex.join(parts)} {_work_cli_verify_suffix(session)}"
 
 
+def _work_cli_override_approve_all_command(session, approvals):
+    return f"{_work_cli_approve_all_command(session, approvals)} --allow-unpaired-source-edit"
+
+
 def _work_cli_approval_items(session, resume):
     if not session or session.get("status") != "active":
         return []
     approvals = (resume or {}).get("pending_approvals") or []
     items = []
-    if len(approvals) > 1:
-        items.append(
-            {
-                "label": "approve all pending writes",
-                "command": _work_cli_approve_all_command(session, approvals),
-            }
-        )
+    if (resume or {}).get("approve_all_hint") or (resume or {}).get("approve_all_blocked_reason"):
+        if (resume or {}).get("approve_all_blocked_reason"):
+            items.append(
+                {
+                    "label": "add paired tests before approve all",
+                    "command": _work_resume_command(args=None, task_id=session.get("task_id"), session=session),
+                }
+            )
+            items.append(
+                {
+                    "label": "override unpaired approve all",
+                    "command": (resume or {}).get("cli_override_approve_all_hint")
+                    or _work_cli_override_approve_all_command(session, approvals),
+                }
+            )
+        else:
+            items.append(
+                {
+                    "label": "approve all pending writes",
+                    "command": (resume or {}).get("cli_approve_all_hint") or _work_cli_approve_all_command(session, approvals),
+                }
+            )
     for approval in approvals:
         tool_call_id = approval.get("tool_call_id")
         approval_status = approval.get("approval_status") or ""
+        pairing = approval.get("pairing_status") or {}
+        if pairing.get("status") == "missing_test_edit":
+            items.append(
+                {
+                    "label": f"add paired test before approving #{tool_call_id}",
+                    "command": _work_resume_command(args=None, task_id=session.get("task_id"), session=session),
+                }
+            )
+            items.append(
+                {
+                    "label": f"override unpaired approval #{tool_call_id}",
+                    "command": _work_cli_override_approve_command(session, tool_call_id, approval.get("path") or "."),
+                }
+            )
+            items.append(
+                {
+                    "label": f"reject tool #{tool_call_id}",
+                    "command": _work_cli_reject_command(session, tool_call_id),
+                }
+            )
+            continue
         approve_label = (
             f"retry failed approval #{tool_call_id}"
             if approval_status == "failed"
@@ -4344,9 +4460,23 @@ def _work_reply_template(session=None, resume=None):
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
     pending_approvals = (resume or {}).get("pending_approvals") or []
-    first_approval_id = (pending_approvals[0] or {}).get("tool_call_id") if pending_approvals else None
+    first_approval = (pending_approvals[0] or {}) if pending_approvals else {}
+    first_approval_id = first_approval.get("tool_call_id")
     if first_approval_id not in (None, ""):
-        actions = [{"type": "approve", "tool_call_id": first_approval_id}]
+        pairing = first_approval.get("pairing_status") or {}
+        if pairing.get("status") == "missing_test_edit":
+            path = pairing.get("source_path") or first_approval.get("path") or "src/mew/**"
+            actions = [
+                {
+                    "type": "steer",
+                    "text": (
+                        f"Add a paired tests/** write/edit before approving tool #{first_approval_id} for {path}; "
+                        "only set allow_unpaired_source_edit=true if this source-only edit is intentional."
+                    ),
+                }
+            ]
+        else:
+            actions = [{"type": "approve", "tool_call_id": first_approval_id}]
     else:
         actions = [{"type": "steer", "text": "<next-step guidance>"}]
     return {
@@ -9596,6 +9726,25 @@ def _replace_work_allow_read_options(option_text, roots):
     return shlex.join(kept)
 
 
+def _append_work_cockpit_approval_lines(lines, resume):
+    resume = resume or {}
+    if resume.get("approve_all_blocked_reason"):
+        lines.append(f"- approve all blocked: {resume.get('approve_all_blocked_reason')}")
+        if resume.get("override_approve_all_hint"):
+            lines.append(f"- {resume.get('override_approve_all_hint')}")
+    elif resume.get("approve_all_hint"):
+        lines.append(f"- {resume.get('approve_all_hint')}")
+    for approval in resume.get("pending_approvals") or []:
+        if approval.get("approval_blocked_reason"):
+            lines.append(f"- approve blocked for #{approval.get('tool_call_id')}: {approval.get('approval_blocked_reason')}")
+            if approval.get("override_approve_hint"):
+                lines.append(f"- {approval.get('override_approve_hint')}")
+        elif approval.get("approve_hint"):
+            lines.append(f"- {approval.get('approve_hint')}")
+        if approval.get("reject_hint"):
+            lines.append(f"- {approval.get('reject_hint')}")
+
+
 def format_work_cockpit_controls(state=None, session=None, continue_options="", compact=False, terse=False):
     state = state or load_state()
     if session is None:
@@ -9624,13 +9773,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
             else:
                 lines.append("- /c --allow-read .")
                 lines.append("- /continue --allow-read .")
-        if (resume or {}).get("approve_all_hint"):
-            lines.append(f"- {(resume or {}).get('approve_all_hint')}")
-        for approval in (resume or {}).get("pending_approvals") or []:
-            if approval.get("approve_hint"):
-                lines.append(f"- {approval.get('approve_hint')}")
-            if approval.get("reject_hint"):
-                lines.append(f"- {approval.get('reject_hint')}")
+        _append_work_cockpit_approval_lines(lines, resume)
         lines.append(f"- /work-session resume{task_suffix}")
         lines.append("- /work-session details")
         lines.append("- /work-session diffs")
@@ -9640,13 +9783,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     recovery_command = work_cockpit_recovery_command(resume, task_id=task_id)
     if recovery_command:
         lines.append(f"- {recovery_command}")
-    if (resume or {}).get("approve_all_hint"):
-        lines.append(f"- {(resume or {}).get('approve_all_hint')}")
-    for approval in (resume or {}).get("pending_approvals") or []:
-        if approval.get("approve_hint"):
-            lines.append(f"- {approval.get('approve_hint')}")
-        if approval.get("reject_hint"):
-            lines.append(f"- {approval.get('reject_hint')}")
+    _append_work_cockpit_approval_lines(lines, resume)
 
     cached = (continue_options or "").strip() or work_chat_continue_options(session)
     read_flags = _work_read_flags_from_options(cached, session=session)

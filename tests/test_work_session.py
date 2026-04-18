@@ -13,7 +13,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from mew.cli import main
-from mew.commands import format_work_live_step_result, work_cockpit_recovery_command, work_recovery_suggestion_from_plan
+from mew.commands import (
+    build_work_reply_schema,
+    format_work_cockpit_controls,
+    format_work_live_step_result,
+    remember_successful_work_verification,
+    work_cockpit_recovery_command,
+    work_recovery_suggestion_from_plan,
+)
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
@@ -470,10 +477,158 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(approval["pairing_status"]["status"], "missing_test_edit")
         self.assertTrue(approval["pairing_status"]["advisory"])
+        self.assertEqual(approval["approve_hint"], "")
+        self.assertEqual(approval["cli_approve_hint"], "")
+        self.assertIn("--allow-unpaired-source-edit", approval["override_approve_hint"])
         self.assertEqual(approval_cell["pairing_status"]["status"], "missing_test_edit")
         self.assertIn("paired test missing", approval_cell["preview"])
+        self.assertNotIn("approve_once", approval_cell["actions"])
+        self.assertIn("--allow-unpaired-source-edit", approval_cell["actions"]["override_approve_once"])
+        self.assertIn("approve_once_blocked: add a paired tests/** write/edit first", text)
+        self.assertIn("override_approve_once: mew work 9 --approve-tool 3", text)
         self.assertIn("pairing_status: missing_test_edit", text)
         self.assertIn("pairing_status: missing_test_edit", resume_text)
+        self.assertIn("approve blocked: add a paired tests/** write/edit before approving", resume_text)
+        self.assertIn("--allow-unpaired-source-edit", resume_text)
+
+    def test_work_reply_template_steers_for_unpaired_source_approval(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "updated_at": "2026-04-18T00:00:00Z",
+            "default_options": {"allow_read": ["."], "allow_write": ["."], "allow_verify": True, "verify_command": "true"},
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        schema = build_work_reply_schema(session, resume=resume)
+
+        self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
+        self.assertIn("paired tests/**", schema["reply_template"]["actions"][0]["text"])
+        self.assertIn("tool #3", schema["reply_template"]["actions"][0]["text"])
+        self.assertIn("allow_unpaired_source_edit=true", schema["reply_template"]["actions"][0]["text"])
+
+    def test_cockpit_controls_do_not_primary_approve_unpaired_source_edit(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Pairing",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+            "default_options": {"allow_read": ["."], "allow_write": ["."], "allow_verify": True, "verify_command": "true"},
+        }
+
+        controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
+
+        self.assertIn("approve blocked for #3", controls)
+        self.assertIn("--allow-unpaired-source-edit", controls)
+        self.assertIn("/work-session reject 3", controls)
+        plain_approves = [
+            line
+            for line in controls.splitlines()
+            if line.startswith("- /work-session approve 3 ") and "--allow-unpaired-source-edit" not in line
+        ]
+        self.assertEqual([], plain_approves)
+
+    def test_successful_run_tests_does_not_replace_existing_default_verify_command(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py",
+            }
+        }
+
+        remember_successful_work_verification(
+            session,
+            "run_tests",
+            {
+                "exit_code": 0,
+                "command": (
+                    "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py "
+                    "-k 'narrow dogfood check'"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            session["default_options"]["verify_command"],
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py",
+        )
+
+    def test_narrow_write_verification_does_not_replace_existing_default_verify_command(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py",
+            }
+        }
+
+        remember_successful_work_verification(
+            session,
+            "edit_file",
+            {
+                "verification": {
+                    "exit_code": 0,
+                    "command": (
+                        "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py "
+                        "-k 'narrow approval check'"
+                    ),
+                },
+            },
+        )
+
+        self.assertEqual(
+            session["default_options"]["verify_command"],
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py",
+        )
+
+    def test_narrow_pytest_selectors_do_not_replace_broad_default_verify_command(self):
+        broad_command = "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q"
+        narrow_commands = [
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py",
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_example",
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q -m slow",
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q --lf",
+            "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q --deselect tests/test_work_session.py::test_example",
+        ]
+
+        for command in narrow_commands:
+            with self.subTest(command=command):
+                session = {"default_options": {"allow_verify": True, "verify_command": broad_command}}
+                remember_successful_work_verification(
+                    session,
+                    "run_tests",
+                    {"exit_code": 0, "command": command},
+                )
+                self.assertEqual(session["default_options"]["verify_command"], broad_command)
 
     def test_source_edit_approval_marks_paired_test_write_ok(self):
         session = {
@@ -4976,6 +5131,120 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("pending.txt --allow-verify --verify-command true", controls)
                 self.assertIn("reject tool #2: mew work 1 --reject-tool 2 --reject-reason <feedback>", controls)
                 self.assertLess(controls.index("approve tool #2"), controls.index("one live step"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_controls_do_not_primary_approve_unpaired_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                target = Path("src/mew/gate.py")
+                target.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                controls = stdout.getvalue().split("Next CLI controls", 1)[1]
+
+                self.assertIn("add paired test before approving #1", controls)
+                self.assertIn("override unpaired approval #1", controls)
+                self.assertIn("--allow-unpaired-source-edit", controls)
+                self.assertNotIn("approve tool #1:", controls)
+                self.assertLess(controls.index("add paired test before approving #1"), controls.index("one live step"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_controls_block_approve_all_with_unpaired_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("README.md").write_text("before\n", encoding="utf-8")
+                source = Path("src/mew/gate.py")
+                source.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "README.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                output = stdout.getvalue()
+                controls = output.split("Next CLI controls", 1)[1]
+
+                self.assertIn("approve all blocked: one or more src/mew source edits need paired tests/**", output)
+                self.assertIn("override approve all: /work-session approve all", output)
+                self.assertIn("add paired tests before approve all", controls)
+                self.assertIn("override unpaired approve all", controls)
+                self.assertIn("--allow-unpaired-source-edit", controls)
+                self.assertNotIn("approve all pending writes", controls)
             finally:
                 os.chdir(old_cwd)
 

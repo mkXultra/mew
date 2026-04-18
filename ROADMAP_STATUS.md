@@ -131,6 +131,14 @@ remaining blocker versus Claude Code/Codex CLI. The latest cockpit pass adds
 an advisory pairing status for `src/mew/**` write approvals and tells the
 resident to carry the intended paired test in `working_memory` when the write
 approval boundary stops the loop.
+Fresh mew-as-buddy dogfood on task #122 tightened that approval path: unpaired
+`src/mew/**` source edits no longer present plain approve as the primary action
+in cells, resume text, chat cockpit controls, follow `reply_template`, or
+follow/control JSON; they steer toward adding paired tests or require an
+explicit unpaired override. The same dogfood pass found that narrow pytest
+selector runs polluted future continue commands, so successful `pytest -k`,
+node-id, marker, last-failed, deselect, or broad-to-file verification runs no
+longer replace an existing broader default verify command.
 
 ## Milestone 1: Native Hands
 
@@ -650,6 +658,17 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: real dogfood task #122 used `mew code`/`mew work` as the
+  buddy surface to probe paired-test approval UX, found misleading approve
+  paths and narrow-test default pollution, and the tree now fixes both. Reviewed
+  by `codex-ultra` and `claude-ultra`; codex found a runtime recovery regression
+  after raw blocked approve hints were cleared, which was fixed and re-reviewed
+  with no blockers. Validated with focused approval/default-memory tests
+  (`8 passed, 257 deselected, 5 subtests passed`), related runtime/dogfood
+  regressions (`3 passed`), the combined work/runtime/dogfood/commands/brief
+  suite (`549 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`948 passed, 15 subtests
+  passed`), and `./mew dogfood --scenario all --json` (pass).
 - Follow-up current: passive native-work auto-recovery can now rerun a
   runtime-owned interrupted verifier on the next passive tick when explicit
   read/verify gates match, while preserving recovery-plan priority so unsafe

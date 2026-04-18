@@ -752,6 +752,10 @@ def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task
         approval = ((resume.get("pending_approvals") or [])[:1] or [{}])[0]
         pairing = approval.get("pairing_status") or {}
         approve_command = approval.get("cli_approve_hint") or ""
+        blocked_approve_command = approval.get("cli_blocked_approve_hint") or approve_command
+        override_approve_command = approval.get("cli_override_approve_hint") or (
+            f"{blocked_approve_command} --allow-unpaired-source-edit" if blocked_approve_command else ""
+        )
         if pairing.get("status") == "missing_test_edit":
             command = resume_command
             reason = "a source edit is waiting for a paired tests/** edit or an explicit override"
@@ -770,9 +774,10 @@ def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task
         }
         if pairing.get("status") == "missing_test_edit":
             suggestion["pairing_status"] = pairing
-            if approve_command:
-                suggestion["blocked_command"] = approve_command
-                suggestion["override_command"] = f"{approve_command} --allow-unpaired-source-edit"
+            if blocked_approve_command:
+                suggestion["blocked_command"] = blocked_approve_command
+            if override_approve_command:
+                suggestion["override_command"] = override_approve_command
         if approval.get("cli_reject_hint"):
             suggestion["alternate_command"] = approval.get("cli_reject_hint")
         return suggestion

@@ -1711,10 +1711,27 @@ def build_work_session_resume(session, task=None, limit=8):
             }
             if pairing_status:
                 approval["pairing_status"] = pairing_status
+                if pairing_status.get("status") == "missing_test_edit":
+                    blocked_approve_hint = approval["approve_hint"]
+                    cli_blocked_approve_hint = approval["cli_approve_hint"]
+                    approval["approval_blocked_reason"] = (
+                        "add a paired tests/** write/edit before approving this src/mew source edit"
+                    )
+                    approval["blocked_approve_hint"] = blocked_approve_hint
+                    approval["cli_blocked_approve_hint"] = cli_blocked_approve_hint
+                    approval["override_approve_hint"] = f"{blocked_approve_hint} --allow-unpaired-source-edit"
+                    approval["cli_override_approve_hint"] = f"{cli_blocked_approve_hint} --allow-unpaired-source-edit"
+                    approval["approve_hint"] = ""
+                    approval["cli_approve_hint"] = ""
             pending_approvals.append(approval)
 
     approve_all_hint = ""
     cli_approve_all_hint = ""
+    approve_all_blocked_reason = ""
+    blocked_approve_all_hint = ""
+    cli_blocked_approve_all_hint = ""
+    override_approve_all_hint = ""
+    cli_override_approve_all_hint = ""
     if len(pending_approvals) > 1:
         write_paths = []
         for approval in pending_approvals:
@@ -1731,6 +1748,16 @@ def build_work_session_resume(session, task=None, limit=8):
             cli_approve_all_parts.extend(["--allow-write", write_path])
         cli_approve_all_parts.extend(["--allow-verify", "--verify-command", verify_command or "<command>"])
         cli_approve_all_hint = work_task_command(*cli_approve_all_parts)
+        if any((approval.get("pairing_status") or {}).get("status") == "missing_test_edit" for approval in pending_approvals):
+            approve_all_blocked_reason = (
+                "one or more src/mew source edits need paired tests/** write/edit before approve-all"
+            )
+            blocked_approve_all_hint = approve_all_hint
+            cli_blocked_approve_all_hint = cli_approve_all_hint
+            override_approve_all_hint = f"{approve_all_hint} --allow-unpaired-source-edit"
+            cli_override_approve_all_hint = f"{cli_approve_all_hint} --allow-unpaired-source-edit"
+            approve_all_hint = ""
+            cli_approve_all_hint = ""
 
     recent_decisions = []
     for turn in turns[-limit:]:
@@ -1831,6 +1858,11 @@ def build_work_session_resume(session, task=None, limit=8):
         "queued_followups_truncated": len(queued_followups) > limit,
         "approve_all_hint": approve_all_hint,
         "cli_approve_all_hint": cli_approve_all_hint,
+        "approve_all_blocked_reason": approve_all_blocked_reason,
+        "blocked_approve_all_hint": blocked_approve_all_hint if approve_all_blocked_reason else "",
+        "cli_blocked_approve_all_hint": cli_blocked_approve_all_hint if approve_all_blocked_reason else "",
+        "override_approve_all_hint": override_approve_all_hint,
+        "cli_override_approve_all_hint": cli_override_approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "working_memory": working_memory,
@@ -1926,7 +1958,11 @@ def format_work_session_resume(resume):
     lines.extend(["", "Pending approvals"])
     approvals = resume.get("pending_approvals") or []
     if approvals:
-        if resume.get("approve_all_hint"):
+        if resume.get("approve_all_blocked_reason"):
+            lines.append(f"approve all blocked: {resume.get('approve_all_blocked_reason')}")
+            if resume.get("override_approve_all_hint"):
+                lines.append(f"override approve all: {resume.get('override_approve_all_hint')}")
+        elif resume.get("approve_all_hint"):
             lines.append(f"approve all: {resume.get('approve_all_hint')}")
         for approval in approvals:
             lines.append(f"#{approval.get('tool_call_id')} {approval.get('tool')} {approval.get('path') or ''}")
@@ -1934,7 +1970,11 @@ def format_work_session_resume(resume):
                 lines.append("  diff:")
                 for preview_line in approval.get("diff_preview", "").splitlines():
                     lines.append(f"    {preview_line}")
-            if approval.get("approve_hint"):
+            if approval.get("approval_blocked_reason"):
+                lines.append(f"  approve blocked: {approval.get('approval_blocked_reason')}")
+                if approval.get("override_approve_hint"):
+                    lines.append(f"  override approve: {approval.get('override_approve_hint')}")
+            elif approval.get("approve_hint"):
                 lines.append(f"  approve: {approval.get('approve_hint')}")
             if approval.get("reject_hint"):
                 lines.append(f"  reject: {approval.get('reject_hint')}")

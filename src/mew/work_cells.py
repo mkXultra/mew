@@ -396,6 +396,7 @@ def approval_cell(session, call):
         f"mew work {task_ref} --approve-tool {call.get('id')} "
         f"--allow-write {write_root} {_verify_flags_text(session)}"
     )
+    override_approve_command = f"{approve_command} --allow-unpaired-source-edit"
     reject_command = f"mew work {task_ref} --reject-tool {call.get('id')}"
     reject_feedback_command = f"{reject_command} --reject-reason <feedback>"
     if unavailable:
@@ -422,15 +423,21 @@ def approval_cell(session, call):
     cell["target"] = path
     if pairing_status:
         cell["pairing_status"] = pairing_status
-    cell["actions"] = (
-        {"review": f"mew work {task_ref} --session --resume"}
-        if unavailable
-        else {
+    if unavailable:
+        cell["actions"] = {"review": f"mew work {task_ref} --session --resume"}
+    elif pairing_status.get("status") == "missing_test_edit":
+        cell["actions"] = {
+            "add_paired_test": f"mew work {task_ref} --session --resume",
+            "override_approve_once": override_approve_command,
+            "reject": reject_command,
+            "reject_with_feedback": reject_feedback_command,
+        }
+    else:
+        cell["actions"] = {
             "approve_once": approve_command,
             "reject": reject_command,
             "reject_with_feedback": reject_feedback_command,
         }
-    )
     cell["detail"] = "\n".join(
         line
         for line in (
@@ -448,7 +455,21 @@ def approval_cell(session, call):
                 else ""
             ),
             "approval_unavailable: session is not active" if unavailable else "",
-            f"approve_once: {approve_command}" if not unavailable else "",
+            (
+                "approve_once_blocked: add a paired tests/** write/edit first"
+                if pairing_status.get("status") == "missing_test_edit" and not unavailable
+                else ""
+            ),
+            (
+                f"override_approve_once: {override_approve_command}"
+                if pairing_status.get("status") == "missing_test_edit" and not unavailable
+                else ""
+            ),
+            (
+                f"approve_once: {approve_command}"
+                if not unavailable and pairing_status.get("status") != "missing_test_edit"
+                else ""
+            ),
             f"reject: {reject_command}" if not unavailable else "",
             f"reject_with_feedback: {reject_feedback_command}" if not unavailable else "",
             f"review: mew work {task_ref} --session --resume" if unavailable else "",
