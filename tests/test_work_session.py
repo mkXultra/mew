@@ -3472,7 +3472,8 @@ class WorkSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                command = f"{shlex.quote(sys.executable)} -c \"print('verify ok')\""
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                equivalent_command = f'{shlex.quote(sys.executable)} -c "print(\\"verify ok\\")"'
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
@@ -3599,7 +3600,7 @@ class WorkSessionTests(unittest.TestCase):
                                 ".",
                                 "--allow-verify",
                                 "--verify-command",
-                                command,
+                                equivalent_command,
                                 "--json",
                             ]
                         ),

@@ -4986,6 +4986,17 @@ def interrupted_run_tests_command(call):
     return result.get("command") or parameters.get("command") or ""
 
 
+def recovery_commands_match(expected, requested):
+    expected = expected or ""
+    requested = requested or ""
+    if expected == requested:
+        return True
+    try:
+        return shlex.split(expected) == shlex.split(requested)
+    except ValueError:
+        return False
+
+
 def interrupted_run_tests_cwd(call):
     result = (call or {}).get("result") or {}
     parameters = (call or {}).get("parameters") or {}
@@ -5047,7 +5058,7 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "command": source_command,
             "cwd": source_cwd,
         }
-    if requested_command != source_command:
+    if not recovery_commands_match(source_command, requested_command):
         return {
             "action": "needs_matching_verifier",
             "reason": "verification recovery only reruns the exact interrupted command",
