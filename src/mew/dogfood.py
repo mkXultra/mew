@@ -3012,6 +3012,7 @@ def runtime_effect_summary(state, limit=5):
 
 def native_work_advance_metrics(state, limit=5):
     advances = []
+    runtime_status = state.get("runtime_status") or {}
     for session in state.get("work_sessions", []) or []:
         for note in session.get("notes") or []:
             text = note.get("text") or ""
@@ -3028,12 +3029,16 @@ def native_work_advance_metrics(state, limit=5):
                     "text": text,
                 }
             )
+    skips = list(runtime_status.get("native_work_step_skips") or [])
     return {
         "attempts": len(advances),
         "by_outcome": count_by(advances, "outcome"),
         "latest": advances[-limit:],
-        "last_step": (state.get("runtime_status") or {}).get("last_native_work_step") or {},
-        "last_skip": (state.get("runtime_status") or {}).get("last_native_work_step_skip"),
+        "skip_count": len(skips),
+        "by_skip_reason": count_by(skips, "reason"),
+        "recent_skips": skips[-limit:],
+        "last_step": runtime_status.get("last_native_work_step") or {},
+        "last_skip": runtime_status.get("last_native_work_step_skip"),
     }
 
 

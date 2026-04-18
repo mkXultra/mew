@@ -69,6 +69,9 @@ from .work_session import (
 )
 
 
+NATIVE_WORK_STEP_SKIP_HISTORY_LIMIT = 20
+
+
 def set_runtime_running(state, started_at):
     runtime = state["runtime_status"]
     runtime["state"] = "running"
@@ -255,6 +258,40 @@ def runtime_native_work_step_timeout(args, session=None):
     return max(30.0, model_timeout + tool_timeout + verify_timeout + 30.0)
 
 
+def record_runtime_native_work_step_skip(
+    runtime_status,
+    reason,
+    *,
+    current_time=None,
+    event_id=None,
+    phase="select",
+    session_id=None,
+    task_id=None,
+    command=None,
+):
+    if not reason:
+        runtime_status["last_native_work_step_skip"] = None
+        return None
+    entry = {
+        "at": current_time or now_iso(),
+        "reason": reason,
+        "phase": phase,
+    }
+    if event_id is not None:
+        entry["event_id"] = event_id
+    if session_id is not None:
+        entry["session_id"] = session_id
+    if task_id is not None:
+        entry["task_id"] = task_id
+    if command:
+        entry["command"] = command
+    skips = list(runtime_status.get("native_work_step_skips") or [])
+    skips.append(entry)
+    runtime_status["native_work_step_skips"] = skips[-NATIVE_WORK_STEP_SKIP_HISTORY_LIMIT:]
+    runtime_status["last_native_work_step_skip"] = reason
+    return entry
+
+
 def select_runtime_native_work_step(state, *, current_event_id=None):
     active_sessions = active_work_sessions(state)
     if not active_sessions:
@@ -306,8 +343,18 @@ def run_runtime_native_work_step(step, args):
         selected, skip = select_runtime_native_work_step(state)
         if not selected or str(selected.get("session_id")) != str(step.get("session_id")):
             skipped_at = now_iso()
-            state.setdefault("runtime_status", {})["last_native_work_step_skip"] = f"prelaunch_{skip or 'changed'}"
-            state["runtime_status"]["last_native_work_step"] = {
+            runtime_status = state.setdefault("runtime_status", {})
+            skip_reason = f"prelaunch_{skip or 'changed'}"
+            record_runtime_native_work_step_skip(
+                runtime_status,
+                skip_reason,
+                current_time=skipped_at,
+                phase="prelaunch",
+                session_id=step.get("session_id"),
+                task_id=step.get("task_id"),
+                command=step.get("command"),
+            )
+            runtime_status["last_native_work_step"] = {
                 "finished_at": skipped_at,
                 "session_id": step.get("session_id"),
                 "task_id": step.get("task_id"),
@@ -995,7 +1042,13 @@ def run_runtime(args):
                         state,
                         current_event_id=event_id,
                     )
-                    runtime_status["last_native_work_step_skip"] = native_work_skip
+                    record_runtime_native_work_step_skip(
+                        runtime_status,
+                        native_work_skip,
+                        current_time=now_iso(),
+                        event_id=event_id,
+                        phase="select",
+                    )
                     if native_work_step:
                         runtime_status["last_action"] = (
                             f"selected native work step for session #{native_work_step.get('session_id')}"

@@ -13,6 +13,7 @@ from mew.runtime import (
     apply_runtime_autonomy_controls,
     compact_agent_reflex_report,
     guidance_with_runtime_focus,
+    record_runtime_native_work_step_skip,
     run_runtime_post_run_pipeline,
     select_runtime_native_work_step,
     should_defer_commit_for_user_message,
@@ -44,6 +45,23 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(compact["collected"], ["run #4", "run #5", "run #6"])
         self.assertEqual(compact["collected_omitted"], 4)
         self.assertEqual(compact["runtime_status"], {"state": "running"})
+
+    def test_record_runtime_native_work_step_skip_keeps_bounded_history(self):
+        runtime_status = {}
+
+        for index in range(25):
+            record_runtime_native_work_step_skip(
+                runtime_status,
+                f"reason-{index}",
+                current_time=f"t-{index}",
+                event_id=index,
+                phase="select",
+            )
+
+        self.assertEqual(runtime_status["last_native_work_step_skip"], "reason-24")
+        self.assertEqual(len(runtime_status["native_work_step_skips"]), 20)
+        self.assertEqual(runtime_status["native_work_step_skips"][0]["reason"], "reason-5")
+        self.assertEqual(runtime_status["native_work_step_skips"][-1]["event_id"], 24)
 
     def test_post_run_pipeline_uses_autonomy_gates(self):
         state = default_state()

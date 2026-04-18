@@ -483,6 +483,15 @@ class DogfoodTests(unittest.TestCase):
                 "task_id": 1,
                 "outcome": "completed",
             }
+            state["runtime_status"]["last_native_work_step_skip"] = "session_started_this_cycle"
+            state["runtime_status"]["native_work_step_skips"] = [
+                {
+                    "at": "now",
+                    "event_id": event["id"],
+                    "phase": "select",
+                    "reason": "session_started_this_cycle",
+                }
+            ]
             (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             (workspace / LOG_FILE).write_text(
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
@@ -552,6 +561,12 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["native_work_advance"]["attempts"], 1)
             self.assertEqual(report["native_work_advance"]["by_outcome"], {"completed": 1})
             self.assertEqual(report["native_work_advance"]["last_step"]["outcome"], "completed")
+            self.assertEqual(report["native_work_advance"]["skip_count"], 1)
+            self.assertEqual(
+                report["native_work_advance"]["by_skip_reason"],
+                {"session_started_this_cycle": 1},
+            )
+            self.assertEqual(report["native_work_advance"]["recent_skips"][0]["phase"], "select")
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)
