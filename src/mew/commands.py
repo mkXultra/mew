@@ -647,6 +647,18 @@ def _format_workbench_reentry(resume, task):
     if memory:
         if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
             lines.append("memory: stale; refresh before relying on next_step")
+            if memory.get("stale_after_model_turn_id"):
+                latest = ""
+                if memory.get("latest_model_turn_id"):
+                    latest = f"; latest=#{memory.get('latest_model_turn_id')}"
+                lines.append(
+                    f"stale_after_model_turn: #{memory.get('stale_after_model_turn_id')}{latest}"
+                )
+            if memory.get("stale_after_tool_call_id"):
+                stale_tool = memory.get("stale_after_tool") or "tool"
+                lines.append(
+                    f"stale_after_tool_call: #{memory.get('stale_after_tool_call_id')} ({stale_tool} ran)"
+                )
         for key in ("hypothesis", "next_step", "last_verified_state"):
             value = memory.get(key)
             if value:

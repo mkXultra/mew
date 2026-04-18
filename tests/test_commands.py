@@ -2077,7 +2077,13 @@ class CommandTests(unittest.TestCase):
             try:
                 from mew.programmer import create_task_plan
                 from mew.state import add_question, load_state, save_state, state_lock
-                from mew.work_session import create_work_session
+                from mew.work_session import (
+                    create_work_session,
+                    finish_work_model_turn,
+                    finish_work_tool_call,
+                    start_work_model_turn,
+                    start_work_tool_call,
+                )
 
                 with state_lock():
                     state = load_state()
@@ -2140,6 +2146,28 @@ class CommandTests(unittest.TestCase):
                         "allow_verify": True,
                         "verify_command": "uv run pytest",
                     }
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        {
+                            "summary": "Need a fresh read.",
+                            "working_memory": {
+                                "hypothesis": "README still contains the target section.",
+                                "next_step": "Edit after checking the latest README.",
+                                "last_verified_state": "tests passed before the read",
+                            },
+                        },
+                        {"summary": "Read README."},
+                        {"type": "read_file", "path": "README.md"},
+                    )
+                    call = start_work_tool_call(state, session, "read_file", {"path": "README.md"})
+                    finish_work_tool_call(
+                        state,
+                        session["id"],
+                        call["id"],
+                        result={"path": "README.md", "content": "fresh content\n"},
+                    )
+                    finish_work_model_turn(state, session["id"], turn["id"], tool_call_id=call["id"])
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -2152,6 +2180,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [edit_file] src/mew/commands.py changed=True", output)
                 self.assertIn("Reentry", output)
                 self.assertIn("resume_next_action: continue the work session", output)
+                self.assertIn("memory: stale; refresh before relying on next_step", output)
+                self.assertIn("stale_after_tool_call: #1 (read_file ran)", output)
                 self.assertIn("--allow-verify --verify-command 'uv run pytest'", output)
                 self.assertIn("mew reply 1", output)
 

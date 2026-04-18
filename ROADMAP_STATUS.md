@@ -1497,6 +1497,9 @@ Next action:
   compact controls now expose `/work-session details` directly before the
   shorter `/help work` fallback, while keeping the primary `/c`/`/follow`
   section short.
+- Workbench reentry now explains stale working memory with the specific
+  later tool call or model turn that made it stale, so a returning resident can
+  decide what to refresh without opening the full session detail view first.
 
 ## Current Roadmap Focus
 
