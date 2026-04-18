@@ -52,6 +52,7 @@ READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
@@ -693,6 +694,83 @@ def run_command_for_work(command, cwd=".", timeout=300, on_output=None):
     return run_command_record(command, cwd=cwd, timeout=timeout)
 
 
+def first_unquoted_shell_operator(command):
+    text = command or ""
+    in_single = False
+    in_double = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if in_single or in_double:
+            index += 1
+            continue
+
+        if char in {"\n", "\r"}:
+            return char, "chain"
+        two_chars = text[index : index + 2]
+        if two_chars == "&>":
+            end = index + 2
+            if end < len(text) and text[end] == ">":
+                end += 1
+            return text[index:end], "redirection"
+        if two_chars in SHELL_CHAIN_OPERATORS:
+            return two_chars, "chain"
+        if char in SHELL_CHAIN_OPERATORS:
+            return char, "chain"
+        if char in {">", "<"}:
+            end = index + 1
+            if end < len(text) and text[end] == char:
+                end += 1
+            if end < len(text) and text[end] == "&":
+                end += 1
+                while end < len(text) and text[end].isdigit():
+                    end += 1
+            return text[index:end], "redirection"
+        if char.isdigit() and index + 1 < len(text) and text[index + 1] in {">", "<"}:
+            end = index + 2
+            if end < len(text) and text[end] == text[index + 1]:
+                end += 1
+            if end < len(text) and text[end] == "&":
+                end += 1
+                while end < len(text) and text[end].isdigit():
+                    end += 1
+            return text[index:end], "redirection"
+        index += 1
+    return None, ""
+
+
+def reject_shell_control_tokens(command, *, tool_name="run_tests"):
+    operator, kind = first_unquoted_shell_operator(command)
+    if not operator:
+        return
+    if kind == "redirection":
+        raise ValueError(
+            f"{tool_name} executes one argv command without a shell; "
+            f"redirection operator {operator!r} is not supported"
+        )
+    raise ValueError(
+        f"{tool_name} executes one argv command without a shell; "
+        f"split shell operator {operator!r} into separate commands"
+    )
+
+
 def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
@@ -750,6 +828,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
         command = parameters.get("command") or ""
         if not command:
             raise ValueError("run_tests command is empty")
+        reject_shell_control_tokens(command, tool_name="run_tests")
         return run_command_for_work(
             command,
             cwd=parameters.get("cwd") or ".",
@@ -777,6 +856,8 @@ def execute_work_write_tool(tool, parameters, on_output=None):
     apply = bool(parameters.get("apply"))
     if apply and (not parameters.get("allow_verify") or not parameters.get("verify_command")):
         raise ValueError("applied writes require --allow-verify and --verify-command")
+    if apply:
+        reject_shell_control_tokens(parameters.get("verify_command") or "", tool_name="write verification")
     if tool == "write_file" and "content" not in parameters:
         raise ValueError("write_file requires --content")
     if tool == "edit_file" and "old" not in parameters:

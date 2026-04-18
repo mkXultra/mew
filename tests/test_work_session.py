@@ -33,6 +33,7 @@ from mew.work_session import (
     build_work_session_resume,
     create_work_session,
     finish_work_tool_call,
+    first_unquoted_shell_operator,
     format_diff_preview,
     format_work_action,
     format_work_session_resume,
@@ -70,6 +71,15 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_first_unquoted_shell_operator_respects_quotes_and_adjacency(self):
+        self.assertEqual(first_unquoted_shell_operator("python -V&& python -V"), ("&&", "chain"))
+        self.assertEqual(first_unquoted_shell_operator("python -V >out.txt"), (">", "redirection"))
+        self.assertEqual(first_unquoted_shell_operator("python -V 2>out.txt"), ("2>", "redirection"))
+        self.assertEqual(first_unquoted_shell_operator("python -V &>out.txt"), ("&>", "redirection"))
+        self.assertEqual(first_unquoted_shell_operator("python -V\nfalse"), ("\n", "chain"))
+        self.assertEqual(first_unquoted_shell_operator("printf '&&'"), (None, ""))
+        self.assertEqual(first_unquoted_shell_operator('python -c "print(1 > 0)"'), (None, ""))
+
     def test_create_work_session_refreshes_existing_task_snapshot(self):
         state = {"tasks": [], "work_sessions": [], "next_ids": {"work_session": 1}}
         task = add_coding_task(state)
@@ -2602,6 +2612,62 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_applied_write_rejects_shell_control_verify_before_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "python -V>out.txt",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "generated.md",
+                                "--content",
+                                "ok\n",
+                                "--create",
+                                "--apply",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("write verification executes one argv command without a shell", call["error"])
+                self.assertIn("redirection operator '>' is not supported", call["error"])
+                self.assertFalse(Path("generated.md").exists())
+                self.assertFalse(Path("out.txt").exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_does_not_persist_sensitive_write_roots(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -3149,6 +3215,77 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work tests #1 [active] task=#1", tests_text)
                 self.assertIn("exit=unavailable", tests_text)
                 self.assertNotIn("Work task #1", tests_text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_tests_rejects_shell_control_operators(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                "python -V && python -V",
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("run_tests executes one argv command without a shell", call["error"])
+                self.assertIn("shell operator '&&'", call["error"])
+                self.assertIsNone(call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_tests_allows_quoted_shell_operator_literals(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{shlex.quote(sys.executable)} -c \"import sys; assert sys.argv[1] == '&&'\" '&&'"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "completed")
+                self.assertEqual(call["result"]["exit_code"], 0)
             finally:
                 os.chdir(old_cwd)
 
