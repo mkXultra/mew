@@ -271,7 +271,7 @@ def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1)
     ):
         if defaults.get(key):
             parts.extend([flag, defaults[key]])
-    for root in defaults.get("allow_read") or ["."]:
+    for root in defaults.get("allow_read") or []:
         parts.extend(["--allow-read", root])
     for root in defaults.get("allow_write") or []:
         parts.extend(["--allow-write", root])
@@ -1540,9 +1540,9 @@ def build_work_session_resume(session, task=None, limit=8):
                 next_action = "interrupt-submit requested; wait for the running step to reach a boundary"
             else:
                 if task_id:
-                    live_command = mew_command("work", task_id, "--live")
+                    live_command = work_session_runtime_command(session, task_id)
                 else:
-                    live_command = mew_command("work", "--live")
+                    live_command = work_session_runtime_command(session, None)
                 next_action = f"continue to submit pending interrupt with /continue in chat or {live_command}"
         else:
             next_action = "stop requested; the running work loop should pause at the next boundary"
@@ -1558,9 +1558,9 @@ def build_work_session_resume(session, task=None, limit=8):
         next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
     else:
         if task_id:
-            live_command = mew_command("work", task_id, "--live")
+            live_command = work_session_runtime_command(session, task_id)
         else:
-            live_command = mew_command("work", "--live")
+            live_command = work_session_runtime_command(session, None)
         next_action = f"continue the work session with /continue in chat or {live_command}"
 
     queued_followups = [

@@ -410,7 +410,8 @@ Evidence:
   question open; the start message remains visible to attach/outbox listeners,
   and the created session inherits current runtime read/verify/model defaults
   plus a runtime provenance note without stale write/verify authority from
-  older sessions.
+  older sessions. `mew focus` reuses those same saved defaults for active
+  session next/resume/continue/follow commands.
 
 Missing proof:
 

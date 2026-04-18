@@ -448,6 +448,8 @@ Judgment:
   the work session continues.
 - Runtime-started native sessions are seeded from the current runtime authority
   instead of inheriting stale write/verify defaults from an older session.
+- `mew focus` now reuses those same session defaults for next/resume/continue/follow
+  reentry commands, so the visible cockpit path keeps the runtime boundary.
 - Remaining cadence work: decide whether global/non-task questions should also
   age into a summary/reminder path, and tune the 24-hour threshold after longer
   dogfood.

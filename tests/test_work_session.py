@@ -4198,7 +4198,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(len(resume["failures"]), 1)
                 self.assertEqual(
                     resume["next_action"],
-                    "continue the work session with /continue in chat or mew work 1 --live",
+                    "continue the work session with /continue in chat or mew work 1 --live --max-steps 1",
                 )
             finally:
                 os.chdir(old_cwd)

@@ -593,9 +593,9 @@ class BriefTests(unittest.TestCase):
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
         self.assertIn("memory: Cockpit polish needs one readable reentry cue.", focus)
         self.assertIn("memory_next: Surface memory in focus.", focus)
-        self.assertIn("resume: ./mew work 7 --session --resume --allow-read .", focus)
-        self.assertIn("continue: ./mew work 7 --live --allow-read . --max-steps 1", focus)
-        self.assertIn("follow: ./mew work 7 --follow --allow-read . --max-steps 10", focus)
+        self.assertIn("resume: ./mew work 7 --session --resume", focus)
+        self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
+        self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
 
     def test_focus_reentry_commands_reuse_work_session_defaults(self):
         state = default_state()
@@ -634,8 +634,11 @@ class BriefTests(unittest.TestCase):
             "--act-mode deterministic --compact-live --max-steps 1"
         )
         expected_follow = expected_continue.replace("--live", "--follow").replace("--max-steps 1", "--max-steps 10")
+        expected_resume = "./mew work 7 --session --resume --allow-read ."
+        self.assertEqual(session["resume_command"], expected_resume)
         self.assertEqual(session["continue_command"], expected_continue)
         self.assertEqual(session["follow_command"], expected_follow)
+        self.assertIn(f"resume: {expected_resume}", focus)
         self.assertIn(f"continue: {expected_continue}", focus)
         self.assertIn(f"follow: {expected_follow}", focus)
 

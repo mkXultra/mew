@@ -699,6 +699,7 @@ def active_work_session_items(state, limit=3, kind=None):
         resume = build_work_session_resume(session, task=task, limit=3) or {}
         task_id = session.get("task_id")
         task_parts = [task_id] if task_id is not None else []
+        resume_command = _work_session_resume_command(session, task_parts)
         continue_command = _work_session_reentry_command(session, task_parts, max_steps=1)
         follow_command = _work_session_reentry_command(session, task_parts, max_steps=10, follow=True)
         items.append(
@@ -709,7 +710,7 @@ def active_work_session_items(state, limit=3, kind=None):
                 "phase": resume.get("phase") or "unknown",
                 "next_action": resume.get("next_action") or "",
                 "working_memory": resume.get("working_memory") or {},
-                "resume_command": mew_command("work", *task_parts, "--session", "--resume", "--allow-read", "."),
+                "resume_command": resume_command,
                 "continue_command": continue_command,
                 "follow_command": follow_command,
             }
@@ -755,9 +756,14 @@ def _work_session_reentry_command(session, task_parts, max_steps=1, follow=False
     parts = ["work", *task_parts, "--follow" if follow else "--live"]
     option_parts = _work_session_default_option_parts(session)
     parts.extend(option_parts)
-    if "--allow-read" not in option_parts:
-        parts.extend(["--allow-read", "."])
     parts.extend(["--max-steps", str(max_steps)])
+    return mew_command(*parts)
+
+
+def _work_session_resume_command(session, task_parts):
+    parts = ["work", *task_parts, "--session", "--resume"]
+    for root in ((session or {}).get("default_options") or {}).get("allow_read") or []:
+        parts.extend(["--allow-read", root])
     return mew_command(*parts)
 
 
