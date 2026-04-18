@@ -45,6 +45,7 @@ DOGFOOD_SCENARIOS = (
     "native-advance",
     "passive-recovery-loop",
     "passive-auto-recovery",
+    "passive-auto-recovery-read",
     "day-reentry",
     "chat-cockpit",
     "work-session",
@@ -1906,6 +1907,222 @@ def run_passive_auto_recovery_scenario(workspace, env=None):
     return _scenario_report("passive-auto-recovery", workspace, commands, checks)
 
 
+def run_passive_auto_recovery_read_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, scenario_env=None):
+        result = run_command(
+            _scenario_command(*args),
+            workspace,
+            timeout=timeout,
+            env=scenario_env if scenario_env is not None else env,
+        )
+        commands.append(result)
+        return result
+
+    target = Path(workspace) / "read-target.txt"
+    target.write_text("safe read recovery dogfood\n", encoding="utf-8")
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Passive auto read recovery task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    start_data = _json_stdout(start_result)
+    session = start_data.get("work_session") or {}
+    session_id = session.get("id")
+
+    state_path = Path(workspace) / STATE_FILE
+    state = read_json_file(state_path, {})
+    state = reconcile_next_ids(migrate_state(state))
+    runtime_session = next(
+        (
+            candidate
+            for candidate in state.get("work_sessions") or []
+            if str(candidate.get("id")) == str(session_id)
+        ),
+        None,
+    )
+    seeded_tool_call_id = None
+    if runtime_session:
+        before = "2026-04-18T05:00:00Z"
+        failed_at = "2026-04-18T05:00:10Z"
+        runtime_session["owner"] = "runtime"
+        runtime_session["runtime_managed"] = True
+        runtime_session["runtime_started_at"] = before
+        runtime_session["runtime_started_event_id"] = 999
+        seeded_tool_call_id = next_id(state, "work_tool_call")
+        runtime_session.setdefault("tool_calls", []).append(
+            {
+                "id": seeded_tool_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "read_file",
+                "status": "interrupted",
+                "parameters": {
+                    "path": "read-target.txt",
+                    "max_chars": 50000,
+                },
+                "result": None,
+                "summary": "interrupted dogfood read",
+                "error": "Interrupted before the read completed.",
+                "started_at": before,
+                "finished_at": before,
+            }
+        )
+        runtime_session["last_tool_call_id"] = seeded_tool_call_id
+        runtime_session["updated_at"] = before
+        runtime_status = state.setdefault("runtime_status", {})
+        runtime_status["last_native_work_step"] = {
+            "finished_at": failed_at,
+            "session_id": session_id,
+            "task_id": task_id,
+            "command": f"mew work {task_id} --live --allow-read . --max-steps 1",
+            "exit_code": 1,
+            "timed_out": False,
+            "outcome": "failed",
+        }
+        runtime_status["last_action"] = "seeded failed native work step for auto read recovery dogfood"
+        write_json_file(state_path, state)
+
+    auto_recover_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "act",
+            "--allow-native-advance",
+            "--allow-read",
+            ".",
+            "--poll-interval",
+            "0.01",
+        ],
+        timeout=30,
+    )
+    recovered_state = read_json_file(state_path, {})
+    recovered_session = next(
+        (
+            candidate
+            for candidate in recovered_state.get("work_sessions") or []
+            if str(candidate.get("id")) == str(session_id)
+        ),
+        {},
+    )
+    source_call = next(
+        (
+            call
+            for call in recovered_session.get("tool_calls") or []
+            if str(call.get("id")) == str(seeded_tool_call_id)
+        ),
+        {},
+    )
+    recovered_call = next(
+        (
+            call
+            for call in recovered_session.get("tool_calls") or []
+            if str(call.get("id")) == str(source_call.get("recovered_by_tool_call_id"))
+        ),
+        {},
+    )
+    auto_recovery = (recovered_state.get("runtime_status") or {}).get("last_native_work_recovery") or {}
+    recovery_questions = [
+        question
+        for question in recovered_state.get("questions") or []
+        if str(question.get("related_task_id")) == str(task_id)
+    ]
+
+    fake_log = Path(workspace) / "fake-mew-auto-read-recovery-calls.json"
+    fake_mew = write_fake_mew_executable(Path(workspace) / "fake-mew-auto-read-recovery")
+    scenario_env = dict(env or os.environ)
+    scenario_env["MEW_EXECUTABLE"] = str(fake_mew)
+    scenario_env["MEW_FAKE_WORK_LOG"] = str(fake_log)
+    resume_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "act",
+            "--allow-native-advance",
+            "--allow-read",
+            ".",
+            "--poll-interval",
+            "0.01",
+        ],
+        timeout=30,
+        scenario_env=scenario_env,
+    )
+    final_state = read_json_file(state_path, {})
+    final_runtime = final_state.get("runtime_status") or {}
+    latest_step = final_runtime.get("last_native_work_step") or {}
+    fake_calls = read_json_file(fake_log, [])
+    fake_work_calls = [
+        call for call in fake_calls if (call.get("argv") or [])[:2] == ["work", str(task_id)]
+    ]
+
+    _scenario_check(
+        checks,
+        "passive_auto_recovery_read_reruns_interrupted_read",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and auto_recover_result.get("exit_code") == 0
+        and auto_recovery.get("action") == "auto_retry_tool_completed"
+        and source_call.get("recovery_status") == "superseded"
+        and recovered_call.get("tool") == "read_file"
+        and recovered_call.get("status") == "completed"
+        and "safe read recovery dogfood" in ((recovered_call.get("result") or {}).get("text") or "")
+        and not recovery_questions,
+        observed={
+            "last_native_work_recovery": auto_recovery,
+            "source_call": source_call,
+            "recovered_call": recovered_call,
+            "questions": recovery_questions,
+        },
+        expected="passive tick auto-recovers a runtime-owned interrupted safe read when gates match",
+    )
+    _scenario_check(
+        checks,
+        "passive_auto_recovery_read_resumes_native_advance",
+        resume_result.get("exit_code") == 0
+        and latest_step.get("outcome") == "completed"
+        and latest_step.get("exit_code") == 0
+        and bool(fake_work_calls),
+        observed={
+            "last_native_work_step": latest_step,
+            "fake_calls": fake_calls,
+        },
+        expected="after auto read recovery, the next passive tick can advance the runtime-owned work session",
+    )
+    return _scenario_report("passive-auto-recovery-read", workspace, commands, checks)
+
+
 def run_day_reentry_scenario(workspace, env=None):
     commands = []
     checks = []
@@ -3629,6 +3846,8 @@ def run_dogfood_scenario(args):
             reports.append(run_passive_recovery_loop_scenario(scenario_workspace, env=env))
         elif name == "passive-auto-recovery":
             reports.append(run_passive_auto_recovery_scenario(scenario_workspace, env=env))
+        elif name == "passive-auto-recovery-read":
+            reports.append(run_passive_auto_recovery_read_scenario(scenario_workspace, env=env))
         elif name == "day-reentry":
             reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":

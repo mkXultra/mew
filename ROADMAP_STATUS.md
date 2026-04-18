@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and passive auto-recovery for the narrow interrupted-verifier case exist; broader automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and passive auto-recovery for interrupted verifier plus safe read/git cases exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -112,6 +112,10 @@ matching read/verify gates, the next passive tick can rerun that verifier
 itself and then resume native advance on the following tick. If a higher-risk
 interrupted write/command is still selected by the recovery plan, mew falls back
 to the visible recovery question instead of auto-running the verifier.
+The same selected-item pattern now covers interrupted safe read/git tools:
+`read_file`, `search_text`, `glob`, `inspect_dir`, and `git_*` can be replayed
+by the next passive tick when they are the recovery plan's selected item and
+the runtime read gate covers the recorded path/cwd.
 The latest Persistent Advantage pass adds a deterministic `day-reentry`
 dogfood scenario and `focus` age display, proving that an active work session
 aged by more than a day still surfaces last-active time, working memory,
@@ -552,13 +556,21 @@ Evidence:
   end: seed failed runtime-owned native advance with interrupted verifier, run
   one passive tick to auto-rerun the verifier, then run another passive tick to
   advance the runtime-owned work session.
+- Passive native-work auto-recovery now also supports selected interrupted
+  safe read/git tools. It uses the same recovery-plan priority gate, requires
+  explicit `--allow-read` to cover the interrupted tool's path/cwd, marks the
+  old tool call superseded on success, and falls back to the visible recovery
+  question when read gates are missing.
+- `dogfood --scenario passive-auto-recovery-read` proves the safe-read path end
+  to end with an interrupted `read_file`, a passive auto-retry, and a following
+  passive native advance.
 
 Missing proof:
 
 - Automatic `ask_user` recovery exists for failed passive native-work advances,
-  and exact-command passive auto-retry exists for the narrow interrupted
-  `run_tests` case, but not yet for all interrupted runtime effects or
-  side-effecting write/shell work items.
+  and passive auto-retry now exists for selected interrupted verifier plus
+  safe read/git work-session tools, but not yet for all interrupted runtime
+  effects or side-effecting write/shell work items.
 - World-state revalidation before retry exists for safe read/git and
   interrupted verifier work-session recovery, but not yet for runtime effects or
   write/shell work.
@@ -566,7 +578,7 @@ Missing proof:
 
 Next action:
 
-- Extend safe next-action selection from interrupted verifier recovery into
+- Extend safe next-action selection from work-session tool recovery into
   broader interrupted runtime effects, while keeping side-effecting write/shell
   recovery on explicit review until world-state validation is strong enough.
 
@@ -642,6 +654,17 @@ Next action:
   (`937 passed, 10 subtests passed`), and
   `./mew dogfood --scenario all --json` (pass, including
   `passive-auto-recovery`).
+- Follow-up current: passive native-work auto-recovery now also reruns selected
+  interrupted safe read/git tools under explicit read gates. `claude-ultra`
+  recommended this as the next safest recovery slice, and `codex-ultra`
+  reviewed the implementation with no blockers. Validated with
+  focused runtime recovery tests (`4 passed`),
+  `./mew dogfood --scenario passive-auto-recovery-read --json` (pass),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/runtime.py src/mew/dogfood.py tests/test_runtime.py tests/test_dogfood.py`
+  (pass),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_runtime.py tests/test_work_session.py tests/test_dogfood.py`
+  (`339 passed`), and `./mew dogfood --scenario all --json` (pass, including
+  `passive-auto-recovery-read`).
 - Claude current-HEAD evaluation (`claude-ultra`, session
   `e8ffa27e-5e27-45c9-b37f-68cca4897a95`) verdict: qualified yes for small,
   supervised bounded coding work; the highest-leverage next slice was paired
