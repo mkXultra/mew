@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from mew.cli import main
-from mew.commands import format_work_live_step_result, work_recovery_suggestion_from_plan
+from mew.commands import format_work_live_step_result, work_cockpit_recovery_command, work_recovery_suggestion_from_plan
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
@@ -150,10 +150,54 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(command_suggestion["kind"], "needs_human_review")
         self.assertEqual(command_suggestion["command"], "mew work 1 --session --resume --allow-read .")
+        self.assertEqual(command_suggestion["source_index"], 1)
         self.assertEqual(command_suggestion["effect_classification"], "rollback_needed")
         self.assertEqual(runtime_suggestion["action"], "needs_user_review")
         self.assertEqual(runtime_suggestion["command"], "mew work 1 --session --resume --allow-read .")
         self.assertEqual(runtime_suggestion["effect_classification"], "rollback_needed")
+
+    def test_work_recovery_suggestion_records_selected_source_index(self):
+        plan = {
+            "items": [
+                {
+                    "action": "needs_user_review",
+                    "review_hint": "mew work 1 --session --resume --allow-read .",
+                    "effect_classification": "rollback_needed",
+                },
+                {
+                    "action": "needs_user_review",
+                    "review_hint": "mew work 1 --session --resume --allow-read src",
+                    "effect_classification": "action_committed",
+                },
+            ]
+        }
+
+        suggestion = work_recovery_suggestion_from_plan(plan, task_id=1)
+
+        self.assertEqual(suggestion["source_index"], 0)
+        self.assertEqual(suggestion["command"], "mew work 1 --session --resume --allow-read .")
+
+    def test_work_cockpit_recovery_command_uses_selected_retry_tool_chat_hint(self):
+        plan = {
+            "items": [
+                {
+                    "action": "retry_tool",
+                    "auto_hint": "mew work 1 --recover-session --allow-read old --json",
+                    "chat_auto_hint": "/work-session resume --allow-read old --auto-recover-safe",
+                    "tool_call_id": 1,
+                },
+                {
+                    "action": "retry_tool",
+                    "auto_hint": "mew work 1 --recover-session --allow-read new --json",
+                    "chat_auto_hint": "/work-session resume --allow-read new --auto-recover-safe",
+                    "tool_call_id": 2,
+                },
+            ]
+        }
+
+        command = work_cockpit_recovery_command({"recovery_plan": plan}, task_id=1)
+
+        self.assertEqual(command, "/work-session resume --allow-read new --auto-recover-safe")
 
     def test_work_recovery_effect_classifies_write_risks(self):
         self.assertEqual(

@@ -1713,6 +1713,7 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
     if not items:
         return {}
     item = select_work_recovery_plan_item(recovery_plan)
+    source_index = next((index for index, candidate in enumerate(items) if candidate is item), None)
     action = item.get("action") or "review"
     if action == "retry_tool":
         kind = "retry_read"
@@ -1749,6 +1750,7 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
         "command": command,
         "reason": (recovery_plan or {}).get("next_action") or item.get("reason") or "",
         "source_action": action,
+        "source_index": source_index,
         "source_kind": item.get("kind") or "",
         "effect_classification": item.get("effect_classification") or "",
         "tool_call_id": item.get("tool_call_id"),
@@ -1763,12 +1765,13 @@ def work_cockpit_recovery_command(resume, task_id=None):
         return ""
     items = list(recovery_plan.get("items") or [])
     source_action = suggestion.get("source_action")
-    for item in reversed(items):
-        if item.get("action") != source_action:
-            continue
+    source_index = suggestion.get("source_index")
+    item = {}
+    if isinstance(source_index, int) and 0 <= source_index < len(items):
+        item = items[source_index]
+    if item.get("action") == source_action:
         if source_action == "retry_tool" and item.get("chat_auto_hint"):
             return item.get("chat_auto_hint")
-        break
     return suggestion.get("command") or ""
 
 

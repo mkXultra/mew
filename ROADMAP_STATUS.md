@@ -973,6 +973,12 @@ Next action:
   `action_committed` or `no_action` reviews. Validated with recovery-focused
   tests, `passive-recovery-loop` dogfood, all dogfood scenarios, and full
   pytest (`913 passed, 6 subtests passed`).
+- Mew buddy dogfood task #117/session #139 selected a recovery-cockpit
+  hardening target after inspecting `commands.py`. The landed change preserves
+  the selected recovery item's `source_index` and makes cockpit recovery
+  commands use that exact item for chat auto-recovery hints instead of
+  action-only matching. Validated with `tests/test_work_session.py`, all dogfood
+  scenarios, and full pytest (`915 passed, 6 subtests passed`).
 
 ## Current Roadmap Focus
 
