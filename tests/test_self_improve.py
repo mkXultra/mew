@@ -290,6 +290,33 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_start_session_controls_use_task_cwd_read_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as workdir:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "self-improve",
+                            "--start-session",
+                            "--focus",
+                            "Start native work elsewhere",
+                            "--cwd",
+                            workdir,
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                resolved = str(Path(workdir).resolve())
+                self.assertIn(f"work cwd: {resolved}", output)
+                self.assertIn(f"continue: mew work 1 --live --allow-read {resolved} --max-steps 1", output)
+                self.assertIn(f"follow: mew work 1 --follow --quiet --allow-read {resolved} --max-steps 3", output)
+                self.assertIn(f"resume: mew work 1 --session --resume --allow-read {resolved}", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_cycle_dry_run(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
