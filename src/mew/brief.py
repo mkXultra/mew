@@ -1040,6 +1040,11 @@ def build_brief(state, limit=5, kind=None):
     if runtime.get("last_native_work_step_skip"):
         recovery = f" next={skip_recovery.get('command')}" if skip_recovery.get("command") else ""
         lines.insert(-1, f"native_work_skip: {runtime.get('last_native_work_step_skip')}{recovery}")
+    native_recovery = runtime.get("last_native_work_recovery") or {}
+    if native_recovery.get("action"):
+        status = f" status={native_recovery.get('status')}" if native_recovery.get("status") else ""
+        command = f" command={native_recovery.get('command')}" if native_recovery.get("command") else ""
+        lines.insert(-1, f"native_work_recovery: {native_recovery.get('action')}{status}{command}")
     snapshot_item = _project_snapshot_item(deep.get("project_snapshot"))
     if snapshot_item:
         project_types = ", ".join(snapshot_item.get("project_types") or []) or "(unknown)"

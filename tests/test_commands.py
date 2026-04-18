@@ -939,6 +939,11 @@ class CommandTests(unittest.TestCase):
                         "action": "resolve_pending_write_approval",
                         "command": "mew work 1 --approve-tool 3",
                     }
+                    state["runtime_status"]["last_native_work_recovery"] = {
+                        "action": "auto_retry_verification_completed",
+                        "status": "completed",
+                        "command": "python -V",
+                    }
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -947,6 +952,9 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("last_native_work_step_skip: pending_write_approval", output)
                 self.assertIn('"action": "resolve_pending_write_approval"', output)
                 self.assertIn("mew work 1 --approve-tool 3", output)
+                self.assertIn("last_native_work_recovery:", output)
+                self.assertIn('"action": "auto_retry_verification_completed"', output)
+                self.assertIn("python -V", output)
             finally:
                 os.chdir(old_cwd)
 

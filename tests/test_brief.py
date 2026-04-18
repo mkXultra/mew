@@ -371,11 +371,20 @@ class BriefTests(unittest.TestCase):
             "action": "resolve_pending_write_approval",
             "command": "mew work 1 --approve-tool 3",
         }
+        state["runtime_status"]["last_native_work_recovery"] = {
+            "action": "auto_retry_verification_completed",
+            "status": "completed",
+            "command": "python -V",
+        }
 
         brief = build_brief(state)
 
         self.assertIn(
             "native_work_skip: pending_write_approval next=mew work 1 --approve-tool 3",
+            brief,
+        )
+        self.assertIn(
+            "native_work_recovery: auto_retry_verification_completed status=completed command=python -V",
             brief,
         )
 

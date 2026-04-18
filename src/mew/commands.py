@@ -6218,6 +6218,10 @@ def cmd_status(args):
         "last_native_work_skip_recovery: "
         f"{json.dumps(runtime.get('last_native_work_skip_recovery') or {}, ensure_ascii=False)}"
     )
+    print(
+        "last_native_work_recovery: "
+        f"{json.dumps(runtime.get('last_native_work_recovery') or {}, ensure_ascii=False)}"
+    )
     print(f"last_agent_reflex_at: {runtime.get('last_agent_reflex_at') or ''}")
     print(
         "last_agent_reflex_report: "
