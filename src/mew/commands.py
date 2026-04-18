@@ -1728,6 +1728,22 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
     }
 
 
+def work_cockpit_recovery_command(resume, task_id=None):
+    recovery_plan = (resume or {}).get("recovery_plan") or {}
+    suggestion = work_recovery_suggestion_from_plan(recovery_plan, task_id=task_id)
+    if not suggestion:
+        return ""
+    items = list(recovery_plan.get("items") or [])
+    source_action = suggestion.get("source_action")
+    for item in reversed(items):
+        if item.get("action") != source_action:
+            continue
+        if source_action == "retry_tool" and item.get("chat_auto_hint"):
+            return item.get("chat_auto_hint")
+        break
+    return suggestion.get("command") or ""
+
+
 def write_work_follow_snapshot(args, report, session, task, resume, step=None, force=False, mode=None):
     if not force and not getattr(args, "live", False):
         return None
@@ -9350,9 +9366,9 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         lines.append("- /work-session close")
         return "\n".join(lines)
 
-    recovery_items = ((resume or {}).get("recovery_plan") or {}).get("items") or []
-    if any(item.get("action") == "retry_tool" for item in recovery_items):
-        lines.append(f"- /work-session resume{task_suffix} --allow-read . --auto-recover-safe")
+    recovery_command = work_cockpit_recovery_command(resume, task_id=task_id)
+    if recovery_command:
+        lines.append(f"- {recovery_command}")
     if (resume or {}).get("approve_all_hint"):
         lines.append(f"- {(resume or {}).get('approve_all_hint')}")
     for approval in (resume or {}).get("pending_approvals") or []:

@@ -3928,11 +3928,11 @@ class WorkSessionTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work-session 1", {}), "continue")
-                self.assertIn("/work-session resume 1 --allow-read . --auto-recover-safe", stdout.getvalue())
+                self.assertIn("/work-session resume 1 --allow-read one.md --auto-recover-safe", stdout.getvalue())
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
-                        run_chat_slash_command("/work-session resume 1 --allow-read . --auto-recover-safe", {}),
+                        run_chat_slash_command("/work-session resume 1 --allow-read one.md --auto-recover-safe", {}),
                         "continue",
                     )
                 output = stdout.getvalue()
@@ -4021,6 +4021,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("recover-session", items[1]["hint"])
 
     def test_work_recovery_plan_includes_side_effect_review_context(self):
+        from mew.commands import format_work_cockpit_controls
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
         session = {
@@ -4066,6 +4067,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("review: ./mew work 1 --session --resume --allow-read README.md", text)
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
+        controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
+        self.assertIn("./mew work 1 --session --resume --allow-read README.md", controls)
 
     def test_work_recover_session_reports_review_context_for_side_effects(self):
         old_cwd = os.getcwd()
