@@ -206,6 +206,11 @@ def build_parser():
         help="allow autonomous programmer loop to start native mew work sessions",
     )
     run_parser.add_argument(
+        "--allow-native-advance",
+        action="store_true",
+        help="allow autonomous runtime to advance runtime-owned native work sessions one bounded step",
+    )
+    run_parser.add_argument(
         "--agent-stale-minutes",
         type=float,
         default=60.0,
@@ -702,6 +707,11 @@ def build_parser():
     dogfood_parser.add_argument("--execute-tasks", action="store_true", help="allow runtime task execution gates during dogfood")
     dogfood_parser.add_argument("--allow-agent-run", action="store_true", help="allow runtime programmer agent dispatch during dogfood")
     dogfood_parser.add_argument("--allow-native-work", action="store_true", help="allow runtime native work session start during dogfood")
+    dogfood_parser.add_argument(
+        "--allow-native-advance",
+        action="store_true",
+        help="allow runtime native work session advance during dogfood",
+    )
     dogfood_parser.add_argument(
         "--agent-stale-minutes",
         type=float,

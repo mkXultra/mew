@@ -56,6 +56,17 @@ from .state import (
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso
 from .toolbox import run_command_record
+from .work_session import (
+    active_work_sessions,
+    add_work_session_note,
+    find_work_session,
+    mark_work_session_running_interrupted,
+    work_session_has_pending_write_approval,
+    work_session_has_running_activity,
+    work_session_runtime_command,
+    work_session_started_by_runtime,
+    work_session_task,
+)
 
 
 def set_runtime_running(state, started_at):
@@ -103,6 +114,7 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
     autonomy.setdefault("resumed_at", None)
     autonomy["allow_agent_run"] = bool(args.allow_agent_run)
     autonomy["allow_native_work"] = bool(getattr(args, "allow_native_work", False))
+    autonomy["allow_native_advance"] = bool(getattr(args, "allow_native_advance", False))
     autonomy["allow_verify"] = bool(args.allow_verify)
     autonomy["verify_command_configured"] = bool(args.verify_command)
     autonomy["allow_write"] = bool(args.allow_write)
@@ -114,6 +126,8 @@ def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
         "autonomy_level": effective_level if autonomous_for_cycle else "off",
         "allow_agent_run": bool(args.allow_agent_run) and autonomous_for_cycle,
         "allow_native_work": bool(getattr(args, "allow_native_work", False))
+        and autonomous_for_cycle,
+        "allow_native_advance": bool(getattr(args, "allow_native_advance", False))
         and autonomous_for_cycle,
     }
 
@@ -201,6 +215,9 @@ def apply_runtime_event_plans(
         work_model_backend=work_model_backend,
         work_model=work_model,
         work_base_url=work_base_url,
+        work_model_timeout=args.timeout,
+        work_verify_timeout=args.verify_timeout,
+        work_tool_timeout=args.task_timeout,
     )
     if counts is None:
         counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
@@ -218,6 +235,130 @@ def apply_runtime_event_plans(
         autonomous=autonomy_controls["autonomous"],
     )
     return processed_count, counts
+
+
+def runtime_native_work_step_command(session, task_id):
+    command_session = deepcopy(session or {})
+    defaults = command_session.setdefault("default_options", {})
+    defaults["quiet"] = True
+    defaults["compact_live"] = True
+    defaults["no_prompt_approval"] = True
+    defaults.pop("prompt_approval", None)
+    return work_session_runtime_command(command_session, task_id, follow=False, max_steps=1)
+
+
+def runtime_native_work_step_timeout(args, session=None):
+    defaults = (session or {}).get("default_options") or {}
+    model_timeout = float(defaults.get("model_timeout") or getattr(args, "timeout", 60.0) or 60.0)
+    tool_timeout = float(defaults.get("tool_timeout") or getattr(args, "task_timeout", 300.0) or 300.0)
+    verify_timeout = float(defaults.get("verify_timeout") or getattr(args, "verify_timeout", 300.0) or 300.0)
+    return max(30.0, model_timeout + tool_timeout + verify_timeout + 30.0)
+
+
+def select_runtime_native_work_step(state, *, current_event_id=None):
+    active_sessions = active_work_sessions(state)
+    if not active_sessions:
+        return None, "no_active_work_session"
+
+    human_sessions = [
+        session
+        for session in active_sessions
+        if not work_session_started_by_runtime(session)
+    ]
+    if human_sessions:
+        return None, "human_work_session_active"
+
+    runtime_sessions = [
+        session
+        for session in active_sessions
+        if work_session_started_by_runtime(session)
+    ]
+    if len(runtime_sessions) > 1:
+        return None, "multiple_runtime_work_sessions_active"
+
+    session = runtime_sessions[0]
+    task = work_session_task(state, session)
+    if task and task.get("status") == "done":
+        return None, "task_done"
+    if current_event_id is not None and str(session.get("runtime_started_event_id")) == str(current_event_id):
+        return None, "session_started_this_cycle"
+    if session.get("stop_requested_at"):
+        return None, "stop_requested"
+    if work_session_has_running_activity(session):
+        return None, "work_session_running"
+    if work_session_has_pending_write_approval(session):
+        return None, "pending_write_approval"
+
+    task_id = (task or {}).get("id") or session.get("task_id")
+    return (
+        {
+            "session_id": session.get("id"),
+            "task_id": task_id,
+            "command": runtime_native_work_step_command(session, task_id),
+        },
+        None,
+    )
+
+
+def run_runtime_native_work_step(step, args):
+    with state_lock():
+        state = load_state()
+        selected, skip = select_runtime_native_work_step(state)
+        if not selected or str(selected.get("session_id")) != str(step.get("session_id")):
+            skipped_at = now_iso()
+            state.setdefault("runtime_status", {})["last_native_work_step_skip"] = f"prelaunch_{skip or 'changed'}"
+            state["runtime_status"]["last_native_work_step"] = {
+                "finished_at": skipped_at,
+                "session_id": step.get("session_id"),
+                "task_id": step.get("task_id"),
+                "command": step.get("command"),
+                "outcome": "skipped",
+                "skip_reason": skip or "changed",
+            }
+            save_state(state)
+            return {
+                "command": step.get("command"),
+                "exit_code": 0,
+                "skipped": True,
+                "skip_reason": skip or "changed",
+            }
+        session = find_work_session(state, step.get("session_id"))
+        timeout = runtime_native_work_step_timeout(args, session)
+    result = run_command_record(
+        step["command"],
+        cwd=".",
+        timeout=timeout,
+    )
+    finished_at = now_iso()
+    success = result.get("exit_code") == 0 and not result.get("timed_out")
+    outcome = "completed" if success else "failed"
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, step.get("session_id"))
+        repairs = []
+        if session:
+            if result.get("timed_out"):
+                repairs = mark_work_session_running_interrupted(session, current_time=finished_at)
+            add_work_session_note(
+                session,
+                f"runtime passive advance step {outcome}: {step['command']}",
+                source="runtime",
+                current_time=finished_at,
+            )
+        state.setdefault("runtime_status", {})["last_native_work_step"] = {
+            "finished_at": finished_at,
+            "session_id": step.get("session_id"),
+            "task_id": step.get("task_id"),
+            "command": step.get("command"),
+            "exit_code": result.get("exit_code"),
+            "timed_out": bool(result.get("timed_out")),
+            "outcome": outcome,
+            "repairs": repairs,
+        }
+        state["runtime_status"]["last_action"] = f"native work step {outcome}"
+        save_state(state)
+    return result
+
 
 def action_types_for_plan(action_plan):
     if not isinstance(action_plan, dict):
@@ -502,6 +643,8 @@ def run_runtime(args):
             print("autonomous agent runs allowed")
         if getattr(args, "allow_native_work", False):
             print("autonomous native work sessions allowed")
+        if getattr(args, "allow_native_advance", False):
+            print("autonomous native work advance allowed")
         if args.allow_verify:
             print("runtime verification allowed")
             if args.verify_command:
@@ -531,6 +674,7 @@ def run_runtime(args):
             state_snapshot = None
             decision_plan = None
             action_plan = None
+            native_work_step = None
             precomputed_effects = False
             current_time = None
             cycle_started_monotonic = None
@@ -544,6 +688,7 @@ def run_runtime(args):
                 "autonomy_level": "off",
                 "allow_agent_run": False,
                 "allow_native_work": False,
+                "allow_native_advance": False,
             }
             outbox_ids_before = set()
             with state_lock():
@@ -840,12 +985,54 @@ def run_runtime(args):
                         if str(message.get("id")) not in outbox_ids_before
                         and not message.get("read_at")
                     ]
+                if (
+                    reason == "passive_tick"
+                    and processed_count
+                    and autonomy_controls.get("allow_native_advance")
+                ):
+                    native_work_step, native_work_skip = select_runtime_native_work_step(
+                        state,
+                        current_event_id=event_id,
+                    )
+                    runtime_status["last_native_work_step_skip"] = native_work_skip
+                    if native_work_step:
+                        runtime_status["last_action"] = (
+                            f"selected native work step for session #{native_work_step.get('session_id')}"
+                        )
                 save_state(state)
                 first = False
                 if reason in ("startup", "passive_tick"):
                     next_passive_at = time.time() + args.interval
 
             print(f"processed {processed_count} event(s) reason={reason}")
+            if native_work_step:
+                print(
+                    "advancing native work "
+                    f"session=#{native_work_step.get('session_id')} task=#{native_work_step.get('task_id')}"
+                )
+                native_result = run_runtime_native_work_step(native_work_step, args)
+                if native_result.get("skipped"):
+                    append_log(
+                        "- "
+                        f"{now_iso()}: native work advance skipped "
+                        f"session={native_work_step.get('session_id')} "
+                        f"reason={native_result.get('skip_reason')}"
+                    )
+                elif native_result.get("exit_code") in (0,):
+                    append_log(
+                        "- "
+                        f"{now_iso()}: native work advance completed "
+                        f"session={native_work_step.get('session_id')} "
+                        f"task={native_work_step.get('task_id')}"
+                    )
+                else:
+                    append_log(
+                        "- "
+                        f"{now_iso()}: native work advance failed "
+                        f"session={native_work_step.get('session_id')} "
+                        f"exit_code={native_result.get('exit_code')} "
+                        f"stderr={native_result.get('stderr')!r}"
+                    )
             if effect_summary:
                 print(effect_summary)
             if args.echo_outbox:

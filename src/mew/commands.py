@@ -161,6 +161,7 @@ from .validation import format_validation_issues, validate_state, validation_err
 from .write_tools import edit_file, summarize_write_result, write_file
 from .work_session import (
     active_work_session,
+    active_work_sessions,
     add_work_session_note,
     attach_work_resume_world_state,
     build_work_session_resume,
@@ -2709,6 +2710,31 @@ def cmd_work_ai(args):
             print(format_work_cli_controls(session, args))
         return 0
 
+    with state_lock():
+        state = load_state()
+        running_sessions = [
+            candidate
+            for candidate in active_work_sessions(state)
+            if work_session_has_running_activity(candidate)
+        ]
+    if running_sessions:
+        blocked_by = running_sessions[0]
+        report["stop_reason"] = "work_already_running"
+        report["blocked_by_session_id"] = blocked_by.get("id")
+        report["blocked_by_task_id"] = blocked_by.get("task_id")
+        if progress:
+            progress(f"work session #{blocked_by.get('id')} is already running")
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
+            if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                print(format_work_cli_controls(session, args))
+        return 1
+
     try:
         model_backend = normalize_model_backend(effective_args.model_backend)
     except MewError as exc:
@@ -2854,6 +2880,19 @@ def cmd_work_ai(args):
 
         with state_lock():
             state = load_state()
+            running_sessions = [
+                candidate
+                for candidate in active_work_sessions(state)
+                if work_session_has_running_activity(candidate)
+            ]
+            if running_sessions:
+                blocked_by = running_sessions[0]
+                report["stop_reason"] = "work_already_running"
+                report["blocked_by_session_id"] = blocked_by.get("id")
+                report["blocked_by_task_id"] = blocked_by.get("task_id")
+                if progress:
+                    progress(f"step #{index}: work session #{blocked_by.get('id')} is already running")
+                break
             session = find_work_session(state, session_id)
             planning_turn = start_work_model_turn(
                 state,
@@ -3387,7 +3426,12 @@ def cmd_work_ai(args):
             print(format_work_cli_controls(session, args))
     if report.get("stop_reason") == "user_interrupt":
         return 130
-    return 0 if report.get("stop_reason") not in ("model_error", "tool_failed", "no_active_session") else 1
+    return 0 if report.get("stop_reason") not in (
+        "model_error",
+        "tool_failed",
+        "no_active_session",
+        "work_already_running",
+    ) else 1
 
 
 def _select_active_work_session_for_args(state, args):

@@ -3356,11 +3356,18 @@ class AutonomyTests(unittest.TestCase):
             work_model_backend="codex",
             work_model="gpt-5.4",
             work_base_url="https://example.test",
+            work_model_timeout=120,
+            work_verify_timeout=45,
+            work_tool_timeout=30,
         )
 
         self.assertEqual(len(state["work_sessions"]), 1)
         session = state["work_sessions"][0]
         self.assertEqual(session["task_id"], task["id"])
+        self.assertEqual(session["owner"], "runtime")
+        self.assertTrue(session["runtime_managed"])
+        self.assertEqual(session["runtime_started_event_id"], event["id"])
+        self.assertTrue(session["runtime_started_at"])
         self.assertEqual(session["default_options"]["allow_read"], ["src"])
         self.assertEqual(session["default_options"]["allow_write"], ["docs"])
         self.assertTrue(session["default_options"]["allow_verify"])
@@ -3369,10 +3376,16 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(session["default_options"]["model_backend"], "codex")
         self.assertEqual(session["default_options"]["model"], "gpt-5.4")
         self.assertEqual(session["default_options"]["base_url"], "https://example.test")
+        self.assertEqual(session["default_options"]["model_timeout"], 120.0)
+        self.assertEqual(session["default_options"]["verify_timeout"], 45.0)
+        self.assertEqual(session["default_options"]["tool_timeout"], 30.0)
         self.assertIn("runtime:passive_tick started native work", session["notes"][0]["text"])
         self.assertIn("./mew code 1", state["outbox"][-1]["text"])
         self.assertIn("work 1 --live --auth auth.json", state["outbox"][-1]["text"])
         self.assertIn("--model gpt-5.4", state["outbox"][-1]["text"])
+        self.assertIn("--model-timeout 120.0", state["outbox"][-1]["text"])
+        self.assertIn("--verify-timeout 45.0", state["outbox"][-1]["text"])
+        self.assertIn("--timeout 30.0", state["outbox"][-1]["text"])
         self.assertIn("--verify-command 'uv run pytest -q'", state["outbox"][-1]["text"])
         self.assertEqual(state["outbox"][-1]["type"], "assistant")
         self.assertIsNone(state["outbox"][-1]["read_at"])

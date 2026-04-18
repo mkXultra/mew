@@ -14,9 +14,11 @@ from mew.runtime import (
     compact_agent_reflex_report,
     guidance_with_runtime_focus,
     run_runtime_post_run_pipeline,
+    select_runtime_native_work_step,
     should_defer_commit_for_user_message,
 )
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
+from mew.work_session import create_work_session, mark_work_session_runtime_owned
 
 
 class RuntimeTests(unittest.TestCase):
@@ -95,6 +97,7 @@ class RuntimeTests(unittest.TestCase):
             autonomy_level="act",
             allow_agent_run=False,
             allow_native_work=True,
+            allow_native_advance=True,
             allow_verify=False,
             verify_command="",
             allow_write=False,
@@ -104,8 +107,96 @@ class RuntimeTests(unittest.TestCase):
         blocked = apply_runtime_autonomy_controls(state, args, pending_user=True, current_time="later")
 
         self.assertTrue(controls["allow_native_work"])
+        self.assertTrue(controls["allow_native_advance"])
         self.assertTrue(state["autonomy"]["allow_native_work"])
         self.assertFalse(blocked["allow_native_work"])
+        self.assertFalse(blocked["allow_native_advance"])
+
+    def test_select_runtime_native_work_step_uses_runtime_owned_session_defaults(self):
+        state = default_state()
+        task = {
+            "id": 1,
+            "title": "Improve mew",
+            "description": "",
+            "status": "ready",
+            "kind": "coding",
+            "plans": [],
+            "runs": [],
+        }
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(session, event_id=7, current_time="now")
+        session["default_options"] = {
+            "auth": "auth.json",
+            "model_backend": "codex",
+            "model": "gpt-5.4",
+            "allow_read": ["."],
+            "prompt_approval": True,
+            "model_timeout": 120,
+            "verify_timeout": 45,
+            "tool_timeout": 30,
+        }
+
+        step, skip = select_runtime_native_work_step(state)
+
+        self.assertIsNone(skip)
+        self.assertEqual(step["session_id"], session["id"])
+        self.assertEqual(step["task_id"], task["id"])
+        self.assertIn("work 1 --live --auth auth.json", step["command"])
+        self.assertIn("--model-backend codex", step["command"])
+        self.assertIn("--model gpt-5.4", step["command"])
+        self.assertIn("--allow-read .", step["command"])
+        self.assertIn("--model-timeout 120", step["command"])
+        self.assertIn("--verify-timeout 45", step["command"])
+        self.assertIn("--timeout 30", step["command"])
+        self.assertIn("--quiet", step["command"])
+        self.assertIn("--compact-live", step["command"])
+        self.assertIn("--no-prompt-approval", step["command"])
+        self.assertNotIn("--prompt-approval", step["command"])
+        self.assertIn("--max-steps 1", step["command"])
+
+    def test_select_runtime_native_work_step_skips_human_session(self):
+        state = default_state()
+        task = {"id": 1, "title": "Human task", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        create_work_session(state, task)
+
+        step, skip = select_runtime_native_work_step(state)
+
+        self.assertIsNone(step)
+        self.assertEqual(skip, "human_work_session_active")
+
+    def test_select_runtime_native_work_step_skips_pending_write_approval(self):
+        state = default_state()
+        task = {"id": 1, "title": "Write task", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(session, event_id=7, current_time="now")
+        session["tool_calls"].append(
+            {
+                "id": 1,
+                "tool": "write_file",
+                "status": "completed",
+                "result": {"dry_run": True, "changed": True},
+            }
+        )
+
+        step, skip = select_runtime_native_work_step(state)
+
+        self.assertIsNone(step)
+        self.assertEqual(skip, "pending_write_approval")
+
+    def test_select_runtime_native_work_step_skips_session_started_this_cycle(self):
+        state = default_state()
+        task = {"id": 1, "title": "New runtime task", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(session, event_id=7, current_time="now")
+
+        step, skip = select_runtime_native_work_step(state, current_event_id=7)
+
+        self.assertIsNone(step)
+        self.assertEqual(skip, "session_started_this_cycle")
 
     def test_should_defer_commit_for_new_user_message(self):
         state = default_state()
@@ -279,6 +370,165 @@ class RuntimeTests(unittest.TestCase):
                     state = load_state()
                 self.assertEqual([event["type"] for event in state["inbox"]], ["passive_tick"])
                 self.assertEqual(state["runtime_status"]["last_cycle_reason"], "passive_tick")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_advances_runtime_owned_native_work(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="before")
+                    session["default_options"] = {"allow_read": ["."], "auth": "auth.json"}
+                    save_state(state)
+
+                def fake_run_command(command, cwd=None, timeout=None):
+                    with state_lock():
+                        state = load_state()
+                        state.setdefault("test_observations", {})["runner_acquired_state_lock"] = True
+                        save_state(state)
+                    return {
+                        "command": command,
+                        "argv": command.split(),
+                        "cwd": cwd or ".",
+                        "started_at": "start",
+                        "finished_at": "finish",
+                        "exit_code": 0,
+                        "stdout": "ok",
+                        "stderr": "",
+                    }
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record", side_effect=fake_run_command) as runner,
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertIn("advancing native work session=#1 task=#1", stdout.getvalue())
+                runner.assert_called_once()
+                command = runner.call_args.args[0]
+                self.assertIn("work 1 --live --auth auth.json", command)
+                self.assertIn("--quiet", command)
+                self.assertIn("--compact-live", command)
+                self.assertIn("--no-prompt-approval", command)
+                self.assertIn("--max-steps 1", command)
+                with state_lock():
+                    state = load_state()
+                self.assertTrue(state["test_observations"]["runner_acquired_state_lock"])
+                self.assertEqual(state["runtime_status"]["last_native_work_step"]["outcome"], "completed")
+                self.assertIn("runtime passive advance step completed", state["work_sessions"][0]["notes"][-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_marks_timed_out_native_work_running_records_interrupted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="before")
+                    session["default_options"] = {"allow_read": ["."]}
+                    save_state(state)
+
+                def fake_timeout(command, cwd=None, timeout=None):
+                    with state_lock():
+                        state = load_state()
+                        state["work_sessions"][0]["model_turns"].append({"id": 1, "status": "running"})
+                        save_state(state)
+                    return {
+                        "command": command,
+                        "argv": command.split(),
+                        "cwd": cwd or ".",
+                        "started_at": "start",
+                        "finished_at": "finish",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "",
+                        "stderr": "timed out",
+                    }
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record", side_effect=fake_timeout),
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                with state_lock():
+                    state = load_state()
+                turn = state["work_sessions"][0]["model_turns"][0]
+                self.assertEqual(turn["status"], "interrupted")
+                self.assertIn("Interrupted before the work model turn completed.", turn["error"])
+                step = state["runtime_status"]["last_native_work_step"]
+                self.assertEqual(step["outcome"], "failed")
+                self.assertTrue(step["timed_out"])
+                self.assertEqual(step["repairs"][0]["type"], "interrupted_work_model_turn")
             finally:
                 os.chdir(old_cwd)
 

@@ -124,6 +124,15 @@ def active_work_session(state):
     return None
 
 
+def active_work_sessions(state):
+    sessions = []
+    for session in state.get("work_sessions", []):
+        task = work_session_task(state, session)
+        if session.get("status") == "active" and (not task or task.get("status") != "done"):
+            sessions.append(session)
+    return sessions
+
+
 def work_session_for_task(state, task_id):
     wanted = str(task_id)
     for session in reversed(state.get("work_sessions", [])):
@@ -223,6 +232,9 @@ def seed_work_session_runtime_defaults(
     model_backend="",
     model="",
     base_url="",
+    model_timeout=None,
+    verify_timeout=None,
+    tool_timeout=None,
     source="runtime",
     reason="",
     current_time=None,
@@ -248,6 +260,13 @@ def seed_work_session_runtime_defaults(
     ):
         if value:
             defaults[key] = value
+    for key, value in (
+        ("model_timeout", model_timeout),
+        ("verify_timeout", verify_timeout),
+        ("tool_timeout", tool_timeout),
+    ):
+        if value not in (None, ""):
+            defaults[key] = float(value)
     if source or reason:
         note_text = f"{source or 'runtime'} started native work"
         if reason:
@@ -255,6 +274,48 @@ def seed_work_session_runtime_defaults(
         add_work_session_note(session, note_text, source="runtime", current_time=current_time)
     session["updated_at"] = current_time or now_iso()
     return defaults
+
+
+def mark_work_session_runtime_owned(session, *, event_id=None, current_time=None):
+    if not session:
+        return session
+    session["owner"] = "runtime"
+    session["runtime_managed"] = True
+    session.setdefault("runtime_started_at", current_time or now_iso())
+    if event_id is not None:
+        session["runtime_started_event_id"] = event_id
+    session["updated_at"] = current_time or now_iso()
+    return session
+
+
+def work_session_started_by_runtime(session):
+    if not session:
+        return False
+    if (
+        session.get("runtime_managed") is True
+        or session.get("owner") == "runtime"
+        or bool(session.get("runtime_started_at"))
+    ):
+        return True
+    return any(
+        (note or {}).get("source") == "runtime" and "started native work" in str((note or {}).get("text") or "")
+        for note in session.get("notes") or []
+    )
+
+
+def work_session_has_pending_write_approval(session):
+    if not session:
+        return False
+    for call in session.get("tool_calls") or []:
+        result = call.get("result") or {}
+        if (
+            call.get("tool") in WRITE_WORK_TOOLS
+            and result.get("dry_run")
+            and result.get("changed")
+            and call.get("approval_status") not in ("applying", "applied", "rejected")
+        ):
+            return True
+    return False
 
 
 def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1):
@@ -281,6 +342,12 @@ def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1)
         parts.append("--allow-verify")
     if defaults.get("verify_command"):
         parts.extend(["--verify-command", defaults["verify_command"]])
+    if defaults.get("model_timeout") is not None:
+        parts.extend(["--model-timeout", defaults["model_timeout"]])
+    if defaults.get("verify_timeout") is not None:
+        parts.extend(["--verify-timeout", defaults["verify_timeout"]])
+    if defaults.get("tool_timeout") is not None:
+        parts.extend(["--timeout", defaults["tool_timeout"]])
     if defaults.get("act_mode"):
         parts.extend(["--act-mode", defaults["act_mode"]])
     if defaults.get("compact_live"):
@@ -358,55 +425,63 @@ def mark_running_work_interrupted(state, current_time=None):
     for session in state.get("work_sessions", []):
         if not isinstance(session, dict):
             continue
-        changed = False
-        recovery_hint = (
-            f"Review work session #{session.get('id')} resume, verify world state, then retry or choose a new action."
-        )
-        for call in session.get("tool_calls") or []:
-            if not isinstance(call, dict) or call.get("status") != "running":
-                continue
-            call["status"] = "interrupted"
-            call["finished_at"] = current_time
-            call["error"] = call.get("error") or "Interrupted before the work tool completed."
-            call["summary"] = call.get("summary") or "interrupted work tool call"
-            call["recovery_hint"] = recovery_hint
-            repairs.append(
-                {
-                    "type": "interrupted_work_tool_call",
-                    "session_id": session.get("id"),
-                    "task_id": session.get("task_id"),
-                    "tool_call_id": call.get("id"),
-                    "tool": call.get("tool"),
-                    "old_status": "running",
-                    "new_status": "interrupted",
-                    "recovery_hint": recovery_hint,
-                }
-            )
-            changed = True
-        for turn in session.get("model_turns") or []:
-            if not isinstance(turn, dict) or turn.get("status") != "running":
-                continue
-            turn["status"] = "interrupted"
-            turn["finished_at"] = current_time
-            turn["error"] = turn.get("error") or "Interrupted before the work model turn completed."
-            turn["summary"] = turn.get("summary") or "interrupted work model turn"
-            turn["recovery_hint"] = recovery_hint
-            repairs.append(
-                {
-                    "type": "interrupted_work_model_turn",
-                    "session_id": session.get("id"),
-                    "task_id": session.get("task_id"),
-                    "model_turn_id": turn.get("id"),
-                    "old_status": "running",
-                    "new_status": "interrupted",
-                    "recovery_hint": recovery_hint,
-                }
-            )
-            changed = True
-        if changed:
-            session["updated_at"] = current_time
+        repairs.extend(mark_work_session_running_interrupted(session, current_time=current_time))
     return repairs
 
+
+def mark_work_session_running_interrupted(session, current_time=None):
+    current_time = current_time or now_iso()
+    repairs = []
+    if not isinstance(session, dict):
+        return repairs
+    changed = False
+    recovery_hint = (
+        f"Review work session #{session.get('id')} resume, verify world state, then retry or choose a new action."
+    )
+    for call in session.get("tool_calls") or []:
+        if not isinstance(call, dict) or call.get("status") != "running":
+            continue
+        call["status"] = "interrupted"
+        call["finished_at"] = current_time
+        call["error"] = call.get("error") or "Interrupted before the work tool completed."
+        call["summary"] = call.get("summary") or "interrupted work tool call"
+        call["recovery_hint"] = recovery_hint
+        repairs.append(
+            {
+                "type": "interrupted_work_tool_call",
+                "session_id": session.get("id"),
+                "task_id": session.get("task_id"),
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool"),
+                "old_status": "running",
+                "new_status": "interrupted",
+                "recovery_hint": recovery_hint,
+            }
+        )
+        changed = True
+    for turn in session.get("model_turns") or []:
+        if not isinstance(turn, dict) or turn.get("status") != "running":
+            continue
+        turn["status"] = "interrupted"
+        turn["finished_at"] = current_time
+        turn["error"] = turn.get("error") or "Interrupted before the work model turn completed."
+        turn["summary"] = turn.get("summary") or "interrupted work model turn"
+        turn["recovery_hint"] = recovery_hint
+        repairs.append(
+            {
+                "type": "interrupted_work_model_turn",
+                "session_id": session.get("id"),
+                "task_id": session.get("task_id"),
+                "model_turn_id": turn.get("id"),
+                "old_status": "running",
+                "new_status": "interrupted",
+                "recovery_hint": recovery_hint,
+            }
+        )
+        changed = True
+    if changed:
+        session["updated_at"] = current_time
+    return repairs
 
 def start_work_tool_call(state, session, tool, parameters):
     current_time = now_iso()

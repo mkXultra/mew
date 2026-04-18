@@ -83,6 +83,7 @@ from .thoughts import (
 )
 from .work_session import (
     create_work_session,
+    mark_work_session_runtime_owned,
     seed_work_session_runtime_defaults,
     work_session_for_task,
     work_session_runtime_command,
@@ -2132,6 +2133,9 @@ def apply_start_work_session_action(
     work_model_backend="",
     work_model="",
     work_base_url="",
+    work_model_timeout=None,
+    work_verify_timeout=None,
+    work_tool_timeout=None,
 ):
     task_id = action.get("task_id")
     eligibility = native_work_start_eligibility(
@@ -2164,10 +2168,14 @@ def apply_start_work_session_action(
         model_backend=work_model_backend,
         model=work_model,
         base_url=work_base_url,
+        model_timeout=work_model_timeout,
+        verify_timeout=work_verify_timeout,
+        tool_timeout=work_tool_timeout,
         source=f"runtime:{event.get('type')}",
         reason=action.get("reason") or "native work session started by autonomous runtime",
         current_time=current_time,
     )
+    mark_work_session_runtime_owned(session, event_id=event.get("id"), current_time=current_time)
     verb = "Started" if created else "Reused"
     live_command = work_session_runtime_command(session, task["id"], max_steps=1)
     follow_command = work_session_runtime_command(session, task["id"], follow=True, max_steps=10)
@@ -2740,6 +2748,9 @@ def apply_action_plan(
     work_model_backend="",
     work_model="",
     work_base_url="",
+    work_model_timeout=None,
+    work_verify_timeout=None,
+    work_tool_timeout=None,
 ):
     counts = new_action_counts()
     action_plan = suppress_done_task_wait_actions(state, action_plan)
@@ -2864,6 +2875,9 @@ def apply_action_plan(
                 work_model_backend=work_model_backend,
                 work_model=work_model,
                 work_base_url=work_base_url,
+                work_model_timeout=work_model_timeout,
+                work_verify_timeout=work_verify_timeout,
+                work_tool_timeout=work_tool_timeout,
             )
         elif action_type == "dispatch_task":
             counts["messages"] += apply_dispatch_task_action(
@@ -3239,6 +3253,9 @@ def apply_event_plans(
     work_model_backend="",
     work_model="",
     work_base_url="",
+    work_model_timeout=None,
+    work_verify_timeout=None,
+    work_tool_timeout=None,
 ):
     event = find_event(state, event_id)
     if not event or event.get("processed_at"):
@@ -3268,6 +3285,9 @@ def apply_event_plans(
         work_model_backend=work_model_backend,
         work_model=work_model,
         work_base_url=work_base_url,
+        work_model_timeout=work_model_timeout,
+        work_verify_timeout=work_verify_timeout,
+        work_tool_timeout=work_tool_timeout,
     )
     event["decision_plan"] = decision_plan
     event["action_plan"] = public_action_plan(action_plan)

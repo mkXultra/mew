@@ -16,7 +16,7 @@ from mew.cli import main
 from mew.commands import format_work_live_step_result
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
-from mew.work_session import format_diff_preview, format_work_action, format_work_session_tests
+from mew.work_session import create_work_session, format_diff_preview, format_work_action, format_work_session_tests
 
 
 def add_coding_task(state):
@@ -67,6 +67,27 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(stdout.flush_count, 1)
         self.assertIn("mew work ai: THINK ok", stderr.getvalue())
+
+    def test_work_live_refuses_when_any_work_session_is_already_running(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["model_turns"].append({"id": 1, "status": "running"})
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    code = main(["work", "1", "--live", "--allow-read", ".", "--max-steps", "1"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("work_already_running", stdout.getvalue())
+                self.assertIn("session=#1 task=#1", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
 
     def test_work_live_step_result_groups_sections_and_tool_duration(self):
         text = format_work_live_step_result(

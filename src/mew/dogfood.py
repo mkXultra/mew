@@ -191,6 +191,8 @@ def build_runtime_command(args, workspace):
         command.append("--allow-agent-run")
     if getattr(args, "allow_native_work", False):
         command.append("--allow-native-work")
+    if getattr(args, "allow_native_advance", False):
+        command.append("--allow-native-advance")
     if getattr(args, "agent_stale_minutes", None) is not None:
         command.extend(["--agent-stale-minutes", str(args.agent_stale_minutes)])
     if getattr(args, "agent_result_timeout", None) is not None:

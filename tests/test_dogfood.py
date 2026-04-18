@@ -142,6 +142,7 @@ class DogfoodTests(unittest.TestCase):
             execute_tasks=True,
             allow_agent_run=True,
             allow_native_work=True,
+            allow_native_advance=True,
             agent_stale_minutes=3.0,
             agent_result_timeout=4.0,
             agent_start_timeout=5.0,
@@ -157,6 +158,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertIn("--execute-tasks", command)
         self.assertIn("--allow-agent-run", command)
         self.assertIn("--allow-native-work", command)
+        self.assertIn("--allow-native-advance", command)
         self.assertEqual(command[command.index("--agent-stale-minutes") + 1], "3.0")
         self.assertEqual(command[command.index("--agent-result-timeout") + 1], "4.0")
         self.assertEqual(command[command.index("--agent-start-timeout") + 1], "5.0")
