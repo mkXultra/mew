@@ -359,8 +359,11 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
         f"Inspect with `{resume_command}`. "
     )
     if recovery_suggestion:
+        effect_part = ""
+        if recovery_suggestion.get("effect_classification"):
+            effect_part = f" (effect={recovery_suggestion.get('effect_classification')})"
         text += (
-            f"Recovery plan suggests {recovery_suggestion.get('label')}: "
+            f"Recovery plan suggests {recovery_suggestion.get('label')}{effect_part}: "
             f"`{recovery_suggestion.get('command')}`. "
         )
     text += (
@@ -398,6 +401,7 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
         recovery["recovery_plan_action"] = recovery_suggestion.get("action")
         recovery["recovery_plan_command"] = recovery_suggestion.get("command")
         recovery["recovery_plan_reason"] = recovery_suggestion.get("reason")
+        recovery["recovery_effect_classification"] = recovery_suggestion.get("effect_classification")
     runtime_status["last_native_work_recovery"] = recovery
     runtime_status["last_action"] = f"asked for native work recovery session #{session_id}"
     return recovery
@@ -428,6 +432,7 @@ def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
         "label": label,
         "command": command,
         "reason": (recovery_plan or {}).get("next_action") or item.get("reason") or "",
+        "effect_classification": item.get("effect_classification") or "",
         "tool_call_id": item.get("tool_call_id"),
         "model_turn_id": item.get("model_turn_id"),
     }

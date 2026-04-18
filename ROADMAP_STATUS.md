@@ -572,12 +572,16 @@ Next action:
 
 - Follow-up current: passive native-work recovery now has a deterministic
   `passive-recovery-loop` dogfood scenario, and recovery suggestions now follow
-  recovery-plan action priority. Validated with
+  recovery-plan action priority. Recovery plan items and observer
+  `suggested_recovery` now surface `effect_classification` (`no_action`,
+  `verify_pending`, `action_committed`, `write_started`, `rollback_needed`) so
+  side-effect recovery risk is visible. Validated with
   `uv run pytest -q tests/test_dogfood.py` (`40 passed`),
   `./mew dogfood --scenario passive-recovery-loop --cleanup --json` (pass),
   `uv run pytest -q tests/test_work_session.py tests/test_runtime.py`
-  (`270 passed`), `./mew dogfood --scenario all --cleanup --json` (pass), and
-  full `uv run pytest -q` (`902 passed, 6 subtests passed`).
+  (`270 passed`), `uv run pytest -q tests/test_work_session.py tests/test_runtime.py tests/test_dogfood.py`
+  (`311 passed`), `./mew dogfood --scenario all --cleanup --json` (pass), and
+  full `uv run pytest -q` (`903 passed, 6 subtests passed`).
 - `uv run pytest -q` current: `897 passed, 6 subtests passed`.
 - `./mew dogfood --scenario native-advance --cleanup --json` current: pass; validates passive runtime selection of a runtime-owned work session, the configured `MEW_EXECUTABLE` handoff, quiet one-step live flags, completed runtime status, and dogfood advance metrics.
 - Focused native-work runtime tests current: `11 passed`; covers failed passive-native-advance classification, no blind retry on the next tick, and retry allowance after newer session activity.

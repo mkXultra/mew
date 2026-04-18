@@ -53,6 +53,14 @@ GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
+WORK_RECOVERY_EFFECT_CLASSES = {
+    "no_action",
+    "action_committed",
+    "write_started",
+    "verify_pending",
+    "rollback_needed",
+    "unknown",
+}
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
 DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 WORK_ACTION_DISPLAY_FIELDS = (
@@ -1398,6 +1406,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "tool": tool,
             "action": action,
             "safety": safety,
+            "effect_classification": work_recovery_effect_classification(call),
             "reason": reason,
             "source_summary": call.get("summary") or "",
             "source_error": call.get("error") or "",
@@ -1443,6 +1452,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 "model_turn_id": turn.get("id"),
                 "action": "replan",
                 "safety": "no_tool_started",
+                "effect_classification": "no_action",
                 "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
                 "source_summary": turn.get("summary") or "",
                 "source_error": turn.get("error") or "",
@@ -1463,6 +1473,34 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
     else:
         next_action = "verify world state and replan the interrupted model step"
     return {"next_action": next_action, "items": items}
+
+
+def work_recovery_effect_classification(call):
+    tool = (call or {}).get("tool") or ""
+    parameters = (call or {}).get("parameters") or {}
+    result = (call or {}).get("result") or {}
+    if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
+        return "no_action"
+    if tool == "run_tests":
+        return "verify_pending"
+    if tool == "run_command":
+        return "action_committed"
+    if tool in WRITE_WORK_TOOLS:
+        verification = result.get("verification") or {}
+        verification_failed = "exit_code" in verification and verification.get("exit_code") != 0
+        if verification_failed and not result.get("rolled_back"):
+            return "rollback_needed"
+        apply_requested = bool(parameters.get("apply") or result.get("applied"))
+        write_attempted = bool(result.get("written") and not result.get("dry_run"))
+        verify_expected = bool(parameters.get("verify_command") or result.get("verification_command"))
+        if (apply_requested or write_attempted) and verify_expected and not verification:
+            return "verify_pending"
+        if apply_requested or write_attempted:
+            return "write_started"
+        return "no_action"
+    if tool in COMMAND_WORK_TOOLS:
+        return "action_committed"
+    return "unknown"
 
 
 def select_work_recovery_plan_item(recovery_plan):
@@ -1969,8 +2007,9 @@ def format_work_session_resume(resume):
         lines.extend(["", "Recovery plan"])
         for item in recovery.get("items") or []:
             target = f"tool_call=#{item.get('tool_call_id')}" if item.get("kind") == "tool_call" else f"model_turn=#{item.get('model_turn_id')}"
+            effect = f" effect={item.get('effect_classification')}" if item.get("effect_classification") else ""
             lines.append(
-                f"- {target} action={item.get('action')} safety={item.get('safety')} "
+                f"- {target} action={item.get('action')} safety={item.get('safety')}{effect} "
                 f"{item.get('reason') or ''}"
             )
             if item.get("source_summary"):

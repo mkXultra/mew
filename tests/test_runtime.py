@@ -648,10 +648,12 @@ class RuntimeTests(unittest.TestCase):
                 self.assertIn("work 1 --session --resume --allow-read .", recovery["resume_command"])
                 self.assertEqual(recovery["recovery_plan_action"], "retry_verification")
                 self.assertIn("--allow-verify --verify-command", recovery["recovery_plan_command"])
+                self.assertEqual(recovery["recovery_effect_classification"], "verify_pending")
                 self.assertEqual(len(state["questions"]), 1)
                 self.assertIn("Passive native work session #1", state["questions"][0]["text"])
                 self.assertIn("exit_code=1", state["questions"][0]["text"])
                 self.assertIn("Recovery plan suggests verification recovery", state["questions"][0]["text"])
+                self.assertIn("effect=verify_pending", state["questions"][0]["text"])
                 self.assertIn("--allow-verify --verify-command", state["questions"][0]["text"])
                 self.assertIn("work 1 --live --allow-read . --max-steps 1", state["questions"][0]["text"])
                 self.assertIn(

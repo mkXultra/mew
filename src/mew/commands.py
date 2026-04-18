@@ -1750,6 +1750,7 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
         "reason": (recovery_plan or {}).get("next_action") or item.get("reason") or "",
         "source_action": action,
         "source_kind": item.get("kind") or "",
+        "effect_classification": item.get("effect_classification") or "",
         "tool_call_id": item.get("tool_call_id"),
         "model_turn_id": item.get("model_turn_id"),
     }
@@ -5208,6 +5209,8 @@ def print_work_recovery_report(report):
         tool = recovery.get("tool") or "tool"
         print(f"Interrupted {tool} needs user review before retry.")
         review_item = recovery.get("review_item") or {}
+        if review_item.get("effect_classification"):
+            print(f"effect: {review_item.get('effect_classification')}")
         if review_item.get("path"):
             print(f"path: {review_item.get('path')}")
         if review_item.get("command"):

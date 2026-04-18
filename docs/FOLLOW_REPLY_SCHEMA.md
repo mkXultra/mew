@@ -16,7 +16,9 @@ The snapshot is a local contract for another model or UI. It includes:
   `cli_approve_hint`/`cli_reject_hint`
 - `suggested_recovery`: a machine-readable recovery hint when the resume has a
   retryable interrupted read, side-effecting interruption, or replannable model
-  turn
+  turn. When the source is known, `effect_classification` explains the risk
+  class such as `no_action`, `verify_pending`, `action_committed`,
+  `write_started`, or `rollback_needed`
 - `supported_actions`: the safe reply actions this mew version accepts
 - `reply_command`: where to submit a reply file
 - `reply_template`: a minimal safe reply payload. When pending approvals exist,

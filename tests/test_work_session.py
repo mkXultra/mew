@@ -23,6 +23,7 @@ from mew.work_session import (
     format_work_action,
     format_work_session_tests,
     select_work_recovery_plan_item,
+    work_recovery_effect_classification,
 )
 
 
@@ -76,6 +77,7 @@ class WorkSessionTests(unittest.TestCase):
                 {
                     "action": "needs_user_review",
                     "review_hint": "mew work 1 --session --resume --allow-read .",
+                    "effect_classification": "action_committed",
                     "tool_call_id": 7,
                 },
             ],
@@ -86,8 +88,42 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(command_suggestion["kind"], "needs_human_review")
         self.assertEqual(command_suggestion["command"], "mew work 1 --session --resume --allow-read .")
+        self.assertEqual(command_suggestion["effect_classification"], "action_committed")
         self.assertEqual(runtime_suggestion["action"], "needs_user_review")
         self.assertEqual(runtime_suggestion["command"], "mew work 1 --session --resume --allow-read .")
+        self.assertEqual(runtime_suggestion["effect_classification"], "action_committed")
+
+    def test_work_recovery_effect_classifies_write_risks(self):
+        self.assertEqual(
+            work_recovery_effect_classification(
+                {"tool": "edit_file", "parameters": {"path": "README.md"}}
+            ),
+            "no_action",
+        )
+        self.assertEqual(
+            work_recovery_effect_classification(
+                {
+                    "tool": "edit_file",
+                    "parameters": {"path": "README.md", "apply": True, "verify_command": "pytest"},
+                    "result": {"written": True},
+                }
+            ),
+            "verify_pending",
+        )
+        self.assertEqual(
+            work_recovery_effect_classification(
+                {
+                    "tool": "edit_file",
+                    "parameters": {"path": "README.md", "apply": True},
+                    "result": {
+                        "written": True,
+                        "verification": {"exit_code": 1},
+                        "rolled_back": False,
+                    },
+                }
+            ),
+            "rollback_needed",
+        )
 
     def test_live_work_progress_flushes_stdout_before_stderr(self):
         from mew.commands import work_ai_progress
@@ -4265,14 +4301,18 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["commands"][0]["cwd"], ".")
         self.assertEqual(items[0]["action"], "needs_user_review")
         self.assertEqual(items[0]["safety"], "command")
+        self.assertEqual(items[0]["effect_classification"], "action_committed")
         self.assertEqual(items[0]["command"], "python mutate.py")
         self.assertIn("--session --resume --allow-read", items[0]["review_hint"])
         self.assertIn("idempotent", " ".join(items[0]["review_steps"]))
         self.assertEqual(items[1]["safety"], "write")
+        self.assertEqual(items[1]["effect_classification"], "no_action")
         self.assertEqual(items[1]["path"], "README.md")
         self.assertIn("git status/diff", " ".join(items[1]["review_steps"]))
 
         text = format_work_session_resume(resume)
+        self.assertIn("effect=action_committed", text)
+        self.assertIn("effect=no_action", text)
         self.assertIn("review: ./mew work 1 --session --resume --allow-read .", text)
         self.assertIn("review: ./mew work 1 --session --resume --allow-read README.md", text)
         self.assertIn("command: python mutate.py", text)
@@ -4319,6 +4359,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(report["recovery"]["action"], "needs_user")
                 review = report["recovery"]["review_item"]
                 self.assertEqual(review["tool_call_id"], 1)
+                self.assertEqual(review["effect_classification"], "action_committed")
                 self.assertEqual(review["command"], "python mutate.py")
                 self.assertIn("--session --resume --allow-read", review["review_hint"])
                 self.assertIn("idempotent", " ".join(review["review_steps"]))
@@ -4326,6 +4367,7 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--recover-session"]), 0)
                 text = stdout.getvalue()
+                self.assertIn("effect: action_committed", text)
                 self.assertIn("command: python mutate.py", text)
                 self.assertIn("review: mew work 1 --session --resume --allow-read .", text)
             finally:
@@ -10425,6 +10467,7 @@ class WorkSessionTests(unittest.TestCase):
                                             "kind": "tool_call",
                                             "action": "retry_tool",
                                             "tool_call_id": 4,
+                                            "effect_classification": "no_action",
                                             "auto_hint": "mew work 1 --session --resume --allow-read README.md --auto-recover-safe",
                                         }
                                     ],
@@ -10442,6 +10485,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["status"], "dead")
                 self.assertEqual(data["suggested_recovery"]["kind"], "retry_read")
                 self.assertEqual(data["suggested_recovery"]["tool_call_id"], 4)
+                self.assertEqual(data["suggested_recovery"]["effect_classification"], "no_action")
                 self.assertIn("--auto-recover-safe", data["suggested_recovery"]["command"])
             finally:
                 os.chdir(old_cwd)
