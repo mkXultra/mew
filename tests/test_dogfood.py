@@ -351,6 +351,21 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("passive_auto_recovery_read_reruns_interrupted_read", text)
             self.assertIn("passive_auto_recovery_read_resumes_native_advance", text)
 
+    def test_run_dogfood_passive_auto_recovery_write_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="passive-auto-recovery-write",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "passive-auto-recovery-write")
+            self.assertIn("passive_auto_recovery_write_reruns_interrupted_dry_run_preview", text)
+
     def test_run_dogfood_day_reentry_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

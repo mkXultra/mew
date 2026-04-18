@@ -1510,6 +1510,8 @@ Next action:
   dry-run `write_file`/`edit_file` previews can be retried under a fresh
   `--allow-write` gate, while real apply/approval and indeterminate side effects
   remain on the human-review path.
+- The dogfood suite now includes `passive-auto-recovery-write`, which exercises
+  that dry-run preview recovery path and confirms the target file is unchanged.
 
 ## Current Roadmap Focus
 
