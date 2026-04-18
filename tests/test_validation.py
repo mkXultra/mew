@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -8,7 +9,7 @@ from unittest.mock import patch
 
 from mew.cli import main
 from mew.config import EFFECT_LOG_FILE, STATE_FILE, STATE_VERSION
-from mew.state import default_state, load_state, read_last_state_effect, save_state, state_digest
+from mew.state import default_state, load_state, read_last_state_effect, save_state, state_digest, state_lock
 from mew.validation import format_validation_issues, validate_state, validation_errors
 
 
@@ -159,6 +160,58 @@ class ValidationTests(unittest.TestCase):
                 current_state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
                 self.assertEqual(backup_state["memory"]["shallow"]["latest_task_summary"], "before")
                 self.assertEqual(current_state["memory"]["shallow"]["latest_task_summary"], "after")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_state_lock_serializes_threads_in_process(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                entered = threading.Event()
+                attempting = threading.Event()
+                release = threading.Event()
+                acquired = threading.Event()
+
+                def holder():
+                    with state_lock():
+                        entered.set()
+                        release.wait(timeout=2.0)
+
+                def contender():
+                    attempting.set()
+                    with state_lock():
+                        acquired.set()
+
+                with patch("mew.state.fcntl.flock"):
+                    holder_thread = threading.Thread(target=holder)
+                    contender_thread = threading.Thread(target=contender)
+                    holder_thread.start()
+                    self.assertTrue(entered.wait(timeout=2.0))
+                    contender_thread.start()
+                    self.assertTrue(attempting.wait(timeout=2.0))
+                    self.assertFalse(acquired.wait(timeout=0.05))
+                    release.set()
+                    holder_thread.join(timeout=2.0)
+                    contender_thread.join(timeout=2.0)
+                self.assertFalse(holder_thread.is_alive())
+                self.assertFalse(contender_thread.is_alive())
+                self.assertTrue(acquired.is_set())
+            finally:
+                release.set()
+                os.chdir(old_cwd)
+
+    def test_state_lock_allows_nested_same_thread_entry(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.state.fcntl.flock") as flock:
+                    with state_lock():
+                        with state_lock():
+                            pass
+
+                self.assertEqual(flock.call_count, 2)
             finally:
                 os.chdir(old_cwd)
 

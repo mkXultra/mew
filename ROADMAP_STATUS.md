@@ -167,6 +167,10 @@ The same unresolved-risk signal now reaches `mew focus`: active work sessions
 carry a compact `risk:` line from the shared work-session failure formatter,
 and the day-reentry dogfood seeds a failed verifier to prove the quiet daily
 entrypoint preserves that risk.
+State persistence is also less noisy under live output mirroring: `state_lock`
+now serializes same-process threads as well as external processes, and
+`save_state` uses per-thread/per-call temp names for both state and backup
+writes.
 
 ## Milestone 1: Native Hands
 
@@ -446,6 +450,9 @@ Evidence:
 - `mew focus` active-session entries now use the same unresolved failure risk
   formatter, so the daily quiet reentry surface shows failed verification/work
   risk alongside age, working memory, and continue/follow controls.
+- State saving now uses an in-process `RLock` around the existing file lock and
+  unique pid/thread/monotonic temp names for both state and backup writes,
+  reducing live-output mirror races during concurrent save paths.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
@@ -739,6 +746,21 @@ Next action:
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`968 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/brief.py src/mew/commands.py src/mew/work_session.py src/mew/dogfood.py tests/test_brief.py tests/test_work_session.py tests/test_dogfood.py`
   (pass), and `./mew dogfood --all` (pass, including day-reentry risk checks).
+- Persistent/Recovery foundation current: task #134 investigated a transient
+  `output mirror failed` warning from related tests and found that
+  `fcntl.flock` did not serialize same-process timer/main threads, while
+  `save_state` reused pid-only temp names for backup writes. `state_lock` now
+  uses a genuinely reentrant in-process `RLock`, and `save_state` temp names
+  include pid, thread id, and monotonic time. `codex-ultra` reviewed the first
+  pass and noted the nested-lock deadlock and weak test coverage; the fix skips
+  repeat `flock` calls for nested same-thread entry and mocks `flock` in the
+  thread serialization test. Validated with focused state/mirror tests (`4
+  passed`), the warning-producing related suite plus validation
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py tests/test_dogfood.py tests/test_validation.py`
+  (`553 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`970 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/state.py tests/test_validation.py`
+  (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
   candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now

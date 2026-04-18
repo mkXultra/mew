@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import threading
+import time
 
 from .config import (
     DESIRES_FILE,
@@ -25,6 +27,8 @@ from .validation import validation_errors, validate_state
 
 
 _runtime_lock_handle = None
+_state_thread_lock = threading.RLock()
+_state_thread_local = threading.local()
 
 
 def ensure_state_dir():
@@ -33,12 +37,23 @@ def ensure_state_dir():
 @contextmanager
 def state_lock():
     ensure_state_dir()
-    with STATE_LOCK_FILE.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    depth = getattr(_state_thread_local, "depth", 0)
+    if depth:
+        _state_thread_local.depth = depth + 1
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _state_thread_local.depth = depth
+        return
+    with _state_thread_lock:
+        with STATE_LOCK_FILE.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            _state_thread_local.depth = 1
+            try:
+                yield
+            finally:
+                _state_thread_local.depth = 0
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 def default_state():
     return {
@@ -431,13 +446,14 @@ def save_state(state):
     if issues:
         first = issues[0]
         raise ValueError(f"invalid state at {first['path']}: {first['message']}")
-    tmp_file = STATE_FILE.with_name(f"{STATE_FILE.name}.{os.getpid()}.tmp")
+    tmp_suffix = f"{os.getpid()}.{threading.get_ident()}.{time.monotonic_ns()}.tmp"
+    tmp_file = STATE_FILE.with_name(f"{STATE_FILE.name}.{tmp_suffix}")
     with tmp_file.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     if STATE_FILE.exists():
         backup_file = STATE_FILE.with_name(f"{STATE_FILE.name}.bak")
-        backup_tmp = backup_file.with_name(f"{backup_file.name}.{os.getpid()}.tmp")
+        backup_tmp = backup_file.with_name(f"{backup_file.name}.{tmp_suffix}")
         shutil.copy2(STATE_FILE, backup_tmp)
         os.replace(backup_tmp, backup_file)
     os.replace(tmp_file, STATE_FILE)
