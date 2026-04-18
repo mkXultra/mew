@@ -7875,6 +7875,7 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
         f"follow: "
         f"{mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', read_root, '--compact-live', '--max-steps', '3')}"
     )
+    print(f"status: {mew_command('work', task['id'], '--follow-status', '--json')}")
     print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', read_root)}")
 
 

@@ -669,6 +669,20 @@ Next action:
 
 ## Latest Validation
 
+- Native self-improve dogfood task #127 current: mew used a read-only
+  `--follow` pass to choose the next small Milestone 2 improvement, then landed
+  `follow-status` discoverability in native self-improve output/help. Validated
+  with
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_self_improve.py tests/test_commands.py -k self_improve`
+  (`28 passed, 157 deselected, 6 subtests passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py src/mew/cli.py tests/test_self_improve.py tests/test_commands.py`
+  (pass), and
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_self_improve.py tests/test_commands.py`
+  (`185 passed, 10 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`963 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), and `./mew dogfood --scenario all --cleanup --json` (pass across
+  all scenarios, including the running-output follow snapshot check).
 - Follow-up current: running `run_command`/`run_tests` output is mirrored as a
   bounded tail into work-session state and follow snapshots without changing
   the stale-reply `session_updated_at` token; quiet follow still writes a
@@ -1185,6 +1199,10 @@ Next action:
   session without touching `updated_at` or cached default gates, so observer
   refreshes do not invalidate reply-file stale tokens or silently widen a
   cockpit's remembered authority.
+- Native self-improve dogfood task #127/session #149 then selected a small
+  observer discoverability follow-up: native self-improve output and help now
+  show the task-scoped `mew work <task-id> --follow-status --json` command
+  beside continue, follow, and resume.
 
 ## Current Roadmap Focus
 
