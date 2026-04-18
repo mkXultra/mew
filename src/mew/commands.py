@@ -7298,6 +7298,16 @@ def resolved_task_cwd_text(task):
         cwd = Path.cwd() / cwd
     return str(cwd.resolve(strict=False))
 
+
+def print_native_self_improve_controls(task, *, include_start_hint=False):
+    if include_start_hint:
+        print(f"native work: {mew_command('work', task['id'], '--start-session')}")
+    print(f"work cwd: {resolved_task_cwd_text(task)}")
+    print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
+    print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
+    print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
+
+
 def cmd_self_improve(args):
     native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
     if native and (args.cycle or args.dispatch):
@@ -7352,13 +7362,11 @@ def cmd_self_improve(args):
         print(("created" if plan_created else "reused") + f" {format_task_plan(plan)}")
     if session:
         print(("started" if session_created else "reused") + f" work session #{session['id']}")
-    if native and not getattr(args, "start_session", False):
-        print(f"native work: {mew_command('work', task['id'], '--start-session')}")
     if native:
-        print(f"work cwd: {resolved_task_cwd_text(task)}")
-        print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
-        print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
-        print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
+        print_native_self_improve_controls(
+            task,
+            include_start_hint=not getattr(args, "start_session", False),
+        )
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
@@ -10850,12 +10858,7 @@ def chat_self_improve(rest):
     if native:
         if session:
             print(("started " if session_created else "reused ") + f"work session #{session['id']}")
-        if not start_session:
-            print(f"native work: {mew_command('work', task['id'], '--start-session')}")
-        print(f"work cwd: {resolved_task_cwd_text(task)}")
-        print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', '.', '--max-steps', '1')}")
-        print(f"follow: {mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', '.', '--max-steps', '3')}")
-        print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
+        print_native_self_improve_controls(task, include_start_hint=not start_session)
     if show_prompt:
         if not plan:
             print("No programmer plan was created for native self-improvement.")
