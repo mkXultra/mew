@@ -523,12 +523,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `893 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `894 passed, 6 subtests passed`.
 - `./mew dogfood --scenario native-advance --cleanup --json` current: pass; validates passive runtime selection of a runtime-owned work session, the configured `MEW_EXECUTABLE` handoff, quiet one-step live flags, completed runtime status, and dogfood advance metrics.
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 90 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-env.json --json` completed startup plus two passive ticks; `last_native_work_step.outcome=completed`, exit_code 0, and log tail recorded two `native work advance completed` entries.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, native-advance, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, native-advance proves a later passive tick can invoke one quiet native work step through `MEW_EXECUTABLE`, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, native-advance, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, native-advance proves a later passive tick can invoke one quiet native work step through `MEW_EXECUTABLE`, `observe --json`, and work-session includes task lifecycle JSON, done-task resume reopen controls, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` older cockpit rollout: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `36 passed`.
@@ -768,6 +768,15 @@ Next action:
 - Chat `/self start ...` now prints the same native `follow:` command as CLI `mew self-improve --start-session`, so the self-improvement entrypoint points at the compact continuous cockpit from both interfaces.
 - Real `mew code` dogfood task #94/session #120 used saved coding-cockpit gates, followed the resident model through a 4-step loop, applied a tiny help-text polish, and verified it with `uv run pytest -q tests/test_work_session.py -k interrupt_submit`.
 - Native self-improve buddy task #95/session #121 then identified that compact `Next controls` lost saved read gates on `/work-session resume`; compact controls now preserve the same read flags as the full cockpit view.
+- Native self-improve dogfood tasks #102/#103 exercised the resident loop on
+  current HEAD: #102 correctly chose not to make an unjustified weak edit, while
+  #103 identified a concrete CLI/chat self-improve dry-run output inconsistency.
+  CLI dry-run self-improve output now includes the originating plan id, matching
+  chat. The same dogfood pass exposed invalid closed-session resume controls
+  for done tasks; done-task resumes now point to
+  `mew task update <id> --status ready` instead of an impossible
+  `mew work <id> --start-session`, and `work-session` dogfood preserves that
+  contract.
 
 ## Current Roadmap Focus
 
