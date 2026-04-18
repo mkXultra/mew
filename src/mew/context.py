@@ -522,8 +522,8 @@ def verification_run_for_context(run):
     }
 
 
-def write_run_for_context(run):
-    return {
+def write_run_for_context(run, verification_run=None):
+    context = {
         "id": run.get("id"),
         "operation": run.get("operation") or run.get("action_type"),
         "action_type": run.get("action_type") or run.get("operation"),
@@ -544,6 +544,16 @@ def write_run_for_context(run):
         "created_at": run.get("created_at"),
         "updated_at": run.get("updated_at"),
     }
+    if verification_run:
+        context["verification_stdout_tail"] = clip_context_text(
+            verification_run.get("stdout"),
+            MAX_CONTEXT_RUN_OUTPUT_CHARS,
+        )
+        context["verification_stderr_tail"] = clip_context_text(
+            verification_run.get("stderr"),
+            MAX_CONTEXT_RUN_OUTPUT_CHARS,
+        )
+    return context
 
 
 def runtime_effect_for_context(effect):
@@ -812,6 +822,13 @@ def build_context(
     tasks = sorted(open_tasks(state), key=task_sort_key)
     attention = open_attention_items(state)
     agent_runs_context = agent_runs_for_context(state)
+    verification_runs = compact_recent_items(state.get("verification_runs", []), 10)
+    verification_runs_by_id = {
+        run.get("id"): run
+        for run in verification_runs
+        if run.get("id") is not None
+    }
+    write_runs = compact_recent_items(state.get("write_runs", []), 10)
     context = {
         "date": {
             "now": current_time,
@@ -864,13 +881,10 @@ def build_context(
         "perception": perceive_workspace(allowed_read_roots=allowed_read_roots),
         "allowed_read_roots": allowed_read_roots or [],
         "allowed_write_roots": allowed_write_roots or [],
-        "verification_runs": [
-            verification_run_for_context(run)
-            for run in compact_recent_items(state.get("verification_runs", []), 10)
-        ],
+        "verification_runs": [verification_run_for_context(run) for run in verification_runs],
         "write_runs": [
-            write_run_for_context(run)
-            for run in compact_recent_items(state.get("write_runs", []), 10)
+            write_run_for_context(run, verification_runs_by_id.get(run.get("verification_run_id")))
+            for run in write_runs
         ],
         "runtime_effects": [
             runtime_effect_for_context(effect)

@@ -939,6 +939,17 @@ class AutonomyTests(unittest.TestCase):
                 "updated_at": "later",
             }
         )
+        state["verification_runs"].append(
+            {
+                "id": 9,
+                "command": "uv run pytest -q tests/test_example.py",
+                "exit_code": 1,
+                "stdout": "FAILED tests/test_example.py::test_expected_value\n" + ("expected detail " * 100),
+                "stderr": "assertion traceback " * 100,
+                "created_at": "verify",
+                "updated_at": "verify",
+            }
+        )
         event = add_event(state, "passive_tick", "test")
 
         context = build_context(state, event, "later")
@@ -950,6 +961,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertTrue(write_run["rolled_back"])
         self.assertEqual(write_run["verification_run_id"], 9)
         self.assertEqual(write_run["verification_exit_code"], 1)
+        self.assertIn("FAILED tests/test_example.py::test_expected_value", write_run["verification_stdout_tail"])
+        self.assertIn("assertion traceback", write_run["verification_stderr_tail"])
         self.assertIn("rollback detail", write_run["rollback_error"])
         self.assertLessEqual(len(write_run["diff_tail"]), 620)
 
