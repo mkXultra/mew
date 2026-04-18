@@ -6213,6 +6213,11 @@ def cmd_status(args):
     print(f"last_cycle_reason: {runtime.get('last_cycle_reason') or ''}")
     print(f"last_cycle_duration_seconds: {runtime.get('last_cycle_duration_seconds')}")
     print(f"last_processed_count: {runtime.get('last_processed_count')}")
+    print(f"last_startup_repair_at: {runtime.get('last_startup_repair_at') or ''}")
+    print(
+        "last_startup_repairs: "
+        f"{json.dumps(runtime.get('last_startup_repairs') or [], ensure_ascii=False)}"
+    )
     print(f"last_native_work_step_skip: {runtime.get('last_native_work_step_skip') or ''}")
     print(
         "last_native_work_skip_recovery: "

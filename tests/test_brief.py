@@ -376,6 +376,15 @@ class BriefTests(unittest.TestCase):
             "status": "completed",
             "command": "python -V",
         }
+        state["runtime_status"]["last_startup_repair_at"] = "2026-04-18T09:00:00Z"
+        state["runtime_status"]["last_startup_repairs"] = [
+            {
+                "type": "interrupted_runtime_effect",
+                "effect_id": 1,
+                "old_status": "planning",
+                "new_status": "interrupted",
+            }
+        ]
 
         brief = build_brief(state)
 
@@ -385,6 +394,10 @@ class BriefTests(unittest.TestCase):
         )
         self.assertIn(
             "native_work_recovery: auto_retry_verification_completed status=completed command=python -V",
+            brief,
+        )
+        self.assertIn(
+            "startup_repair: 1 item(s) at=2026-04-18T09:00:00Z types=interrupted_runtime_effect",
             brief,
         )
 

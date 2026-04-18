@@ -1045,6 +1045,11 @@ def build_brief(state, limit=5, kind=None):
         status = f" status={native_recovery.get('status')}" if native_recovery.get("status") else ""
         command = f" command={native_recovery.get('command')}" if native_recovery.get("command") else ""
         lines.insert(-1, f"native_work_recovery: {native_recovery.get('action')}{status}{command}")
+    startup_repairs = runtime.get("last_startup_repairs") or []
+    if startup_repairs:
+        repair_types = ", ".join(repair.get("type") or "unknown" for repair in startup_repairs[:3])
+        suffix = f" at={runtime.get('last_startup_repair_at')}" if runtime.get("last_startup_repair_at") else ""
+        lines.insert(-1, f"startup_repair: {len(startup_repairs)} item(s){suffix} types={repair_types}")
     snapshot_item = _project_snapshot_item(deep.get("project_snapshot"))
     if snapshot_item:
         project_types = ", ".join(snapshot_item.get("project_types") or []) or "(unknown)"

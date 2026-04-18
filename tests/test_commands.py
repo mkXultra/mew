@@ -944,6 +944,15 @@ class CommandTests(unittest.TestCase):
                         "status": "completed",
                         "command": "python -V",
                     }
+                    state["runtime_status"]["last_startup_repair_at"] = "2026-04-18T09:00:00Z"
+                    state["runtime_status"]["last_startup_repairs"] = [
+                        {
+                            "type": "interrupted_runtime_effect",
+                            "effect_id": 1,
+                            "old_status": "planning",
+                            "new_status": "interrupted",
+                        }
+                    ]
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -955,6 +964,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("last_native_work_recovery:", output)
                 self.assertIn('"action": "auto_retry_verification_completed"', output)
                 self.assertIn("python -V", output)
+                self.assertIn("last_startup_repair_at: 2026-04-18T09:00:00Z", output)
+                self.assertIn('"type": "interrupted_runtime_effect"', output)
             finally:
                 os.chdir(old_cwd)
 
