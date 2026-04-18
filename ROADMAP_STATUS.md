@@ -422,6 +422,12 @@ Evidence:
   Codex Web API dogfood in temporary workspaces completed two passive native
   work advances after startup, including read-only model/tool turns and runtime
   verification.
+- The passive native-work advance path is now covered by a deterministic
+  `native-advance` dogfood scenario inside `dogfood --scenario all`. The
+  scenario uses a fake `MEW_EXECUTABLE` to prove passive ticks invoke one quiet
+  `mew work --live --max-steps 1` step without spending model tokens, and
+  runtime status now preserves a bounded skip-reason history for later dogfood
+  diagnosis.
 
 Missing proof:
 
@@ -517,13 +523,14 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `890 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `893 passed, 6 subtests passed`.
+- `./mew dogfood --scenario native-advance --cleanup --json` current: pass; validates passive runtime selection of a runtime-owned work session, the configured `MEW_EXECUTABLE` handoff, quiet one-step live flags, completed runtime status, and dogfood advance metrics.
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 90 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-env.json --json` completed startup plus two passive ticks; `last_native_work_step.outcome=completed`, exit_code 0, and log tail recorded two `native work advance completed` entries.
-- `uv run pytest -q` current: `881 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
+- `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, native-advance, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, native-advance proves a later passive tick can invoke one quiet native work step through `MEW_EXECUTABLE`, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
-- `uv run pytest -q` current: `813 passed, 6 subtests passed`.
+- `uv run pytest -q` older cockpit rollout: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `36 passed`.
 - `uv run pytest -q tests/test_commands.py` current: `158 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
