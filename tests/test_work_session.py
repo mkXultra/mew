@@ -566,6 +566,52 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("tool #4", schema["reply_template"]["actions"][0]["text"])
         self.assertNotEqual(schema["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
 
+    def test_work_reply_template_steers_when_hidden_unpaired_source_blocks_approve_all(self):
+        tool_calls = [
+            {
+                "id": 1,
+                "tool": "edit_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/hidden.py"},
+                "result": {
+                    "path": "src/mew/hidden.py",
+                    "dry_run": True,
+                    "changed": True,
+                    "diff": "--- a/src/mew/hidden.py\n+++ b/src/mew/hidden.py\n@@ -1 +1 @@\n-old\n+new\n",
+                },
+            }
+        ]
+        for index in range(2, 10):
+            tool_calls.append(
+                {
+                    "id": index,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": f"docs/{index}.md"},
+                    "result": {
+                        "path": f"docs/{index}.md",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": f"--- a/docs/{index}.md\n+++ b/docs/{index}.md\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                }
+            )
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "updated_at": "2026-04-18T00:00:00Z",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session, limit=8)
+        schema = build_work_reply_schema(session, resume=resume)
+
+        self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], list(range(2, 10)))
+        self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
+        self.assertIn("hidden src/mew source edit", schema["reply_template"]["actions"][0]["text"])
+
     def test_cockpit_controls_do_not_primary_approve_unpaired_source_edit(self):
         session = {
             "id": 3,

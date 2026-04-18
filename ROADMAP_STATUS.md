@@ -143,6 +143,9 @@ Follow `reply_template` also scans the whole visible pending-approval set for
 unpaired source edits before suggesting any normal approval, avoiding mixed
 approval batches where an early safe write hides a later source edit that still
 needs tests.
+If the unpaired source edit is outside the visible pending-approval window but
+still blocks approve-all, the reply template now steers to resume inspection
+instead of approving the first visible normal write.
 If the first successful verification is a narrow pytest node-id run, mew marks
 it as a narrow verification result and keeps it out of default verify fallback,
 so the next resident step does not inherit a one-test command as its long-lived
@@ -674,8 +677,8 @@ Next action:
   with no blockers. Validated with focused approval/default-memory tests
   (`8 passed, 257 deselected, 5 subtests passed`), related runtime/dogfood
   regressions (`3 passed`), the combined work/runtime/dogfood/commands/brief
-  suite (`551 passed, 9 subtests passed`), full
-  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`950 passed, 15 subtests
+  suite (`552 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`951 passed, 15 subtests
   passed`), and `./mew dogfood --scenario all --json` (pass).
 - Follow-up current: passive native-work auto-recovery can now rerun a
   runtime-owned interrupted verifier on the next passive tick when explicit

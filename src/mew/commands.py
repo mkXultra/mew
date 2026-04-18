@@ -4474,7 +4474,17 @@ def _work_reply_template(session=None, resume=None):
     )
     first_approval = blocked_source_approval or ((pending_approvals[0] or {}) if pending_approvals else {})
     first_approval_id = first_approval.get("tool_call_id")
-    if first_approval_id not in (None, ""):
+    if not blocked_source_approval and (resume or {}).get("approve_all_blocked_reason"):
+        actions = [
+            {
+                "type": "steer",
+                "text": (
+                    "Inspect the work-session resume before approving: at least one hidden src/mew source edit "
+                    "needs a paired tests/** write/edit or an explicit unpaired override."
+                ),
+            }
+        ]
+    elif first_approval_id not in (None, ""):
         pairing = first_approval.get("pairing_status") or {}
         if pairing.get("status") == "missing_test_edit":
             path = pairing.get("source_path") or first_approval.get("path") or "src/mew/**"
