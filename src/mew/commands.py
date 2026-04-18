@@ -2023,9 +2023,8 @@ def work_cockpit_recovery_command(resume, task_id=None):
     item = {}
     if isinstance(source_index, int) and 0 <= source_index < len(items):
         item = items[source_index]
-    if item.get("action") == source_action:
-        if source_action == "retry_tool" and item.get("chat_auto_hint"):
-            return item.get("chat_auto_hint")
+    if item.get("action") == source_action and item.get("chat_auto_hint"):
+        return item.get("chat_auto_hint")
     return suggestion.get("command") or ""
 
 

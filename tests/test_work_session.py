@@ -232,6 +232,22 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(command, "/work-session resume --allow-read new --auto-recover-safe")
 
+    def test_work_cockpit_recovery_command_uses_dry_run_write_chat_hint(self):
+        plan = {
+            "items": [
+                {
+                    "action": "retry_dry_run_write",
+                    "auto_hint": "mew work 1 --session --resume --allow-write README.md --auto-recover-safe",
+                    "chat_auto_hint": "/work-session resume --allow-write README.md --auto-recover-safe",
+                    "tool_call_id": 1,
+                }
+            ]
+        }
+
+        command = work_cockpit_recovery_command({"recovery_plan": plan}, task_id=1)
+
+        self.assertEqual(command, "/work-session resume --allow-write README.md --auto-recover-safe")
+
     def test_work_recovery_effect_classifies_write_risks(self):
         self.assertEqual(
             work_recovery_effect_classification(
