@@ -1489,7 +1489,11 @@ def remember_successful_work_verification(session, tool, result):
     if not command:
         return
     defaults = session.setdefault("default_options", {})
-    if defaults.get("verify_command") and _is_narrow_pytest_verify_command(command, defaults.get("verify_command")):
+    if _is_narrow_pytest_verify_command(command, defaults.get("verify_command")):
+        if tool == "run_tests":
+            result["narrow_verify_command"] = True
+        elif verification:
+            verification["narrow_verify_command"] = True
         defaults["allow_verify"] = True
         defaults["verify_disabled"] = False
         return

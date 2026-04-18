@@ -20,6 +20,7 @@ from mew.commands import (
     remember_successful_work_verification,
     work_cockpit_recovery_command,
     work_recovery_suggestion_from_plan,
+    work_session_default_verify_command,
 )
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
@@ -31,6 +32,7 @@ from mew.work_session import (
     format_work_action,
     format_work_session_resume,
     format_work_session_tests,
+    latest_work_verify_command,
     select_work_recovery_plan_item,
     work_recovery_effect_classification,
 )
@@ -671,6 +673,24 @@ class WorkSessionTests(unittest.TestCase):
                     {"exit_code": 0, "command": command},
                 )
                 self.assertEqual(session["default_options"]["verify_command"], broad_command)
+
+    def test_first_narrow_pytest_selector_does_not_become_default_verify_command(self):
+        session = {"default_options": {}}
+        result = {
+            "exit_code": 0,
+            "command": "UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_example",
+        }
+
+        remember_successful_work_verification(session, "run_tests", result)
+
+        self.assertTrue(result["narrow_verify_command"])
+        self.assertNotIn("verify_command", session["default_options"])
+        call = {"tool": "run_tests", "result": result}
+        self.assertEqual(latest_work_verify_command([call]), "")
+        self.assertEqual(
+            work_session_default_verify_command({"default_options": session["default_options"], "tool_calls": [call]}),
+            "",
+        )
 
     def test_source_edit_approval_marks_paired_test_write_ok(self):
         session = {

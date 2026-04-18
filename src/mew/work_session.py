@@ -1085,9 +1085,13 @@ def latest_work_verify_command(calls, task=None):
     command = (task or {}).get("command") or ""
     for call in calls:
         result = call.get("result") or {}
+        if result.get("narrow_verify_command"):
+            continue
         if call.get("tool") == "run_tests" and result.get("command"):
             command = result.get("command")
         verification = result.get("verification") or {}
+        if verification.get("narrow_verify_command"):
+            continue
         if verification.get("command"):
             command = verification.get("command")
     return command
