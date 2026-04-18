@@ -696,6 +696,8 @@ The first user-facing version should likely include:
 - `mew run --autonomous`: let mew do self-directed work when no user input is pending.
 - `mew run --autonomy-level observe|propose|act`: control how much freedom autonomous mode has.
 - `mew run --allow-agent-run`: allow autonomous programmer dispatch/review runs.
+- `mew run --allow-native-work`: allow act-level autonomous cycles to create task-linked native `mew work` sessions.
+- `mew run --allow-native-advance`: allow later passive ticks to advance runtime-owned native work sessions by one bounded step.
 - `mew run --allow-verify --verify-command <command>`: allow act-level runtime verification using the configured bounded command.
 - `mew run --verify-interval-minutes <minutes>`: set the minimum interval between autonomous verification runs.
 - `mew run --auto-archive`: archive old processed inbox and read outbox records while the runtime is active.

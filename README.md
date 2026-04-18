@@ -135,6 +135,21 @@ uv run mew task update <task-id> --status ready --auto-execute
 uv run mew run --autonomous --autonomy-level act --allow-agent-run --echo-outbox
 ```
 
+Native work is a separate resident-model path. `--allow-native-work` lets a
+passive tick create a task-linked `mew work` session; `--allow-native-advance`
+lets later passive ticks advance a runtime-owned session by one bounded live
+step. The runtime will not advance human-started sessions, sessions waiting on a
+write approval, or sessions with an already-running model/tool turn.
+
+```sh
+uv run mew run --ai --auth auth.json \
+  --autonomous --autonomy-level act \
+  --allow-read . \
+  --allow-native-work \
+  --allow-native-advance \
+  --echo-outbox
+```
+
 Local shell command execution is a separate gate:
 
 ```sh
@@ -333,6 +348,10 @@ explicit gates. Write tools default to dry-run. Applied writes require
 `--allow-verify` and `--verify-command`; failed verification rolls the change
 back and records the failed tool result. Nonzero `run_tests` exits are treated
 as failed tool calls and summarized in `mew work --session --details`.
+When `mew run --allow-native-advance` is enabled, runtime-started sessions are
+also resumable by passive ticks. Each tick runs at most one live step, preserves
+the session's auth/model/read/write/verify defaults, disables inline approval
+prompts, and records the outcome in the session notes and dogfood metrics.
 When no work session is active, `mew work --session` and
 `mew work --session --resume` list recent sessions with resume commands instead
 of leaving reentry discovery to memory.
