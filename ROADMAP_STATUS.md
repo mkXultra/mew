@@ -679,7 +679,8 @@ Next action:
   regressions (`3 passed`), the combined work/runtime/dogfood/commands/brief
   suite (`552 passed, 9 subtests passed`), full
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`951 passed, 15 subtests
-  passed`), and `./mew dogfood --scenario all --json` (pass).
+  passed`), full ruff over `src tests` (pass), and
+  `./mew dogfood --scenario all --json` (pass).
 - Follow-up current: passive native-work auto-recovery can now rerun a
   runtime-owned interrupted verifier on the next passive tick when explicit
   read/verify gates match, while preserving recovery-plan priority so unsafe

@@ -58,7 +58,10 @@ class ModelBackendTests(unittest.TestCase):
 
     def test_call_model_json_forwards_stream_callback_to_codex(self):
         expected = {"summary": "ok"}
-        callback = lambda delta: None
+
+        def callback(delta):
+            return None
+
         with patch("mew.model_backends.call_codex_json", return_value=expected) as call:
             result = call_model_json(
                 "codex",

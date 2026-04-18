@@ -2974,7 +2974,7 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_event, add_question, load_state, save_state, state_lock
+                from mew.state import add_event, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()
@@ -3012,7 +3012,7 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                from mew.state import add_event, add_question, load_state, save_state, state_lock
+                from mew.state import add_event, load_state, save_state, state_lock
 
                 with state_lock():
                     state = load_state()

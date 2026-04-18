@@ -685,7 +685,6 @@ def _format_workbench_task_notes(notes):
     if len(finish_indices) <= 1:
         return clip_output("\n".join(lines), 800)
 
-    latest_finish_index = finish_indices[-1]
     omitted = len(finish_indices) - 1
     omitted_indices = set(finish_indices[:-1])
     compacted = []
@@ -7261,7 +7260,8 @@ def cmd_step(args):
 
     progress = None
     if args.ai and not args.json:
-        progress = lambda line: print(f"mew step: {line}", file=sys.stderr, flush=True)
+        def progress(line):
+            print(f"mew step: {line}", file=sys.stderr, flush=True)
 
     report = run_step_loop(
         max_steps=args.max_steps,
@@ -8918,7 +8918,6 @@ def mark_outbox_read(message_ids):
     if not message_ids:
         return
     ids = {str(message_id) for message_id in message_ids}
-    current_time = now_iso()
     with state_lock():
         state = load_state()
         changed = False

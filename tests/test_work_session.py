@@ -6547,7 +6547,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
-                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()) as stderr:
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                             self.assertEqual(
                                 main(
                                     [
