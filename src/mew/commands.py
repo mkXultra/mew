@@ -2344,6 +2344,8 @@ def compact_repeat_guard_action(action):
             "session_id",
             "attention_id",
             "effort_summary",
+            "reason",
+            "stale_for_seconds",
         )
         if action.get(key) not in (None, "")
     }

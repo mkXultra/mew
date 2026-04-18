@@ -131,6 +131,22 @@ def action_identity(action: Any) -> tuple[str, str]:
     return (kind, command)
 
 
+def format_duration(seconds: Any) -> str:
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h"
+    return f"{hours // 24}d"
+
+
 def render_actions(view_model: dict[str, Any]) -> str:
     actions = view_model.get("actions")
     if not isinstance(actions, list):
@@ -144,13 +160,24 @@ def render_actions(view_model: dict[str, Any]) -> str:
             continue
         label = compact_detail_value(raw_action.get("label") or raw_action.get("kind"))
         command = compact_detail_value(raw_action.get("command"))
+        meta_parts = []
         effort = compact_detail_value(raw_action.get("effort_summary"))
-        if not label and not command and not effort:
+        reason = compact_detail_value(raw_action.get("reason"))
+        if effort:
+            meta_parts.append(effort)
+        if reason:
+            meta_parts.append(reason)
+        if raw_action.get("stale_for_seconds") is not None:
+            stale_text = format_duration(raw_action.get("stale_for_seconds"))
+            if stale_text:
+                meta_parts.append(f"stale for {stale_text}")
+        meta = " | ".join(meta_parts)
+        if not label and not command and not meta:
             continue
         label_node = f"<strong>{html.escape(label)}</strong>" if label else ""
-        effort_node = f"<span>{html.escape(effort)}</span>" if effort else ""
+        meta_node = f"<span>{html.escape(meta)}</span>" if meta else ""
         command_node = f"<code>{html.escape(command)}</code>" if command else ""
-        nodes.append(f'<div class="action-item">{label_node}{effort_node}{command_node}</div>')
+        nodes.append(f'<div class="action-item">{label_node}{meta_node}{command_node}</div>')
     if not nodes:
         return ""
     return f'<div class="actions"><h2>Actions</h2>{"".join(nodes)}</div>'

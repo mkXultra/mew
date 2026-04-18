@@ -9,6 +9,7 @@ from typing import Any
 from .cli_command import mew_command
 from .state import open_questions as canonical_open_questions
 from .tasks import task_kind
+from .timeutil import now_iso, parse_time
 from .work_session import build_work_session_effort, format_work_effort_brief
 
 
@@ -34,6 +35,45 @@ def normalize_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.strip().split())
+
+
+def stale_for_seconds(item: dict[str, Any], current_time: str | None, *keys: str) -> int | None:
+    reference = parse_time(current_time) or parse_time(now_iso())
+    if not reference:
+        return None
+    for key in keys:
+        timestamp = parse_time(item.get(key))
+        if not timestamp:
+            continue
+        try:
+            return int(max(0.0, (reference - timestamp).total_seconds()))
+        except TypeError:
+            return None
+    return None
+
+
+def attach_action_metadata(action: dict[str, Any], reason: str, stale_seconds: int | None) -> dict[str, Any]:
+    action["reason"] = reason
+    if stale_seconds is not None:
+        action["stale_for_seconds"] = stale_seconds
+    return action
+
+
+def format_stale_duration(seconds: Any) -> str:
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h"
+    days = hours // 24
+    return f"{days}d"
 
 
 def open_tasks_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -209,7 +249,7 @@ def attention_detail_item(item: dict[str, Any]) -> dict[str, Any]:
     return detail
 
 
-def question_action_item(question: dict[str, Any]) -> dict[str, Any]:
+def question_action_item(question: dict[str, Any], current_time: str | None = None) -> dict[str, Any]:
     question_id = question.get("id") or question.get("question_id")
     action = {
         "kind": "reply",
@@ -224,10 +264,14 @@ def question_action_item(question: dict[str, Any]) -> dict[str, Any]:
     related_task_id = question.get("related_task_id")
     if related_task_id is not None:
         action["task_id"] = related_task_id
-    return action
+    return attach_action_metadata(
+        action,
+        "open question requires a reply",
+        stale_for_seconds(question, current_time, "created_at", "updated_at"),
+    )
 
 
-def work_session_action_item(session: dict[str, Any]) -> dict[str, Any]:
+def work_session_action_item(session: dict[str, Any], current_time: str | None = None) -> dict[str, Any]:
     task_id = session.get("task_id")
     session_id = session.get("id")
     action = {
@@ -246,26 +290,38 @@ def work_session_action_item(session: dict[str, Any]) -> dict[str, Any]:
     effort_summary = format_work_effort_brief(effort)
     if effort_summary:
         action["effort_summary"] = effort_summary
-    return action
+    return attach_action_metadata(
+        action,
+        "active work session can be resumed",
+        stale_for_seconds(session, current_time, "updated_at", "created_at"),
+    )
 
 
-def task_action_item(task: dict[str, Any]) -> dict[str, Any]:
+def task_action_item(task: dict[str, Any], current_time: str | None = None) -> dict[str, Any]:
     task_id = task.get("id")
     if task_id is None:
-        return {"kind": "open_task", "label": "Open next task", "command": mew_command("task", "list")}
+        return attach_action_metadata(
+            {"kind": "open_task", "label": "Open next task", "command": mew_command("task", "list")},
+            "open task is available",
+            stale_for_seconds(task, current_time, "updated_at", "created_at"),
+        )
     kind = normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
     command = mew_command("code", task_id) if kind == "coding" else mew_command("task", "show", task_id)
-    return {
-        "kind": "open_task",
-        "label": f"Open task #{task_id}",
-        "command": command,
-        "id": task_id,
-        "task_id": task_id,
-        "task_kind": kind,
-    }
+    return attach_action_metadata(
+        {
+            "kind": "open_task",
+            "label": f"Open task #{task_id}",
+            "command": command,
+            "id": task_id,
+            "task_id": task_id,
+            "task_kind": kind,
+        },
+        "open task is available",
+        stale_for_seconds(task, current_time, "updated_at", "created_at"),
+    )
 
 
-def attention_action_item(item: dict[str, Any]) -> dict[str, Any]:
+def attention_action_item(item: dict[str, Any], current_time: str | None = None) -> dict[str, Any]:
     attention_id = item.get("id")
     action = {
         "kind": "review_attention",
@@ -279,7 +335,11 @@ def attention_action_item(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("task_id", "agent_run_id", "question_id"):
         if item.get(key) is not None:
             action[key] = item.get(key)
-    return action
+    return attach_action_metadata(
+        action,
+        "independent attention item is open",
+        stale_for_seconds(item, current_time, "created_at", "updated_at"),
+    )
 
 
 def action_identity(value: Any) -> str:
@@ -308,6 +368,7 @@ def desk_actions_for_desk(
     sessions: list[dict[str, Any]],
     attention: list[dict[str, Any]],
     limit: int = MAX_ACTION_ITEMS,
+    current_time: str | None = None,
 ) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
@@ -318,17 +379,17 @@ def desk_actions_for_desk(
     }
     active_task_ids = {action_identity(session.get("task_id")) for session in sessions if session.get("task_id") is not None}
     for question in questions:
-        _append_unique_action(actions, seen, question_action_item(question))
+        _append_unique_action(actions, seen, question_action_item(question, current_time=current_time))
     for session in reversed(sessions):
-        _append_unique_action(actions, seen, work_session_action_item(session))
+        _append_unique_action(actions, seen, work_session_action_item(session, current_time=current_time))
     for item in attention:
         if action_identity(item.get("question_id")) in question_ids:
             continue
-        _append_unique_action(actions, seen, attention_action_item(item))
+        _append_unique_action(actions, seen, attention_action_item(item, current_time=current_time))
     for task in tasks:
         if action_identity(task.get("id")) in active_task_ids:
             continue
-        _append_unique_action(actions, seen, task_action_item(task))
+        _append_unique_action(actions, seen, task_action_item(task, current_time=current_time))
     return actions[: max(0, int(limit))]
 
 
@@ -376,13 +437,17 @@ def focus_summary(state: dict[str, Any]) -> str:
     return "No active work recorded"
 
 
-def build_desk_view_model(state: dict[str, Any], explicit_date: str | None = None) -> dict[str, Any]:
+def build_desk_view_model(
+    state: dict[str, Any],
+    explicit_date: str | None = None,
+    current_time: str | None = None,
+) -> dict[str, Any]:
     day = resolve_desk_date(explicit_date)
     questions = open_questions_for_desk(state)
     tasks = open_tasks_for_desk(state)
     sessions = active_work_sessions_for_desk(state)
     attention = open_attention_for_desk(state)
-    actions = desk_actions_for_desk(questions, tasks, sessions, attention)
+    actions = desk_actions_for_desk(questions, tasks, sessions, attention, current_time=current_time)
     primary_action = actions[0] if actions else None
     return {
         "date": day,
@@ -426,10 +491,17 @@ def format_desk_view(view_model: dict[str, Any]) -> str:
                 continue
             label = normalize_text(item.get("label")) or normalize_text(item.get("kind")) or "action"
             command = normalize_text(item.get("command"))
+            reason = normalize_text(item.get("reason"))
             effort_summary = normalize_text(item.get("effort_summary"))
             detail = f"  - {label}"
+            if reason:
+                detail += f": {reason}"
             if effort_summary:
                 detail += f" [{effort_summary}]"
+            if item.get("stale_for_seconds") is not None:
+                stale_text = format_stale_duration(item.get("stale_for_seconds"))
+                if stale_text:
+                    detail += f" stale_for={stale_text}"
             if command:
                 detail += f" -> {command}"
             action_lines.append(detail)

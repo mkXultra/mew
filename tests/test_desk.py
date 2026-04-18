@@ -27,6 +27,7 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["counts"]["open_questions"], 1)
         self.assertEqual(view["primary_action"]["kind"], "reply")
         self.assertEqual(view["primary_action"]["command"], mew_command("reply", 1, "<reply>"))
+        self.assertEqual(view["primary_action"]["reason"], "open question requires a reply")
         self.assertEqual([action["kind"] for action in view["actions"]], ["reply", "open_task"])
         self.assertEqual(view["actions"][0]["command"], mew_command("reply", 1, "<reply>"))
         self.assertEqual(view["actions"][1]["command"], mew_command("code", 1))
@@ -114,6 +115,7 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(typing["focus"], "Working on: Continue work")
         self.assertEqual(typing["primary_action"]["kind"], "resume_work")
         self.assertEqual(typing["actions"][0]["kind"], "resume_work")
+        self.assertEqual(typing["actions"][0]["reason"], "active work session can be resumed")
         self.assertEqual(typing["actions"][0]["effort_summary"], "effort=low steps=2/30 failures=0")
         self.assertEqual(
             typing["primary_action"]["command"],
@@ -184,24 +186,54 @@ class DeskTests(unittest.TestCase):
             {
                 "questions": [{"id": "1", "status": "open", "text": "Need input?"}],
                 "tasks": [
-                    {"id": 3, "title": "Active task", "status": "ready", "kind": "coding"},
-                    {"id": 4, "title": "Next task", "status": "ready", "kind": "research"},
+                    {
+                        "id": 3,
+                        "title": "Active task",
+                        "status": "ready",
+                        "kind": "coding",
+                        "updated_at": "2026-04-17T00:30:00Z",
+                    },
+                    {
+                        "id": 4,
+                        "title": "Next task",
+                        "status": "ready",
+                        "kind": "research",
+                        "updated_at": "2026-04-17T00:15:00Z",
+                    },
                 ],
-                "work_sessions": [{"id": 8, "task_id": "3", "status": "active", "goal": "Active task"}],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": "3",
+                        "status": "active",
+                        "goal": "Active task",
+                        "updated_at": "2026-04-17T00:45:00Z",
+                    }
+                ],
                 "attention": {
                     "items": [
                         {"id": 1, "status": "open", "title": "Duplicate question", "question_id": 1},
-                        {"id": 2, "status": "open", "title": "Independent attention"},
+                        {
+                            "id": 2,
+                            "status": "open",
+                            "title": "Independent attention",
+                            "created_at": "2026-04-17T00:20:00Z",
+                        },
                     ]
                 },
             },
             explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
         )
 
         labels = [action["label"] for action in view["actions"]]
 
         self.assertEqual(labels, ["Reply to question #1", "Resume task #3", "Review attention #2", "Open task #4"])
         self.assertNotIn("Open task #3", labels)
+        by_label = {action["label"]: action for action in view["actions"]}
+        self.assertEqual(by_label["Resume task #3"]["stale_for_seconds"], 900)
+        self.assertEqual(by_label["Review attention #2"]["stale_for_seconds"], 2400)
+        self.assertEqual(by_label["Open task #4"]["stale_for_seconds"], 2700)
 
     def test_format_desk_view(self):
         text = format_desk_view(
@@ -226,8 +258,18 @@ class DeskTests(unittest.TestCase):
                     ]
                 },
                 "actions": [
-                    {"label": "Open task #1", "command": mew_command("task", "show", 1)},
-                    {"label": "Review attention #2", "command": mew_command("attention")},
+                    {
+                        "label": "Open task #1",
+                        "command": mew_command("task", "show", 1),
+                        "reason": "open task is available",
+                        "stale_for_seconds": 60,
+                    },
+                    {
+                        "label": "Review attention #2",
+                        "command": mew_command("attention"),
+                        "reason": "independent attention item is open",
+                        "stale_for_seconds": 120,
+                    },
                 ],
             }
         )
@@ -237,7 +279,10 @@ class DeskTests(unittest.TestCase):
         self.assertIn("primary_action: Open task #1", text)
         self.assertIn(f"primary_command: {mew_command('task', 'show', 1)}", text)
         self.assertIn("actions:", text)
-        self.assertIn(f"- Review attention #2 -> {mew_command('attention')}", text)
+        self.assertIn(
+            f"- Review attention #2: independent attention item is open stale_for=2m -> {mew_command('attention')}",
+            text,
+        )
         self.assertEqual(text.count("Open task #1"), 1)
         self.assertIn("tasks:", text)
         self.assertIn(f"- Task #1: Review desk -> {mew_command('task', 'show', 1)}", text)

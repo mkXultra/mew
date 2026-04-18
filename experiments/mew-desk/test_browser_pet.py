@@ -29,6 +29,8 @@ def test_render_browser_pet_for_alerting_state() -> None:
                     "label": "Resume task #2",
                     "command": "mew work 2 --session --resume",
                     "effort_summary": "effort=medium steps=24/30 failures=2",
+                    "reason": "active work session can be resumed",
+                    "stale_for_seconds": 42,
                 },
             ],
             "details": {
@@ -58,6 +60,8 @@ def test_render_browser_pet_for_alerting_state() -> None:
     assert "mew reply 1 &quot;&lt;reply&gt;&quot;" in html
     assert "Resume task #2" in html
     assert "effort=medium steps=24/30 failures=2" in html
+    assert "active work session can be resumed" in html
+    assert "stale for 42s" in html
     assert "mew work 2 --session --resume" in html
     assert "Questions" in html
     assert "Need input" in html
