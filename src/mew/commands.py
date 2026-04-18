@@ -7479,10 +7479,23 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
     print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', read_root)}")
 
 
+def self_improve_native_validation_error(*, native=False, dispatch=False, cycle=False, show_prompt=False):
+    if native and (cycle or dispatch):
+        return "--native/--start-session cannot be combined with --cycle or --dispatch"
+    if native and show_prompt:
+        return "--native/--start-session cannot be combined with --prompt"
+    return ""
+
+
 def cmd_self_improve(args):
     native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
-    if native and (args.cycle or args.dispatch):
-        print("mew: --native/--start-session cannot be combined with --cycle or --dispatch", file=sys.stderr)
+    validation_error = self_improve_native_validation_error(
+        native=native,
+        dispatch=args.dispatch,
+        cycle=args.cycle,
+    )
+    if validation_error:
+        print(f"mew: {validation_error}", file=sys.stderr)
         return 1
     if args.cycle:
         return cmd_self_improve_cycle(args)
@@ -10987,11 +11000,13 @@ def chat_self_improve(rest):
     auto_execute = "auto-execute" in flags or "--auto-execute" in flags
     start_session = bool({"start", "--start", "start-session", "--start-session"} & flags)
     native = "native" in flags or "--native" in flags or start_session
-    if native and dispatch:
-        print("mew: native self-improve cannot be combined with dispatch")
-        return
-    if native and show_prompt:
-        print("mew: native self-improve does not create a programmer prompt")
+    validation_error = self_improve_native_validation_error(
+        native=native,
+        dispatch=dispatch,
+        show_prompt=show_prompt,
+    )
+    if validation_error:
+        print(f"mew: {validation_error}")
         return
     focus = " ".join(part for part in parts if part.casefold() not in option_tokens).strip()
 

@@ -5191,10 +5191,37 @@ class CommandTests(unittest.TestCase):
                     code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
 
                 self.assertEqual(code, 0)
-                self.assertIn("does not create a programmer prompt", stdout.getvalue())
+                self.assertIn("--native/--start-session cannot be combined with --prompt", stdout.getvalue())
                 state = load_state()
                 self.assertEqual(state["tasks"], [])
                 self.assertEqual(state["agent_runs"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_self_improve_native_dispatch_is_rejected_before_mutation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                stdin = StringIO("/self native dispatch improve native loop\n/exit\n")
+                with (
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                self.assertIn(
+                    "--native/--start-session cannot be combined with --cycle or --dispatch",
+                    stdout.getvalue(),
+                )
+                state = load_state()
+                self.assertEqual(state["tasks"], [])
+                self.assertEqual(state["agent_runs"], [])
+                self.assertEqual(state["work_sessions"], [])
             finally:
                 os.chdir(old_cwd)
 
