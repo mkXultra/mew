@@ -365,6 +365,36 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_start_session_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--start-session", "--focus", "Start native work", "--json"])
+
+                self.assertEqual(code, 0)
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["created"])
+                self.assertTrue(data["session_created"])
+                self.assertTrue(data["native"])
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(data["work_session"]["id"], 1)
+                self.assertEqual(data["work_session"]["task_id"], 1)
+                self.assertEqual(data["controls"]["work_cwd"], str(Path(tmp).resolve()))
+                self.assertEqual(
+                    data["controls"]["continue"],
+                    "mew work 1 --live --allow-read . --compact-live --max-steps 1",
+                )
+                self.assertEqual(
+                    data["controls"]["follow"],
+                    "mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10",
+                )
+                self.assertEqual(data["controls"]["status"], "mew work 1 --follow-status --json")
+                self.assertEqual(data["controls"]["resume"], "mew work 1 --session --resume --allow-read .")
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_controls_use_task_cwd_read_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as workdir:

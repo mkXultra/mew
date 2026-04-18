@@ -174,6 +174,9 @@ writes.
 Search navigation is more forgiving for resident models: `search_text`
 normalizes space-separated include globs such as `src/** tests/** docs/**` and
 adds absolute-path-friendly `**/` variants before invoking `rg`.
+Native self-improvement startup now has a structured surface:
+`mew self-improve --start-session --json` returns the task, work session, and
+copy-paste controls without scraping text.
 
 ## Milestone 1: Native Hands
 
@@ -460,6 +463,9 @@ Evidence:
   and expands relative directory globs to `**/...` variants, so a model can
   search `src/** tests/** docs/**` from an absolute workspace path instead of
   getting a silent zero-match result.
+- `mew self-improve --json` now returns structured task/plan/run/session data;
+  in native start-session mode it includes work-session controls for continue,
+  follow, status, and resume.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
@@ -779,6 +785,16 @@ Next action:
   (`282 passed, 5 subtests passed`), full
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`971 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/read_tools.py tests/test_work_session.py`
+  (pass), and `./mew dogfood --all` (pass).
+- Observer/self-improve current: task #136 fixed the long-session failure where
+  `mew self-improve --start-session --json` was rejected. The command now has a
+  JSON surface with task, plan, run, work-session, and native controls fields,
+  while preserving existing text output. Validated with focused start-session
+  JSON/text tests (`2 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_self_improve.py tests/test_commands.py`
+  (`188 passed, 10 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`972 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/cli.py src/mew/commands.py tests/test_self_improve.py`
   (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test

@@ -7886,21 +7886,39 @@ def native_self_improve_read_root(task):
     return resolved
 
 
-def print_native_self_improve_controls(task, *, include_start_hint=False):
-    if include_start_hint:
-        print(f"start session: {mew_command('work', task['id'], '--start-session')}")
+def native_self_improve_controls(task, *, include_start_hint=False):
     read_root = native_self_improve_read_root(task)
-    print(f"work cwd: {resolved_task_cwd_text(task)}")
-    print(
-        "continue: "
-        f"{mew_command('work', task['id'], '--live', '--allow-read', read_root, '--compact-live', '--max-steps', '1')}"
-    )
-    print(
-        f"follow: "
-        f"{mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', read_root, '--compact-live', '--max-steps', '10')}"
-    )
-    print(f"status: {mew_command('work', task['id'], '--follow-status', '--json')}")
-    print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', read_root)}")
+    controls = {
+        "work_cwd": resolved_task_cwd_text(task),
+        "continue": mew_command("work", task["id"], "--live", "--allow-read", read_root, "--compact-live", "--max-steps", "1"),
+        "follow": mew_command(
+            "work",
+            task["id"],
+            "--follow",
+            "--quiet",
+            "--allow-read",
+            read_root,
+            "--compact-live",
+            "--max-steps",
+            "10",
+        ),
+        "status": mew_command("work", task["id"], "--follow-status", "--json"),
+        "resume": mew_command("work", task["id"], "--session", "--resume", "--allow-read", read_root),
+    }
+    if include_start_hint:
+        controls["start_session"] = mew_command("work", task["id"], "--start-session")
+    return controls
+
+
+def print_native_self_improve_controls(task, *, include_start_hint=False):
+    controls = native_self_improve_controls(task, include_start_hint=include_start_hint)
+    if include_start_hint:
+        print(f"start session: {controls['start_session']}")
+    print(f"work cwd: {controls['work_cwd']}")
+    print(f"continue: {controls['continue']}")
+    print(f"follow: {controls['follow']}")
+    print(f"status: {controls['status']}")
+    print(f"resume: {controls['resume']}")
 
 
 def self_improve_native_validation_error(*, native=False, dispatch=False, cycle=False, show_prompt=False):
@@ -7970,6 +7988,31 @@ def cmd_self_improve(args):
         if getattr(args, "start_session", False):
             session, session_created = create_work_session(state, task)
         save_state(state)
+
+    if getattr(args, "json", False):
+        payload = {
+            "created": created,
+            "task": task,
+            "plan_created": plan_created,
+            "plan": plan,
+            "run": run,
+            "session_created": session_created,
+            "work_session": session,
+            "native": native,
+            "controls": native_self_improve_controls(
+                task,
+                include_start_hint=native and not getattr(args, "start_session", False),
+            )
+            if native
+            else {},
+        }
+        if args.prompt and plan:
+            payload["implementation_prompt"] = plan.get("implementation_prompt") or ""
+            payload["review_prompt"] = plan.get("review_prompt") or ""
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if run and not args.dry_run and run.get("status") != "running":
+            return 1
+        return 0
 
     print(("created" if created else "reused") + f" {format_task(task)}")
     if plan:

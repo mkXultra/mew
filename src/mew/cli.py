@@ -1200,6 +1200,7 @@ def build_parser():
         action="store_true",
         help="continue supervised cycles when a review returns unknown",
     )
+    self_improve_parser.add_argument("--json", action="store_true", help="print structured JSON")
     self_improve_parser.set_defaults(func=cmd_self_improve)
 
     outbox_parser = subparsers.add_parser("outbox", help="show runtime messages")
