@@ -9,10 +9,10 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, and prioritized desk actions; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, and paired verifier promotion; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
-| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
+| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
 
@@ -192,6 +192,12 @@ failed repeat-guard tool calls carry concrete recovery actions, work sessions
 surface effort/budget pressure in resume/model context/desk, and `mew desk`
 now exposes prioritized actions with rationale and stale age while keeping the
 old `primary_action` field for compatibility.
+The current 2026-04-19 long dogfood pass extended that thread with commits
+`4073282`, `d500105`, and `6229213`: native self-improve start sessions now
+persist read/compact-live defaults, chat `/self start` matches the CLI path and
+marks the task ready, and approved paired `src/mew/**` source edits can promote
+the session verifier to the inferred matching test while `approve-all` applies
+the pending paired test edit first when promotion depends on it.
 
 ## Milestone 1: Native Hands
 
@@ -734,6 +740,17 @@ Next action:
 
 ## Latest Validation
 
+- Interactive/Self-improve current: the 2026-04-19 long dogfood session added
+  three reentry and verifier-safety commits: `4073282` seeds native
+  self-improve work-session defaults, `d500105` aligns CLI and chat
+  self-improve start-session state, and `6229213` promotes paired source-edit
+  verifiers while preserving explicit verifier precedence and `verify_disabled`
+  behavior. Validation included focused self-improve/chat/work-session tests,
+  `uv run --with ruff ruff check` on the changed files, full
+  `uv run python -m unittest` (`973 tests`, pass), `./mew dogfood --all`
+  (pass), `codex-ultra` reviews with an initial approve-all ordering finding,
+  and a final `codex-ultra` re-review PASS after the paired-test-first
+  approve-all regression test was added.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
