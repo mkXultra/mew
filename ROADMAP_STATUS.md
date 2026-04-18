@@ -760,7 +760,13 @@ Next action:
   tests`, pass), repeated `./mew dogfood --all` runs (pass), `codex-ultra`
   reviews with an initial approve-all ordering finding and a later
   no-task-arg follow-status recovery finding, and final `codex-ultra`
-  re-review PASS after each regression test was added.
+  re-review PASS after each regression test was added. A manual external-cwd
+  e2e smoke also passed: `mew self-improve --native --cwd <external-root>`
+  printed a default-preserving start hint, `mew work 1 --start-session
+  --allow-read <external-root> --compact-live --json` persisted those defaults,
+  taskless `mew work --follow-status --json` suggested a matching
+  `refresh_snapshot` command, and the suggested zero-step follow refresh wrote a
+  fresh session snapshot.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
