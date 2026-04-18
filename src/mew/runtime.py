@@ -503,17 +503,29 @@ def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task
     if normalized_reason == "pending_write_approval" and session:
         resume = build_work_session_resume(session, task=task)
         approval = ((resume.get("pending_approvals") or [])[:1] or [{}])[0]
-        command = approval.get("cli_approve_hint") or resume_command
+        pairing = approval.get("pairing_status") or {}
+        approve_command = approval.get("cli_approve_hint") or ""
+        if pairing.get("status") == "missing_test_edit":
+            command = resume_command
+            reason = "a source edit is waiting for a paired tests/** edit or an explicit override"
+        else:
+            command = approve_command or resume_command
+            reason = "a dry-run write/edit is waiting for approval or rejection"
         suggestion = {
             "action": "resolve_pending_write_approval",
             "label": "resolve pending write approval",
             "command": command,
-            "reason": "a dry-run write/edit is waiting for approval or rejection",
+            "reason": reason,
             "session_id": session.get("id"),
             "task_id": resolved_task_id,
             "tool_call_id": approval.get("tool_call_id"),
             "resume_command": resume_command,
         }
+        if pairing.get("status") == "missing_test_edit":
+            suggestion["pairing_status"] = pairing
+            if approve_command:
+                suggestion["blocked_command"] = approve_command
+                suggestion["override_command"] = f"{approve_command} --allow-unpaired-source-edit"
         if approval.get("cli_reject_hint"):
             suggestion["alternate_command"] = approval.get("cli_reject_hint")
         return suggestion

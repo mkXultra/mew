@@ -3657,7 +3657,7 @@ def _apply_work_approval(args, approve_tool_id):
             add_work_session_note(
                 session,
                 (
-                    "approved unpaired source edit override for "
+                    "allowed unpaired source edit override for approval attempt on "
                     f"tool #{source_call.get('id')} {pairing_status.get('source_path')}"
                 ),
                 source="system",
@@ -4097,6 +4097,14 @@ def _coerce_work_reply_list(value):
     return [str(value).strip()]
 
 
+def _coerce_work_reply_bool(value, field):
+    if value is None or value == "":
+        return False
+    if isinstance(value, bool):
+        return value
+    raise MewError(f"reply {field} must be a boolean true/false value")
+
+
 def _reject_reply_verify_overrides(raw):
     raw = raw if isinstance(raw, dict) else {}
     blocked = [key for key in ("verify_command", "verify_cwd", "verify_timeout") if raw.get(key) not in (None, "")]
@@ -4144,7 +4152,10 @@ def _normalize_work_reply_actions(payload):
                         "type": "approve",
                         "tool_call_id": tool_call_id,
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
-                        "allow_unpaired_source_edit": bool(raw.get("allow_unpaired_source_edit")),
+                        "allow_unpaired_source_edit": _coerce_work_reply_bool(
+                            raw.get("allow_unpaired_source_edit"),
+                            "allow_unpaired_source_edit",
+                        ),
                     }
                 )
             elif action_type in ("approve_all", "approve-all"):
@@ -4153,7 +4164,10 @@ def _normalize_work_reply_actions(payload):
                     {
                         "type": "approve_all",
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
-                        "allow_unpaired_source_edit": bool(raw.get("allow_unpaired_source_edit")),
+                        "allow_unpaired_source_edit": _coerce_work_reply_bool(
+                            raw.get("allow_unpaired_source_edit"),
+                            "allow_unpaired_source_edit",
+                        ),
                     }
                 )
             else:
@@ -4191,12 +4205,18 @@ def _normalize_work_reply_actions(payload):
             _reject_reply_verify_overrides(approve)
             tool_call_id = approve.get("tool_call_id") or approve.get("tool") or approve.get("id")
             allow_write = _coerce_work_reply_list(approve.get("allow_write") or approve.get("allow_write_roots"))
-            allow_unpaired = bool(approve.get("allow_unpaired_source_edit"))
+            allow_unpaired = _coerce_work_reply_bool(
+                approve.get("allow_unpaired_source_edit"),
+                "allow_unpaired_source_edit",
+            )
         else:
             _reject_reply_verify_overrides(payload)
             tool_call_id = payload.get("approve_tool") or approve
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
-            allow_unpaired = bool(payload.get("allow_unpaired_source_edit"))
+            allow_unpaired = _coerce_work_reply_bool(
+                payload.get("allow_unpaired_source_edit"),
+                "allow_unpaired_source_edit",
+            )
         actions.append(
             {
                 "type": "approve",
@@ -4210,11 +4230,17 @@ def _normalize_work_reply_actions(payload):
         if isinstance(approve_all, dict):
             _reject_reply_verify_overrides(approve_all)
             allow_write = _coerce_work_reply_list(approve_all.get("allow_write") or approve_all.get("allow_write_roots"))
-            allow_unpaired = bool(approve_all.get("allow_unpaired_source_edit"))
+            allow_unpaired = _coerce_work_reply_bool(
+                approve_all.get("allow_unpaired_source_edit"),
+                "allow_unpaired_source_edit",
+            )
         else:
             _reject_reply_verify_overrides(payload)
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
-            allow_unpaired = bool(payload.get("allow_unpaired_source_edit"))
+            allow_unpaired = _coerce_work_reply_bool(
+                payload.get("allow_unpaired_source_edit"),
+                "allow_unpaired_source_edit",
+            )
         actions.append(
             {
                 "type": "approve_all",

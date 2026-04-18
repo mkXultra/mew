@@ -230,9 +230,38 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(recovery["session_id"], session["id"])
         self.assertEqual(recovery["task_id"], task["id"])
         self.assertEqual(recovery["tool_call_id"], 1)
-        self.assertIn("mew work 1 --approve-tool 1", recovery["command"])
+        self.assertIn("mew work 1 --session --resume --allow-read .", recovery["command"])
+        self.assertIn("mew work 1 --approve-tool 1", recovery["blocked_command"])
+        self.assertIn("--allow-unpaired-source-edit", recovery["override_command"])
         self.assertIn("mew work 1 --reject-tool 1", recovery["alternate_command"])
         self.assertIn("mew work 1 --session --resume --allow-read .", recovery["resume_command"])
+
+    def test_native_work_skip_recovery_keeps_approve_primary_for_non_source_write(self):
+        state = default_state()
+        task = {"id": 1, "title": "Write task", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(session, event_id=7, current_time="now")
+        session["tool_calls"].append(
+            {
+                "id": 1,
+                "session_id": session["id"],
+                "task_id": task["id"],
+                "tool": "edit_file",
+                "status": "completed",
+                "parameters": {"path": "notes.md"},
+                "result": {"dry_run": True, "changed": True, "diff": "-old\n+new\n"},
+            }
+        )
+
+        _step, skip = select_runtime_native_work_step(state)
+        recovery = native_work_skip_recovery_suggestion(state, skip)
+
+        self.assertEqual(recovery["action"], "resolve_pending_write_approval")
+        self.assertIn("mew work 1 --approve-tool 1", recovery["command"])
+        self.assertNotIn("blocked_command", recovery)
+        self.assertNotIn("override_command", recovery)
+        self.assertIn("mew work 1 --reject-tool 1", recovery["alternate_command"])
 
     def test_select_runtime_native_work_step_skips_session_started_this_cycle(self):
         state = default_state()
@@ -761,7 +790,9 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(runtime["last_native_work_step_skip"], "pending_write_approval")
                 recovery = runtime["last_native_work_skip_recovery"]
                 self.assertEqual(recovery["action"], "resolve_pending_write_approval")
-                self.assertIn("mew work 1 --approve-tool 1", recovery["command"])
+                self.assertIn("mew work 1 --session --resume --allow-read .", recovery["command"])
+                self.assertIn("mew work 1 --approve-tool 1", recovery["blocked_command"])
+                self.assertIn("--allow-unpaired-source-edit", recovery["override_command"])
                 self.assertIn("mew work 1 --reject-tool 1", recovery["alternate_command"])
                 self.assertEqual(
                     runtime["native_work_step_skips"][-1]["recovery"]["action"],

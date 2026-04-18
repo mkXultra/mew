@@ -1205,6 +1205,10 @@ def _work_call_changed_write(call):
     return (call or {}).get("tool") in WRITE_WORK_TOOLS and bool(result.get("changed"))
 
 
+def _work_call_counts_as_test_pair(call):
+    return _work_call_changed_write(call) and call.get("approval_status") not in ("rejected", "failed")
+
+
 def work_write_pairing_status(session, call):
     """Return advisory test-pairing status for resident edits to mew source files."""
     if not session or not call or not _work_call_changed_write(call):
@@ -1217,7 +1221,7 @@ def work_write_pairing_status(session, call):
     for candidate in session.get("tool_calls") or []:
         if candidate.get("id") == call.get("id"):
             continue
-        if _work_call_changed_write(candidate) and _is_test_path(work_call_path(candidate)):
+        if _work_call_counts_as_test_pair(candidate) and _is_test_path(work_call_path(candidate)):
             paired = candidate
             break
 

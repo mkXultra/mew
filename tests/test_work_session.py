@@ -536,6 +536,62 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("pairing_status", test_approval)
         self.assertNotIn("paired test missing", source_approval_cell["preview"])
 
+    def test_source_edit_pairing_ignores_rejected_or_failed_test_writes(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Pairing",
+            "model_turns": [],
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "approval_status": "rejected",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- /dev/null\n+++ b/tests/test_pairing.py\n@@ -0,0 +1 @@\n+def test_pairing(): pass\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "approval_status": "failed",
+                    "parameters": {"path": "tests/test_pairing_failed.py"},
+                    "result": {
+                        "path": "tests/test_pairing_failed.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- /dev/null\n+++ b/tests/test_pairing_failed.py\n@@ -0,0 +1 @@\n+def test_pairing_failed(): pass\n",
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        source_approval = [
+            approval for approval in resume["pending_approvals"] if approval["path"] == "src/mew/pairing.py"
+        ][0]
+
+        self.assertEqual(source_approval["pairing_status"]["status"], "missing_test_edit")
+
     def test_work_session_cells_pane_is_available_from_cli(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -5178,7 +5234,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("approved work tool #1", stdout.getvalue())
                 self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'new'\n")
                 notes = load_state()["work_sessions"][0]["notes"]
-                self.assertTrue(any("approved unpaired source edit override" in note["text"] for note in notes))
+                self.assertTrue(any("allowed unpaired source edit override" in note["text"] for note in notes))
             finally:
                 os.chdir(old_cwd)
 
@@ -10473,7 +10529,32 @@ class WorkSessionTests(unittest.TestCase):
                             "schema_version": 1,
                             "session_id": 1,
                             "task_id": 1,
-                            "observed_session_updated_at": observed_updated_at,
+                            "observed_session_updated_at": load_state()["work_sessions"][0]["updated_at"],
+                            "actions": [
+                                {
+                                    "type": "approve",
+                                    "tool_call_id": 1,
+                                    "allow_write": ".",
+                                    "allow_unpaired_source_edit": "false",
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                self.assertIn("allow_unpaired_source_edit must be a boolean", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'old'\n")
+
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": load_state()["work_sessions"][0]["updated_at"],
                             "actions": [
                                 {
                                     "type": "approve",

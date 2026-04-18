@@ -1357,7 +1357,9 @@ def run_native_advance_scenario(workspace, env=None):
         and approval_report.get("exit_code") == 0
         and approval_runtime.get("last_native_work_step_skip") == "pending_write_approval"
         and approval_skip_recovery.get("action") == "resolve_pending_write_approval"
-        and "--approve-tool" in (approval_skip_recovery.get("command") or "")
+        and "--session --resume --allow-read ." in (approval_skip_recovery.get("command") or "")
+        and "--approve-tool" in (approval_skip_recovery.get("blocked_command") or "")
+        and "--allow-unpaired-source-edit" in (approval_skip_recovery.get("override_command") or "")
         and "--reject-tool" in (approval_skip_recovery.get("alternate_command") or "")
         and not [
             call for call in approval_fake_calls if (call.get("argv") or [])[:2] == ["work", str(approval_task_id)]
@@ -1367,7 +1369,7 @@ def run_native_advance_scenario(workspace, env=None):
             "last_native_work_skip_recovery": approval_skip_recovery,
             "fake_calls": approval_fake_calls,
         },
-        expected="pending write approval skips passive advance and records concrete approve/reject recovery commands",
+        expected="unpaired source approval skip records resume-first recovery with blocked approve and override commands",
     )
 
     failure_workspace = Path(workspace) / "failed-advance"

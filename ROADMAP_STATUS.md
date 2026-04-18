@@ -991,6 +991,11 @@ Next action:
   explicit `--allow-unpaired-source-edit` / reply-file
   `allow_unpaired_source_edit` override. `work-session` dogfood proves the
   block and audited override path.
+- Codex-ultra review found and the tree now fixes three approval-gate edge
+  cases: reply-file overrides require a real JSON boolean `true`, rejected or
+  failed `tests/**` edits no longer satisfy source pairing, and passive
+  native-work recovery for unpaired source approvals is resume-first while
+  exposing the blocked approve command plus explicit override command.
 
 ## Current Roadmap Focus
 
