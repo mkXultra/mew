@@ -246,7 +246,7 @@ class SelfImproveTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
-                self.assertIn("start session: mew work 1 --start-session", output)
+                self.assertIn("start session: mew work 1 --start-session --allow-read . --compact-live", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --compact-live --max-steps 1", output)
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
@@ -258,6 +258,15 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(len(state["agent_runs"]), 0)
                 self.assertEqual(state["work_sessions"], [])
+
+                with redirect_stdout(StringIO()) as start_stdout:
+                    start_code = main(["work", "1", "--start-session", "--allow-read", ".", "--compact-live", "--json"])
+
+                self.assertEqual(start_code, 0)
+                start_data = json.loads(start_stdout.getvalue())
+                defaults = start_data["work_session"]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["."])
+                self.assertTrue(defaults["compact_live"])
             finally:
                 os.chdir(old_cwd)
 

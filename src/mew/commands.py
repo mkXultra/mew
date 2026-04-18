@@ -8582,7 +8582,14 @@ def native_self_improve_controls(task, *, include_start_hint=False):
         "resume": mew_command("work", task["id"], "--session", "--resume", "--allow-read", read_root),
     }
     if include_start_hint:
-        controls["start_session"] = mew_command("work", task["id"], "--start-session")
+        controls["start_session"] = mew_command(
+            "work",
+            task["id"],
+            "--start-session",
+            "--allow-read",
+            read_root,
+            "--compact-live",
+        )
     return controls
 
 

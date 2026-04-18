@@ -5520,7 +5520,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
                 self.assertIn("created #1 [todo/normal/coding] Improve mew itself", output)
-                self.assertIn("start session: mew work 1 --start-session", output)
+                self.assertIn("start session: mew work 1 --start-session --allow-read . --compact-live", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --compact-live --max-steps 1", output)
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
