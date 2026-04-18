@@ -1426,6 +1426,134 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_glob_expands_brace_pattern_list(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("readme\n", encoding="utf-8")
+                Path("ROADMAP.md").write_text("roadmap\n", encoding="utf-8")
+                Path("docs").mkdir()
+                Path("docs/guide.md").write_text("guide\n", encoding="utf-8")
+                Path("src/mew").mkdir(parents=True)
+                Path("src/mew/app.py").write_text("app\n", encoding="utf-8")
+                Path("tests").mkdir()
+                Path("tests/test_app.py").write_text("test\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "glob",
+                                "--pattern",
+                                "{README*,ROADMAP*,docs/**,src/mew/**,tests/**}",
+                                "--path",
+                                ".",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                paths = [match["path"] for match in result["matches"]]
+                self.assertEqual(
+                    result["patterns"],
+                    [
+                        "README*",
+                        "ROADMAP*",
+                        "docs/**",
+                        "docs/**/*",
+                        "src/mew/**",
+                        "src/mew/**/*",
+                        "tests/**",
+                        "tests/**/*",
+                    ],
+                )
+                self.assertTrue(any(path.endswith("README.md") for path in paths))
+                self.assertTrue(any(path.endswith("ROADMAP.md") for path in paths))
+                self.assertTrue(any(path.endswith("docs/guide.md") for path in paths))
+                self.assertTrue(any(path.endswith("src/mew/app.py") for path in paths))
+                self.assertTrue(any(path.endswith("tests/test_app.py") for path in paths))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_glob_does_not_follow_symlink_outside_allowed_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                allowed = Path("allowed")
+                outside = Path("outside")
+                allowed.mkdir()
+                outside.mkdir()
+                (outside / "visible.txt").write_text("outside\n", encoding="utf-8")
+                try:
+                    os.symlink(outside.resolve(), allowed / "link", target_is_directory=True)
+                except OSError as exc:
+                    self.skipTest(f"symlink unavailable: {exc}")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "glob",
+                                "--pattern",
+                                "link/**",
+                                "--path",
+                                "allowed",
+                                "--allow-read",
+                                "allowed",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                paths = [match["path"] for match in data["tool_call"]["result"]["matches"]]
+                self.assertFalse(any("visible.txt" in path for path in paths))
+                self.assertFalse(any(str(outside.resolve()) in path for path in paths))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_glob_rejects_parent_traversal_patterns(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.read_tools import glob_paths
+
+                Path("allowed").mkdir()
+                Path("allowed/a.txt").write_text("a\n", encoding="utf-8")
+                Path("sibling").mkdir()
+
+                with self.assertRaisesRegex(ValueError, "without '..'"):
+                    glob_paths("../*/../allowed/a.txt", "allowed", ["allowed"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_read_file_default_handles_larger_source_files(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

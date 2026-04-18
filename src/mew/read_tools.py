@@ -357,12 +357,57 @@ def search_text(
     }
 
 
+def _split_top_level_commas(text):
+    parts = []
+    current = []
+    depth = 0
+    for char in str(text or ""):
+        if char == "{":
+            depth += 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _normalize_glob_patterns(pattern):
+    values = pattern if isinstance(pattern, (list, tuple)) else [pattern]
+    patterns = []
+
+    def add_pattern(text):
+        if text not in patterns:
+            patterns.append(text)
+        if text.endswith("/**"):
+            recursive_contents = f"{text}/*"
+            if recursive_contents not in patterns:
+                patterns.append(recursive_contents)
+
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text.startswith("{") and text.endswith("}"):
+            expanded = [part.strip() for part in _split_top_level_commas(text[1:-1]) if part.strip()]
+            for expanded_pattern in expanded or [text]:
+                add_pattern(expanded_pattern)
+        else:
+            add_pattern(text)
+    return patterns
+
+
 def glob_paths(pattern, path, allowed_roots, max_matches=DEFAULT_GLOB_MAX_MATCHES):
     max_matches = max(1, min(int(max_matches), 500))
-    if not pattern or not str(pattern).strip():
+    patterns = _normalize_glob_patterns(pattern)
+    if not patterns:
         raise ValueError("glob pattern is empty")
 
     resolved = resolve_allowed_path(path or ".", allowed_roots)
+    roots = normalize_allowed_roots(allowed_roots)
     ensure_not_sensitive(resolved, verb="glob")
     if not resolved.is_dir():
         raise ValueError(f"path is not a directory: {resolved}")
@@ -374,28 +419,51 @@ def glob_paths(pattern, path, allowed_roots, max_matches=DEFAULT_GLOB_MAX_MATCHE
             parts = candidate.parts
         return any(part in DEFAULT_GLOB_IGNORED_PARTS for part in parts)
 
-    matches = []
-    for candidate in sorted(resolved.rglob(str(pattern)), key=lambda item: str(item)):
+    def safe_candidate(candidate):
         if is_sensitive_path(candidate) or ignored(candidate):
-            continue
-        if len(matches) >= max_matches:
-            break
-        kind = "dir" if candidate.is_dir() else "file"
-        matches.append({"path": str(candidate), "type": kind})
+            return None
+        try:
+            resolved_candidate = candidate.resolve(strict=True)
+        except OSError:
+            return None
+        if is_sensitive_path(resolved_candidate):
+            return None
+        if not any(resolved_candidate == root or _is_relative_to(resolved_candidate, root) for root in roots):
+            return None
+        return resolved_candidate
 
+    matches = []
+    matched_paths = set()
     truncated = False
-    if len(matches) >= max_matches:
-        matched_paths = {match["path"] for match in matches}
-        for candidate in resolved.rglob(str(pattern)):
-            if is_sensitive_path(candidate) or ignored(candidate):
+    for glob_pattern in patterns:
+        pattern_path = Path(glob_pattern)
+        if pattern_path.is_absolute() or ".." in pattern_path.parts:
+            raise ValueError(f"glob pattern must be a relative pattern without '..': {glob_pattern!r}")
+        try:
+            candidates = sorted(resolved.rglob(glob_pattern), key=lambda item: str(item))
+        except ValueError as exc:
+            raise ValueError(f"invalid glob pattern {glob_pattern!r}: {exc}") from exc
+        for candidate in candidates:
+            resolved_candidate = safe_candidate(candidate)
+            if resolved_candidate is None:
                 continue
-            if str(candidate) not in matched_paths:
+            candidate_path = str(candidate)
+            resolved_candidate_path = str(resolved_candidate)
+            if resolved_candidate_path in matched_paths:
+                continue
+            matched_paths.add(resolved_candidate_path)
+            if len(matches) >= max_matches:
                 truncated = True
                 break
+            kind = "dir" if candidate.is_dir() else "file"
+            matches.append({"path": candidate_path, "type": kind})
+        if truncated:
+            break
 
     return {
         "path": str(resolved),
         "pattern": str(pattern),
+        "patterns": patterns,
         "matches": matches,
         "truncated": truncated,
     }

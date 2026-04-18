@@ -1126,6 +1126,12 @@ Next action:
   `mew work --follow` and `--compact-live` now print compact CLI controls by
   default, and code-mode `/work-session resume` keeps terse cockpit controls
   instead of expanding back into the full command list.
+- Native self-improve task #125/session #147 exposed a real resident-tool
+  failure: the model naturally asked `glob` for a brace list containing
+  `docs/**`, `src/mew/**`, and `tests/**`. `glob` now expands brace lists,
+  includes `/**/*` for recursive-directory patterns across Python versions, and
+  keeps candidate results inside allowed read roots even through symlinks or
+  rejected parent traversal.
 
 ## Current Roadmap Focus
 
