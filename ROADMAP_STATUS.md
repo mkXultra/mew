@@ -785,6 +785,11 @@ Next action:
   next highest-leverage work inside Milestone 2: codex points at a calmer
   continuous live/follow cockpit, while Claude points at a built-in same-surface
   audit before a resident task is called done.
+- `098df7d` adds the first lightweight same-surface audit nudge to native
+  self-improvement task descriptions: before calling work done, the resident is
+  asked to inspect sibling code paths on the same surface and note why they are
+  covered or out of scope. This is not yet a hard checkpoint, but it turns the
+  evaluator finding into default resident guidance.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
@@ -1592,4 +1597,6 @@ itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
 persistent memory and audit trail. The next useful slice is to dogfood a longer
 live/follow coding session and add a same-surface audit/checkpoint before the
 resident marks work complete, so the loop catches peer cases without depending
-on a fresh external reviewer.
+on a fresh external reviewer. The initial self-improve prompt nudge exists; the
+remaining work is to make this a visible cockpit/checkpoint artifact rather than
+only task-description guidance.
