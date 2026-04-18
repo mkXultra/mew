@@ -6851,6 +6851,34 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_closed_done_task_resume_suggests_reopen_not_start_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["status"] = "done"
+                    session, _ = create_work_session(state, task)
+                    session["status"] = "closed"
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                resume_text = stdout.getvalue()
+                self.assertIn("task #1 is done, so reopen it before starting", resume_text)
+                self.assertIn("reopen task: mew task update 1 --status ready", resume_text)
+                self.assertNotIn("start a new session: mew work 1 --start-session", resume_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertIn("mew task update 1 --status ready", data["next_cli_controls"])
+                self.assertNotIn("mew work 1 --start-session", data["next_cli_controls"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_resumes_existing_session_across_invocations(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

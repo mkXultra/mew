@@ -1577,15 +1577,24 @@ def _work_cli_approval_items(session, resume):
     return items
 
 
-def work_cli_control_items(session, args):
+def work_cli_control_items(session, args, task=None):
     if not session:
         return [{"label": "start a work session", "command": f"{mew_executable()} work <task-id> --start-session"}]
     task_id = session.get("task_id")
     if session.get("status") != "active":
-        return [
+        controls = [
             {"label": "review closed session", "command": _work_resume_command(args, task_id, session=session)},
-            {"label": "start a new session", "command": mew_command("work", task_id, "--start-session")},
         ]
+        if task and task.get("status") == "done":
+            controls.append(
+                {
+                    "label": "reopen task",
+                    "command": mew_command("task", "update", task_id, "--status", "ready"),
+                }
+            )
+        else:
+            controls.append({"label": "start a new session", "command": mew_command("work", task_id, "--start-session")})
+        return controls
     controls = []
     resume = build_work_session_resume(session)
     approval_items = _work_cli_approval_items(session, resume)
@@ -1663,13 +1672,13 @@ def work_cli_control_items(session, args):
     return controls
 
 
-def work_cli_control_commands(session, args):
-    return [item["command"] for item in work_cli_control_items(session, args)]
+def work_cli_control_commands(session, args, task=None):
+    return [item["command"] for item in work_cli_control_items(session, args, task=task)]
 
 
-def format_work_cli_controls(session, args):
+def format_work_cli_controls(session, args, task=None):
     lines = ["", "Next CLI controls"]
-    for item in work_cli_control_items(session, args):
+    for item in work_cli_control_items(session, args, task=task):
         label = item.get("label") or "run"
         lines.append(f"{label}: {item.get('command')}")
     return "\n".join(lines)
@@ -1751,7 +1760,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
             task_id=task_id,
         ),
         "cells": build_work_session_cells(session, limit=30) if session else [],
-        "controls": work_cli_control_items(session, args) if session else [],
+        "controls": work_cli_control_items(session, args, task=task) if session else [],
         "reply_command": _work_reply_file_command(task_id, reply_path),
         "supported_actions": reply_schema["supported_actions"],
         "reply_template": reply_schema["reply_template"],
@@ -3850,7 +3859,7 @@ def cmd_work_show_session(args):
         if args.json:
             payload = {
                 "resume": resume,
-                "next_cli_controls": work_cli_control_commands(session, args) if resume else [],
+                "next_cli_controls": work_cli_control_commands(session, args, task=task) if resume else [],
             }
             if auto_recovery is not None:
                 payload["auto_recovery"] = auto_recovery
@@ -3862,7 +3871,7 @@ def cmd_work_show_session(args):
                 print("")
             print(format_work_session_resume(resume))
             if resume:
-                print(format_work_cli_controls(session, args))
+                print(format_work_cli_controls(session, args, task=task))
         return auto_recovery_code
     if args.json:
         payload = {"work_session": session}
@@ -3894,7 +3903,7 @@ def cmd_work_show_session(args):
                     limit=getattr(args, "limit", 20),
                     tail_max_lines=getattr(args, "cell_tail_lines", None),
                 )
-            payload["next_cli_controls"] = work_cli_control_commands(session, args)
+            payload["next_cli_controls"] = work_cli_control_commands(session, args, task=task)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if not session and not getattr(args, "task_id", None):
@@ -3929,10 +3938,10 @@ def cmd_work_show_session(args):
                     )
                 )
             print("\n\n".join(panes))
-            print(format_work_cli_controls(session, args))
+            print(format_work_cli_controls(session, args, task=task))
         else:
             print(format_work_session(session, task=task, details=getattr(args, "details", False)))
-            print(format_work_cli_controls(session, args))
+            print(format_work_cli_controls(session, args, task=task))
     return 0
 
 

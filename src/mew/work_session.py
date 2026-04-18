@@ -1599,11 +1599,18 @@ def build_work_session_resume(session, task=None, limit=8):
     )
 
     if session.get("status") == "closed":
-        if task_id:
+        if task_id and task and task.get("status") == "done":
+            reopen_command = mew_command("task", "update", task_id, "--status", "ready")
+            next_action = (
+                "review this closed work session; "
+                f"task #{task_id} is done, so reopen it before starting a new one with {reopen_command}"
+            )
+        elif task_id:
             start_command = mew_command("work", task_id, "--start-session")
+            next_action = f"review this closed work session or start a new one with {start_command}"
         else:
             start_command = mew_command("work", "--start-session")
-        next_action = f"review this closed work session or start a new one with {start_command}"
+            next_action = f"review this closed work session or start a new one with {start_command}"
     elif phase == "stop_requested":
         if session.get("stop_action") == "interrupt_submit":
             if work_session_has_running_activity(session):
