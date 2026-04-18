@@ -2713,6 +2713,9 @@ def run_work_session_scenario(workspace, env=None):
     if memory_session:
         turn_id = next_id(state, "work_model_turn")
         timestamp = now_iso()
+        state.setdefault("memory", {}).setdefault("deep", {}).setdefault("preferences", []).append(
+            "Prefer compact dogfood reentry."
+        )
         memory_session.setdefault("model_turns", []).append(
             {
                 "id": turn_id,
@@ -3247,6 +3250,8 @@ def run_work_session_scenario(workspace, env=None):
         for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
     ]
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
+    user_preferences = (resume_data.get("resume") or {}).get("user_preferences") or {}
+    running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
     done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
     done_resume_controls = done_resume_json_data.get("next_cli_controls") or []
@@ -3694,6 +3699,18 @@ def run_work_session_scenario(workspace, env=None):
         and working_memory.get("open_questions") == ["Does resume show this compact memory?"],
         observed=working_memory,
         expected="resume includes compact working memory from resident THINK output",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_user_preferences",
+        resume_result.get("exit_code") == 0
+        and "Prefer compact dogfood reentry." in " ".join(user_preferences.get("items") or [])
+        and "Prefer compact dogfood reentry." in " ".join(running_output_preferences.get("items") or []),
+        observed={
+            "resume": user_preferences,
+            "follow_snapshot": running_output_preferences,
+        },
+        expected="resume and follow snapshots include durable user preferences",
     )
     _scenario_check(
         checks,

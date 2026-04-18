@@ -433,7 +433,8 @@ Evidence:
   items as `user_preferences`; the same resume flows into the native work THINK
   prompt and `.mew/follow/latest.json`, making durable human preferences
   visible to both the resident model and external observer agents after
-  reentry.
+  reentry. The deterministic work-session dogfood scenario now also checks that
+  resume and zero-step follow snapshots preserve those preferences.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -687,7 +688,11 @@ Next action:
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`964 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
   (pass), `git diff --check` (pass), and
-  `./mew dogfood --scenario all --cleanup --json` (pass).
+  `./mew dogfood --scenario all --cleanup --json` (pass). Follow-up dogfood
+  coverage added `work_resume_surfaces_user_preferences`, validated with
+  `./mew dogfood --scenario work-session --cleanup --json` (pass) and
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_dogfood.py -k work_session`
+  (`1 passed, 42 deselected`).
 - Native self-improve dogfood task #127 current: mew used a read-only
   `--follow` pass to choose the next small Milestone 2 improvement, then landed
   `follow-status` discoverability in native self-improve output/help. Validated
