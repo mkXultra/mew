@@ -257,6 +257,13 @@ class RuntimeTests(unittest.TestCase):
             "outcome": "failed",
             "exit_code": 1,
         }
+        session.setdefault("notes", []).append(
+            {
+                "created_at": "2026-04-18T00:02:00Z",
+                "source": "user",
+                "text": "Reviewed failure; retry once.",
+            }
+        )
         session["updated_at"] = "2026-04-18T00:02:00Z"
 
         step, skip = select_runtime_native_work_step(state)

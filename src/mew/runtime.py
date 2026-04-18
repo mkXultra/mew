@@ -304,10 +304,29 @@ def previous_native_work_step_failure_unresolved(state, session, task=None):
     if last_step.get("task_id") is not None and str(last_step.get("task_id")) != str(task_id):
         return False
     failed_at = parse_time(last_step.get("finished_at"))
-    updated_at = parse_time(session.get("updated_at"))
-    if failed_at and updated_at and updated_at > failed_at:
+    if failed_at and native_work_session_activity_after_failure(session, failed_at):
         return False
     return True
+
+
+def native_work_session_activity_after_failure(session, failed_at):
+    for call in session.get("tool_calls") or []:
+        for key in ("started_at", "finished_at", "updated_at"):
+            timestamp = parse_time(call.get(key))
+            if timestamp and timestamp > failed_at:
+                return True
+    for turn in session.get("model_turns") or []:
+        for key in ("started_at", "finished_at", "updated_at"):
+            timestamp = parse_time(turn.get(key))
+            if timestamp and timestamp > failed_at:
+                return True
+    for note in session.get("notes") or []:
+        if note.get("source") == "runtime":
+            continue
+        timestamp = parse_time(note.get("created_at") or note.get("updated_at"))
+        if timestamp and timestamp > failed_at:
+            return True
+    return False
 
 
 def recover_previous_native_work_step_failure(state, *, event_id=None, current_time=None):

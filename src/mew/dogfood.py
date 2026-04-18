@@ -1113,7 +1113,7 @@ if log_path.exists():
     records = json.loads(log_path.read_text(encoding="utf-8"))
 records.append({{"argv": sys.argv[1:]}})
 log_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
-sys.exit(0)
+sys.exit(int(os.environ.get("MEW_FAKE_WORK_EXIT_CODE", "0")))
 """
     path.write_text(script, encoding="utf-8")
     path.chmod(0o755)
@@ -1255,6 +1255,82 @@ def run_native_advance_scenario(workspace, env=None):
         ),
         observed=state.get("work_sessions", []),
         expected="advance scenario uses an explicitly runtime-owned work session",
+    )
+
+    failure_workspace = Path(workspace) / "failed-advance"
+    failure_workspace.mkdir(parents=True, exist_ok=True)
+    failure_task_result = run_command(
+        _scenario_command(
+            "task",
+            "add",
+            "Native advance failure recovery task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ),
+        failure_workspace,
+        timeout=15,
+        env=env,
+    )
+    commands.append(failure_task_result)
+    failure_task_data = _json_stdout(failure_task_result)
+    failure_task = (
+        failure_task_data.get("task")
+        if isinstance(failure_task_data.get("task"), dict)
+        else failure_task_data
+    )
+    failure_task_id = failure_task.get("id") if isinstance(failure_task, dict) else None
+    failure_log = failure_workspace / "fake-mew-failure-calls.json"
+    failure_fake_mew = write_fake_mew_executable(failure_workspace / "fake-mew-failure")
+    failure_env = dict(env or os.environ)
+    failure_env["MEW_EXECUTABLE"] = str(failure_fake_mew)
+    failure_env["MEW_FAKE_WORK_LOG"] = str(failure_log)
+    failure_env["MEW_FAKE_WORK_EXIT_CODE"] = "1"
+    failure_runtime_args = SimpleNamespace(**vars(runtime_args))
+    failure_runtime_args.duration = 5.0
+    failure_report = _run_dogfood_in_workspace(
+        failure_runtime_args,
+        failure_workspace,
+        created_temp=False,
+        env=failure_env,
+    )
+    commands.append(
+        {
+            "command": failure_report.get("command") or [],
+            "exit_code": failure_report.get("exit_code"),
+            "stdout": "\n".join(failure_report.get("runtime_output_tail") or []),
+            "stderr": "",
+        }
+    )
+    failure_state = read_json_file(failure_workspace / STATE_FILE, {})
+    failure_calls = read_json_file(failure_log, [])
+    failure_runtime = failure_state.get("runtime_status", {})
+    failure_recovery = failure_runtime.get("last_native_work_recovery") or {}
+    failure_questions = [
+        question
+        for question in failure_state.get("questions", [])
+        if str(question.get("related_task_id")) == str(failure_task_id)
+    ]
+    _scenario_check(
+        checks,
+        "native_advance_failure_asks_recovery_question",
+        failure_task_result.get("exit_code") == 0
+        and failure_report.get("exit_code") == 0
+        and failure_runtime.get("last_native_work_step_skip") == "previous_native_work_step_failed"
+        and failure_recovery.get("action") == "ask_user_seeded_question"
+        and bool(failure_questions)
+        and len([call for call in failure_calls if (call.get("argv") or [])[:2] == ["work", str(failure_task_id)]]) == 1,
+        observed={
+            "last_native_work_step": failure_runtime.get("last_native_work_step"),
+            "last_native_work_step_skip": failure_runtime.get("last_native_work_step_skip"),
+            "last_native_work_recovery": failure_recovery,
+            "questions": failure_questions,
+            "fake_calls": failure_calls,
+        },
+        expected="failed passive native advance asks a seeded recovery question and does not blindly retry",
     )
     return _scenario_report("native-advance", workspace, commands, checks)
 
