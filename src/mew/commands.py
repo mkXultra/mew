@@ -10209,12 +10209,15 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
             lines.append("Primary")
             if terse:
                 lines.append("- /c")
+                lines.append("- /follow")
                 lines.append("- /continue <guidance>")
             elif cached:
                 lines.append(f"- /c {cached}")
+                lines.append(f"- /follow {_work_options_with_max_steps(cached, 10)}")
                 lines.append("- /continue <guidance>")
             else:
                 lines.append("- /c --allow-read .")
+                lines.append("- /follow --allow-read . --max-steps 10")
                 lines.append("- /continue --allow-read .")
         _append_work_cockpit_approval_lines(lines, resume)
         lines.append(f"- /work-session resume{task_suffix}")

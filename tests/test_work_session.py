@@ -4471,6 +4471,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Pending steer", text)
                 self.assertIn("continue to submit pending interrupt", resume["next_action"])
                 self.assertIn("mew work 1 --live", resume["next_action"])
+                controls = format_work_cockpit_controls(
+                    state=state,
+                    session=session,
+                    continue_options="--allow-read src --max-steps 1",
+                )
+                self.assertIn("- /c --allow-read src --max-steps 1", controls)
+                self.assertIn("- /follow --allow-read src --max-steps 10", controls)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session"]), 0)

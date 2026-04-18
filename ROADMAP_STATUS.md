@@ -1485,6 +1485,10 @@ Next action:
   edit has an inferred matching test and the latest verifier is a different
   narrow test command, the cockpit now surfaces the expected verifier instead
   of presenting the green result without caveat.
+- The smaller target remembered by task #145 also landed: when an
+  `interrupt_submit` request is idle and ready to continue, chat cockpit
+  controls now show `/follow` alongside `/c`, preserving the normal multi-step
+  cockpit path through that recovery branch.
 
 ## Current Roadmap Focus
 
