@@ -37,6 +37,45 @@ def normalize_text(value: Any) -> str:
     return " ".join(value.strip().split())
 
 
+def normalize_kind_filter(kind: str | None) -> str:
+    return normalize_text(kind).casefold()
+
+
+def effective_task_kind(task: dict[str, Any]) -> str:
+    return normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
+
+
+def task_matches_kind(task: dict[str, Any] | None, kind: str) -> bool:
+    if not kind:
+        return True
+    if not isinstance(task, dict):
+        return False
+    return effective_task_kind(task) == kind
+
+
+def task_ids_for_kind(state: dict[str, Any], kind: str) -> set[str]:
+    if not kind:
+        return set()
+    return {
+        str(task.get("id"))
+        for task in state.get("tasks", [])
+        if isinstance(task, dict) and task.get("id") is not None and task_matches_kind(task, kind)
+    }
+
+
+def related_task_identity(item: dict[str, Any]) -> str:
+    task_id = item.get("related_task_id")
+    if task_id is None:
+        task_id = item.get("task_id")
+    return "" if task_id is None else str(task_id)
+
+
+def filter_items_by_task_kind(items: list[dict[str, Any]], task_ids: set[str], kind: str) -> list[dict[str, Any]]:
+    if not kind:
+        return items
+    return [item for item in items if related_task_identity(item) in task_ids]
+
+
 def stale_for_seconds(item: dict[str, Any], current_time: str | None, *keys: str) -> int | None:
     reference = parse_time(current_time) or parse_time(now_iso())
     if not reference:
@@ -76,11 +115,13 @@ def format_stale_duration(seconds: Any) -> str:
     return f"{days}d"
 
 
-def open_tasks_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
+def open_tasks_for_desk(state: dict[str, Any], kind: str | None = None) -> list[dict[str, Any]]:
+    kind_filter = normalize_kind_filter(kind)
     return [
         task
         for task in state.get("tasks", [])
         if isinstance(task, dict) and normalize_text(task.get("status")).casefold() != "done"
+        and task_matches_kind(task, kind_filter)
     ]
 
 
@@ -106,7 +147,8 @@ def open_attention_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in items if isinstance(item, dict) and item.get("status") == "open"]
 
 
-def active_work_sessions_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
+def active_work_sessions_for_desk(state: dict[str, Any], kind: str | None = None) -> list[dict[str, Any]]:
+    kind_filter = normalize_kind_filter(kind)
     sessions = []
     single_session = state.get("work_session")
     if isinstance(single_session, dict):
@@ -129,6 +171,8 @@ def active_work_sessions_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]
         task = tasks_by_id.get(str(task_id)) if task_id is not None else None
         if task and task.get("status") == "done":
             continue
+        if kind_filter and not task_matches_kind(task, kind_filter):
+            continue
         active.append(session)
     return active
 
@@ -142,15 +186,26 @@ def runtime_phase_for_desk(state: dict[str, Any]) -> str:
     return normalize_text(runtime.get("current_phase"))
 
 
-def choose_pet_state(state: dict[str, Any]) -> str:
-    if open_questions_for_desk(state) or open_attention_for_desk(state):
+def choose_pet_state(
+    state: dict[str, Any],
+    questions: list[dict[str, Any]] | None = None,
+    attention: list[dict[str, Any]] | None = None,
+    sessions: list[dict[str, Any]] | None = None,
+) -> str:
+    if questions is None:
+        questions = open_questions_for_desk(state)
+    if attention is None:
+        attention = open_attention_for_desk(state)
+    if sessions is None:
+        sessions = active_work_sessions_for_desk(state)
+    if questions or attention:
         return "alerting"
     phase = runtime_phase_for_desk(state)
     if phase in ("planning", "thinking", "precomputing"):
         return "thinking"
     if phase in ("applying", "acting", "executing", "committing"):
         return "typing"
-    if active_work_sessions_for_desk(state):
+    if sessions:
         return "typing"
     return "sleeping"
 
@@ -191,7 +246,7 @@ def question_detail_item(question: dict[str, Any]) -> dict[str, Any]:
 
 def task_detail_item(task: dict[str, Any]) -> dict[str, Any]:
     task_id = task.get("id")
-    kind = normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
+    kind = effective_task_kind(task)
     item = {
         "kind": "task",
         "label": f"Task #{task_id}" if task_id is not None else "Task",
@@ -407,11 +462,13 @@ def desk_detail_items(
     }
 
 
-def primary_action_for_desk(state: dict[str, Any]) -> dict[str, Any] | None:
-    questions = open_questions_for_desk(state)
-    tasks = open_tasks_for_desk(state)
-    sessions = active_work_sessions_for_desk(state)
-    attention = open_attention_for_desk(state)
+def primary_action_for_desk(state: dict[str, Any], kind: str | None = None) -> dict[str, Any] | None:
+    kind_filter = normalize_kind_filter(kind)
+    task_ids = task_ids_for_kind(state, kind_filter)
+    questions = filter_items_by_task_kind(open_questions_for_desk(state), task_ids, kind_filter)
+    tasks = open_tasks_for_desk(state, kind_filter)
+    sessions = active_work_sessions_for_desk(state, kind_filter)
+    attention = filter_items_by_task_kind(open_attention_for_desk(state), task_ids, kind_filter)
     actions = desk_actions_for_desk(questions, tasks, sessions, attention, limit=1)
     return actions[0] if actions else None
 
@@ -422,16 +479,24 @@ def action_display_identity(action: dict[str, Any] | None) -> tuple[str, str]:
     return (normalize_text(action.get("kind")), normalize_text(action.get("command")))
 
 
-def focus_summary(state: dict[str, Any]) -> str:
-    questions = open_questions_for_desk(state)
+def focus_summary(
+    state: dict[str, Any],
+    questions: list[dict[str, Any]] | None = None,
+    sessions: list[dict[str, Any]] | None = None,
+    tasks: list[dict[str, Any]] | None = None,
+) -> str:
+    if questions is None:
+        questions = open_questions_for_desk(state)
     if questions:
         text = normalize_text(questions[0].get("text")) or "Question needs a reply"
         return f"Waiting for reply: {text}"
-    sessions = active_work_sessions_for_desk(state)
+    if sessions is None:
+        sessions = active_work_sessions_for_desk(state)
     if sessions:
         goal = normalize_text(sessions[-1].get("goal") or sessions[-1].get("title")) or "active work"
         return f"Working on: {goal}"
-    tasks = open_tasks_for_desk(state)
+    if tasks is None:
+        tasks = open_tasks_for_desk(state)
     if tasks:
         return f"Next: {task_label(tasks[0])}"
     return "No active work recorded"
@@ -441,18 +506,21 @@ def build_desk_view_model(
     state: dict[str, Any],
     explicit_date: str | None = None,
     current_time: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     day = resolve_desk_date(explicit_date)
-    questions = open_questions_for_desk(state)
-    tasks = open_tasks_for_desk(state)
-    sessions = active_work_sessions_for_desk(state)
-    attention = open_attention_for_desk(state)
+    kind_filter = normalize_kind_filter(kind)
+    task_ids = task_ids_for_kind(state, kind_filter)
+    questions = filter_items_by_task_kind(open_questions_for_desk(state), task_ids, kind_filter)
+    tasks = open_tasks_for_desk(state, kind_filter)
+    sessions = active_work_sessions_for_desk(state, kind_filter)
+    attention = filter_items_by_task_kind(open_attention_for_desk(state), task_ids, kind_filter)
     actions = desk_actions_for_desk(questions, tasks, sessions, attention, current_time=current_time)
     primary_action = actions[0] if actions else None
-    return {
+    view_model = {
         "date": day,
-        "pet_state": choose_pet_state(state),
-        "focus": focus_summary(state),
+        "pet_state": choose_pet_state(state, questions=questions, attention=attention, sessions=sessions),
+        "focus": focus_summary(state, questions=questions, sessions=sessions, tasks=tasks),
         "primary_action": primary_action,
         "actions": actions,
         "counts": {
@@ -463,6 +531,9 @@ def build_desk_view_model(
         },
         "details": desk_detail_items(questions, tasks, sessions, attention),
     }
+    if kind_filter:
+        view_model["kind"] = kind_filter
+    return view_model
 
 
 def format_desk_view(view_model: dict[str, Any]) -> str:
@@ -472,6 +543,9 @@ def format_desk_view(view_model: dict[str, Any]) -> str:
         f"pet_state: {view_model['pet_state']}",
         f"focus: {view_model['focus']}",
     ]
+    kind = normalize_text(view_model.get("kind"))
+    if kind:
+        lines.insert(1, f"kind: {kind}")
     action = view_model.get("primary_action")
     if isinstance(action, dict):
         label = normalize_text(action.get("label"))

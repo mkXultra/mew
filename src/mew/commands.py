@@ -7562,7 +7562,7 @@ def cmd_passive_bundle(args):
 def cmd_desk(args):
     state = load_state()
     try:
-        view_model = build_desk_view_model(state, explicit_date=args.date)
+        view_model = build_desk_view_model(state, explicit_date=args.date, kind=getattr(args, "kind", None))
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1

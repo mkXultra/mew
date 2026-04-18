@@ -235,6 +235,45 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(by_label["Review attention #2"]["stale_for_seconds"], 2400)
         self.assertEqual(by_label["Open task #4"]["stale_for_seconds"], 2700)
 
+    def test_build_desk_view_model_kind_filter_scopes_related_backlog(self):
+        view = build_desk_view_model(
+            {
+                "questions": [
+                    {"id": 2, "status": "open", "text": "Which city?", "related_task_id": 2},
+                    {"id": 1, "status": "open", "text": "Which file?", "related_task_id": 1},
+                ],
+                "tasks": [
+                    {"id": 1, "title": "Fix code", "status": "ready", "kind": "coding"},
+                    {"id": 2, "title": "Research grants", "status": "ready", "kind": "research"},
+                ],
+                "work_sessions": [
+                    {"id": 7, "task_id": 1, "status": "active", "goal": "Fix code"},
+                    {"id": 8, "task_id": 2, "status": "active", "goal": "Research grants"},
+                ],
+                "attention": {
+                    "items": [
+                        {"id": 1, "status": "open", "title": "Coding attention", "related_task_id": 1},
+                        {"id": 2, "status": "open", "title": "Research attention", "related_task_id": 2},
+                    ]
+                },
+            },
+            explicit_date="2026-04-17",
+            kind="coding",
+        )
+
+        self.assertEqual(view["kind"], "coding")
+        self.assertEqual(view["pet_state"], "alerting")
+        self.assertEqual(view["focus"], "Waiting for reply: Which file?")
+        self.assertEqual(view["counts"]["open_tasks"], 1)
+        self.assertEqual(view["counts"]["open_questions"], 1)
+        self.assertEqual(view["counts"]["active_work_sessions"], 1)
+        self.assertEqual(view["counts"]["open_attention"], 1)
+        self.assertEqual(view["primary_action"]["task_id"], 1)
+        labels = [action["label"] for action in view["actions"]]
+        self.assertEqual(labels, ["Reply to question #1", "Resume task #1", "Review attention #1"])
+        self.assertEqual(view["details"]["tasks"][0]["label"], "Task #1")
+        self.assertEqual(view["details"]["questions"][0]["label"], "Question #1")
+
     def test_format_desk_view(self):
         text = format_desk_view(
             {
@@ -325,6 +364,39 @@ class DeskTests(unittest.TestCase):
             self.assertEqual(markdown_path, Path(".mew/desk/2026-04-17.md"))
             self.assertTrue((Path(tmp) / json_path).exists())
             self.assertTrue((Path(tmp) / markdown_path).exists())
+
+    def test_desk_command_accepts_kind_filter(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].extend(
+                        [
+                            {"id": 1, "title": "Fix code", "status": "ready", "kind": "coding"},
+                            {"id": 2, "title": "Research grants", "status": "ready", "kind": "research"},
+                        ]
+                    )
+                    state["questions"].extend(
+                        [
+                            {"id": 1, "status": "open", "text": "Which file?", "related_task_id": 1},
+                            {"id": 2, "status": "open", "text": "Which city?", "related_task_id": 2},
+                        ]
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["desk", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(data["kind"], "coding")
+        self.assertEqual(data["counts"]["open_tasks"], 1)
+        self.assertEqual(data["counts"]["open_questions"], 1)
+        self.assertEqual(data["focus"], "Waiting for reply: Which file?")
+        self.assertEqual(data["primary_action"]["task_id"], 1)
 
     def test_desk_command_rejects_invalid_date(self):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:

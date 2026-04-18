@@ -480,6 +480,7 @@ def build_parser():
 
     desk_parser = subparsers.add_parser("desk", help="show the desktop-pet view model")
     desk_parser.add_argument("--date", help="view-model date YYYY-MM-DD; defaults to today")
+    desk_parser.add_argument("--kind", choices=TASK_KINDS, help="scope the desk view to one task kind")
     desk_parser.add_argument("--write", action="store_true", help="write .mew/desk/YYYY-MM-DD.json and .md")
     desk_parser.add_argument("--output-dir", default=".", help="where to write .mew/desk files with --write")
     desk_parser.add_argument("--json", action="store_true", help="print structured output")
