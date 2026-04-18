@@ -1480,6 +1480,11 @@ Next action:
   dogfood: once a resident has already read the exact line window needed for an
   edit, the THINK prompt now tells it not to reread the whole file solely to
   prepare `edit_file`.
+- After Claude identified verifier trust as the highest-leverage next gap,
+  task #145 added a resume-level verification coverage warning: if a mew source
+  edit has an inferred matching test and the latest verifier is a different
+  narrow test command, the cockpit now surfaces the expected verifier instead
+  of presenting the green result without caveat.
 
 ## Current Roadmap Focus
 

@@ -656,6 +656,205 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_resume_warns_when_verifier_misses_matching_mew_test(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                Path("tests/test_work_session.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": "uv run python -m unittest tests.test_work_session"},
+                            "result": {
+                                "command": "uv run python -m unittest tests.test_work_session",
+                                "exit_code": 0,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                warning = resume["verification_coverage_warning"]
+                text = format_work_session_resume(resume)
+
+                self.assertEqual(warning["command"], "uv run python -m unittest tests.test_work_session")
+                self.assertEqual(warning["expected_test_path"], "tests/test_commands.py")
+                self.assertEqual(warning["expected_command"], "uv run python -m unittest tests.test_commands")
+                self.assertIn("Verification coverage warning", text)
+                self.assertIn("expected: uv run python -m unittest tests.test_commands", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_verifier_coverage_accepts_matching_or_broad_commands(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+
+                def warning_for(command):
+                    session = {
+                        "id": 3,
+                        "task_id": 9,
+                        "status": "active",
+                        "title": "Verifier hint",
+                        "tool_calls": [
+                            {
+                                "id": 3,
+                                "tool": "edit_file",
+                                "status": "completed",
+                                "parameters": {"path": "src/mew/commands.py"},
+                                "result": {
+                                    "path": "src/mew/commands.py",
+                                    "dry_run": False,
+                                    "changed": True,
+                                    "written": True,
+                                },
+                            },
+                            {
+                                "id": 4,
+                                "tool": "run_tests",
+                                "status": "completed",
+                                "parameters": {"command": command},
+                                "result": {"command": command, "exit_code": 0},
+                            },
+                        ],
+                        "model_turns": [],
+                    }
+                    return build_work_session_resume(session)["verification_coverage_warning"]
+
+                self.assertEqual(warning_for("uv run python -m unittest tests.test_commands"), {})
+                self.assertEqual(warning_for("uv run python -m unittest tests.test_commands.CommandTests"), {})
+                self.assertTrue(warning_for("uv run python -m unittest tests.test_commands_extra"))
+                self.assertTrue(warning_for("uv run pytest ./tests/test_commands_extra.py"))
+                self.assertEqual(warning_for("uv run python -m unittest"), {})
+                self.assertEqual(warning_for("uv run pytest -q"), {})
+                self.assertEqual(warning_for("uv run pytest -q tests"), {})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_verifier_coverage_ignores_configured_unrun_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(
+                    session,
+                    task={"command": "uv run python -m unittest tests.test_work_session"},
+                )
+
+                self.assertEqual(resume["verification_coverage_warning"], {})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_verifier_coverage_checks_multiple_mew_source_edits(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                Path("tests/test_work_session.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/work_session.py"},
+                            "result": {
+                                "path": "src/mew/work_session.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 5,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": "uv run pytest tests/test_work_session.py"},
+                            "result": {
+                                "command": "uv run pytest tests/test_work_session.py",
+                                "exit_code": 0,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                warning = build_work_session_resume(session)["verification_coverage_warning"]
+
+                self.assertEqual(warning["source_path"], "src/mew/commands.py")
+                self.assertEqual(warning["expected_test_path"], "tests/test_commands.py")
+                self.assertEqual(warning["uncovered_tests"], ["tests/test_commands.py"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_template_steers_for_unpaired_source_approval(self):
         session = {
             "id": 3,

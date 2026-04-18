@@ -1341,7 +1341,9 @@ def suggested_verify_command_for_call_path(source_path):
     }
 
 
-def suggested_verify_command_for_calls(calls):
+def suggested_verify_commands_for_calls(calls):
+    suggestions = []
+    seen_tests = set()
     for call in reversed(list(calls or [])):
         result = (call or {}).get("result") or {}
         if (
@@ -1354,8 +1356,84 @@ def suggested_verify_command_for_calls(calls):
         source_path = work_call_path(call)
         suggestion = suggested_verify_command_for_call_path(source_path)
         if suggestion:
-            return suggestion
+            test_path = suggestion.get("test_path") or ""
+            if test_path in seen_tests:
+                continue
+            seen_tests.add(test_path)
+            suggestions.append(suggestion)
+    return suggestions
+
+
+def suggested_verify_command_for_calls(calls):
+    suggestions = suggested_verify_commands_for_calls(calls)
+    if suggestions:
+        return suggestions[0]
     return {}
+
+
+def _verification_command_covers_suggestion(command, suggestion):
+    command = str(command or "").strip()
+    if not command or not suggestion:
+        return False
+    test_path = str(suggestion.get("test_path") or "").replace("\\", "/")
+    test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".") if test_path else ""
+    try:
+        tokens = [token.replace("\\", "/") for token in shlex.split(command)]
+    except ValueError:
+        tokens = command.replace("\\", "/").split()
+    for token in tokens:
+        normalized_token = token.removeprefix("./")
+        if test_path and (
+            normalized_token == test_path
+            or normalized_token.startswith(f"{test_path}::")
+        ):
+            return True
+        if test_module and (
+            token == test_module
+            or token.startswith(f"{test_module}.")
+        ):
+            return True
+    if any(token in ("tests", "tests/") or token.endswith("/tests") for token in tokens):
+        return True
+    has_pytest = any(Path(token).name == "pytest" or token.endswith("/pytest") for token in tokens)
+    has_unittest = "-m" in tokens and "unittest" in tokens
+    if has_pytest or has_unittest:
+        has_specific_test_target = any(
+            token.removeprefix("./").startswith("tests/")
+            or token.startswith("tests.")
+            or "::" in token
+            for token in tokens
+        )
+        return not has_specific_test_target
+    if any(Path(token).name in ("tox", "nox") for token in tokens):
+        return True
+    if "poe" in tokens and any(token in ("test", "tests") for token in tokens):
+        return True
+    return False
+
+
+def verification_coverage_warning_for_calls(calls, task=None):
+    suggestions = suggested_verify_commands_for_calls(calls)
+    if not suggestions:
+        return {}
+    verification_state = latest_work_verification_state(calls, task=task)
+    command = verification_state.get("command") or latest_work_verify_command(calls, task=task)
+    if not command or verification_state.get("status") != "passed":
+        return {}
+    uncovered = [suggestion for suggestion in suggestions if not _verification_command_covers_suggestion(command, suggestion)]
+    if not uncovered:
+        return {}
+    suggestion = uncovered[0]
+    return {
+        "command": command,
+        "status": verification_state.get("status") or "unknown",
+        "source_path": suggestion.get("source_path") or "",
+        "expected_test_path": suggestion.get("test_path") or "",
+        "expected_command": suggestion.get("command") or "",
+        "uncovered_count": len(uncovered),
+        "uncovered_tests": [item.get("test_path") or "" for item in uncovered[:5]],
+        "reason": "latest verification command does not appear to cover the matching test for this mew source edit",
+    }
 
 
 def _is_test_path(path):
@@ -1948,6 +2026,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
             cli_approve_all_hint = ""
 
     suggested_verify_command = suggested_verify_command_for_calls(calls)
+    verification_coverage_warning = verification_coverage_warning_for_calls(calls, task=task)
 
     recent_decisions = []
     for turn in turns[-limit:]:
@@ -2041,6 +2120,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
         "files_touched": paths[-limit:],
         "commands": commands[-limit:],
         "suggested_verify_command": suggested_verify_command,
+        "verification_coverage_warning": verification_coverage_warning,
         "failures": failures[-limit:],
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
@@ -2157,6 +2237,16 @@ def format_work_session_resume(resume):
         lines.append(f"test: {suggested_verify.get('test_path')}")
         if suggested_verify.get("reason"):
             lines.append(f"reason: {suggested_verify.get('reason')}")
+
+    coverage_warning = resume.get("verification_coverage_warning") or {}
+    if coverage_warning:
+        lines.extend(["", "Verification coverage warning"])
+        lines.append(f"command: {coverage_warning.get('command')}")
+        lines.append(f"source: {coverage_warning.get('source_path')}")
+        lines.append(f"expected_test: {coverage_warning.get('expected_test_path')}")
+        lines.append(f"expected: {coverage_warning.get('expected_command')}")
+        if coverage_warning.get("reason"):
+            lines.append(f"reason: {coverage_warning.get('reason')}")
 
     lines.extend(["", "Pending approvals"])
     approvals = resume.get("pending_approvals") or []
