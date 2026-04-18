@@ -222,6 +222,10 @@ One more small dogfood pass fixed the empty coding-queue recommendation:
 `d437460` now suggests `mew self-improve --start-session --ready ...`, so the
 created native self-improvement task enters the ready coding queue instead of
 being left as a todo task.
+The same empty-queue action now reaches the desk/pet surface in `81f0412`:
+`mew desk --kind coding` exposes a `start_self_improve` primary action with the
+same ready native self-improve command instead of going actionless while focus
+has a next move.
 
 ## Milestone 1: Native Hands
 
@@ -832,6 +836,13 @@ Next action:
   Validation: focused brief tests (pass), `tests.test_brief` (pass), ruff on
   changed files (pass), direct `./mew focus --kind coding` output check, and
   full `uv run python -m unittest` (`980 tests`, pass).
+- Task #174 aligned the desk/pet empty coding-queue action with focus in
+  `81f0412`, adding a `start_self_improve` primary action for
+  `mew desk --kind coding` inside the mew project and keeping non-mew
+  workspaces quiet. Validation: focused desk tests (pass), `tests.test_desk
+  tests.test_brief` (`56 tests`, pass), ruff on changed files (pass), direct
+  `./mew desk --kind coding --json` output check, and full `uv run python -m
+  unittest` (`982 tests`, pass).
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
