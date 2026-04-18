@@ -520,6 +520,68 @@ def run_runtime_focus_scenario(workspace, env=None):
         timeout=15,
     )
     bundle_result = run(["bundle", "--date", bundle_day, "--json"], timeout=15)
+    stale_task_result = run(
+        [
+            "task",
+            "add",
+            "Dogfood stale passive question",
+            "--kind",
+            "research",
+            "--ready",
+            "--description",
+            "Synthetic task for stale passive question refresh dogfood.",
+            "--json",
+        ],
+        timeout=15,
+    )
+    stale_seed_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "propose",
+            "--echo-outbox",
+            "--poll-interval",
+            "0.01",
+            "--focus",
+            "Seed one stale passive question for dogfood.",
+        ],
+        timeout=15,
+    )
+    stale_task_data = _json_stdout(stale_task_result)
+    stale_task_id = stale_task_data.get("id")
+    if stale_task_id is not None:
+        state_path = workspace / STATE_FILE
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        stale_question_ids = []
+        for question in state.get("questions", []):
+            if question.get("related_task_id") == stale_task_id and question.get("status") == "open":
+                question["created_at"] = "2026-01-01T00:00:00Z"
+                question["updated_at"] = "2026-01-01T00:00:00Z"
+                stale_question_ids.append(question.get("id"))
+        for message in state.get("outbox", []):
+            if message.get("question_id") in stale_question_ids:
+                message["created_at"] = "2026-01-01T00:00:00Z"
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    stale_refresh_result = run(
+        [
+            "run",
+            "--once",
+            "--passive-now",
+            "--autonomous",
+            "--autonomy-level",
+            "propose",
+            "--echo-outbox",
+            "--poll-interval",
+            "0.01",
+            "--focus",
+            "Refresh stale passive question for dogfood.",
+        ],
+        timeout=15,
+    )
+    stale_state = json.loads((workspace / STATE_FILE).read_text(encoding="utf-8"))
     desk_data = _json_stdout(desk_result)
     observe_data = _json_stdout(observe_result)
     journal_data = _json_stdout(journal_result)
@@ -558,6 +620,35 @@ def run_runtime_focus_scenario(workspace, env=None):
         "effect #2 [applied] event=#2 reason=passive_tick" in (passive_result.get("stdout") or ""),
         observed=command_result_tail(passive_result),
         expected="run --once --passive-now --echo-effects prints the passive runtime effect",
+    )
+    stale_questions = [
+        question
+        for question in stale_state.get("questions", [])
+        if question.get("related_task_id") == stale_task_id
+    ]
+    _scenario_check(
+        checks,
+        "runtime_passive_refreshes_stale_question_once",
+        stale_task_result.get("exit_code") == 0
+        and stale_seed_result.get("exit_code") == 0
+        and stale_refresh_result.get("exit_code") == 0
+        and len([question for question in stale_questions if question.get("status") == "deferred"]) == 1
+        and len([question for question in stale_questions if question.get("status") == "open"]) == 1
+        and f"Task #{stale_task_id} is ready research work." in (stale_refresh_result.get("stdout") or ""),
+        observed={
+            "task": stale_task_data,
+            "seed": command_result_tail(stale_seed_result),
+            "refresh": command_result_tail(stale_refresh_result),
+            "questions": [
+                {
+                    "id": question.get("id"),
+                    "status": question.get("status"),
+                    "defer_reason": question.get("defer_reason"),
+                }
+                for question in stale_questions
+            ],
+        },
+        expected="one stale task question is deferred and refreshed as one visible outbox question",
     )
     _scenario_check(
         checks,

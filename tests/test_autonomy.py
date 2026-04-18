@@ -12,6 +12,7 @@ from mew.agent import (
     build_act_prompt,
     build_context,
     build_think_prompt,
+    deterministic_action_plan,
     deterministic_decision_plan,
     normalize_action_plan,
     normalize_decision_plan,
@@ -2127,6 +2128,113 @@ class AutonomyTests(unittest.TestCase):
         )
 
         self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+
+    def test_passive_tick_refreshes_stale_task_question_once(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        task["status"] = "ready"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        old_question, _ = add_question(
+            state,
+            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            related_task_id=task["id"],
+        )
+        old_question["created_at"] = "2026-04-17T00:00:00Z"
+        old_question["updated_at"] = "2026-04-17T00:00:00Z"
+        state["outbox"][0]["created_at"] = "2026-04-17T00:00:00Z"
+
+        event = {"id": 1, "type": "passive_tick"}
+        current_time = "2026-04-18T12:00:00Z"
+        plan = deterministic_decision_plan(
+            state,
+            event,
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        ask_actions = [decision for decision in plan["decisions"] if decision["type"] == "ask_user"]
+        self.assertEqual(len(ask_actions), 1)
+        self.assertEqual(ask_actions[0]["supersedes_question_id"], old_question["id"])
+        self.assertNotIn("wait_for_user", [decision["type"] for decision in plan["decisions"]])
+
+        counts = apply_action_plan(
+            state,
+            event,
+            plan,
+            deterministic_action_plan(plan),
+            current_time,
+            allow_task_execution=False,
+            task_timeout=1,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(counts["messages"], 1)
+        self.assertEqual(state["questions"][0]["status"], "deferred")
+        self.assertIn("unanswered for", state["questions"][0]["defer_reason"])
+        self.assertIsNotNone(state["outbox"][0]["read_at"])
+        self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+        self.assertEqual(state["questions"][1]["status"], "open")
+        self.assertEqual(state["questions"][1]["related_task_id"], task["id"])
+        self.assertIsNone(state["outbox"][-1]["read_at"])
+
+    def test_passive_tick_uses_question_update_time_for_stale_refresh(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        task["status"] = "ready"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        question, _ = add_question(
+            state,
+            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            related_task_id=task["id"],
+        )
+        question["created_at"] = "2026-04-17T00:00:00Z"
+        question["updated_at"] = "2026-04-18T11:30:00Z"
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            "2026-04-18T12:00:00Z",
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+        waits = [decision for decision in plan["decisions"] if decision["type"] == "wait_for_user"]
+        self.assertEqual(waits[0]["reason"], f"Question #{question['id']} is still unanswered.")
+
+    def test_passive_tick_keeps_waiting_on_fresh_task_question(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        task["status"] = "ready"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        question, _ = add_question(
+            state,
+            "Task #1 is ready but has no command or agent backend. Should I dispatch it to an agent, add a command, or block it?",
+            related_task_id=task["id"],
+        )
+        question["created_at"] = "2026-04-18T11:00:00Z"
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            "2026-04-18T12:00:00Z",
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+        waits = [decision for decision in plan["decisions"] if decision["type"] == "wait_for_user"]
+        self.assertEqual(waits[0]["reason"], f"Question #{question['id']} is still unanswered.")
 
     def test_passive_tick_does_not_question_ready_task_while_task_running(self):
         state = default_state()

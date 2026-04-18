@@ -386,14 +386,17 @@ Evidence:
   run in `/tmp/mew-passive-outbox-proof.tgg0Oo` created a user-visible outbox
   question for a ready coding task, proving passive proposal output can happen
   when stale unanswered questions are not already blocking the loop.
+- Real-repo passive proof after the stale-question cadence fix emitted one
+  user-visible outbox question instead of staying silent: old task question #3
+  was deferred with a reason, new task question #5 was opened, and the same
+  cycle kept other task questions as `wait_for_user`.
 
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
-- Watcher-driven passive output has a controlled one-shot proof, but not yet a
-  long-running real-state proof with old unanswered questions and competing
-  attention items.
+- Watcher-driven passive output now has controlled and real-repo one-shot
+  proofs, but not yet a long-running cadence proof across several hours or days.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
@@ -481,8 +484,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `860 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; runtime-focus includes `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
+- `uv run pytest -q` current: `863 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `33 passed`.

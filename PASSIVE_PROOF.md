@@ -367,3 +367,54 @@ Likely implementation hook:
   only `wait_for_user` decisions. The next slice should decide when a stale
   unanswered question should be summarized, deferred, or superseded instead of
   permanently suppressing new passive output.
+
+## 2026-04-18 Stale Question Refresh Proof
+
+Change:
+
+- `append_passive_decisions` now treats a task-bound open question older than
+  24 hours as stale during autonomous `propose`/`act` passive ticks.
+- It refreshes at most one stale task question per cycle.
+- The old question is marked `deferred` with a readable reason before the new
+  question is created, so the history is journaled rather than silently dropped.
+
+Real repo command:
+
+```bash
+./mew run --once --passive-now --autonomous --autonomy-level propose --allow-read . --echo-effects --echo-outbox --focus "Passive refresh proof after stale-question cadence fix: if an old unanswered task question is blocking, refresh exactly one user-visible prompt."
+```
+
+Observed result:
+
+```text
+processed 1 event(s) reason=passive_tick
+effect #20 [applied] event=#399 reason=passive_tick actions=record_memory,ask_user,wait_for_user,wait_for_user,self_review
+outcome=Task #20 is ready research work. Should I assign it to an agent, add research criteria, or block it?
+outbox #141 [question]: Task #20 is ready research work. Should I assign it to an agent, add research criteria, or block it?
+```
+
+Question state after the run:
+
+```text
+question #3: deferred, task #20
+defer_reason: Question #3 was unanswered for 61.0h; refreshing one passive prompt instead of waiting forever.
+question #5: open, task #20
+```
+
+Regression coverage:
+
+```text
+uv run pytest -q tests/test_autonomy.py
+90 passed
+
+./mew dogfood --scenario runtime-focus --cleanup --json
+status: pass, including runtime_passive_refreshes_stale_question_once
+```
+
+Judgment:
+
+- The previous real-repo silence is fixed for stale task-bound questions.
+- mew still respects a fresh unanswered question and waits instead of spamming.
+- Remaining cadence work: decide whether global/non-task questions should also
+  age into a summary/reminder path, and tune the 24-hour threshold after longer
+  dogfood.

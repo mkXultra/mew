@@ -51,8 +51,10 @@ from .state import (
     add_outbox_message,
     add_question,
     append_log,
+    find_question,
     has_open_question,
     has_unread_outbox_message,
+    mark_question_deferred,
     next_id,
     open_attention_items,
     pending_question_for_task,
@@ -475,13 +477,35 @@ def open_task_with_title(state, title):
             return task
     return None
 
+PASSIVE_PENDING_QUESTION_REFRESH_HOURS = 24.0
+
+
+def passive_pending_question_age_hours(question, current_time):
+    if not isinstance(question, dict):
+        return None
+    timestamp = (
+        question.get("updated_at")
+        or question.get("reopened_at")
+        or question.get("acknowledged_at")
+        or question.get("created_at")
+    )
+    return elapsed_hours(timestamp, current_time)
+
+
+def passive_pending_question_is_stale(question, current_time):
+    age = passive_pending_question_age_hours(question, current_time)
+    return age is not None and age >= PASSIVE_PENDING_QUESTION_REFRESH_HOURS
+
+
 def append_passive_decisions(
     state,
     decisions,
     allow_task_execution,
     autonomous=False,
     autonomy_level="off",
+    current_time=None,
 ):
+    current_time = current_time or now_iso()
     tasks = sorted(open_tasks(state), key=task_sort_key)
     if not tasks:
         if autonomous and latest_open_verification_attention(state):
@@ -508,6 +532,32 @@ def append_passive_decisions(
         task_id = task["id"]
         pending_question = pending_question_for_task(state, task_id)
         if pending_question:
+            question = task_question(task)
+            pending_question_id = pending_question.get("id")
+            pending_question_age = passive_pending_question_age_hours(pending_question, current_time)
+            if (
+                question
+                and pending_question_id is not None
+                and not question_added
+                and autonomous
+                and autonomy_level in ("propose", "act")
+                and passive_pending_question_is_stale(pending_question, current_time)
+            ):
+                age_text = f"{pending_question_age:.1f}h" if pending_question_age is not None else "unknown age"
+                decisions.append(
+                    {
+                        "type": "ask_user",
+                        "task_id": task_id,
+                        "question": question,
+                        "supersedes_question_id": pending_question_id,
+                        "supersedes_reason": (
+                            f"Question #{pending_question_id} was unanswered for {age_text}; "
+                            "refreshing one passive prompt instead of waiting forever."
+                        ),
+                    }
+                )
+                question_added = True
+                continue
             decisions.append(
                 {
                     "type": "wait_for_user",
@@ -811,6 +861,7 @@ def deterministic_decision_plan(
             allow_task_execution,
             autonomous=autonomous,
             autonomy_level=autonomy_level,
+            current_time=current_time,
         )
         if autonomous:
             append_autonomous_decisions(
@@ -832,6 +883,7 @@ def deterministic_decision_plan(
             allow_task_execution,
             autonomous=autonomous,
             autonomy_level=autonomy_level,
+            current_time=current_time,
         )
         if autonomous:
             append_autonomous_decisions(
@@ -905,6 +957,7 @@ def normalize_decision_plan(plan, fallback_summary):
             "text",
             "question",
             "reason",
+            "supersedes_reason",
             "summary",
             "path",
             "query",
@@ -932,6 +985,10 @@ def normalize_decision_plan(plan, fallback_summary):
             if isinstance(decision.get(key), bool):
                 clean[key] = decision[key]
         for key in ("run_id", "plan_id"):
+            value = normalize_task_id(decision.get(key))
+            if value is not None:
+                clean[key] = value
+        for key in ("supersedes_question_id",):
             value = normalize_task_id(decision.get(key))
             if value is not None:
                 clean[key] = value
@@ -1203,6 +1260,7 @@ def normalize_action_plan(plan, fallback_plan):
             "text",
             "question",
             "reason",
+            "supersedes_reason",
             "summary",
             "path",
             "query",
@@ -1230,6 +1288,10 @@ def normalize_action_plan(plan, fallback_plan):
             if isinstance(action.get(key), bool):
                 clean[key] = action[key]
         for key in ("run_id", "plan_id"):
+            value = normalize_task_id(action.get(key))
+            if value is not None:
+                clean[key] = value
+        for key in ("supersedes_question_id",):
             value = normalize_task_id(action.get(key))
             if value is not None:
                 clean[key] = value
@@ -2415,6 +2477,21 @@ def apply_write_action(
                 message_count += 1
     return message_count
 
+
+def defer_superseded_question_for_action(state, action):
+    question_id = action.get("supersedes_question_id")
+    if question_id is None:
+        return None
+    question = find_question(state, question_id)
+    if not question or question.get("status") != "open":
+        return None
+    task_id = action.get("task_id")
+    if task_id is not None and str(question.get("related_task_id")) != str(task_id):
+        return None
+    reason = action.get("supersedes_reason") or "Superseded by a refreshed passive prompt."
+    return mark_question_deferred(state, question, reason=reason)
+
+
 def apply_action_plan(
     state,
     event,
@@ -2644,6 +2721,8 @@ def apply_action_plan(
             task_id = action.get("task_id")
             if text and should_skip_low_intent_task_wait_action(state, event, action, text=text):
                 continue
+            if text:
+                defer_superseded_question_for_action(state, action)
             if text and not has_open_question(state, text, task_id):
                 add_question(
                     state,
