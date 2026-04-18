@@ -618,6 +618,21 @@ class RuntimeTests(unittest.TestCase):
                     state["runtime_status"]["last_native_work_step_skip"],
                     "previous_native_work_step_failed",
                 )
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "ask_user_seeded_question")
+                self.assertEqual(recovery["reason"], "previous_native_work_step_failed")
+                self.assertEqual(recovery["session_id"], 1)
+                self.assertEqual(recovery["task_id"], 1)
+                self.assertTrue(recovery["question_created"])
+                self.assertIn("work 1 --session --resume --allow-read .", recovery["resume_command"])
+                self.assertEqual(len(state["questions"]), 1)
+                self.assertIn("Passive native work session #1", state["questions"][0]["text"])
+                self.assertIn("exit_code=1", state["questions"][0]["text"])
+                self.assertIn("work 1 --live --allow-read . --max-steps 1", state["questions"][0]["text"])
+                self.assertIn(
+                    "runtime asked for recovery after failed passive native advance",
+                    state["work_sessions"][0]["notes"][-1]["text"],
+                )
             finally:
                 os.chdir(old_cwd)
 

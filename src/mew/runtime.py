@@ -12,6 +12,7 @@ from .agent import (
     update_runtime_processing_summary,
 )
 from .archive import archive_state_records
+from .cli_command import mew_command
 from .config import (
     DEFAULT_CODEX_MODEL,
     DEFAULT_CODEX_WEB_BASE_URL,
@@ -34,6 +35,7 @@ from .model_backends import (
 from .state import (
     acquire_lock,
     add_event,
+    add_question,
     add_runtime_effect,
     append_log,
     complete_runtime_effect,
@@ -306,6 +308,64 @@ def previous_native_work_step_failure_unresolved(state, session, task=None):
     if failed_at and updated_at and updated_at > failed_at:
         return False
     return True
+
+
+def recover_previous_native_work_step_failure(state, *, event_id=None, current_time=None):
+    runtime_status = state.setdefault("runtime_status", {})
+    last_step = runtime_status.get("last_native_work_step") or {}
+    if last_step.get("outcome") != "failed":
+        return None
+    session = find_work_session(state, last_step.get("session_id"))
+    if not session:
+        return None
+    task = work_session_task(state, session)
+    if not previous_native_work_step_failure_unresolved(state, session, task):
+        return None
+    task_id = (task or {}).get("id") or session.get("task_id")
+    session_id = session.get("id")
+    resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+    retry_command = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
+    exit_part = ""
+    if last_step.get("timed_out"):
+        exit_part = "timed out"
+    elif last_step.get("exit_code") not in (None, ""):
+        exit_part = f"exit_code={last_step.get('exit_code')}"
+    reason = f" after {exit_part}" if exit_part else ""
+    text = (
+        f"Passive native work session #{session_id} for task #{task_id} failed{reason}. "
+        f"Inspect with `{resume_command}`. Should I retry with `{retry_command}`, keep it paused, "
+        "or close/replan the task?"
+    )
+    question, created = add_question(
+        state,
+        text,
+        event_id=event_id,
+        related_task_id=task_id,
+        source="runtime",
+    )
+    if created:
+        add_work_session_note(
+            session,
+            f"runtime asked for recovery after failed passive native advance: {resume_command}",
+            source="runtime",
+            current_time=current_time,
+        )
+    recovery = {
+        "at": current_time or now_iso(),
+        "action": "ask_user_seeded_question",
+        "reason": "previous_native_work_step_failed",
+        "session_id": session_id,
+        "task_id": task_id,
+        "question_id": question.get("id"),
+        "question_created": created,
+        "resume_command": resume_command,
+        "retry_command": retry_command,
+        "exit_code": last_step.get("exit_code"),
+        "timed_out": bool(last_step.get("timed_out")),
+    }
+    runtime_status["last_native_work_recovery"] = recovery
+    runtime_status["last_action"] = f"asked for native work recovery session #{session_id}"
+    return recovery
 
 
 def select_runtime_native_work_step(state, *, current_event_id=None):
@@ -1060,13 +1120,20 @@ def run_runtime(args):
                         state,
                         current_event_id=event_id,
                     )
+                    native_skip_time = now_iso()
                     record_runtime_native_work_step_skip(
                         runtime_status,
                         native_work_skip,
-                        current_time=now_iso(),
+                        current_time=native_skip_time,
                         event_id=event_id,
                         phase="select",
                     )
+                    if native_work_skip == "previous_native_work_step_failed":
+                        recover_previous_native_work_step_failure(
+                            state,
+                            event_id=event_id,
+                            current_time=native_skip_time,
+                        )
                     if native_work_step:
                         runtime_status["last_action"] = (
                             f"selected native work step for session #{native_work_step.get('session_id')}"
