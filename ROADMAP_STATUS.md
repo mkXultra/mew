@@ -139,6 +139,10 @@ explicit unpaired override. The same dogfood pass found that narrow pytest
 selector runs polluted future continue commands, so successful `pytest -k`,
 node-id, marker, last-failed, deselect, or broad-to-file verification runs no
 longer replace an existing broader default verify command.
+Follow `reply_template` also scans the whole visible pending-approval set for
+unpaired source edits before suggesting any normal approval, avoiding mixed
+approval batches where an early safe write hides a later source edit that still
+needs tests.
 
 ## Milestone 1: Native Hands
 
@@ -666,8 +670,8 @@ Next action:
   with no blockers. Validated with focused approval/default-memory tests
   (`8 passed, 257 deselected, 5 subtests passed`), related runtime/dogfood
   regressions (`3 passed`), the combined work/runtime/dogfood/commands/brief
-  suite (`549 passed, 9 subtests passed`), full
-  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`948 passed, 15 subtests
+  suite (`550 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`949 passed, 15 subtests
   passed`), and `./mew dogfood --scenario all --json` (pass).
 - Follow-up current: passive native-work auto-recovery can now rerun a
   runtime-owned interrupted verifier on the next passive tick when explicit

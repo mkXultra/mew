@@ -522,6 +522,48 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("tool #3", schema["reply_template"]["actions"][0]["text"])
         self.assertIn("allow_unpaired_source_edit=true", schema["reply_template"]["actions"][0]["text"])
 
+    def test_work_reply_template_prefers_later_unpaired_source_approval(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "updated_at": "2026-04-18T00:00:00Z",
+            "default_options": {"allow_read": ["."], "allow_write": ["."], "allow_verify": True, "verify_command": "true"},
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "README.md"},
+                    "result": {
+                        "path": "README.md",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        schema = build_work_reply_schema(session, resume=resume)
+
+        self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
+        self.assertIn("tool #4", schema["reply_template"]["actions"][0]["text"])
+        self.assertNotEqual(schema["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
+
     def test_cockpit_controls_do_not_primary_approve_unpaired_source_edit(self):
         session = {
             "id": 3,

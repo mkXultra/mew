@@ -4460,7 +4460,15 @@ def _work_reply_template(session=None, resume=None):
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
     pending_approvals = (resume or {}).get("pending_approvals") or []
-    first_approval = (pending_approvals[0] or {}) if pending_approvals else {}
+    blocked_source_approval = next(
+        (
+            approval
+            for approval in pending_approvals
+            if ((approval or {}).get("pairing_status") or {}).get("status") == "missing_test_edit"
+        ),
+        {},
+    )
+    first_approval = blocked_source_approval or ((pending_approvals[0] or {}) if pending_approvals else {})
     first_approval_id = first_approval.get("tool_call_id")
     if first_approval_id not in (None, ""):
         pairing = first_approval.get("pairing_status") or {}
