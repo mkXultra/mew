@@ -443,6 +443,9 @@ Judgment:
 - The created session carries the runtime read roots and a runtime provenance
   note, so the visible live/follow commands are immediately runnable with the
   same inspection boundary.
+- Runtime model backend/auth/model/base-url settings are also preserved when
+  present, so a resident launched with a specific model can keep that body when
+  the work session continues.
 - Remaining cadence work: decide whether global/non-task questions should also
   age into a summary/reminder path, and tune the 24-hour threshold after longer
   dogfood.

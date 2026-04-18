@@ -2130,6 +2130,10 @@ def apply_start_work_session_action(
     allow_write=False,
     allow_verify=False,
     verify_command="",
+    work_auth="",
+    work_model_backend="",
+    work_model="",
+    work_base_url="",
 ):
     task_id = action.get("task_id")
     eligibility = native_work_start_eligibility(
@@ -2158,6 +2162,10 @@ def apply_start_work_session_action(
         allow_write=allow_write,
         allow_verify=allow_verify,
         verify_command=verify_command,
+        auth=work_auth,
+        model_backend=work_model_backend,
+        model=work_model,
+        base_url=work_base_url,
         source=f"runtime:{event.get('type')}",
         reason=action.get("reason") or "native work session started by autonomous runtime",
         current_time=current_time,
@@ -2730,6 +2738,10 @@ def apply_action_plan(
     allowed_write_roots=None,
     cycle_reason="",
     agent_result_timeout=None,
+    work_auth="",
+    work_model_backend="",
+    work_model="",
+    work_base_url="",
 ):
     counts = new_action_counts()
     action_plan = suppress_done_task_wait_actions(state, action_plan)
@@ -2850,6 +2862,10 @@ def apply_action_plan(
                 allow_write=allow_write,
                 allow_verify=allow_verify,
                 verify_command=verify_command,
+                work_auth=work_auth,
+                work_model_backend=work_model_backend,
+                work_model=work_model,
+                work_base_url=work_base_url,
             )
         elif action_type == "dispatch_task":
             counts["messages"] += apply_dispatch_task_action(
@@ -3221,6 +3237,10 @@ def apply_event_plans(
     allow_write=False,
     allowed_write_roots=None,
     agent_result_timeout=None,
+    work_auth="",
+    work_model_backend="",
+    work_model="",
+    work_base_url="",
 ):
     event = find_event(state, event_id)
     if not event or event.get("processed_at"):
@@ -3246,6 +3266,10 @@ def apply_event_plans(
         allowed_write_roots=allowed_write_roots,
         cycle_reason=reason,
         agent_result_timeout=agent_result_timeout,
+        work_auth=work_auth,
+        work_model_backend=work_model_backend,
+        work_model=work_model,
+        work_base_url=work_base_url,
     )
     event["decision_plan"] = decision_plan
     event["action_plan"] = public_action_plan(action_plan)
@@ -3306,6 +3330,10 @@ def process_events(
     allowed_read_roots=None,
     allowed_write_roots=None,
     max_reflex_rounds=0,
+    work_auth="",
+    work_model_backend="",
+    work_model="",
+    work_base_url="",
 ):
     current_time = now_iso()
     if create_internal_event:
@@ -3365,6 +3393,10 @@ def process_events(
             verify_timeout=verify_timeout,
             allow_write=allow_write,
             allowed_write_roots=allowed_write_roots,
+            work_auth=work_auth,
+            work_model_backend=work_model_backend,
+            work_model=work_model,
+            work_base_url=work_base_url,
         )
         if counts is None:
             continue

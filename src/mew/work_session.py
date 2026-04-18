@@ -219,6 +219,10 @@ def seed_work_session_runtime_defaults(
     allow_write=False,
     allow_verify=False,
     verify_command="",
+    auth="",
+    model_backend="",
+    model="",
+    base_url="",
     source="runtime",
     reason="",
     current_time=None,
@@ -236,6 +240,14 @@ def seed_work_session_runtime_defaults(
         defaults["allow_verify"] = True
         defaults["verify_command"] = verify_command
         defaults["verify_disabled"] = False
+    for key, value in (
+        ("auth", auth),
+        ("model_backend", model_backend),
+        ("model", model),
+        ("base_url", base_url),
+    ):
+        if value:
+            defaults[key] = value
     if source or reason:
         note_text = f"{source or 'runtime'} started native work"
         if reason:
@@ -251,6 +263,14 @@ def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1)
     if task_id is not None:
         parts.append(task_id)
     parts.append("--follow" if follow else "--live")
+    for key, flag in (
+        ("auth", "--auth"),
+        ("model_backend", "--model-backend"),
+        ("model", "--model"),
+        ("base_url", "--base-url"),
+    ):
+        if defaults.get(key):
+            parts.extend([flag, defaults[key]])
     for root in defaults.get("allow_read") or ["."]:
         parts.extend(["--allow-read", root])
     for root in defaults.get("allow_write") or []:

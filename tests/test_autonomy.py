@@ -3310,6 +3310,10 @@ class AutonomyTests(unittest.TestCase):
             verify_command="uv run pytest -q",
             allow_write=True,
             allowed_write_roots=["docs"],
+            work_auth="auth.json",
+            work_model_backend="codex",
+            work_model="gpt-5.4",
+            work_base_url="https://example.test",
         )
 
         self.assertEqual(len(state["work_sessions"]), 1)
@@ -3319,9 +3323,14 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(session["default_options"]["allow_write"], ["docs"])
         self.assertTrue(session["default_options"]["allow_verify"])
         self.assertEqual(session["default_options"]["verify_command"], "uv run pytest -q")
+        self.assertEqual(session["default_options"]["auth"], "auth.json")
+        self.assertEqual(session["default_options"]["model_backend"], "codex")
+        self.assertEqual(session["default_options"]["model"], "gpt-5.4")
+        self.assertEqual(session["default_options"]["base_url"], "https://example.test")
         self.assertIn("runtime:passive_tick started native work", session["notes"][0]["text"])
         self.assertIn("./mew code 1", state["outbox"][-1]["text"])
-        self.assertIn("work 1 --live --allow-read src", state["outbox"][-1]["text"])
+        self.assertIn("work 1 --live --auth auth.json", state["outbox"][-1]["text"])
+        self.assertIn("--model gpt-5.4", state["outbox"][-1]["text"])
         self.assertIn("--verify-command 'uv run pytest -q'", state["outbox"][-1]["text"])
         self.assertEqual(state["outbox"][-1]["type"], "assistant")
         self.assertIsNone(state["outbox"][-1]["read_at"])

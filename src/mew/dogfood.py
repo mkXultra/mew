@@ -1038,6 +1038,7 @@ def run_native_work_scenario(workspace, env=None):
         str(workspace) in (latest_defaults.get("allow_read") or [])
         and latest_defaults.get("allow_verify") is True
         and latest_defaults.get("verify_command") == runtime_args.verify_command
+        and latest_defaults.get("model_backend") == "codex"
         and any(note.get("source") == "runtime" for note in latest_active_session.get("notes") or []),
         observed={
             "default_options": latest_defaults,
@@ -1058,6 +1059,7 @@ def run_native_work_scenario(workspace, env=None):
         f"./mew code {task_id}" in outbox_text
         and f"mew work {task_id} --live" in outbox_text
         and f"mew work {task_id} --follow" in outbox_text
+        and "--model-backend codex" in outbox_text
         and "--allow-verify" in outbox_text
         and "--verify-command" in outbox_text
         and "native work session" in outbox_text,

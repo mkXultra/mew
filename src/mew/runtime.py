@@ -172,6 +172,10 @@ def apply_runtime_event_plans(
     args,
     allow_task_execution,
     autonomy_controls,
+    work_auth="",
+    work_model_backend="",
+    work_model="",
+    work_base_url="",
 ):
     counts = apply_event_plans(
         state,
@@ -193,6 +197,10 @@ def apply_runtime_event_plans(
         allow_write=bool(args.allow_write),
         allowed_write_roots=args.allow_write,
         agent_result_timeout=getattr(args, "agent_result_timeout", 10.0),
+        work_auth=work_auth,
+        work_model_backend=work_model_backend,
+        work_model=work_model,
+        work_base_url=work_base_url,
     )
     if counts is None:
         counts = {"actions": 0, "messages": 0, "executed": 0, "waits": 0}
@@ -735,6 +743,10 @@ def run_runtime(args):
                             args,
                             allow_task_execution,
                             autonomy_controls,
+                            work_auth=(model_auth or {}).get("path") or "",
+                            work_model_backend=model_backend,
+                            work_model=model,
+                            work_base_url=base_url,
                         )
                         verification_run_ids = [
                             run.get("id")
