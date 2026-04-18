@@ -776,6 +776,15 @@ Next action:
   snapshot. A separate `codex-ultra` human-role dogfood from `/tmp` then
   confirmed the core flow worked and exposed the fixed path-launcher/task-cwd
   handoff issues.
+- Post-session evaluator check on clean HEAD `4b5b21a`: `codex-ultra` scored
+  mew `7.2/10`, judging it worth inhabiting for bounded supervised coding where
+  persistence/reentry matters, while still behind Claude Code/Codex CLI for a
+  dense uninterrupted coding burst. `claude-ultra` scored mew `6/10`, agreeing
+  it is now genuinely inhabitable for task-scoped resident coding but not yet
+  trustworthy for unattended multi-hour autonomy. Both evaluations keep the
+  next highest-leverage work inside Milestone 2: codex points at a calmer
+  continuous live/follow cockpit, while Claude points at a built-in same-surface
+  audit before a resident task is called done.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
@@ -1581,5 +1590,6 @@ Fresh implementation should continue dogfooding real coding changes through
 now coherent; the remaining Milestone 2 work is making the active coding loop
 itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
 persistent memory and audit trail. The next useful slice is to dogfood a longer
-live/follow coding session and fix the first place where the model still wishes
-it could see, steer, or summarize the loop more directly.
+live/follow coding session and add a same-surface audit/checkpoint before the
+resident marks work complete, so the loop catches peer cases without depending
+on a fresh external reviewer.
