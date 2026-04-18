@@ -55,6 +55,7 @@ def build_self_improve_description(state, focus=""):
         "- Preserve unrelated user changes.\n"
         "- Run relevant checks or explain why they were skipped.\n"
         "- Update tests or docs when behavior changes.\n"
+        "- Before calling the task done, inspect sibling code paths on the same surface and note why they are covered or out of scope.\n"
     )
 
 

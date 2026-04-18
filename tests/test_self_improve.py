@@ -44,6 +44,7 @@ class SelfImproveTests(unittest.TestCase):
         )
         self.assertIn("Do not repeat these topics", description)
         self.assertIn("abc123 Fix latest thing", description)
+        self.assertIn("inspect sibling code paths on the same surface", description)
 
     def test_self_improve_description_uses_coding_focus(self):
         state = default_state()
