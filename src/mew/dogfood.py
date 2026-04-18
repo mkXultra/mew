@@ -44,6 +44,7 @@ DOGFOOD_SCENARIOS = (
     "native-work",
     "native-advance",
     "passive-recovery-loop",
+    "day-reentry",
     "chat-cockpit",
     "work-session",
 )
@@ -1569,6 +1570,198 @@ def run_passive_recovery_loop_scenario(workspace, env=None):
     return _scenario_report("passive-recovery-loop", workspace, commands, checks)
 
 
+def run_day_reentry_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    readme = Path(workspace) / "README.md"
+    readme.write_text(
+        "# Day Reentry Dogfood\n\n"
+        "The next step is to reopen this file and verify that aged work context stays visible.\n",
+        encoding="utf-8",
+    )
+    verify_command = f"{sys.executable} -V"
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Day-scale reentry task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=15,
+    )
+    start_data = _json_stdout(start_result)
+    session = start_data.get("work_session") or {}
+    session_id = session.get("id")
+
+    state_path = Path(workspace) / STATE_FILE
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    note_at = "2026-04-16T08:32:00Z"
+    tool_at = "2026-04-16T08:34:00Z"
+    memory_at = "2026-04-16T08:36:00Z"
+    for candidate in state.get("work_sessions") or []:
+        if str(candidate.get("id")) != str(session_id):
+            continue
+        candidate["created_at"] = "2026-04-16T08:00:00Z"
+        candidate["updated_at"] = memory_at
+        candidate["goal"] = "Prove a next-day reentry surface for active work."
+        candidate.setdefault("notes", []).append(
+            {
+                "id": next_id(state, "work_note"),
+                "source": "dogfood",
+                "text": "Day-scale reentry note: keep the hypothesis, next step, and last touched file visible.",
+                "created_at": note_at,
+            }
+        )
+        read_tool_call_id = next_id(state, "work_tool_call")
+        candidate.setdefault("tool_calls", []).append(
+            {
+                "id": read_tool_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "README.md"},
+                "result": {"path": "README.md", "content": readme.read_text(encoding="utf-8")},
+                "summary": "Read README.md to seed day-scale reentry context.",
+                "started_at": tool_at,
+                "finished_at": tool_at,
+            }
+        )
+        memory_turn_id = next_id(state, "work_model_turn")
+        candidate.setdefault("model_turns", []).append(
+            {
+                "id": memory_turn_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "status": "completed",
+                "decision_plan": {
+                    "summary": "preserve day-scale reentry context",
+                    "working_memory": {
+                        "hypothesis": "Day-scale reentry is viable if focus preserves age, memory, and controls.",
+                        "next_step": "Run the day-reentry dogfood and inspect the README context before changing code.",
+                        "open_questions": ["Does focus show how old the active work session is?"],
+                        "last_verified_state": "No code changes yet; README evidence was inspected.",
+                    },
+                },
+                "action_plan": {},
+                "action": {"type": "finish", "reason": "pause until next-day reentry"},
+                "summary": "Captured next-day reentry memory.",
+                "started_at": memory_at,
+                "finished_at": memory_at,
+            }
+        )
+        break
+    write_json_file(state_path, state)
+
+    focus_json_result = run(["focus", "--kind", "coding", "--json"], timeout=15)
+    focus_text_result = run(["focus", "--kind", "coding"], timeout=15)
+    resume_json_result = run(
+        [
+            "work",
+            str(task_id),
+            "--session",
+            "--resume",
+            "--allow-read",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    activity_json_result = run(["activity", "--kind", "coding", "--json"], timeout=15)
+
+    focus_data = _json_stdout(focus_json_result)
+    focus_sessions = focus_data.get("active_work_sessions") or []
+    focus_session = focus_sessions[0] if focus_sessions else {}
+    focus_memory = focus_session.get("working_memory") or {}
+    resume_data = _json_stdout(resume_json_result)
+    resume = resume_data.get("resume") or {}
+    resume_memory = resume.get("working_memory") or {}
+    world_state = resume.get("world_state") or {}
+    activity_data = _json_stdout(activity_json_result)
+    activity_text = json.dumps(activity_data.get("recent_activity") or [], ensure_ascii=False)
+    focus_text = focus_text_result.get("stdout") or ""
+
+    _scenario_check(
+        checks,
+        "day_reentry_focus_surfaces_aged_active_session",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and focus_json_result.get("exit_code") == 0
+        and focus_session.get("id") == session_id
+        and focus_session.get("task_id") == task_id
+        and (focus_session.get("inactive_hours") or 0) >= 24.0
+        and bool(focus_session.get("inactive_for")),
+        observed=focus_session,
+        expected="focus --json surfaces the active session with day-scale inactive age",
+    )
+    _scenario_check(
+        checks,
+        "day_reentry_focus_text_is_copy_paste_reentry",
+        focus_text_result.get("exit_code") == 0
+        and "last_active:" in focus_text
+        and "Day-scale reentry is viable" in focus_text
+        and f" work {task_id} --session --resume --allow-read ." in focus_text
+        and f" work {task_id} --follow " in focus_text
+        and "--allow-read ." in focus_text
+        and "--allow-verify" in focus_text,
+        observed=command_result_tail(focus_text_result),
+        expected="focus text shows age, working memory, and runnable resume/follow controls",
+    )
+    _scenario_check(
+        checks,
+        "day_reentry_resume_restores_memory_and_world_state",
+        resume_json_result.get("exit_code") == 0
+        and resume.get("session_id") == session_id
+        and resume_memory.get("hypothesis") == focus_memory.get("hypothesis")
+        and any("Day-scale reentry note" in (note.get("text") or "") for note in resume.get("notes") or [])
+        and any(record.get("path") == "README.md" and record.get("exists") for record in world_state.get("files") or []),
+        observed={
+            "resume": resume,
+            "next_cli_controls": resume_data.get("next_cli_controls"),
+        },
+        expected="work --session --resume restores memory, notes, and live file world state",
+    )
+    _scenario_check(
+        checks,
+        "day_reentry_activity_preserves_old_work_events",
+        activity_json_result.get("exit_code") == 0
+        and "Captured next-day reentry memory." in activity_text
+        and "Read README.md to seed day-scale reentry context." in activity_text
+        and "Day-scale reentry note" in activity_text,
+        observed=activity_data,
+        expected="activity --kind coding preserves old turn, tool, and note events for reentry audit",
+    )
+    return _scenario_report("day-reentry", workspace, commands, checks)
+
+
 def run_chat_cockpit_scenario(workspace, env=None):
     commands = []
     checks = []
@@ -2946,6 +3139,8 @@ def run_dogfood_scenario(args):
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
             reports.append(run_passive_recovery_loop_scenario(scenario_workspace, env=env))
+        elif name == "day-reentry":
+            reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":

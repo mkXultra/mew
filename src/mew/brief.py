@@ -2,11 +2,11 @@ from pathlib import Path
 
 from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
-from .question_view import format_question_context, question_view_metadata
+from .question_view import format_question_context, format_waiting_hours, question_view_metadata
 from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
-from .timeutil import now_iso
+from .timeutil import elapsed_hours, now_iso
 from .work_session import build_work_session_resume, work_session_task
 
 
@@ -646,7 +646,11 @@ def build_focus_data(state, limit=3, kind=None):
     generated_at = now_iso()
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     coding_tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind="coding") if not kind else []
-    coding_active_work = active_work_session_items(state, limit=1, kind="coding") if not kind else []
+    coding_active_work = (
+        active_work_session_items(state, limit=1, kind="coding", current_time=generated_at)
+        if not kind
+        else []
+    )
     coding_next_move = (
         next_move(state, kind="coding")
         if not kind and (coding_tasks or coding_active_work or not current_project_looks_like_mew())
@@ -672,7 +676,12 @@ def build_focus_data(state, limit=3, kind=None):
         "routine_unread_info_count": len(routine_unread),
         "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
-        "active_work_sessions": active_work_session_items(state, limit=limit, kind=kind),
+        "active_work_sessions": active_work_session_items(
+            state,
+            limit=limit,
+            kind=kind,
+            current_time=generated_at,
+        ),
         "tasks": [
             {
                 **_task_item(task),
@@ -684,7 +693,8 @@ def build_focus_data(state, limit=3, kind=None):
     }
 
 
-def active_work_session_items(state, limit=3, kind=None):
+def active_work_session_items(state, limit=3, kind=None, current_time=None):
+    current_time = current_time or now_iso()
     items = []
     for session in reversed(state.get("work_sessions") or []):
         if session.get("status") != "active":
@@ -702,12 +712,17 @@ def active_work_session_items(state, limit=3, kind=None):
         resume_command = _work_session_resume_command(session, task_parts)
         continue_command = _work_session_reentry_command(session, task_parts, max_steps=1)
         follow_command = _work_session_reentry_command(session, task_parts, max_steps=10, follow=True)
+        updated_at = session.get("updated_at") or session.get("created_at") or ""
+        inactive_hours = elapsed_hours(updated_at, current_time)
         items.append(
             {
                 "id": session.get("id"),
                 "task_id": task_id,
                 "title": session.get("title") or (task or {}).get("title") or "",
                 "phase": resume.get("phase") or "unknown",
+                "updated_at": updated_at,
+                "inactive_hours": round(inactive_hours, 2) if inactive_hours is not None else None,
+                "inactive_for": format_waiting_hours(inactive_hours, minimum_hours=0.0),
                 "next_action": resume.get("next_action") or "",
                 "working_memory": resume.get("working_memory") or {},
                 "resume_command": resume_command,
@@ -832,6 +847,12 @@ def format_focus(data):
             )
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
+            if session.get("updated_at"):
+                inactive = session.get("inactive_for")
+                if inactive:
+                    lines.append(f"  last_active: {session.get('updated_at')} ({inactive} ago)")
+                else:
+                    lines.append(f"  last_active: {session.get('updated_at')}")
             memory = session.get("working_memory") or {}
             stale_memory = _format_focus_memory_stale(memory)
             if memory.get("hypothesis"):

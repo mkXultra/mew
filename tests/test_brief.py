@@ -597,6 +597,33 @@ class BriefTests(unittest.TestCase):
         self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
         self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
 
+    def test_focus_surfaces_active_work_session_age(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Resume after a day", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Resume after a day",
+                "goal": "Make old work easy to reenter.",
+                "created_at": "2026-04-16T08:00:00Z",
+                "updated_at": "2026-04-16T12:00:00Z",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        with patch("mew.brief.now_iso", return_value="2026-04-18T00:00:00Z"):
+            data = build_focus_data(state, limit=3, kind="coding")
+            focus = format_focus(data)
+
+        session = data["active_work_sessions"][0]
+        self.assertEqual(session["updated_at"], "2026-04-16T12:00:00Z")
+        self.assertEqual(session["inactive_hours"], 36.0)
+        self.assertEqual(session["inactive_for"], "1.5d")
+        self.assertIn("last_active: 2026-04-16T12:00:00Z (1.5d ago)", focus)
+
     def test_focus_reentry_commands_reuse_work_session_defaults(self):
         state = default_state()
         add_task(state, task_id=7, title="Use saved cockpit defaults")

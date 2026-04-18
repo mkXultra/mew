@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, and short passive native-work advancement now exist; day-scale reentry is not yet proven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and a proven passive native-advance recovery loop exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -106,6 +106,10 @@ a failed runtime-owned native advance asks a classified recovery question,
 superseded, and the next passive tick resumes native advance. Recovery
 suggestions now use the recovery plan's action priority, so side-effect review
 is not hidden by a later verifier retry hint.
+The latest Persistent Advantage pass adds a deterministic `day-reentry`
+dogfood scenario and `focus` age display, proving that an active work session
+aged by more than a day still surfaces last-active time, working memory,
+resume/follow commands, notes, live file world state, and old activity events.
 
 ## Milestone 1: Native Hands
 
@@ -400,6 +404,10 @@ Evidence:
   listings such as `mew questions --all` expose deferred stale prompts with
   `defer_reason=...`, so humans can see why passive work is waiting or why an
   older prompt was superseded.
+- Active work sessions in `mew focus` now include `last_active` age and
+  `focus --json` exposes `updated_at`, `inactive_hours`, and `inactive_for`,
+  so day-scale reentry makes the age of resident work explicit instead of
+  silently looking fresh.
 - `mew dogfood --scenario resident-loop` now starts a real resident runtime,
   lets it process startup plus passive ticks, stops it cleanly, and checks that
   passive effects and stdout summaries were recorded.
@@ -434,6 +442,10 @@ Evidence:
   `mew work --live --max-steps 1` step without spending model tokens, and
   runtime status now preserves a bounded skip-reason history for later dogfood
   diagnosis.
+- `dogfood --scenario day-reentry` now proves an active work session aged by
+  more than a day can be reentered through `mew focus`, `mew work --session
+  --resume --allow-read .`, and `mew activity --kind coding` while preserving
+  working memory, durable notes, touched-file world state, and old work events.
 - Failed passive native-work advances no longer cause blind retries. If the
   last native advance failed for the same runtime-owned session and no newer
   session activity has occurred, the next passive tick records
@@ -442,7 +454,9 @@ Evidence:
 
 Missing proof:
 
-- Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
+- Task-local resume and scoped reentry views are proven across a deterministic
+  day-scale interruption/resume cycle, but not yet across real multi-day
+  resident runtime operation.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - Watcher-driven passive output now has controlled, real-repo one-shot,
   short resident-loop, native-work-start, and real API native-work-advance
@@ -451,7 +465,9 @@ Missing proof:
 
 Next action:
 
-- Use task-local resume as the basis for day-scale reentry: compact noisy history, keep open risks, and verify that returning after interruption is faster than starting a fresh CLI session.
+- Use the day-scale reentry proof as the basis for a real multi-day resident
+  cadence test: compact noisy history, keep open risks, and verify that
+  returning after interruption is faster than starting a fresh CLI session.
 
 ## Milestone 4: True Recovery
 
@@ -570,6 +586,15 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: `mew focus` now shows active work-session age, and
+  `dogfood --scenario day-reentry` proves day-scale reentry across focus,
+  resume, world-state, notes, and activity history. Validated with
+  `uv run pytest -q tests/test_brief.py` (`39 passed`),
+  `uv run pytest -q tests/test_dogfood.py` (`41 passed`),
+  `uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_self_improve.py`
+  (`217 passed, 6 subtests passed`), day-reentry dogfood (pass),
+  all-scenario dogfood (pass), and full `uv run pytest -q` (`906 passed,
+  6 subtests passed`).
 - Follow-up current: passive native-work recovery now has a deterministic
   `passive-recovery-loop` dogfood scenario, and recovery suggestions now follow
   recovery-plan action priority. Recovery plan items and observer
