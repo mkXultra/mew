@@ -651,13 +651,15 @@ def _format_workbench_reentry(resume, task):
         lines.append(f"resume_next_action: {next_action}")
     memory = resume.get("working_memory") or {}
     if memory:
-        if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
+        stale_memory = bool(memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"))
+        if stale_memory:
             lines.append("memory: stale; refresh before relying on next_step")
             lines.extend(_format_stale_working_memory_source_lines(memory))
         for key in ("hypothesis", "next_step", "last_verified_state"):
             value = memory.get(key)
             if value:
-                lines.append(f"{key}: {clip_inline_text(value, 360)}")
+                label = "stale_next_step" if key == "next_step" and stale_memory else key
+                lines.append(f"{label}: {clip_inline_text(value, 360)}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append(f"open_questions: {clip_inline_text('; '.join(str(item) for item in questions), 360)}")

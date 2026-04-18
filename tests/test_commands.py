@@ -2181,6 +2181,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("Reentry", output)
                 self.assertIn("resume_next_action: continue the work session", output)
                 self.assertIn("memory: stale; refresh before relying on next_step", output)
+                self.assertIn("stale_next_step: Edit after checking the latest README.", output)
+                self.assertNotIn("\nnext_step: Edit after checking the latest README.", output)
                 self.assertIn("stale_after_tool_call: #1 (read_file ran)", output)
                 self.assertIn("--allow-verify --verify-command 'uv run pytest'", output)
                 self.assertIn("mew reply 1", output)
