@@ -5218,14 +5218,18 @@ def build_work_reply_schema(session=None, resume=None):
     }
 
 
-def _work_follow_snapshot_path_for_args(args, state):
-    follow_dir = STATE_DIR / "follow"
-    session = None
+def _work_follow_status_session_for_args(args, state):
     task_id = getattr(args, "task_id", None)
     if task_id:
-        session = _latest_work_session_for_task(state, task_id)
-    else:
-        session = active_work_session(state)
+        return _latest_work_session_for_task(state, task_id)
+    return active_work_session(state)
+
+
+def _work_follow_snapshot_path_for_args(args, state, session=None):
+    follow_dir = STATE_DIR / "follow"
+    if session is None:
+        session = _work_follow_status_session_for_args(args, state)
+    task_id = getattr(args, "task_id", None)
     if session and session.get("id") is not None:
         return follow_dir / f"session-{session.get('id')}.json"
     if task_id:
@@ -5254,9 +5258,41 @@ def work_follow_producer_health(status, heartbeat_at=None, age=None, producer_pi
     }
 
 
-def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=None):
+def _work_follow_status_read_roots(session):
+    roots = []
+    defaults = (session or {}).get("default_options") or {}
+    for root in defaults.get("allow_read") or []:
+        if root and root not in roots:
+            roots.append(root)
+    return roots or ["."]
+
+
+def _work_follow_status_refresh_command(task_id, session=None):
+    parts = ["work"]
+    if task_id is not None:
+        parts.append(task_id)
+    parts.extend(["--follow", "--max-steps", "0", "--quiet"])
+    for root in _work_follow_status_read_roots(session):
+        parts.extend(["--allow-read", root])
+    if ((session or {}).get("default_options") or {}).get("compact_live"):
+        parts.append("--compact-live")
+    return mew_command(*parts)
+
+
+def _work_follow_status_inspect_command(task_id, session=None):
+    parts = ["work"]
+    if task_id is not None:
+        parts.append(task_id)
+    parts.extend(["--session", "--resume"])
+    for root in _work_follow_status_read_roots(session):
+        parts.extend(["--allow-read", root])
+    parts.append("--auto-recover-safe")
+    return mew_command(*parts)
+
+
+def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=None, session=None):
     snapshot_data = snapshot_data or {}
-    task_id = snapshot_data.get("task_id") or task_id
+    task_id = snapshot_data.get("task_id") or task_id or (session or {}).get("task_id")
     planned = work_recovery_suggestion_from_plan(
         ((snapshot_data.get("resume") or {}).get("recovery_plan") or {}),
         task_id=task_id,
@@ -5272,19 +5308,19 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
             }
         return {
             "kind": "refresh_snapshot",
-            "command": _work_task_command(task_id, "--follow", "--max-steps", "0", "--quiet", "--allow-read", "."),
+            "command": _work_follow_status_refresh_command(task_id, session=session),
             "reason": "write a fresh observer snapshot before replying",
         }
     if status in ("dead", "stale"):
         return {
             "kind": "inspect_resume",
-            "command": _work_task_command(task_id, "--session", "--resume", "--allow-read", ".", "--auto-recover-safe"),
+            "command": _work_follow_status_inspect_command(task_id, session=session),
             "reason": "producer is not active; inspect the session resume and recover safe interrupted reads if present",
         }
     return {}
 
 
-def _work_follow_status_from_snapshot(path, task_id=None):
+def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     if not path.exists():
         status = "absent"
         return {
@@ -5296,7 +5332,7 @@ def _work_follow_status_from_snapshot(path, task_id=None):
             "producer_pid": None,
             "producer_alive": False,
             "producer_health": work_follow_producer_health(status),
-            "suggested_recovery": work_follow_status_suggested_recovery(status, task_id=task_id),
+            "suggested_recovery": work_follow_status_suggested_recovery(status, task_id=task_id, session=session),
         }
     data = json.loads(path.read_text(encoding="utf-8"))
     heartbeat_at = data.get("heartbeat_at") or data.get("generated_at")
@@ -5318,7 +5354,12 @@ def _work_follow_status_from_snapshot(path, task_id=None):
         status = "dead"
     else:
         status = "stale"
-    suggested_recovery = work_follow_status_suggested_recovery(status, snapshot_data=data, task_id=task_id)
+    suggested_recovery = work_follow_status_suggested_recovery(
+        status,
+        snapshot_data=data,
+        task_id=task_id,
+        session=session,
+    )
     resume = data.get("resume") or {}
     return {
         "snapshot_path": str(path),
@@ -5380,8 +5421,9 @@ def format_work_follow_status(data):
 def cmd_work_follow_status(args):
     try:
         state = load_state()
-        path = _work_follow_snapshot_path_for_args(args, state)
-        data = _work_follow_status_from_snapshot(path, task_id=getattr(args, "task_id", None))
+        session = _work_follow_status_session_for_args(args, state)
+        path = _work_follow_snapshot_path_for_args(args, state, session=session)
+        data = _work_follow_status_from_snapshot(path, task_id=getattr(args, "task_id", None), session=session)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"mew: invalid follow snapshot: {exc}", file=sys.stderr)
         return 1

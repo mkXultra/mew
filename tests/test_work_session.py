@@ -14495,6 +14495,7 @@ class WorkSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                read_root = str(Path(tmp, "external-work").resolve())
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
@@ -14506,6 +14507,7 @@ class WorkSessionTests(unittest.TestCase):
                             "title": "Follow status",
                             "created_at": now_iso(),
                             "updated_at": now_iso(),
+                            "default_options": {"allow_read": [read_root], "compact_live": True},
                         }
                     ]
                     save_state(state)
@@ -14516,6 +14518,94 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["status"], "absent")
                 self.assertEqual(data["suggested_recovery"]["kind"], "refresh_snapshot")
                 self.assertIn("work 1 --follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
+                self.assertIn(f"--allow-read {read_root}", data["suggested_recovery"]["command"])
+                self.assertIn("--compact-live", data["suggested_recovery"]["command"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_active_session_absent_suggests_refresh(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                read_root = str(Path(tmp, "external-work").resolve())
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 7,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Follow status",
+                            "created_at": now_iso(),
+                            "updated_at": now_iso(),
+                            "default_options": {"allow_read": [read_root], "compact_live": True},
+                        }
+                    ]
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--follow-status", "--json"]), 1)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "absent")
+                self.assertTrue(data["snapshot_path"].endswith(".mew/follow/session-7.json"))
+                self.assertEqual(data["suggested_recovery"]["kind"], "refresh_snapshot")
+                self.assertIn("work 1 --follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
+                self.assertIn(f"--allow-read {read_root}", data["suggested_recovery"]["command"])
+                self.assertIn("--compact-live", data["suggested_recovery"]["command"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_dead_task_uses_session_defaults_for_inspect(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                read_root = str(Path(tmp, "external-work").resolve())
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"] = [
+                        {
+                            "id": 7,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Follow status",
+                            "created_at": now_iso(),
+                            "updated_at": now_iso(),
+                            "default_options": {"allow_read": [read_root], "compact_live": True},
+                        }
+                    ]
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True, exist_ok=True)
+                (follow_dir / "session-7.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 7,
+                            "task_id": 1,
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "producer": {"pid": 999999},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "dead")
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
+                self.assertIn(f"--allow-read {read_root}", data["suggested_recovery"]["command"])
+                self.assertIn("--auto-recover-safe", data["suggested_recovery"]["command"])
             finally:
                 os.chdir(old_cwd)
 
