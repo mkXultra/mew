@@ -142,3 +142,76 @@ Judgment:
   original resident diagnosis did not cover.
 - Mew did not beat a polished coding CLI on edit speed, because the session was
   intentionally read-only and I took over the patch.
+
+#### B3: Read-Only Reentry To Write-Capable Continuation
+
+Setup:
+
+- Created task #140 with `mew task add --kind coding --json`.
+- Started the resident session with write and verify gates:
+  `mew work 140 --start-session --allow-read . --allow-write . --allow-verify
+  --verify-command "uv run python -m unittest tests.test_work_session" --json`.
+- Ran `mew work 140 --follow --quiet --auth auth.json --allow-read .
+  --allow-write . --allow-verify --verify-command "uv run python -m unittest
+  tests.test_work_session" --compact-live --max-steps 5`.
+
+Observed mew advantage:
+
+- With write/verify gates, mew did not stop at diagnosis. It inspected the
+  reentry formatter and applied a real `edit_file` to `src/mew/commands.py`.
+- The applied edit ran the configured verifier successfully and journaled the
+  write plus verification in the work session.
+- When it reached the max-step boundary before finishing the paired test/doc
+  work, it preserved the exact pending follow-up in work-session memory.
+- `mew work 140 --session --resume --allow-read .` made the pending paired-test
+  work obvious enough to continue without reconstructing the task from scratch.
+
+Observed mew weakness:
+
+- I gave it a verifier for `tests.test_work_session`, but the actual paired test
+  belonged in `tests.test_commands`. Mew trusted the supplied gate and called
+  the work verified too early. The resident can execute gates, but the human or
+  supervisor still has to choose a good one.
+- The model initially guessed `tests/test_brief.py`; after reading the code path,
+  the correct paired coverage was in `tests/test_commands.py`.
+
+Change shipped:
+
+- `mew work <task>` workbench reentry now includes the active work-session
+  `resume.next_action`, so the immediate continuation command is visible beside
+  working memory and notes.
+- The workbench's bottom `Next action` now reuses the active work session's
+  persisted defaults via `work_session_runtime_command`, preserving auth,
+  read/write roots, verification gates, compact-live, quiet mode, and similar
+  cockpit settings instead of falling back to `--allow-read .` only.
+
+Validation:
+
+- Focused command tests: `2 passed`.
+- The same two focused tests were also run through `mew work 140 --tool
+  run_tests`, preserving the verification in the work-session ledger.
+- Related `tests.test_commands` + `tests.test_work_session`: `452 tests OK`.
+- Ruff and `git diff --check`: pass.
+
+Fresh review:
+
+- Fresh `codex-ultra` initially failed the patch. It found that a session with
+  non-gate defaults such as `compact_live` would lose `--allow-read .` and hit
+  `missing_gates`, and that `next_action:` in Reentry was ambiguous beside the
+  canonical bottom `Next action`.
+- Follow-up fix added a workbench command helper with three cases: no defaults
+  keep the old `--allow-read .` fallback, real gate defaults are reused exactly,
+  and non-gate defaults get an injected read gate while preserving those
+  defaults.
+- The Reentry label is now `resume_next_action:`.
+- Fresh `codex-ultra` re-review: PASS.
+
+Judgment:
+
+- Mew was better than a fresh session at preserving "what remains" after a
+  partially completed edit. The resume bundle pointed directly at the missing
+  paired test.
+- Mew still needs better verifier selection discipline. A wrong verification
+  gate can create false confidence even when the native tool loop works.
+- Fresh review again improved breadth. It caught the non-gate default edge case
+  before commit.

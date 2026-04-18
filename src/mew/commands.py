@@ -216,6 +216,7 @@ from .work_session import (
     WRITE_WORK_TOOLS,
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
+    work_session_runtime_command,
     work_session_task,
     work_write_pairing_status,
 )
@@ -491,7 +492,7 @@ def build_workbench_data(state, task):
     elif not is_programmer_task(task):
         next_action = mew_command("task", "update", task_id, "--kind", "coding")
     elif active_task_work_session:
-        next_action = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
+        next_action = _workbench_active_work_session_command(active_task_work_session, task_id)
     elif not plan:
         next_action = mew_command("work", task_id, "--start-session")
     elif not latest_implementation:
@@ -615,10 +616,32 @@ def work_session_write_summaries(session, limit=5):
     return items if limit is None else items[-limit:]
 
 
+def _workbench_active_work_session_command(session, task_id):
+    defaults = (session or {}).get("default_options") or {}
+    has_gate = (
+        bool(defaults.get("allow_read"))
+        or bool(defaults.get("allow_write"))
+        or bool(defaults.get("allow_shell"))
+        or bool(defaults.get("allow_verify"))
+    )
+    if not defaults:
+        return mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
+    if has_gate:
+        return work_session_runtime_command(session, task_id)
+    defaulted = dict(session or {})
+    default_options = dict(defaults)
+    default_options["allow_read"] = ["."]
+    defaulted["default_options"] = default_options
+    return work_session_runtime_command(defaulted, task_id)
+
+
 def _format_workbench_reentry(resume, task):
     if not resume:
         return []
     lines = []
+    next_action = clip_inline_text(resume.get("next_action") or "", 360)
+    if next_action:
+        lines.append(f"resume_next_action: {next_action}")
     memory = resume.get("working_memory") or {}
     if memory:
         if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):

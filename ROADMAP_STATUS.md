@@ -842,6 +842,21 @@ Next action:
   passed, 25 subtests passed`),
   `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py tests/test_work_session.py`
   (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
+- Bake-off current: task #140 turned the first bake-off weakness into a second
+  real improvement. With write/verify gates present, mew inspected the
+  workbench reentry path and applied a source edit itself, then stopped with a
+  durable note for the missing paired test. The final fix now shows
+  `resume_next_action` in the workbench Reentry block and makes the workbench's
+  canonical bottom `Next action` reuse active work-session defaults when they
+  include gates. For sessions with only non-gate defaults, it preserves those
+  options while injecting `--allow-read .`, avoiding the `missing_gates`
+  regression found by fresh `codex-ultra`. Fresh re-review returned PASS.
+  Validated with focused workbench tests (`4 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest tests.test_commands tests.test_work_session`
+  (`452 tests OK`), full `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`978
+  passed, 25 subtests passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py tests/test_commands.py tests/test_work_session.py`
+  (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
   candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now

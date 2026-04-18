@@ -2077,6 +2077,7 @@ class CommandTests(unittest.TestCase):
             try:
                 from mew.programmer import create_task_plan
                 from mew.state import add_question, load_state, save_state, state_lock
+                from mew.work_session import create_work_session
 
                 with state_lock():
                     state = load_state()
@@ -2132,6 +2133,13 @@ class CommandTests(unittest.TestCase):
                         }
                     )
                     add_question(state, "Need scope?", related_task_id=1)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_verify": True,
+                        "verify_command": "uv run pytest",
+                    }
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -2142,6 +2150,9 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("#1 [completed/implementation]", output)
                 self.assertIn("#1 [passed] uv run pytest", output)
                 self.assertIn("#1 [edit_file] src/mew/commands.py changed=True", output)
+                self.assertIn("Reentry", output)
+                self.assertIn("resume_next_action: continue the work session", output)
+                self.assertIn("--allow-verify --verify-command 'uv run pytest'", output)
                 self.assertIn("mew reply 1", output)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -2153,6 +2164,110 @@ class CommandTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/work", {}), "continue")
                 self.assertIn("Work task #1: Implement workbench", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_workbench_active_session_next_action_reuses_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Continue resident work",
+                        "kind": "coding",
+                        "description": "Keep gates in the workbench next action.",
+                        "status": "ready",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_verify": True,
+                        "verify_command": "uv run pytest",
+                        "compact_live": True,
+                        "quiet": True,
+                    }
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("Next action", output)
+                self.assertIn(
+                    "mew work 1 --live --allow-read . --allow-write . --allow-verify "
+                    "--verify-command 'uv run pytest' --compact-live --quiet --max-steps 1",
+                    output,
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_workbench_active_session_next_action_adds_read_gate_for_non_gate_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Continue non-gate defaults",
+                        "kind": "coding",
+                        "description": "",
+                        "status": "ready",
+                        "priority": "normal",
+                        "notes": "",
+                        "command": "",
+                        "cwd": ".",
+                        "auto_execute": False,
+                        "agent_backend": "",
+                        "agent_model": "",
+                        "agent_prompt": "",
+                        "agent_run_id": None,
+                        "plans": [],
+                        "latest_plan_id": None,
+                        "runs": [],
+                        "created_at": "now",
+                        "updated_at": "now",
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {
+                        "model_backend": "codex",
+                        "compact_live": True,
+                    }
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1"]), 0)
+                output = stdout.getvalue()
+                self.assertIn(
+                    "mew work 1 --live --model-backend codex --allow-read . --compact-live --max-steps 1",
+                    output,
+                )
             finally:
                 os.chdir(old_cwd)
 
