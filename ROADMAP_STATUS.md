@@ -587,6 +587,12 @@ Next action:
   `uv run pytest -q tests/test_work_session.py` (`239 passed`), work-session
   dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`898 passed,
   6 subtests passed`).
+- Self-improve task #113 current: native self-improve controls are now
+  cwd-aware, so `--cwd <other-dir>` prints continue/follow/resume commands
+  gated with that resolved directory instead of `--allow-read .`. Validated with
+  `uv run pytest -q tests/test_self_improve.py -k start_session` (`3 passed`),
+  self-improve command tests (`23 passed`), work-session dogfood (pass), all
+  dogfood (pass), and full `uv run pytest -q` (`899 passed, 6 subtests passed`).
 - Real Codex Web API dogfood after the verification-recovery work current:
   `./mew dogfood --duration 80 ... --ai --auth auth.json --allow-native-work
   --allow-native-advance` completed startup plus two passive ticks; it started
@@ -845,6 +851,10 @@ Next action:
   `mew task update <id> --status ready` instead of an impossible
   `mew work <id> --start-session`, and `work-session` dogfood preserves that
   contract.
+- Native self-improve task #113/session #136 identified a cwd/gate mismatch in
+  native self-improve controls: the output printed `work cwd: <task cwd>` but
+  still suggested `--allow-read .`. Controls now keep `.` only when the task cwd
+  is the current directory and otherwise use the resolved task cwd.
 - `claude-ultra` evaluation after passive native-work advance answered
   `CONDITIONAL`: mew is worth inhabiting for bounded, observable,
   gate-limited passive coding, but not yet for dense interactive or unattended
