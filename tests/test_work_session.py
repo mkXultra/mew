@@ -10920,6 +10920,7 @@ class WorkSessionTests(unittest.TestCase):
                             if (call.get("parameters") or {}).get("approved_from_tool_call_id") != 1
                         ]
                         save_state(state)
+                    target.write_text("after\n", encoding="utf-8")
                     return {
                         "operation": "edit_file",
                         "path": str(target.resolve()),
@@ -10952,10 +10953,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIsNone(data)
                 self.assertIn("approval result could not be recorded", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(len(session["tool_calls"]), 1)
-                self.assertEqual(session["tool_calls"][0]["approval_status"], "failed")
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "indeterminate")
                 self.assertIn("work session changed during approval", session["tool_calls"][0]["approval_error"])
+                self.assertEqual(build_work_session_resume(session)["pending_approvals"], [])
             finally:
                 os.chdir(old_cwd)
 

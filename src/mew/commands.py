@@ -197,6 +197,7 @@ from .work_session import (
     build_work_session_timeline,
     latest_work_verify_command,
     mark_running_work_interrupted,
+    APPROVAL_STATUS_INDETERMINATE,
     request_work_session_stop,
     select_work_recovery_plan_item,
     start_work_model_turn,
@@ -204,6 +205,7 @@ from .work_session import (
     start_work_tool_call,
     update_work_model_turn_plan,
     GIT_WORK_TOOLS,
+    NON_PENDING_APPROVAL_STATUSES,
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
     WRITE_WORK_TOOLS,
@@ -3663,7 +3665,7 @@ def _apply_work_approval(args, approve_tool_id):
         if not result.get("dry_run"):
             print("mew: only dry-run write/edit tool calls can be approved", file=sys.stderr)
             return 1, None
-        if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+        if source_call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
             print(f"mew: tool call is already {source_call.get('approval_status')}", file=sys.stderr)
             return 1, None
         if not result.get("changed"):
@@ -3714,7 +3716,7 @@ def _apply_work_approval(args, approve_tool_id):
         if not tool_call:
             stale_error = "approval result could not be recorded; work session changed during approval"
             if source_call:
-                source_call["approval_status"] = "failed"
+                source_call["approval_status"] = APPROVAL_STATUS_INDETERMINATE
                 source_call["approval_error"] = stale_error
             save_state(state)
             print(f"mew: {stale_error}", file=sys.stderr)
@@ -3752,7 +3754,7 @@ def _pending_approval_tool_ids(session):
         result = call.get("result") or {}
         if not result.get("dry_run") or not result.get("changed"):
             continue
-        if call.get("approval_status") in ("applying", "applied", "rejected"):
+        if call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
             continue
         ids.append(call.get("id"))
     return ids
@@ -3801,7 +3803,7 @@ def _work_reject_error(source_call):
     result = source_call.get("result") or {}
     if not result.get("dry_run") or not result.get("changed"):
         return "only pending dry-run write/edit tool calls can be rejected"
-    if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+    if source_call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
         return f"tool call is already {source_call.get('approval_status')}"
     return ""
 
@@ -4601,7 +4603,7 @@ def _work_approve_error(source_call):
     result = source_call.get("result") or {}
     if not result.get("dry_run"):
         return "only dry-run write/edit tool calls can be approved"
-    if source_call.get("approval_status") in ("applying", "applied", "rejected"):
+    if source_call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
         return f"tool call is already {source_call.get('approval_status')}"
     if not result.get("changed"):
         return "dry-run tool call has no changes to approve"

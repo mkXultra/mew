@@ -3,6 +3,7 @@ import shlex
 from .tasks import clip_output
 from .timeutil import parse_time
 from .work_session import (
+    NON_PENDING_APPROVAL_STATUSES,
     GIT_WORK_TOOLS,
     WRITE_WORK_TOOLS,
     clip_inline_text,
@@ -365,7 +366,7 @@ def has_pending_write_approval(call):
     result = (call or {}).get("result") or {}
     if not result.get("dry_run") or not result.get("changed"):
         return False
-    return (call or {}).get("approval_status") not in ("applying", "applied", "rejected")
+    return (call or {}).get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
 
 
 def _session_verify_command(session):

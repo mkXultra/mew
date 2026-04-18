@@ -52,6 +52,8 @@ READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+APPROVAL_STATUS_INDETERMINATE = "indeterminate"
+NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
 WORK_RECOVERY_EFFECT_PRIORITY = (
     "rollback_needed",
@@ -324,7 +326,7 @@ def work_session_has_pending_write_approval(session):
             call.get("tool") in WRITE_WORK_TOOLS
             and result.get("dry_run")
             and result.get("changed")
-            and call.get("approval_status") not in ("applying", "applied", "rejected")
+            and call.get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
         ):
             return True
     return False
@@ -1206,7 +1208,11 @@ def _work_call_changed_write(call):
 
 
 def _work_call_counts_as_test_pair(call):
-    return _work_call_changed_write(call) and call.get("approval_status") not in ("rejected", "failed")
+    return _work_call_changed_write(call) and call.get("approval_status") not in (
+        "rejected",
+        "failed",
+        APPROVAL_STATUS_INDETERMINATE,
+    )
 
 
 def work_write_pairing_status(session, call):
@@ -1320,7 +1326,7 @@ def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
     for call in reversed(calls or []):
         if call.get("tool") not in ("write_file", "edit_file"):
             continue
-        if call.get("approval_status") not in ("applied", "rejected", "failed"):
+        if call.get("approval_status") not in (NON_PENDING_APPROVAL_STATUSES | {"failed"}):
             continue
         result = call.get("result") or {}
         if not result.get("dry_run"):
@@ -1670,7 +1676,7 @@ def build_work_session_resume(session, task=None, limit=8):
             call.get("tool") in WRITE_WORK_TOOLS
             and result.get("dry_run")
             and result.get("changed")
-            and call.get("approval_status") not in ("applying", "applied", "rejected")
+            and call.get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
         ):
             tool_call_id = call.get("id")
             write_path = path or "."
