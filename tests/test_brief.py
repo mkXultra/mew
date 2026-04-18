@@ -54,7 +54,7 @@ class BriefTests(unittest.TestCase):
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
         self.assertEqual(
             next_move(default_state(), kind="coding"),
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --ready --focus 'Pick the next small mew improvement'`",
         )
 
     def test_next_move_coding_filter_in_empty_project_suggests_task_creation(self):
@@ -854,7 +854,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(
             data["next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --ready --focus 'Pick the next small mew improvement'`",
         )
 
     def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
