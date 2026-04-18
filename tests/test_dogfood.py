@@ -525,6 +525,10 @@ class DogfoodTests(unittest.TestCase):
                     "reason": "session_started_this_cycle",
                 }
             ]
+            state["runtime_status"]["last_native_work_skip_recovery"] = {
+                "action": "wait_next_tick",
+                "command": "mew work 1 --session --resume --allow-read .",
+            }
             (workspace / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             (workspace / LOG_FILE).write_text(
                 "- now: think_phase codex ok event=1\n- now: act_phase codex ok event=1\n",
@@ -600,6 +604,7 @@ class DogfoodTests(unittest.TestCase):
                 {"session_started_this_cycle": 1},
             )
             self.assertEqual(report["native_work_advance"]["recent_skips"][0]["phase"], "select")
+            self.assertEqual(report["native_work_advance"]["last_skip_recovery"]["action"], "wait_next_tick")
             self.assertEqual(report["plan_schema_issues"]["count"], 1)
             self.assertEqual(report["project_snapshot"]["project_types"], ["python"])
             self.assertEqual(report["active_dropped_threads"]["thought_count"], 0)

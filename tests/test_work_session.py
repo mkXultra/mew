@@ -68,6 +68,60 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(select_work_recovery_plan_item(plan)["id"], "write-2")
 
+    def test_recovery_plan_item_selection_prefers_rollback_over_action_committed(self):
+        plan = {
+            "items": [
+                {
+                    "action": "needs_user_review",
+                    "id": "write",
+                    "effect_classification": "rollback_needed",
+                },
+                {
+                    "action": "needs_user_review",
+                    "id": "command",
+                    "effect_classification": "action_committed",
+                },
+            ]
+        }
+
+        self.assertEqual(select_work_recovery_plan_item(plan)["id"], "write")
+
+    def test_recovery_plan_item_selection_prefers_verify_pending_over_action_committed(self):
+        plan = {
+            "items": [
+                {
+                    "action": "needs_user_review",
+                    "id": "verify-write",
+                    "effect_classification": "verify_pending",
+                },
+                {
+                    "action": "needs_user_review",
+                    "id": "command",
+                    "effect_classification": "action_committed",
+                },
+            ]
+        }
+
+        self.assertEqual(select_work_recovery_plan_item(plan)["id"], "verify-write")
+
+    def test_recovery_plan_item_selection_keeps_last_with_same_effect(self):
+        plan = {
+            "items": [
+                {
+                    "action": "needs_user_review",
+                    "id": "command-1",
+                    "effect_classification": "action_committed",
+                },
+                {
+                    "action": "needs_user_review",
+                    "id": "command-2",
+                    "effect_classification": "action_committed",
+                },
+            ]
+        }
+
+        self.assertEqual(select_work_recovery_plan_item(plan)["id"], "command-2")
+
     def test_recovery_suggestions_prefer_side_effect_review_over_later_verifier(self):
         plan = {
             "next_action": "verify the world and review interrupted side-effecting work before retry",
@@ -79,6 +133,12 @@ class WorkSessionTests(unittest.TestCase):
                 {
                     "action": "needs_user_review",
                     "review_hint": "mew work 1 --session --resume --allow-read .",
+                    "effect_classification": "rollback_needed",
+                    "tool_call_id": 6,
+                },
+                {
+                    "action": "needs_user_review",
+                    "review_hint": "mew work 1 --session --resume --allow-read src",
                     "effect_classification": "action_committed",
                     "tool_call_id": 7,
                 },
@@ -90,10 +150,10 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(command_suggestion["kind"], "needs_human_review")
         self.assertEqual(command_suggestion["command"], "mew work 1 --session --resume --allow-read .")
-        self.assertEqual(command_suggestion["effect_classification"], "action_committed")
+        self.assertEqual(command_suggestion["effect_classification"], "rollback_needed")
         self.assertEqual(runtime_suggestion["action"], "needs_user_review")
         self.assertEqual(runtime_suggestion["command"], "mew work 1 --session --resume --allow-read .")
-        self.assertEqual(runtime_suggestion["effect_classification"], "action_committed")
+        self.assertEqual(runtime_suggestion["effect_classification"], "rollback_needed")
 
     def test_work_recovery_effect_classifies_write_risks(self):
         self.assertEqual(
@@ -4427,7 +4487,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
         controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
-        self.assertIn("./mew work 1 --session --resume --allow-read README.md", controls)
+        self.assertIn("./mew work 1 --session --resume --allow-read .", controls)
 
     def test_work_recover_session_reports_review_context_for_side_effects(self):
         old_cwd = os.getcwd()

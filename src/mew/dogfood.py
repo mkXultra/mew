@@ -3734,6 +3734,7 @@ def native_work_advance_metrics(state, limit=5):
         "recent_skips": skips[-limit:],
         "last_step": runtime_status.get("last_native_work_step") or {},
         "last_skip": runtime_status.get("last_native_work_step_skip"),
+        "last_skip_recovery": runtime_status.get("last_native_work_skip_recovery") or {},
     }
 
 

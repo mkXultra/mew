@@ -965,6 +965,14 @@ Next action:
   pending approvals and approval cells. `work-session` dogfood now exercises a
   real dry-run source edit and verifies `missing_test_edit`, while the follow
   schema documents the optional observer field.
+- Passive native-work skips now keep a structured
+  `last_native_work_skip_recovery`, including concrete approval/reject/resume
+  commands for `pending_write_approval` instead of only a skip reason. Recovery
+  plan selection also ranks `needs_user_review` items by effect severity, so
+  `rollback_needed` and `verify_pending` are surfaced before lower-risk
+  `action_committed` or `no_action` reviews. Validated with recovery-focused
+  tests, `passive-recovery-loop` dogfood, all dogfood scenarios, and full
+  pytest (`913 passed, 6 subtests passed`).
 
 ## Current Roadmap Focus
 

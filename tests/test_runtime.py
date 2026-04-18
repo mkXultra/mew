@@ -13,6 +13,7 @@ from mew.runtime import (
     apply_runtime_autonomy_controls,
     compact_agent_reflex_report,
     guidance_with_runtime_focus,
+    native_work_skip_recovery_suggestion,
     record_runtime_native_work_step_skip,
     run_runtime_post_run_pipeline,
     select_runtime_native_work_step,
@@ -203,6 +204,35 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertIsNone(step)
         self.assertEqual(skip, "pending_write_approval")
+
+    def test_native_work_skip_recovery_suggests_pending_write_approval_controls(self):
+        state = default_state()
+        task = {"id": 1, "title": "Write task", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(session, event_id=7, current_time="now")
+        session["tool_calls"].append(
+            {
+                "id": 1,
+                "session_id": session["id"],
+                "task_id": task["id"],
+                "tool": "edit_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/example.py"},
+                "result": {"dry_run": True, "changed": True, "diff": "-old\n+new\n"},
+            }
+        )
+
+        _step, skip = select_runtime_native_work_step(state)
+        recovery = native_work_skip_recovery_suggestion(state, skip)
+
+        self.assertEqual(recovery["action"], "resolve_pending_write_approval")
+        self.assertEqual(recovery["session_id"], session["id"])
+        self.assertEqual(recovery["task_id"], task["id"])
+        self.assertEqual(recovery["tool_call_id"], 1)
+        self.assertIn("mew work 1 --approve-tool 1", recovery["command"])
+        self.assertIn("mew work 1 --reject-tool 1", recovery["alternate_command"])
+        self.assertIn("mew work 1 --session --resume --allow-read .", recovery["resume_command"])
 
     def test_select_runtime_native_work_step_skips_session_started_this_cycle(self):
         state = default_state()
@@ -659,6 +689,83 @@ class RuntimeTests(unittest.TestCase):
                 self.assertIn(
                     "runtime asked for recovery after failed passive native advance",
                     state["work_sessions"][0]["notes"][-1]["text"],
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_records_skip_recovery_for_pending_approval(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Approve pending write",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="before")
+                    session["tool_calls"].append(
+                        {
+                            "id": 1,
+                            "session_id": session["id"],
+                            "task_id": task["id"],
+                            "tool": "write_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/runtime_note.py"},
+                            "result": {"dry_run": True, "changed": True, "diff": "+note\n"},
+                            "started_at": "before",
+                            "finished_at": "before",
+                        }
+                    )
+                    save_state(state)
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                runtime = state["runtime_status"]
+                self.assertEqual(runtime["last_native_work_step_skip"], "pending_write_approval")
+                recovery = runtime["last_native_work_skip_recovery"]
+                self.assertEqual(recovery["action"], "resolve_pending_write_approval")
+                self.assertIn("mew work 1 --approve-tool 1", recovery["command"])
+                self.assertIn("mew work 1 --reject-tool 1", recovery["alternate_command"])
+                self.assertEqual(
+                    runtime["native_work_step_skips"][-1]["recovery"]["action"],
+                    "resolve_pending_write_approval",
                 )
             finally:
                 os.chdir(old_cwd)

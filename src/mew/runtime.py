@@ -272,9 +272,11 @@ def record_runtime_native_work_step_skip(
     session_id=None,
     task_id=None,
     command=None,
+    recovery=None,
 ):
     if not reason:
         runtime_status["last_native_work_step_skip"] = None
+        runtime_status["last_native_work_skip_recovery"] = {}
         return None
     entry = {
         "at": current_time or now_iso(),
@@ -289,10 +291,13 @@ def record_runtime_native_work_step_skip(
         entry["task_id"] = task_id
     if command:
         entry["command"] = command
+    if recovery:
+        entry["recovery"] = recovery
     skips = list(runtime_status.get("native_work_step_skips") or [])
     skips.append(entry)
     runtime_status["native_work_step_skips"] = skips[-NATIVE_WORK_STEP_SKIP_HISTORY_LIMIT:]
     runtime_status["last_native_work_step_skip"] = reason
+    runtime_status["last_native_work_skip_recovery"] = recovery or {}
     return entry
 
 
@@ -438,6 +443,107 @@ def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
     }
 
 
+def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task_id=None):
+    normalized_reason = str(reason or "").removeprefix("prelaunch_")
+    if not normalized_reason:
+        return {}
+
+    session = find_work_session(state, session_id) if session_id is not None else None
+    active_sessions = active_work_sessions(state)
+    if session is None:
+        if normalized_reason == "human_work_session_active":
+            session = next((candidate for candidate in active_sessions if not work_session_started_by_runtime(candidate)), None)
+        else:
+            runtime_sessions = [
+                candidate for candidate in active_sessions if work_session_started_by_runtime(candidate)
+            ]
+            if len(runtime_sessions) == 1:
+                session = runtime_sessions[0]
+
+    task = work_session_task(state, session) if session else None
+    resolved_task_id = task_id or (task or {}).get("id") or (session or {}).get("task_id")
+    resume_command = (
+        mew_command("work", resolved_task_id, "--session", "--resume", "--allow-read", ".")
+        if resolved_task_id
+        else mew_command("focus", "--kind", "coding")
+    )
+
+    if normalized_reason == "no_active_work_session":
+        return {
+            "action": "inspect_coding_focus",
+            "label": "inspect coding focus",
+            "command": mew_command("focus", "--kind", "coding"),
+            "reason": "no runtime-owned work session is active",
+        }
+    if normalized_reason == "multiple_runtime_work_sessions_active":
+        return {
+            "action": "inspect_coding_focus",
+            "label": "inspect active runtime sessions",
+            "command": mew_command("focus", "--kind", "coding"),
+            "reason": "more than one runtime-owned work session is active",
+        }
+    if normalized_reason == "session_started_this_cycle":
+        return {
+            "action": "wait_next_tick",
+            "label": "wait for the next passive tick",
+            "command": resume_command,
+            "reason": "runtime started this work session during the same cycle",
+            "session_id": (session or {}).get("id"),
+            "task_id": resolved_task_id,
+        }
+    if normalized_reason == "task_done" and resolved_task_id:
+        return {
+            "action": "reopen_task",
+            "label": "reopen completed task",
+            "command": mew_command("task", "update", resolved_task_id, "--status", "ready"),
+            "reason": "the runtime-owned work session belongs to a done task",
+            "session_id": (session or {}).get("id"),
+            "task_id": resolved_task_id,
+        }
+    if normalized_reason == "pending_write_approval" and session:
+        resume = build_work_session_resume(session, task=task)
+        approval = ((resume.get("pending_approvals") or [])[:1] or [{}])[0]
+        command = approval.get("cli_approve_hint") or resume_command
+        suggestion = {
+            "action": "resolve_pending_write_approval",
+            "label": "resolve pending write approval",
+            "command": command,
+            "reason": "a dry-run write/edit is waiting for approval or rejection",
+            "session_id": session.get("id"),
+            "task_id": resolved_task_id,
+            "tool_call_id": approval.get("tool_call_id"),
+            "resume_command": resume_command,
+        }
+        if approval.get("cli_reject_hint"):
+            suggestion["alternate_command"] = approval.get("cli_reject_hint")
+        return suggestion
+    if normalized_reason == "previous_native_work_step_failed" and session:
+        resume = build_work_session_resume(session, task=task)
+        suggestion = native_work_recovery_suggestion_from_plan(
+            resume.get("recovery_plan") or {},
+            task_id=resolved_task_id,
+        )
+        if suggestion:
+            suggestion.setdefault("session_id", session.get("id"))
+            suggestion.setdefault("task_id", resolved_task_id)
+            return suggestion
+    if normalized_reason in ("human_work_session_active", "stop_requested", "work_session_running") and session:
+        labels = {
+            "human_work_session_active": "inspect human work session",
+            "stop_requested": "inspect stop request",
+            "work_session_running": "inspect running work session",
+        }
+        return {
+            "action": "inspect_work_session",
+            "label": labels.get(normalized_reason, "inspect work session"),
+            "command": resume_command,
+            "reason": f"native work advance skipped because {normalized_reason}",
+            "session_id": session.get("id"),
+            "task_id": resolved_task_id,
+        }
+    return {}
+
+
 def select_runtime_native_work_step(state, *, current_event_id=None):
     active_sessions = active_work_sessions(state)
     if not active_sessions:
@@ -493,6 +599,12 @@ def run_runtime_native_work_step(step, args):
             skipped_at = now_iso()
             runtime_status = state.setdefault("runtime_status", {})
             skip_reason = f"prelaunch_{skip or 'changed'}"
+            skip_recovery = native_work_skip_recovery_suggestion(
+                state,
+                skip_reason,
+                session_id=step.get("session_id"),
+                task_id=step.get("task_id"),
+            )
             record_runtime_native_work_step_skip(
                 runtime_status,
                 skip_reason,
@@ -501,6 +613,7 @@ def run_runtime_native_work_step(step, args):
                 session_id=step.get("session_id"),
                 task_id=step.get("task_id"),
                 command=step.get("command"),
+                recovery=skip_recovery,
             )
             runtime_status["last_native_work_step"] = {
                 "finished_at": skipped_at,
@@ -1191,12 +1304,17 @@ def run_runtime(args):
                         current_event_id=event_id,
                     )
                     native_skip_time = now_iso()
+                    native_skip_recovery = native_work_skip_recovery_suggestion(
+                        state,
+                        native_work_skip,
+                    )
                     record_runtime_native_work_step_skip(
                         runtime_status,
                         native_work_skip,
                         current_time=native_skip_time,
                         event_id=event_id,
                         phase="select",
+                        recovery=native_skip_recovery,
                     )
                     if native_work_skip == "previous_native_work_step_failed":
                         recover_previous_native_work_step_failure(

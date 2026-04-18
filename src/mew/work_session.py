@@ -53,6 +53,14 @@ GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
+WORK_RECOVERY_EFFECT_PRIORITY = (
+    "rollback_needed",
+    "verify_pending",
+    "write_started",
+    "action_committed",
+    "no_action",
+    "unknown",
+)
 WORK_RECOVERY_EFFECT_CLASSES = {
     "no_action",
     "action_committed",
@@ -1562,6 +1570,19 @@ def select_work_recovery_plan_item(recovery_plan):
     for action in RECOVERY_PLAN_ACTION_PRIORITY:
         matches = [item for item in items if item.get("action") == action]
         if matches:
+            if action == "needs_user_review":
+                best = {}
+                best_priority = len(WORK_RECOVERY_EFFECT_PRIORITY)
+                for item in matches:
+                    effect = item.get("effect_classification") or "unknown"
+                    try:
+                        priority = WORK_RECOVERY_EFFECT_PRIORITY.index(effect)
+                    except ValueError:
+                        priority = len(WORK_RECOVERY_EFFECT_PRIORITY)
+                    if priority <= best_priority:
+                        best = item
+                        best_priority = priority
+                return best
             return matches[-1]
     return items[-1]
 
