@@ -2471,7 +2471,9 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "mew chat. Type /help" in code_output
         and "scope: coding" in code_output
         and "work-mode: on" in code_output
-        and "Mew code (coding):" in code_output,
+        and "Mew code (coding):" in code_output
+        and "Current: coding cockpit is open for task #3" in code_output
+        and "Next: enter coding cockpit for task #3" not in code_output,
         observed=command_result_tail(code_result),
         expected="mew code <task-id> starts/reuses a coding work session and enters work-mode chat",
     )

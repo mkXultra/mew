@@ -1472,9 +1472,17 @@ Next action:
   `src/mew/*.py` files when the matching `tests/test_*.py` module exists,
   reducing the B3 failure mode where a resident trusts a too-broad or wrong
   verification gate.
+- Real `mew code` dogfood on task #143/session #162 exposed a front-door
+  wording loop: after entering `mew code <task-id>`, the compact startup brief
+  still said "Next: enter coding cockpit". Active coding cockpits now say the
+  cockpit is already open and point to `/c`, `/follow`, or `/continue`.
 
 ## Current Roadmap Focus
 
 Milestone 2: Interactive Parity.
 
-The next implementation should dogfood a real coding change through `mew code <task-id>`. The front-door route and core mid-loop control lanes are now coherent; the remaining Milestone 2 work is making the active coding loop itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's persistent memory and audit trail.
+Fresh implementation should continue dogfooding real coding changes through
+`mew code <task-id>`. The front-door route and core mid-loop control lanes are
+now coherent; the remaining Milestone 2 work is making the active coding loop
+itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
+persistent memory and audit trail.

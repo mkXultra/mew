@@ -4922,6 +4922,49 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_task_startup_says_cockpit_is_open(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Improve cockpit",
+                            "kind": "coding",
+                            "description": "",
+                            "status": "todo",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["code", "1", "--timeout", "0"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("created work session #", output)
+                self.assertIn("Current: coding cockpit is open for task #1", output)
+                self.assertNotIn("Next: enter coding cockpit for task #1", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_code_hides_unread_by_default_and_can_show_it(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

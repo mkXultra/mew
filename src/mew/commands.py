@@ -12116,12 +12116,19 @@ def format_compact_chat_brief(state, kind=None):
     title = "Mew code"
     if kind:
         title += f" ({kind})"
+    active = (focus.get("active_work_sessions") or [])[:1]
+    if kind == "coding" and active:
+        current_line = (
+            f"Current: coding cockpit is open for task #{active[0].get('task_id')}; "
+            "use /c, /follow, or /continue <guidance>"
+        )
+    else:
+        current_line = f"Next: {focus.get('next_move')}"
     lines = [
         f"{title}: runtime={runtime_phase} tasks={focus.get('open_task_count') or 0} "
         f"unread={focus.get('unread_outbox_count') or 0}",
-        f"Next: {focus.get('next_move')}",
+        current_line,
     ]
-    active = (focus.get("active_work_sessions") or [])[:1]
     if active:
         session = active[0]
         lines.append(
