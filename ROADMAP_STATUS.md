@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, and short passive native-work advancement now exist; day-scale reentry is not yet proven. |
-| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, and safe read/git retries exist; automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, safe read/git retries, and passive native-advance failure questions exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -472,10 +472,16 @@ Evidence:
 - `mew work --session --resume --allow-read ...` now adds a live world-state section with current git status and touched-file stats, reducing reliance on cached session history alone.
 - The same world-state check is available from chat resume and in model context, making it easier for both user and resident model to revalidate state before continuing.
 - Follow-status recovery hints now expose the read-side next command for absent/stale/dead snapshots and prefer the session recovery plan when it contains a retryable read, side-effect review, or replannable model turn.
+- Failed passive native-work advances now route the next tick to an explicit
+  recovery question with concrete inspect/retry commands instead of silent wait
+  or blind retry. Runtime-created recovery notes are ignored by the retry gate,
+  so mew does not mistake its own bookkeeping for user/model/tool progress.
 
 Missing proof:
 
-- No automatic resume/retry/abort/ask_user decision from interrupted runtime effects, and no automatic recovery for interrupted write/shell/verification work items.
+- Automatic `ask_user` recovery exists for failed passive native-work advances,
+  but not yet for all interrupted runtime effects or side-effecting
+  write/shell/verification work items.
 - World-state revalidation before retry exists for safe read/git work-session recovery, but not yet for runtime effects or side-effecting work.
 - Safe work-session auto-recovery is still opt-in and limited to one interrupted read/git tool per resume.
 
@@ -538,6 +544,13 @@ Next action:
 - Native self-improve dogfood task #106 current: mew selected a recovery-cockpit target and drove the first dry-run; supervisor completed the paired test update after rollback friction. Validated with `uv run pytest -q tests/test_work_session.py -k recovery` (`8 passed`), `uv run pytest -q tests/test_work_session.py` (`238 passed`), full `uv run pytest -q` (`897 passed, 6 subtests passed`), and `./mew dogfood --scenario all --cleanup --json` (pass).
 - Follow-up task #107 current: failed approval retry labels validated with focused approval-control tests, `uv run pytest -q tests/test_work_session.py` (`238 passed`), full `uv run pytest -q` (`897 passed, 6 subtests passed`), and `./mew dogfood --scenario all --cleanup --json` (pass).
 - Native self-improve task #108 current: write-run context now includes linked verification stdout/stderr tails; validated with `uv run pytest -q tests/test_autonomy.py` (`100 passed`), full `uv run pytest -q` (`897 passed, 6 subtests passed`), and `./mew dogfood --scenario all --cleanup --json` (pass).
+- Follow-up task #109 current: failed passive native-work advance recovery now
+  ignores runtime-created recovery notes when deciding whether a failure was
+  resolved. `dogfood --scenario native-advance` simulates a failing
+  `MEW_EXECUTABLE` and verifies that mew asks a seeded recovery question with
+  inspect/retry commands and does not blindly call `mew work <task>` again.
+  Validated with full `uv run pytest -q` (`897 passed, 6 subtests passed`) and
+  `./mew dogfood --scenario all --cleanup --json` (pass).
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 80 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-seed-note.json --json` completed startup plus two passive ticks; `native_work_advance.attempts=2`, `by_outcome.completed=2`, `last_native_work_step.outcome=completed`, and the earlier refused-complete warning is gone because the dogfood seed task is now marked as self-proposed.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
