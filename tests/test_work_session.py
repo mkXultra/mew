@@ -4957,6 +4957,231 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approval_blocks_unpaired_source_edit_by_default(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                target = Path("src/mew/gate.py")
+                target.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--approve-tool", "1", "--allow-write", "."]), 1)
+
+                self.assertIn("requires a paired tests/** write/edit", stderr.getvalue())
+                self.assertIn("--allow-unpaired-source-edit", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'old'\n")
+                self.assertNotIn("approval_status", load_state()["work_sessions"][0]["tool_calls"][0])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_approve_all_blocks_unpaired_source_edit_by_default(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                target = Path("src/mew/gate.py")
+                target.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--approve-all", "--allow-write", "."]), 1)
+
+                self.assertIn("requires a paired tests/** write/edit", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'old'\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_approval_allows_paired_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/gate.py")
+                test_file = Path("tests/test_gate.py")
+                source.write_text("VALUE = 'old'\n", encoding="utf-8")
+                test_file.write_text("def test_gate():\n    assert 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "tests/test_gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                            ]
+                        ),
+                        0,
+                    )
+
+                self.assertIn("approved work tool #1", stdout.getvalue())
+                self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 'new'\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_approval_can_override_unpaired_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                target = Path("src/mew/gate.py")
+                target.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--allow-unpaired-source-edit",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                            ]
+                        ),
+                        0,
+                    )
+
+                self.assertIn("approved work tool #1", stdout.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'new'\n")
+                notes = load_state()["work_sessions"][0]["notes"]
+                self.assertTrue(any("approved unpaired source edit override" in note["text"] for note in notes))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_reuses_latest_verification_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10172,6 +10397,100 @@ class WorkSessionTests(unittest.TestCase):
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve")
                 self.assertEqual(snapshot["last_step"]["applied"][0]["tool_call_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_approval_requires_unpaired_source_override(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                target = Path("src/mew/reply_gate.py")
+                target.write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "src/mew/reply_gate.py",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "approve", "tool_call_id": 1, "allow_write": "."}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+                self.assertIn("requires a paired tests/** write/edit", stderr.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'old'\n")
+
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [
+                                {
+                                    "type": "approve",
+                                    "tool_call_id": 1,
+                                    "allow_write": ".",
+                                    "allow_unpaired_source_edit": True,
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                self.assertIn("- approved tool #1", stdout.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "VALUE = 'new'\n")
             finally:
                 os.chdir(old_cwd)
 

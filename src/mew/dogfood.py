@@ -2069,6 +2069,7 @@ def run_work_session_scenario(workspace, env=None):
         encoding="utf-8",
     )
     (workspace / "src" / "mew" / "pairing.py").write_text("PAIRING = 'old'\n", encoding="utf-8")
+    (workspace / "src" / "mew" / "dogfood_override.py").write_text("OVERRIDE = 'old'\n", encoding="utf-8")
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
     (workspace / "large_no_newline.py").write_text("x" * 120000 + " old_call()", encoding="utf-8")
 
@@ -2612,6 +2613,60 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    unpaired_task_result = run(
+        ["task", "add", "Unpaired source approval task", "--kind", "coding", "--json"]
+    )
+    unpaired_task_data_for_id = _json_stdout(unpaired_task_result)
+    unpaired_task_id = (unpaired_task_data_for_id.get("task") or {}).get("id") or 10
+    unpaired_start_result = run(["work", str(unpaired_task_id), "--start-session", "--json"])
+    unpaired_edit_result = run(
+        [
+            "work",
+            str(unpaired_task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "src/mew/dogfood_override.py",
+            "--old",
+            "old",
+            "--new",
+            "new",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    unpaired_edit_data_for_id = _json_stdout(unpaired_edit_result)
+    unpaired_tool_id = str((unpaired_edit_data_for_id.get("tool_call") or {}).get("id") or "")
+    unpaired_reject_result = run(
+        [
+            "work",
+            str(unpaired_task_id),
+            "--approve-tool",
+            unpaired_tool_id,
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            "true",
+            "--json",
+        ]
+    )
+    unpaired_override_result = run(
+        [
+            "work",
+            str(unpaired_task_id),
+            "--approve-tool",
+            unpaired_tool_id,
+            "--allow-write",
+            ".",
+            "--allow-unpaired-source-edit",
+            "--allow-verify",
+            "--verify-command",
+            "true",
+            "--json",
+        ]
+    )
 
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
@@ -2642,6 +2697,9 @@ def run_work_session_scenario(workspace, env=None):
     done_resume_json_data = _json_stdout(done_resume_json_result)
     verification_resume_data = _json_stdout(verification_resume_result)
     verification_recover_data = _json_stdout(verification_recover_result)
+    unpaired_task_data = _json_stdout(unpaired_task_result)
+    unpaired_edit_data = _json_stdout(unpaired_edit_result)
+    unpaired_override_data = _json_stdout(unpaired_override_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -3291,6 +3349,30 @@ def run_work_session_scenario(workspace, env=None):
             },
         },
         expected="recover-session can rerun an interrupted run_tests verifier with explicit read and verify gates",
+    )
+    _scenario_check(
+        checks,
+        "work_unpaired_source_approval_requires_override",
+        unpaired_task_result.get("exit_code") == 0
+        and unpaired_start_result.get("exit_code") == 0
+        and unpaired_edit_result.get("exit_code") == 0
+        and unpaired_reject_result.get("exit_code") != 0
+        and "requires a paired tests/** write/edit" in (unpaired_reject_result.get("stderr") or "")
+        and unpaired_override_result.get("exit_code") == 0
+        and ((unpaired_edit_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and ((unpaired_override_data.get("tool_call") or {}).get("status") == "completed")
+        and (workspace / "src" / "mew" / "dogfood_override.py").read_text(encoding="utf-8")
+        == "OVERRIDE = 'new'\n",
+        observed={
+            "task": unpaired_task_data,
+            "edit_tool_id": (unpaired_edit_data.get("tool_call") or {}).get("id"),
+            "reject": command_result_tail(unpaired_reject_result, limit=5),
+            "override": {
+                "approved": (unpaired_override_data.get("approved_tool_call") or {}).get("approval_status"),
+                "tool_status": (unpaired_override_data.get("tool_call") or {}).get("status"),
+            },
+        },
+        expected="src/mew approval is blocked without a paired test edit and succeeds only with explicit override",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 

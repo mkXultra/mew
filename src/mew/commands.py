@@ -210,6 +210,7 @@ from .work_session import (
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_session_task,
+    work_write_pairing_status,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
 from .work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
@@ -3599,6 +3600,20 @@ def _approval_parameters_from_call(call, args):
     return {key: value for key, value in parameters.items() if value is not None}
 
 
+def _work_unpaired_source_approval_error(session, source_call, args):
+    pairing = work_write_pairing_status(session, source_call)
+    if pairing.get("status") != "missing_test_edit":
+        return "", pairing
+    if getattr(args, "allow_unpaired_source_edit", False):
+        return "", pairing
+    path = pairing.get("source_path") or "src/mew/**"
+    return (
+        "src/mew source edit approval requires a paired tests/** write/edit in the same work session "
+        f"before approving {path}; pass --allow-unpaired-source-edit to override explicitly",
+        pairing,
+    )
+
+
 def _apply_work_approval(args, approve_tool_id):
     progress = work_tool_progress(args)
     with state_lock():
@@ -3634,6 +3649,19 @@ def _apply_work_approval(args, approve_tool_id):
         if not result.get("changed"):
             print("mew: dry-run tool call has no changes to approve", file=sys.stderr)
             return 1, None
+        pairing_error, pairing_status = _work_unpaired_source_approval_error(session, source_call, args)
+        if pairing_error:
+            print(f"mew: {pairing_error}", file=sys.stderr)
+            return 1, None
+        if pairing_status.get("status") == "missing_test_edit":
+            add_work_session_note(
+                session,
+                (
+                    "approved unpaired source edit override for "
+                    f"tool #{source_call.get('id')} {pairing_status.get('source_path')}"
+                ),
+                source="system",
+            )
         parameters = _approval_parameters_from_call(source_call, args)
         tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)
         source_call["approval_status"] = "applying"
@@ -4116,6 +4144,7 @@ def _normalize_work_reply_actions(payload):
                         "type": "approve",
                         "tool_call_id": tool_call_id,
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
+                        "allow_unpaired_source_edit": bool(raw.get("allow_unpaired_source_edit")),
                     }
                 )
             elif action_type in ("approve_all", "approve-all"):
@@ -4124,6 +4153,7 @@ def _normalize_work_reply_actions(payload):
                     {
                         "type": "approve_all",
                         "allow_write": _coerce_work_reply_list(raw.get("allow_write") or raw.get("allow_write_roots")),
+                        "allow_unpaired_source_edit": bool(raw.get("allow_unpaired_source_edit")),
                     }
                 )
             else:
@@ -4161,15 +4191,18 @@ def _normalize_work_reply_actions(payload):
             _reject_reply_verify_overrides(approve)
             tool_call_id = approve.get("tool_call_id") or approve.get("tool") or approve.get("id")
             allow_write = _coerce_work_reply_list(approve.get("allow_write") or approve.get("allow_write_roots"))
+            allow_unpaired = bool(approve.get("allow_unpaired_source_edit"))
         else:
             _reject_reply_verify_overrides(payload)
             tool_call_id = payload.get("approve_tool") or approve
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
+            allow_unpaired = bool(payload.get("allow_unpaired_source_edit"))
         actions.append(
             {
                 "type": "approve",
                 "tool_call_id": tool_call_id,
                 "allow_write": allow_write,
+                "allow_unpaired_source_edit": allow_unpaired,
             }
         )
     if payload.get("approve_all"):
@@ -4177,13 +4210,16 @@ def _normalize_work_reply_actions(payload):
         if isinstance(approve_all, dict):
             _reject_reply_verify_overrides(approve_all)
             allow_write = _coerce_work_reply_list(approve_all.get("allow_write") or approve_all.get("allow_write_roots"))
+            allow_unpaired = bool(approve_all.get("allow_unpaired_source_edit"))
         else:
             _reject_reply_verify_overrides(payload)
             allow_write = _coerce_work_reply_list(payload.get("allow_write") or payload.get("allow_write_roots"))
+            allow_unpaired = bool(payload.get("allow_unpaired_source_edit"))
         actions.append(
             {
                 "type": "approve_all",
                 "allow_write": allow_write,
+                "allow_unpaired_source_edit": allow_unpaired,
             }
         )
     for action in actions:
@@ -4236,13 +4272,13 @@ def _work_reply_supported_actions():
             "type": "approve",
             "description": "approve and apply a pending dry-run write_file/edit_file tool call",
             "required": ["tool_call_id"],
-            "optional": ["allow_write"],
+            "optional": ["allow_write", "allow_unpaired_source_edit"],
         },
         {
             "type": "approve_all",
             "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
             "required": [],
-            "optional": ["allow_write"],
+            "optional": ["allow_write", "allow_unpaired_source_edit"],
         },
     ]
 
@@ -4540,6 +4576,7 @@ def _reply_approval_args(args, session, source_call, action):
     approval_args.verify_command = getattr(args, "verify_command", None)
     approval_args.verify_cwd = getattr(args, "verify_cwd", None) or "."
     approval_args.verify_timeout = getattr(args, "verify_timeout", None)
+    approval_args.allow_unpaired_source_edit = bool(action.get("allow_unpaired_source_edit"))
     approval_args.progress = False
     approval_args.json = False
     return approval_args
@@ -9977,6 +10014,7 @@ def chat_work_session(rest, chat_state=None):
                 return
         approve_task_id = None
         allow_write = []
+        allow_unpaired_source_edit = False
         verify_command = ""
         verify_cwd = "."
         verify_timeout = 300.0
@@ -9996,6 +10034,10 @@ def chat_work_session(rest, chat_state=None):
                 index += 1
                 continue
             if token == "--allow-verify":
+                index += 1
+                continue
+            if token == "--allow-unpaired-source-edit":
+                allow_unpaired_source_edit = True
                 index += 1
                 continue
             if token == "--verify-command" and index + 1 < len(parts):
@@ -10051,6 +10093,7 @@ def chat_work_session(rest, chat_state=None):
             verify_command=verify_command,
             verify_cwd=verify_cwd,
             verify_timeout=verify_timeout,
+            allow_unpaired_source_edit=allow_unpaired_source_edit,
             allow_read=[],
             json=False,
         )

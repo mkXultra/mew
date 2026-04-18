@@ -17,7 +17,9 @@ The snapshot is a local contract for another model or UI. It includes:
   - approvals may include an advisory `pairing_status`. For `src/mew/**`
     writes, `missing_test_edit` means no changed `tests/**` write/edit has been
     produced in the same work session yet; `ok` points at the paired test tool
-    call. The advisory is informational and does not block approval.
+    call. `missing_test_edit` blocks approval by default; CLI approvals require
+    `--allow-unpaired-source-edit`, and reply-file `approve` / `approve_all`
+    actions require `"allow_unpaired_source_edit": true` to override it.
 - `suggested_recovery`: a machine-readable recovery hint when the resume has a
   retryable interrupted read, side-effecting interruption, or replannable model
   turn. When the source is known, `effect_classification` explains the risk
@@ -110,6 +112,10 @@ Supported actions:
 - `reject`: reject a pending dry-run `write_file` or `edit_file` tool call.
 - `approve`: approve and apply a pending dry-run `write_file` or `edit_file` tool call.
 - `approve_all`: approve and apply all pending dry-run `write_file` or `edit_file` tool calls.
+
+Approval actions may include `allow_unpaired_source_edit: true` to explicitly
+override the default block on `src/mew/**` edits without a paired `tests/**`
+write/edit in the same work session.
 
 ## Task Helpers
 

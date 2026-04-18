@@ -361,6 +361,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "work-session")
             self.assertIn("work-session: pass", text)
             self.assertIn("work_source_edit_pairing_advisory", text)
+            self.assertIn("work_unpaired_source_approval_requires_override", text)
             command = report["scenarios"][0]["commands"][0]
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)

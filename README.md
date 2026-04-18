@@ -597,6 +597,8 @@ the stale-snapshot guard and `mew work <task-id> --follow-status --json`, or run
 When a pending write touches `src/mew/**`, the approval entry may also include
 an advisory `pairing_status`; `missing_test_edit` means the same work session
 has not yet produced a paired changed write/edit under `tests/**`.
+Approving that source edit is blocked by default until a paired test write/edit
+exists; use `--allow-unpaired-source-edit` only for an explicit audited override.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

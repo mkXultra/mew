@@ -986,6 +986,11 @@ Next action:
   pending dry-run write approval. It verifies passive advance does not call
   `mew work --live` through the fake executable and records concrete
   approve/reject recovery commands under `last_native_work_skip_recovery`.
+- The paired-test guard for `src/mew/**` edits is now default-deny on approval:
+  unpaired source edits require a same-session `tests/**` write/edit or an
+  explicit `--allow-unpaired-source-edit` / reply-file
+  `allow_unpaired_source_edit` override. `work-session` dogfood proves the
+  block and audited override path.
 
 ## Current Roadmap Focus
 
