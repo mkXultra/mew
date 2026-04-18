@@ -159,6 +159,7 @@ class SelfImproveTests(unittest.TestCase):
         self.assertIn("mew self-improve --start-session --focus", output)
         self.assertIn("mew work <task-id> --live --allow-read . --max-steps 1", output)
         self.assertIn("mew work <task-id> --follow --quiet --allow-read . --max-steps 3", output)
+        self.assertIn("print generated implementation and review prompts", output)
         self.assertIn("prepare native mew work instead of a programmer-", output)
         self.assertIn("plan/ai-cli dispatch", output)
 
@@ -187,6 +188,26 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(len(state["agent_runs"]), 1)
                 self.assertEqual(state["agent_runs"][0]["purpose"], "implementation")
                 self.assertEqual(state["agent_runs"][0]["status"], "dry_run")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_prompt_prints_generated_prompts(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--focus", "Show generated prompts", "--prompt"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("created #1 [todo/normal/coding] Improve mew itself", output)
+                self.assertIn("created plan #1", output)
+                self.assertIn("implementation_prompt:", output)
+                self.assertIn("review_prompt:", output)
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["latest_plan_id"], 1)
+                self.assertEqual(state["agent_runs"], [])
             finally:
                 os.chdir(old_cwd)
 
@@ -242,6 +263,32 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(state["agent_runs"], [])
             finally:
                 os.chdir(old_cwd)
+
+    def test_cli_self_improve_native_rejects_prompt(self):
+        old_cwd = os.getcwd()
+        cases = (
+            ["--native", "--prompt"],
+            ["--start-session", "--prompt"],
+        )
+        for extra_args in cases:
+            with self.subTest(extra_args=extra_args):
+                with tempfile.TemporaryDirectory() as tmp:
+                    os.chdir(tmp)
+                    try:
+                        with redirect_stderr(StringIO()) as stderr:
+                            code = main(["self-improve", *extra_args])
+
+                        self.assertEqual(code, 1)
+                        self.assertIn(
+                            "--native/--start-session cannot be combined with --prompt",
+                            stderr.getvalue(),
+                        )
+                        state = load_state()
+                        self.assertEqual(state["tasks"], [])
+                        self.assertEqual(state["agent_runs"], [])
+                        self.assertEqual(state["work_sessions"], [])
+                    finally:
+                        os.chdir(old_cwd)
 
     def test_cli_self_improve_start_session_rejects_dispatch_and_cycle(self):
         old_cwd = os.getcwd()

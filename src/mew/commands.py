@@ -7611,6 +7611,7 @@ def cmd_self_improve(args):
         native=native,
         dispatch=args.dispatch,
         cycle=args.cycle,
+        show_prompt=args.prompt,
     )
     if validation_error:
         print(f"mew: {validation_error}", file=sys.stderr)
@@ -7669,6 +7670,14 @@ def cmd_self_improve(args):
             task,
             include_start_hint=not getattr(args, "start_session", False),
         )
+    if args.prompt:
+        if not plan:
+            print("No programmer plan was created for native self-improvement.")
+            return 0
+        print("implementation_prompt:")
+        print(plan.get("implementation_prompt") or "")
+        print("review_prompt:")
+        print(plan.get("review_prompt") or "")
     if run:
         if args.dry_run:
             print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
