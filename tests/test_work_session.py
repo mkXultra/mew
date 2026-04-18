@@ -9806,6 +9806,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("include a paired tests/ change", prompt)
         self.assertIn("pairing_status.suggested_test_path", prompt)
         self.assertIn("record the intended test in working_memory.next_step", prompt)
+        self.assertIn("If a targeted test-file search misses, search tests/ or the likely test module", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)

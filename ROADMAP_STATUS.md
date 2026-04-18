@@ -795,6 +795,16 @@ Next action:
   dry-run false pending states, `python -m pytest` selector false positives,
   over-trusting `narrow_verify_command`, and `uv run --with pytest ...`
   dependency-token parsing. The final review returned PASS.
+- Task #176 follow-mode dogfood used two `mew work --follow` runs with Codex
+  Web API to investigate a small native self-improve improvement. The resident
+  repeatedly searched only `tests/test_work_session.py` for self-improve
+  control assertions and missed the actual `tests/test_self_improve.py` surface,
+  so the THINK prompt now tells residents to broaden from a missed targeted
+  test-file search to `tests/` or the likely test module before concluding no
+  paired test surface exists. Validation: focused prompt test (pass), ruff on
+  changed files (pass), `tests.test_work_session` (`332 tests`, pass),
+  `./mew dogfood --scenario work-session --json` (pass), and full
+  `uv run python -m unittest` (`991 tests`, pass).
 - Interactive/Self-improve current: the 2026-04-19 long dogfood session added
   seven reentry, verifier-safety, and observer-handoff commits: `4073282` seeds
   native self-improve work-session defaults, `d500105` aligns CLI and chat
