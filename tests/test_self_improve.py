@@ -157,6 +157,7 @@ class SelfImproveTests(unittest.TestCase):
         self.assertIn("native mew work task without a programmer plan", output)
         self.assertIn("Native work-session flow:", output)
         self.assertIn("mew self-improve --start-session --focus", output)
+        self.assertIn("mew self-improve --start-session --json --focus", output)
         self.assertIn("mew work <task-id> --live --allow-read . --compact-live --max-steps 1", output)
         self.assertIn("mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10", output)
         self.assertIn("mew work <task-id> --follow-status --json", output)

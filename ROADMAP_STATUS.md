@@ -180,6 +180,8 @@ copy-paste controls without scraping text.
 Reused native self-improve sessions now refresh their work-session title/goal
 from the latest task description, so changing `--focus` does not leave an old
 resident objective inside the active session.
+The native self-improve help now advertises the structured
+`--start-session --json` entrypoint directly in the work-session flow.
 
 ## Milestone 1: Native Hands
 
@@ -810,6 +812,16 @@ Next action:
   (`307 passed`), full `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`974
   passed, 15 subtests passed`),
   `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/work_session.py tests/test_self_improve.py tests/test_work_session.py`
+  (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
+- Observer/self-improve current: task #138 used `mew work --follow` to inspect
+  the self-improve/start-session surface and picked a tiny discoverability
+  cleanup. `mew self-improve --help` now lists the structured
+  `--start-session --json` entrypoint beside the text start-session flow.
+  Validated with focused help output test (`1 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest tests.test_self_improve`
+  (`24 passed`), full `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`974
+  passed, 15 subtests passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/cli.py tests/test_self_improve.py`
   (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
