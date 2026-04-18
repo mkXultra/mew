@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, and prioritized desk actions; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -186,6 +186,12 @@ The bake-off ledger `WHY_MEW.md` now records real mew-vs-fresh evidence; the
 first task proved mew's resume advantage after a failed model call, while a
 fresh `codex-ultra` review found broader same-surface JSON gaps that were then
 fixed.
+The latest long dogfood session connected several active-buddy surfaces:
+resident work loops now block repeated identical tool calls before execution,
+failed repeat-guard tool calls carry concrete recovery actions, work sessions
+surface effort/budget pressure in resume/model context/desk, and `mew desk`
+now exposes prioritized actions with rationale and stale age while keeping the
+old `primary_action` field for compatibility.
 
 ## Milestone 1: Native Hands
 
@@ -728,6 +734,17 @@ Next action:
 
 ## Latest Validation
 
+- Interactive Parity current: the 2026-04-19 long dogfood session added five
+  bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
+  `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
+  before execution; blocked repeat guards suggest review/steer/desk recovery
+  actions; work-session effort budgets are visible in resume/model context/desk;
+  `mew desk` exposes multiple prioritized actions instead of hiding everything
+  behind a stale primary action; and those actions now explain their rationale
+  and stale age. Validation for the final state in this session included
+  focused desk/work-session/browser tests, ruff checks, full `uv run python -m
+  unittest` (`964 tests`, pass), `./mew dogfood --all` (pass), and
+  `codex-ultra` review PASS for each slice after fixes.
 - Persistent Advantage current: native self-improve task #131 used two
   read-only `mew work --follow` steps to identify that compact task workbench
   reentry under-surfaced open risk from failed verification/work tools. The
@@ -1521,4 +1538,6 @@ Fresh implementation should continue dogfooding real coding changes through
 `mew code <task-id>`. The front-door route and core mid-loop control lanes are
 now coherent; the remaining Milestone 2 work is making the active coding loop
 itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
-persistent memory and audit trail.
+persistent memory and audit trail. The next useful slice is to dogfood a longer
+live/follow coding session and fix the first place where the model still wishes
+it could see, steer, or summarize the loop more directly.
