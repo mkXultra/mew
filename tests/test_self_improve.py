@@ -204,12 +204,35 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("created #1 [todo/normal/coding] Improve mew itself", output)
                 self.assertIn("created plan #1", output)
                 self.assertIn("implementation_prompt:", output)
+                self.assertIn("Show generated prompts", output)
                 self.assertIn("review_prompt:", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["latest_plan_id"], 1)
                 self.assertEqual(state["agent_runs"], [])
             finally:
                 os.chdir(old_cwd)
+
+    def test_cli_self_improve_prompt_requires_plan_and_non_cycle(self):
+        old_cwd = os.getcwd()
+        cases = (
+            (["--no-plan", "--prompt"], "--prompt requires a programmer plan"),
+            (["--cycle", "--prompt"], "--prompt cannot be combined with --cycle"),
+        )
+        for extra_args, expected in cases:
+            with self.subTest(extra_args=extra_args):
+                with tempfile.TemporaryDirectory() as tmp:
+                    os.chdir(tmp)
+                    try:
+                        with redirect_stderr(StringIO()) as stderr:
+                            code = main(["self-improve", *extra_args])
+
+                        self.assertEqual(code, 1)
+                        self.assertIn(expected, stderr.getvalue())
+                        state = load_state()
+                        self.assertEqual(state["tasks"], [])
+                        self.assertEqual(state["agent_runs"], [])
+                    finally:
+                        os.chdir(old_cwd)
 
     def test_cli_self_improve_native_skips_programmer_plan(self):
         old_cwd = os.getcwd()

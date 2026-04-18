@@ -54,6 +54,7 @@ COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
+RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", "failed", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
 WORK_RECOVERY_EFFECT_PRIORITY = (
     "rollback_needed",
@@ -1326,7 +1327,7 @@ def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
     for call in reversed(calls or []):
         if call.get("tool") not in ("write_file", "edit_file"):
             continue
-        if call.get("approval_status") not in (NON_PENDING_APPROVAL_STATUSES | {"failed"}):
+        if call.get("approval_status") not in RESOLVED_APPROVAL_MEMORY_STATUSES:
             continue
         result = call.get("result") or {}
         if not result.get("dry_run"):

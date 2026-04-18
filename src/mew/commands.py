@@ -7602,11 +7602,16 @@ def self_improve_native_validation_error(*, native=False, dispatch=False, cycle=
         return "--native/--start-session cannot be combined with --cycle or --dispatch"
     if native and show_prompt:
         return "--native/--start-session cannot be combined with --prompt"
+    if cycle and show_prompt:
+        return "--prompt cannot be combined with --cycle"
     return ""
 
 
 def cmd_self_improve(args):
     native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
+    if args.prompt and args.no_plan:
+        print("mew: --prompt requires a programmer plan; remove --no-plan", file=sys.stderr)
+        return 1
     validation_error = self_improve_native_validation_error(
         native=native,
         dispatch=args.dispatch,
