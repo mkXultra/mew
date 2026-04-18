@@ -702,6 +702,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(task["kind"], "coding")
             self.assertEqual(task["status"], "ready")
             self.assertTrue(task["auto_execute"])
+            self.assertIn("Proposed by mew", task["notes"])
             self.assertGreaterEqual(len(task["plans"]), 1)
             self.assertEqual(task["latest_plan_id"], second["plan_id"])
 

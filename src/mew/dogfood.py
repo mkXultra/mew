@@ -3480,7 +3480,7 @@ def seed_ready_coding_task(workspace, title=DOGFOOD_READY_CODING_TASK_TITLE):
             ),
             "status": "ready",
             "priority": "normal",
-            "notes": "Seeded by dogfood as a refined self-proposed coding task.",
+            "notes": "Proposed by mew from dogfood seed. Refined self-proposed coding task.",
             "command": "",
             "cwd": str(workspace),
             "auto_execute": True,
