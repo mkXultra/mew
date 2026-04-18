@@ -2,6 +2,7 @@ import json
 import os
 import time
 
+from .cli_command import mew_command
 from .action_application import (
     new_action_counts,
     public_action_plan,
@@ -741,7 +742,7 @@ def append_autonomous_decisions(
     autonomous_task_candidates = running_tasks or tasks
 
     if autonomy_level == "act" and allow_native_work:
-        for task in autonomous_task_candidates:
+        for task in tasks:
             eligibility = native_work_start_eligibility(
                 state,
                 event,
@@ -754,13 +755,11 @@ def append_autonomous_decisions(
                 eligible_task = eligibility["task"]
                 if not eligible_task:
                     continue
-                ready_question = task_question(eligible_task)
                 decisions[:] = [
                     decision for decision in decisions
                     if not (
                         decision.get("type") == "ask_user"
                         and str(decision.get("task_id")) == str(eligible_task.get("id"))
-                        and decision.get("question") == ready_question
                     )
                 ]
                 decisions.append(
@@ -781,7 +780,6 @@ def append_autonomous_decisions(
                     if not (
                         decision.get("type") == "ask_user"
                         and str(decision.get("task_id")) == str(task.get("id"))
-                        and decision.get("question") == task_question(task)
                     )
                 ]
 
@@ -2154,7 +2152,7 @@ def apply_start_work_session_action(
         )
         return 1
     task = eligibility["task"]
-    session, created = create_work_session(state, task, current_time=current_time)
+    session, created = create_work_session(state, task, current_time=current_time, inherit_defaults=False)
     seed_work_session_runtime_defaults(
         session,
         allowed_read_roots=allowed_read_roots,
@@ -2178,7 +2176,7 @@ def apply_start_work_session_action(
         "assistant",
         (
             f"{verb} native work session #{session['id']} for task #{task['id']}. "
-            f"Open with ./mew code {task['id']}.\n"
+            f"Open with {mew_command('code', task['id'])}.\n"
             f"live: {live_command}\n"
             f"follow: {follow_command}"
         ),

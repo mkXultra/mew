@@ -6698,6 +6698,7 @@ def cmd_context(args):
         autonomous=bool(autonomy.get("enabled")),
         autonomy_level=autonomy.get("level") or "off",
         allow_agent_run=bool(autonomy.get("allow_agent_run")),
+        allow_native_work=bool(autonomy.get("allow_native_work")),
         allow_verify=bool(autonomy.get("allow_verify")),
         verify_command="configured" if autonomy.get("verify_command_configured") else "",
         allow_write=bool(autonomy.get("allow_write")),

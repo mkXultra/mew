@@ -1056,7 +1056,7 @@ def run_native_work_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "native_work_routes_user_to_code_cockpit",
-        f"./mew code {task_id}" in outbox_text
+        (f"./mew code {task_id}" in outbox_text or f"mew code {task_id}" in outbox_text)
         and f"mew work {task_id} --live" in outbox_text
         and f"mew work {task_id} --follow" in outbox_text
         and "--model-backend codex" in outbox_text

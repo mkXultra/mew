@@ -446,6 +446,8 @@ Judgment:
 - Runtime model backend/auth/model/base-url settings are also preserved when
   present, so a resident launched with a specific model can keep that body when
   the work session continues.
+- Runtime-started native sessions are seeded from the current runtime authority
+  instead of inheriting stale write/verify defaults from an older session.
 - Remaining cadence work: decide whether global/non-task questions should also
   age into a summary/reminder path, and tune the 24-hour threshold after longer
   dogfood.

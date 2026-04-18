@@ -3243,6 +3243,48 @@ class AutonomyTests(unittest.TestCase):
             ],
         )
 
+    def test_autonomous_act_starts_native_work_when_other_task_is_running(self):
+        state = default_state()
+        coding_task = add_planned_ready_task(state)
+        coding_task["kind"] = "coding"
+        current_time = now_iso()
+        state["tasks"].append(
+            {
+                "id": 2,
+                "title": "Keep unrelated task active",
+                "description": "",
+                "status": "running",
+                "priority": "high",
+                "notes": "",
+                "command": "",
+                "cwd": ".",
+                "auto_execute": False,
+                "agent_backend": "",
+                "agent_model": "",
+                "agent_prompt": "",
+                "agent_run_id": None,
+                "plans": [],
+                "latest_plan_id": None,
+                "runs": [],
+                "created_at": current_time,
+                "updated_at": current_time,
+            }
+        )
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            current_time,
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+        )
+
+        starts = [decision for decision in plan["decisions"] if decision["type"] == "start_work_session"]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]["task_id"], coding_task["id"])
+
     def test_native_work_start_precedes_due_verification(self):
         state = default_state()
         task = add_planned_ready_task(state)
@@ -3334,6 +3376,49 @@ class AutonomyTests(unittest.TestCase):
         self.assertIn("--verify-command 'uv run pytest -q'", state["outbox"][-1]["text"])
         self.assertEqual(state["outbox"][-1]["type"], "assistant")
         self.assertIsNone(state["outbox"][-1]["read_at"])
+
+    def test_start_work_session_action_does_not_inherit_stale_authority(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        stale_session, _ = create_work_session(state, task)
+        stale_session["status"] = "closed"
+        stale_session["default_options"] = {
+            "allow_read": ["legacy"],
+            "allow_write": ["src"],
+            "allow_verify": True,
+            "verify_command": "pytest -q",
+            "auth": "old-auth.json",
+        }
+        event = add_event(state, "passive_tick", "test")
+
+        apply_action_plan(
+            state,
+            event,
+            {"summary": "start native work", "decisions": []},
+            {"summary": "start native work", "actions": [{"type": "start_work_session", "task_id": task["id"]}]},
+            now_iso(),
+            allow_task_execution=False,
+            task_timeout=1,
+            allowed_read_roots=["docs"],
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+            allow_verify=False,
+            allow_write=False,
+        )
+
+        session = state["work_sessions"][-1]
+        defaults = session["default_options"]
+        self.assertEqual(defaults["allow_read"], ["docs"])
+        self.assertNotIn("allow_write", defaults)
+        self.assertNotIn("allow_verify", defaults)
+        self.assertNotIn("verify_command", defaults)
+        self.assertNotIn("auth", defaults)
+        outbox_text = state["outbox"][-1]["text"]
+        self.assertNotIn("--allow-write", outbox_text)
+        self.assertNotIn("--allow-verify", outbox_text)
+        self.assertNotIn("pytest -q", outbox_text)
 
     def test_start_work_session_action_requires_native_work_gate(self):
         state = default_state()

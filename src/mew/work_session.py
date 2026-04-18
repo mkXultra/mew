@@ -163,7 +163,7 @@ def find_work_tool_call(session, tool_call_id):
     return None
 
 
-def create_work_session(state, task, current_time=None):
+def create_work_session(state, task, current_time=None, inherit_defaults=True):
     current_time = current_time or now_iso()
     existing = work_session_for_task(state, task.get("id"))
     if existing:
@@ -184,7 +184,7 @@ def create_work_session(state, task, current_time=None):
         "tool_calls": [],
         "model_turns": [],
     }
-    if latest and latest.get("default_options"):
+    if inherit_defaults and latest and latest.get("default_options"):
         session["default_options"] = json.loads(json.dumps(latest.get("default_options") or {}))
     state.setdefault("work_sessions", []).append(session)
     return session, True
