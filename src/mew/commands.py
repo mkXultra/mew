@@ -694,6 +694,10 @@ def _format_workbench_reentry(resume, task):
             f"{clip_inline_text(audit.get('prompt') or audit.get('reason') or '', 240)}"
         )
 
+    verification_confidence = resume.get("verification_confidence") or {}
+    if verification_confidence and verification_confidence.get("status") != "verified":
+        lines.append(_format_verification_confidence_inline(verification_confidence))
+
     recurring = resume.get("recurring_failures") or []
     if recurring:
         item = recurring[-1]
@@ -1143,6 +1147,21 @@ def _format_verification_coverage_warning_inline(warning):
     return clip_inline_text(text, 360)
 
 
+def _format_verification_confidence_inline(confidence):
+    if not confidence:
+        return ""
+    status = confidence.get("status") or "unknown"
+    level = confidence.get("confidence") or "unknown"
+    reason = clip_inline_text(confidence.get("reason") or "", 180)
+    expected = clip_inline_text(confidence.get("expected_command") or "", 160)
+    text = f"verification_confidence: {level} status={status}"
+    if reason:
+        text += f"; {reason}"
+    if expected and status != "verified":
+        text += f"; expected {expected}"
+    return clip_inline_text(text, 420)
+
+
 def format_work_live_step_result(step, resume=None):
     action = step.get("action") or {}
     status = step.get("status") or "unknown"
@@ -1197,6 +1216,9 @@ def format_work_live_step_result(step, resume=None):
         coverage_warning = resume.get("verification_coverage_warning") or {}
         if coverage_warning:
             session_lines.append(_format_verification_coverage_warning_inline(coverage_warning))
+        verification_confidence = resume.get("verification_confidence") or {}
+        if verification_confidence and verification_confidence.get("status") != "verified":
+            session_lines.append(_format_verification_confidence_inline(verification_confidence))
         memory = resume.get("working_memory") or {}
         if memory:
             if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
@@ -5385,6 +5407,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
         "suggested_recovery": suggested_recovery,
         "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
+        "verification_confidence": resume.get("verification_confidence") or {},
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
         "pending_approval_count": len(data.get("pending_approvals") or []),
@@ -5424,6 +5447,9 @@ def format_work_follow_status(data):
     coverage_warning = data.get("verification_coverage_warning") or {}
     if coverage_warning:
         lines.append(_format_verification_coverage_warning_inline(coverage_warning))
+    verification_confidence = data.get("verification_confidence") or {}
+    if verification_confidence and verification_confidence.get("status") != "verified":
+        lines.append(_format_verification_confidence_inline(verification_confidence))
     return "\n".join(lines)
 
 

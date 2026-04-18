@@ -1691,6 +1691,8 @@ def latest_work_verification_state(calls, task=None):
                 "cwd": verification.get("cwd") or "",
                 "exit_code": verification.get("exit_code"),
                 "finished_at": verification.get("finished_at") or call.get("finished_at"),
+                "tool_call_id": call.get("id"),
+                "narrow_verify_command": bool(verification.get("narrow_verify_command")),
             }
         if call.get("tool") == "run_tests" and "exit_code" in result:
             return {
@@ -1700,6 +1702,8 @@ def latest_work_verification_state(calls, task=None):
                 "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
                 "exit_code": result.get("exit_code"),
                 "finished_at": result.get("finished_at") or call.get("finished_at"),
+                "tool_call_id": call.get("id"),
+                "narrow_verify_command": bool(result.get("narrow_verify_command")),
             }
     command = latest_work_verify_command(calls, task=task)
     if command:
@@ -1883,6 +1887,38 @@ def verification_command_covers_suggestion(command, suggestion):
     return _verification_command_covers_suggestion(command, suggestion)
 
 
+def _source_edit_verify_suggestions_for_calls(calls, include_dry_run=False):
+    suggestions = []
+    seen_tests = set()
+    for call in reversed(list(calls or [])):
+        result = (call or {}).get("result") or {}
+        pending_dry_run = (
+            result.get("dry_run")
+            and not result.get("written")
+            and (call or {}).get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
+        )
+        if (
+            (call or {}).get("tool") not in WRITE_WORK_TOOLS
+            or (call or {}).get("status") != "completed"
+            or not result.get("changed")
+            or not (result.get("written") or (include_dry_run and pending_dry_run))
+        ):
+            continue
+        source_path = work_call_path(call)
+        suggestion = suggested_verify_command_for_call_path(source_path)
+        if not suggestion:
+            continue
+        test_path = suggestion.get("test_path") or ""
+        if test_path in seen_tests:
+            continue
+        seen_tests.add(test_path)
+        suggestion = dict(suggestion)
+        suggestion["source_tool_call_id"] = call.get("id")
+        suggestion["source_pending_approval"] = bool(pending_dry_run)
+        suggestions.append(suggestion)
+    return suggestions
+
+
 def verification_coverage_warning_for_calls(calls, task=None):
     suggestions = suggested_verify_commands_for_calls(calls)
     if not suggestions:
@@ -1904,6 +1940,145 @@ def verification_coverage_warning_for_calls(calls, task=None):
         "uncovered_count": len(uncovered),
         "uncovered_tests": [item.get("test_path") or "" for item in uncovered[:5]],
         "reason": "latest verification command does not appear to cover the matching test for this mew source edit",
+    }
+
+
+def _verification_command_uses_selector(command, suggestions=None):
+    command = str(command or "").strip()
+    if not command:
+        return False
+    try:
+        tokens = [token.replace("\\", "/") for token in shlex.split(command)]
+    except ValueError:
+        tokens = command.replace("\\", "/").split()
+    selector_flags = {"-k", "-m", "--deselect", "--lf", "--ff", "--failed-first", "--last-failed"}
+    pytest_indices = [
+        index
+        for index, token in enumerate(tokens)
+        if Path(token).name == "pytest" or token.endswith("/pytest")
+    ]
+    pytest_args = tokens[pytest_indices[-1] + 1 :] if pytest_indices else []
+    for token in pytest_args:
+        if token in selector_flags or token.startswith(("-k=", "-m=", "--deselect=", "--keyword=")):
+            return True
+    for token in tokens:
+        if "::" in token:
+            return True
+    for suggestion in suggestions or []:
+        test_path = str(suggestion.get("test_path") or "").replace("\\", "/")
+        test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".") if test_path else ""
+        if not test_module:
+            continue
+        for token in tokens:
+            normalized_token = token.removeprefix("./")
+            if normalized_token.startswith(f"{test_path}::"):
+                return True
+            if token.startswith(f"{test_module}."):
+                return True
+    return False
+
+
+def verification_confidence_checkpoint_for_calls(calls, task=None):
+    suggestions = _source_edit_verify_suggestions_for_calls(calls, include_dry_run=True)
+    if not suggestions:
+        return {}
+    expected_commands = []
+    source_paths = []
+    pending_source_paths = []
+    latest_source_tool_call_id = None
+    for suggestion in suggestions:
+        command = suggestion.get("command") or ""
+        source_path = suggestion.get("source_path") or ""
+        if command and command not in expected_commands:
+            expected_commands.append(command)
+        if source_path and source_path not in source_paths:
+            source_paths.append(source_path)
+        if suggestion.get("source_pending_approval") and source_path not in pending_source_paths:
+            pending_source_paths.append(source_path)
+        tool_call_id = suggestion.get("source_tool_call_id")
+        if isinstance(tool_call_id, int):
+            latest_source_tool_call_id = max(latest_source_tool_call_id or tool_call_id, tool_call_id)
+
+    base = {
+        "source_paths": source_paths[:5],
+        "expected_commands": expected_commands[:5],
+        "expected_command": expected_commands[0] if expected_commands else "",
+        "latest_source_tool_call_id": latest_source_tool_call_id,
+        "finish_ready": False,
+        "approval_ready": False,
+    }
+    if pending_source_paths:
+        return {
+            **base,
+            "status": "pending_approval",
+            "confidence": "low",
+            "pending_source_paths": pending_source_paths[:5],
+            "reason": "mew source edits are still dry-run or awaiting approval; verify the applied change before finish",
+        }
+
+    verification_state = latest_work_verification_state(calls, task=task)
+    command = verification_state.get("command") or latest_work_verify_command(calls, task=task)
+    latest_verification_tool_call_id = verification_state.get("tool_call_id")
+    latest_status = verification_state.get("status") or ("not_run" if command else "missing")
+    checkpoint = {
+        **base,
+        "command": command,
+        "latest_status": latest_status,
+        "latest_verification_kind": verification_state.get("kind") or "",
+        "latest_verification_tool_call_id": latest_verification_tool_call_id,
+        "latest_verification_finished_at": verification_state.get("finished_at") or "",
+    }
+
+    if not command:
+        return {
+            **checkpoint,
+            "status": "missing",
+            "confidence": "low",
+            "reason": "no verification command has run for the latest mew source edit",
+        }
+    if isinstance(latest_source_tool_call_id, int) and isinstance(latest_verification_tool_call_id, int):
+        if latest_verification_tool_call_id < latest_source_tool_call_id:
+            return {
+                **checkpoint,
+                "status": "stale",
+                "confidence": "low",
+                "reason": "latest passing verifier ran before the latest mew source edit",
+            }
+    if latest_status != "passed":
+        return {
+            **checkpoint,
+            "status": "failed" if latest_status == "failed" else "missing",
+            "confidence": "low",
+            "reason": "latest verifier has not passed after the latest mew source edit",
+        }
+
+    uncovered = [suggestion for suggestion in suggestions if not _verification_command_covers_suggestion(command, suggestion)]
+    if uncovered:
+        return {
+            **checkpoint,
+            "status": "partial",
+            "confidence": "medium",
+            "uncovered_tests": [item.get("test_path") or "" for item in uncovered[:5]],
+            "reason": "latest verifier passed, but does not appear to cover every inferred paired test",
+        }
+
+    narrow = _verification_command_uses_selector(command, suggestions)
+    if narrow:
+        return {
+            **checkpoint,
+            "status": "narrow",
+            "confidence": "medium",
+            "narrow_command": True,
+            "reason": "latest verifier used a selector or node-id; run the full inferred test module or a broader suite before finish",
+        }
+
+    return {
+        **checkpoint,
+        "status": "verified",
+        "confidence": "high",
+        "finish_ready": True,
+        "approval_ready": True,
+        "reason": "latest passing verifier appears to cover the inferred paired tests for mew source edits",
     }
 
 
@@ -2801,6 +2976,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     user_preferences = build_work_user_preferences(state, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
+    verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
 
     return {
         "session_id": session.get("id"),
@@ -2814,6 +2990,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "commands": commands[-limit:],
         "suggested_verify_command": suggested_verify_command,
         "verification_coverage_warning": verification_coverage_warning,
+        "verification_confidence": verification_confidence,
         "failures": failures[-limit:],
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
@@ -2942,6 +3119,31 @@ def format_work_session_resume(resume):
         lines.append(f"expected: {coverage_warning.get('expected_command')}")
         if coverage_warning.get("reason"):
             lines.append(f"reason: {coverage_warning.get('reason')}")
+
+    verification_confidence = resume.get("verification_confidence") or {}
+    if verification_confidence:
+        lines.extend(["", "Verification confidence"])
+        lines.append(
+            f"status={verification_confidence.get('status')} "
+            f"confidence={verification_confidence.get('confidence')}"
+        )
+        if verification_confidence.get("command"):
+            lines.append(f"command: {verification_confidence.get('command')}")
+        if verification_confidence.get("expected_command"):
+            lines.append(f"expected: {verification_confidence.get('expected_command')}")
+        if verification_confidence.get("source_paths"):
+            lines.append(f"sources: {', '.join(str(path) for path in verification_confidence.get('source_paths') or [])}")
+        if verification_confidence.get("uncovered_tests"):
+            lines.append(
+                f"uncovered_tests: {', '.join(str(path) for path in verification_confidence.get('uncovered_tests') or [])}"
+            )
+        if verification_confidence.get("pending_source_paths"):
+            lines.append(
+                "pending_source_paths: "
+                f"{', '.join(str(path) for path in verification_confidence.get('pending_source_paths') or [])}"
+            )
+        if verification_confidence.get("reason"):
+            lines.append(f"reason: {verification_confidence.get('reason')}")
 
     lines.extend(["", "Pending approvals"])
     approvals = resume.get("pending_approvals") or []

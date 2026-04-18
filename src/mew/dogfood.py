@@ -2719,6 +2719,13 @@ def run_work_session_scenario(workspace, env=None):
     )
     (workspace / "src" / "mew" / "pairing.py").write_text("PAIRING = 'old'\n", encoding="utf-8")
     (workspace / "src" / "mew" / "dogfood_override.py").write_text("OVERRIDE = 'old'\n", encoding="utf-8")
+    (workspace / "tests" / "test_pairing.py").write_text(
+        "import unittest\n\n"
+        "class PairingTests(unittest.TestCase):\n"
+        "    def test_placeholder(self):\n"
+        "        self.assertTrue(True)\n",
+        encoding="utf-8",
+    )
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
     (workspace / "large_no_newline.py").write_text("x" * 120000 + " old_call()", encoding="utf-8")
 
@@ -3459,6 +3466,7 @@ def run_work_session_scenario(workspace, env=None):
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
     user_preferences = (resume_data.get("resume") or {}).get("user_preferences") or {}
     same_surface_audit = (resume_data.get("resume") or {}).get("same_surface_audit") or {}
+    source_verification_confidence = (resume_data.get("resume") or {}).get("verification_confidence") or {}
     running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
     done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
@@ -3628,6 +3636,8 @@ def run_work_session_scenario(workspace, env=None):
         == "tests/test_pairing.py"
         and same_surface_audit.get("status") == "needed"
         and "src/mew/pairing.py" in (same_surface_audit.get("paths") or [])
+        and source_verification_confidence.get("status") == "pending_approval"
+        and source_verification_confidence.get("expected_command") == "uv run python -m unittest tests.test_pairing"
         and "paired test missing" in ((source_pairing_cells[0].get("preview") or "") if source_pairing_cells else ""),
         observed={
             "tool_call_id": (source_edit_data.get("tool_call") or {}).get("id"),
@@ -3648,10 +3658,11 @@ def run_work_session_scenario(workspace, env=None):
                 else None
             ),
             "same_surface_audit": same_surface_audit,
+            "verification_confidence": source_verification_confidence,
             "cell_preview": (source_pairing_cells[0] or {}).get("preview") if source_pairing_cells else None,
         },
         expected=(
-            "src/mew dry-run edits surface a missing paired test advisory and same-surface audit checkpoint"
+            "src/mew dry-run edits surface a missing paired test advisory, same-surface audit, and verification confidence"
         ),
     )
     _scenario_check(

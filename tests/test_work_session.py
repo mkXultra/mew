@@ -1063,6 +1063,368 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_resume_surfaces_low_confidence_before_source_approval(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": True,
+                                "changed": True,
+                                "written": False,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                confidence = resume["verification_confidence"]
+                text = format_work_session_resume(resume)
+
+                self.assertEqual(confidence["status"], "pending_approval")
+                self.assertEqual(confidence["confidence"], "low")
+                self.assertFalse(confidence["finish_ready"])
+                self.assertEqual(confidence["expected_command"], "uv run python -m unittest tests.test_commands")
+                self.assertIn("Verification confidence", text)
+                self.assertIn("status=pending_approval confidence=low", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_confidence_ignores_rejected_source_dry_run(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "approval_status": "rejected",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": True,
+                                "changed": True,
+                                "written": False,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                self.assertEqual(build_work_session_resume(session)["verification_confidence"], {})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_marks_narrow_verifier_as_medium_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_commands.py::CommandsTests::test_one"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0, "narrow_verify_command": True},
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "narrow")
+                self.assertEqual(confidence["confidence"], "medium")
+                self.assertTrue(confidence["narrow_command"])
+                self.assertFalse(confidence["finish_ready"])
+                self.assertEqual(confidence["command"], command)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_marks_broad_verifier_as_high_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run python -m unittest tests.test_commands"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0, "narrow_verify_command": True},
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "verified")
+                self.assertEqual(confidence["confidence"], "high")
+                self.assertTrue(confidence["finish_ready"])
+                self.assertTrue(confidence["approval_ready"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_keeps_python_m_pytest_module_run_high_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run python -m pytest tests/test_commands.py"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0, "narrow_verify_command": True},
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "verified")
+                self.assertEqual(confidence["confidence"], "high")
+                self.assertFalse(confidence.get("narrow_command"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_ignores_uv_with_pytest_dependency_when_detecting_selectors(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run --with pytest python -m pytest tests/test_commands.py"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0, "narrow_verify_command": True},
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "verified")
+                self.assertEqual(confidence["confidence"], "high")
+                self.assertFalse(confidence.get("narrow_command"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_marks_pre_edit_verifier_as_stale_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run python -m unittest tests.test_commands"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0},
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "stale")
+                self.assertEqual(confidence["confidence"], "low")
+                self.assertEqual(confidence["latest_verification_tool_call_id"], 3)
+                self.assertEqual(confidence["latest_source_tool_call_id"], 4)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_confidence_uses_latest_repeated_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run python -m unittest tests.test_commands"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0},
+                        },
+                        {
+                            "id": 5,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "stale")
+                self.assertEqual(confidence["latest_source_tool_call_id"], 5)
+                self.assertEqual(confidence["latest_verification_tool_call_id"], 4)
+            finally:
+                os.chdir(old_cwd)
+
     def test_resume_verifier_coverage_accepts_matching_or_broad_commands(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -2038,6 +2400,24 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("verification_warning:", text)
         self.assertIn("did not cover src/mew/commands.py", text)
+        self.assertIn("expected uv run python -m unittest tests.test_commands", text)
+
+    def test_work_live_step_result_surfaces_verification_confidence(self):
+        text = format_work_live_step_result(
+            {"status": "completed", "action": {"type": "run_tests"}, "summary": "verified"},
+            resume={
+                "phase": "idle",
+                "verification_confidence": {
+                    "status": "narrow",
+                    "confidence": "medium",
+                    "reason": "latest verifier used a selector or node-id",
+                    "expected_command": "uv run python -m unittest tests.test_commands",
+                },
+            },
+        )
+
+        self.assertIn("verification_confidence: medium status=narrow", text)
+        self.assertIn("latest verifier used a selector or node-id", text)
         self.assertIn("expected uv run python -m unittest tests.test_commands", text)
 
     def test_work_live_step_result_surfaces_recurring_failure_ribbon(self):
@@ -14425,6 +14805,12 @@ class WorkSessionTests(unittest.TestCase):
                                     "command": "uv run python -m unittest tests.test_work_session",
                                     "source_path": "src/mew/commands.py",
                                     "expected_command": "uv run python -m unittest tests.test_commands",
+                                },
+                                "verification_confidence": {
+                                    "status": "partial",
+                                    "confidence": "medium",
+                                    "reason": "latest verifier passed, but does not appear to cover every inferred paired test",
+                                    "expected_command": "uv run python -m unittest tests.test_commands",
                                 }
                             },
                         }
@@ -14444,6 +14830,7 @@ class WorkSessionTests(unittest.TestCase):
                     data["verification_coverage_warning"]["expected_command"],
                     "uv run python -m unittest tests.test_commands",
                 )
+                self.assertEqual(data["verification_confidence"]["status"], "partial")
                 self.assertIsInstance(data["heartbeat_age_seconds"], float)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -14452,6 +14839,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("verification_warning:", text)
                 self.assertIn("did not cover src/mew/commands.py", text)
                 self.assertIn("expected uv run python -m unittest tests.test_commands", text)
+                self.assertIn("verification_confidence: medium status=partial", text)
             finally:
                 os.chdir(old_cwd)
 

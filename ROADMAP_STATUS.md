@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
@@ -226,6 +226,11 @@ The same empty-queue action now reaches the desk/pet surface in `81f0412`:
 `mew desk --kind coding` exposes a `start_self_improve` primary action with the
 same ready native self-improve command instead of going actionless while focus
 has a next move.
+Task #175 adds a verification-confidence checkpoint to the resident work
+surface: pending source approvals, stale verifiers, partial coverage, selector
+or node-id verifier runs, and broad verified runs now produce structured
+confidence state in resume/live/follow/follow-status before a resident calls
+work finished or applies approval.
 
 ## Milestone 1: Native Hands
 
@@ -287,6 +292,12 @@ Evidence:
   command/JSON/control peers on the same surface and remains `needed` until the
   latest post-edit relevant session note records the audit as checked, covered,
   reviewed, or out of scope.
+- Work-session resumes now also emit `verification_confidence` for inferred
+  paired tests on `src/mew/**` edits. The checkpoint distinguishes pending
+  approval, stale verifier, failed/missing verifier, partial coverage, selector
+  or node-id verifier, and broad verified states; live result panes, workbench
+  reentry, and follow-status surface non-verified states for residents and
+  observer agents.
 - Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
 - `mew work --approve-all` and `/work-session approve all ...` can apply multiple pending dry-run write/edit calls with the same explicit write and verification gates, reducing scaffold dogfood approval churn.
 - `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
@@ -774,6 +785,16 @@ Next action:
 
 ## Latest Validation
 
+- Task #175 verification-confidence pass: this slice adds structured
+  `verification_confidence` to work-session resume/live/follow/follow-status
+  and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
+  focused confidence/resume/follow-status tests (`10 passed`), ruff on changed
+  files (pass), `./mew dogfood --scenario work-session --json` (pass), full
+  `uv run python -m unittest` (`991 tests`, pass), and three `codex-ultra`
+  reviews. The first two reviews found and drove fixes for rejected/applied
+  dry-run false pending states, `python -m pytest` selector false positives,
+  over-trusting `narrow_verify_command`, and `uv run --with pytest ...`
+  dependency-token parsing. The final review returned PASS.
 - Interactive/Self-improve current: the 2026-04-19 long dogfood session added
   seven reentry, verifier-safety, and observer-handoff commits: `4073282` seeds
   native self-improve work-session defaults, `d500105` aligns CLI and chat
@@ -1654,9 +1675,9 @@ Fresh implementation should continue dogfooding real coding changes through
 `mew code <task-id>`. The front-door route and core mid-loop control lanes are
 now coherent; the remaining Milestone 2 work is making the active coding loop
 itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
-persistent memory and audit trail. The next useful slice is to dogfood a longer
-live/follow coding session and add a same-surface audit/checkpoint before the
-resident marks work complete, so the loop catches peer cases without depending
-on a fresh external reviewer. The initial self-improve prompt nudge exists; the
-remaining work is to make this a visible cockpit/checkpoint artifact rather than
-only task-description guidance.
+persistent memory and audit trail. Same-surface audit and verification
+confidence are now visible cockpit/checkpoint artifacts rather than only
+prompt guidance. The next useful slice is a longer real live/follow coding
+dogfood session that measures whether these checkpoints reduce finish/approval
+mistakes without making the cockpit feel slower than a fresh Claude Code or
+Codex CLI session.
