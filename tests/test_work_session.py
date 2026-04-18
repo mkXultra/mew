@@ -9687,6 +9687,50 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(memory["next_step"], "Wait for approval or rejection of tool_call_id 1.")
         self.assertNotIn("resolved_pending_approval", memory)
 
+    def test_work_session_keeps_memory_for_failed_retryable_approval(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Approval failed",
+            "updated_at": "2026-04-18T00:00:03Z",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "started_at": "2026-04-18T00:00:00Z",
+                    "finished_at": "2026-04-18T00:00:01Z",
+                    "tool_call_id": 1,
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "A write approval failed.",
+                            "next_step": "Wait for approval or rejection of tool_call_id 1.",
+                        }
+                    },
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "approval_status": "failed",
+                    "approval_error": "verification failed",
+                    "parameters": {"path": "notes.md", "old": "before", "new": "after"},
+                    "result": {"path": "notes.md", "dry_run": True, "changed": True},
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task={"id": 1, "title": "Approval failed"})
+
+        self.assertEqual(resume["pending_approvals"][0]["approval_status"], "failed")
+        memory = resume["working_memory"]
+        self.assertEqual(memory["next_step"], "Wait for approval or rejection of tool_call_id 1.")
+        self.assertNotIn("resolved_pending_approval", memory)
+
     def test_work_reply_template_falls_back_when_pending_approval_id_missing(self):
         from mew.commands import build_work_reply_schema
 

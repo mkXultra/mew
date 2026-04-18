@@ -54,7 +54,7 @@ COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
-RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", "failed", APPROVAL_STATUS_INDETERMINATE}
+RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = ("needs_user_review", "retry_tool", "retry_verification", "replan")
 WORK_RECOVERY_EFFECT_PRIORITY = (
     "rollback_needed",
