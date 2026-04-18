@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
@@ -16,7 +17,7 @@ from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import default_state, migrate_state, next_id, reconcile_next_ids
 from .thoughts import dropped_thread_warning_for_context
-from .timeutil import now_iso
+from .timeutil import now_iso, parse_time
 
 
 DOGFOOD_SKIP_DIR_NAMES = {
@@ -39,6 +40,7 @@ DOGFOOD_SCENARIOS = (
     "trace-smoke",
     "memory-search",
     "runtime-focus",
+    "resident-loop",
     "chat-cockpit",
     "work-session",
 )
@@ -745,6 +747,145 @@ def run_runtime_focus_scenario(workspace, env=None):
         expected="bundle --json includes generated journal, mood, morning paper, dream, and self-memory reports",
     )
     return _scenario_report("runtime-focus", workspace, commands, checks)
+
+
+def run_resident_loop_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Resident loop cadence task",
+            "--kind",
+            "coding",
+            "--priority",
+            "normal",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    runtime_args = SimpleNamespace(
+        interval=2.0,
+        poll_interval=0.1,
+        autonomy_level="propose",
+        model_timeout=20.0,
+        ai=False,
+        auth=None,
+        model_backend="",
+        model="",
+        base_url="",
+        allow_write=False,
+        allow_verify=False,
+        verify_command="",
+        verify_interval_minutes=0.05,
+        execute_tasks=False,
+        allow_agent_run=False,
+        agent_stale_minutes=None,
+        agent_result_timeout=None,
+        agent_start_timeout=None,
+        review_model=None,
+        trace_model=False,
+        max_reflex_rounds=0,
+        startup_timeout=5.0,
+        message_timeout=5.0,
+        send_message=[],
+        duration=6.0,
+        cleanup=False,
+        stop_timeout=10.0,
+        wait_agent_runs=0.0,
+    )
+    resident_report = _run_dogfood_in_workspace(
+        runtime_args,
+        workspace,
+        created_temp=False,
+    )
+    commands.append(
+        {
+            "command": resident_report.get("command") or [],
+            "exit_code": resident_report.get("exit_code"),
+            "stdout": "\n".join(resident_report.get("runtime_output_tail") or []),
+            "stderr": "",
+        }
+    )
+
+    state = read_json_file(Path(workspace) / STATE_FILE, {})
+    processed_events = [
+        event for event in state.get("inbox", [])
+        if event.get("processed_at")
+    ]
+    passive_events = [
+        event for event in processed_events
+        if event.get("type") == "passive_tick"
+    ]
+    passive_effects = [
+        effect for effect in state.get("runtime_effects", [])
+        if effect.get("reason") == "passive_tick"
+    ]
+    runtime_output = "\n".join(resident_report.get("runtime_output_tail") or [])
+    passive_times = [
+        parsed
+        for parsed in (
+            parse_time(event.get("processed_at") or event.get("created_at"))
+            for event in passive_events
+        )
+        if parsed is not None
+    ]
+    passive_gaps = [
+        round((later - earlier).total_seconds(), 2)
+        for earlier, later in zip(passive_times, passive_times[1:])
+    ]
+
+    _scenario_check(
+        checks,
+        "resident_loop_starts_and_stops",
+        task_result.get("exit_code") == 0
+        and resident_report.get("exit_code") == 0
+        and (resident_report.get("duration_seconds") or 0) >= 5.0,
+        observed={
+            "task": task_data,
+            "exit_code": resident_report.get("exit_code"),
+            "duration_seconds": resident_report.get("duration_seconds"),
+        },
+        expected="resident runtime starts, runs briefly, and stops cleanly",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_processes_multiple_events",
+        len(processed_events) >= 2
+        and bool([event for event in processed_events if event.get("type") == "startup"])
+        and len(passive_events) >= 2
+        and any(gap >= 1.0 for gap in passive_gaps),
+        observed={
+            "processed": len(processed_events),
+            "by_type": count_by(processed_events, "type"),
+            "passive_gaps_seconds": passive_gaps,
+        },
+        expected="startup and at least two spaced passive_tick events are processed",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_records_passive_effect",
+        len(passive_effects) >= 2
+        and all(effect.get("status") == "applied" for effect in passive_effects[-2:]),
+        observed=runtime_effect_summary(state),
+        expected="at least two applied passive_tick runtime effects",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_echoes_passive_output",
+        runtime_output.count("reason=passive_tick") >= 2,
+        observed=resident_report.get("runtime_output_tail"),
+        expected="runtime stdout includes repeated passive_tick summaries",
+    )
+    return _scenario_report("resident-loop", workspace, commands, checks)
 
 
 def run_chat_cockpit_scenario(workspace, env=None):
@@ -1998,6 +2139,8 @@ def run_dogfood_scenario(args):
             reports.append(run_memory_search_scenario(scenario_workspace, env=env))
         elif name == "runtime-focus":
             reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
+        elif name == "resident-loop":
+            reports.append(run_resident_loop_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":

@@ -634,6 +634,7 @@ def build_parser():
             "trace-smoke",
             "memory-search",
             "runtime-focus",
+            "resident-loop",
             "chat-cockpit",
             "work-session",
         ),

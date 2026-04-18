@@ -394,13 +394,17 @@ Evidence:
   listings such as `mew questions --all` expose deferred stale prompts with
   `defer_reason=...`, so humans can see why passive work is waiting or why an
   older prompt was superseded.
+- `mew dogfood --scenario resident-loop` now starts a real resident runtime,
+  lets it process startup plus passive ticks, stops it cleanly, and checks that
+  passive effects and stdout summaries were recorded.
 
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
-- Watcher-driven passive output now has controlled and real-repo one-shot
-  proofs, but not yet a long-running cadence proof across several hours or days.
+- Watcher-driven passive output now has controlled, real-repo one-shot, and
+  short resident-loop proofs, but not yet a long-running cadence proof across
+  several hours or days.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
@@ -488,12 +492,12 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `865 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
+- `uv run pytest -q` current: `866 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
-- `uv run pytest -q tests/test_dogfood.py` current: `33 passed`.
-- `uv run pytest -q tests/test_commands.py` current: `149 passed, 4 subtests passed`.
+- `uv run pytest -q tests/test_dogfood.py` current: `34 passed`.
+- `uv run pytest -q tests/test_commands.py` current: `158 passed, 4 subtests passed`.
 - `uv run pytest -q tests/test_commands.py -k "chat_self_improve_start_opens_native_work_session or chat_self_improve_native_skips_programmer_plan"` current: `2 passed`.
 - `uv run pytest -q tests/test_work_session.py` current: `203 passed`.
 - `uv run pytest -q tests/test_work_session.py -k "reply_file_can_queue_safe_follow_actions or reply_file_rejects_stale_session_snapshot or reply_file_reject_action_is_single_use or chat_work_session_can_approve_and_reject_tool_changes"` current: `4 passed`.

@@ -409,6 +409,9 @@ uv run pytest -q tests/test_autonomy.py
 
 ./mew dogfood --scenario runtime-focus --cleanup --json
 status: pass, including runtime_passive_refreshes_stale_question_once
+
+./mew dogfood --scenario resident-loop --cleanup --json
+status: pass, including resident_loop_processes_multiple_events
 ```
 
 Human-facing visibility:
