@@ -1994,7 +1994,7 @@ def refresh_work_follow_snapshot(args, report, session_id, task_id=None):
         state = load_state()
         session = find_work_session(state, session_id)
         task = work_session_task(state, session) or find_task(state, task_id)
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
     return write_work_follow_snapshot(args, report, session, task, resume, force=True)
 
 
@@ -3018,7 +3018,7 @@ def cmd_work_ai(args):
                 state = load_state()
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session)
-            resume = build_work_session_resume(session, task=task)
+            resume = build_work_session_resume(session, task=task, state=state)
             write_work_follow_snapshot(args, report, session, task, resume, force=True)
         if getattr(args, "json", False):
             print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -3408,7 +3408,7 @@ def cmd_work_ai(args):
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
-                resume = build_work_session_resume(session, task=task)
+                resume = build_work_session_resume(session, task=task, state=state)
                 live_cells_seen = print_work_live_step_output(
                     args,
                     index,
@@ -3484,7 +3484,7 @@ def cmd_work_ai(args):
                         or ""
                     ),
                 }
-                resume = build_work_session_resume(session, task=task)
+                resume = build_work_session_resume(session, task=task, state=state)
                 live_cells_seen = print_work_live_step_output(
                     args,
                     index,
@@ -3675,7 +3675,7 @@ def cmd_work_ai(args):
                 state = load_state()
                 session = find_work_session(state, session_id)
                 task = work_session_task(state, session)
-            resume = build_work_session_resume(session, task=task)
+            resume = build_work_session_resume(session, task=task, state=state)
             write_work_follow_snapshot(args, report, session, task, resume, step=report["steps"][-1])
             live_cells_seen = print_work_live_step_output(
                 args,
@@ -3752,7 +3752,7 @@ def cmd_work_ai(args):
         state = load_state()
         session = find_work_session(state, session_id)
         task = work_session_task(state, session)
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
         write_work_follow_snapshot(args, report, session, task, resume)
 
     if args.json:
@@ -4152,7 +4152,7 @@ def recent_work_session_summaries(state, limit=5, kind=None):
             break
     for session in recent:
         task = work_session_task(state, session)
-        resume = build_work_session_resume(session, task=task, limit=3)
+        resume = build_work_session_resume(session, task=task, limit=3, state=state)
         task_id = session.get("task_id")
         resume_command = (
             mew_command("work", task_id, "--session", "--resume")
@@ -4212,7 +4212,7 @@ def cmd_work_show_session(args):
             else:
                 session = active_work_session(state)
                 task = work_session_task(state, session)
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
         if resume and getattr(args, "allow_read", None):
             attach_work_resume_world_state(resume, build_work_world_state(resume, args.allow_read))
         if not resume and not getattr(args, "task_id", None):
@@ -5187,7 +5187,7 @@ def cmd_work_reply_file(args):
         state = load_state()
         session = find_work_session(state, session_id)
         task = work_session_task(state, session)
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
     snapshot_step = {
         "status": "completed",
         "action": {"type": "reply_file", "path": str(path)},
@@ -5491,7 +5491,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             if blocker:
                 return 0, {"recovery": blocker}
         elif tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
-            resume = build_work_session_resume(session, task=work_session_task(state, session))
+            resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
             review_item = {}
             for item in (resume.get("recovery_plan") or {}).get("items") or []:
                 if str(item.get("tool_call_id")) == str(source_call.get("id")):
@@ -5517,7 +5517,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                 }
             }
         source_tool_call_id = source_call.get("id")
-        resume_for_world = build_work_session_resume(session, task=work_session_task(state, session))
+        resume_for_world = build_work_session_resume(session, task=work_session_task(state, session), state=state)
 
     world_state_before = {}
     if getattr(args, "allow_read", None):
@@ -9361,6 +9361,8 @@ CHAT_WORK_HELP = """Work session quick help:
 /work-mode on                         text becomes /continue guidance; blank repeats after one work step
 /work-session stop <reason>           pause the live loop at the next boundary
 /work-session note <text>             save a durable note for future work context
+/outside chat: mew memory --add "Prefer compact diffs" --category preferences
+                                      add durable preferences injected into work reentry
 /work-session steer <text>            queue one-time guidance for the next live/follow step
 /work-session queue <text>            queue FIFO follow-up input for a later live/follow step
 /work-session interrupt <text>        stop at boundary and submit this as the next step
@@ -9939,7 +9941,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
         lines.append(f"- /work-session resume{task_suffix}")
         lines.append(f"- /work-session start{task_suffix or ' <task-id>'}")
         return "\n".join(lines)
-    resume = build_work_session_resume(session, task=work_session_task(state, session))
+    resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
     if session.get("stop_requested_at"):
         cached = (continue_options or "").strip() or work_chat_continue_options(session)
         if session.get("stop_action") == "interrupt_submit" and not work_session_has_running_activity(session):
@@ -10325,7 +10327,7 @@ def chat_work_session(rest, chat_state=None):
             session = active_work_session_for_kind(state, scope_kind)
             if task_id:
                 session = _latest_work_session_for_task(state, task_id)
-        resume = build_work_session_resume(session, task=work_session_task(state, session))
+        resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
         if resume and allow_read:
             attach_work_resume_world_state(resume, build_work_world_state(resume, allow_read))
         if not resume and not task_id:

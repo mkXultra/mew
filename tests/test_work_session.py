@@ -3339,6 +3339,47 @@ class WorkSessionTests(unittest.TestCase):
             "Add a focused command-output pane.",
         )
 
+    def test_work_session_context_and_resume_surface_user_preferences(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.work_loop import build_work_model_context, build_work_think_prompt
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                preference = "Prefer compact diffs over noisy full logs."
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["memory", "--add", preference, "--category", "preferences"]), 0)
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                task = state["tasks"][0]
+                context = build_work_model_context(state, session, task, "now")
+                preferences = context["work_session"]["resume"]["user_preferences"]
+                self.assertEqual(preferences["source"], "memory.deep.preferences")
+                self.assertEqual(preferences["total"], 1)
+                self.assertFalse(preferences["truncated"])
+                self.assertIn(preference, preferences["items"][0])
+                self.assertIn(preference, build_work_think_prompt(context))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertIn(preference, resume["user_preferences"]["items"][0])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("User preferences", text)
+                self.assertIn(preference, text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
         from mew.work_session import (
             build_work_session_resume,
@@ -10165,6 +10206,7 @@ class WorkSessionTests(unittest.TestCase):
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
+                    state["memory"]["deep"]["preferences"].append("Prefer compact follow snapshots.")
                     save_state(state)
 
                 model_outputs = [
@@ -10212,6 +10254,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["step_count"], 1)
                 self.assertEqual(data["last_step"]["action"]["type"], "read_file")
                 self.assertEqual(data["resume"]["phase"], "idle")
+                self.assertIn("Prefer compact follow snapshots.", data["resume"]["user_preferences"]["items"][0])
                 self.assertTrue(any(cell["kind"] == "model_turn" for cell in data["cells"]))
                 self.assertTrue(any(cell["kind"] == "tool_call" for cell in data["cells"]))
                 self.assertTrue(any(item["label"] == "steer next step" for item in data["controls"]))

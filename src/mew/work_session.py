@@ -76,6 +76,8 @@ DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
 DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS = 50_000
 DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 DEFAULT_RUNNING_OUTPUT_MAX_CHARS = 4_000
+DEFAULT_RESUME_USER_PREFERENCES_LIMIT = 5
+DEFAULT_RESUME_USER_PREFERENCE_MAX_CHARS = 300
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
     "query",
@@ -145,6 +147,27 @@ def clipped_approval_diff(diff, max_chars=DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS
     marker = "\n... output truncated ..."
     prefix_limit = max(0, max_chars - len(marker))
     return diff[:prefix_limit] + marker, True
+
+
+def build_work_user_preferences(state, limit=DEFAULT_RESUME_USER_PREFERENCES_LIMIT):
+    memory = (state or {}).get("memory") if isinstance(state, dict) else {}
+    deep = (memory or {}).get("deep") if isinstance(memory, dict) else {}
+    preferences = (deep or {}).get("preferences") if isinstance(deep, dict) else []
+    if not isinstance(preferences, list):
+        preferences = []
+    preferences = [str(item or "").strip() for item in preferences if str(item or "").strip()]
+    total = len(preferences)
+    visible_limit = min(DEFAULT_RESUME_USER_PREFERENCES_LIMIT, max(1, int(limit or DEFAULT_RESUME_USER_PREFERENCES_LIMIT)))
+    visible = [
+        clip_output(item, DEFAULT_RESUME_USER_PREFERENCE_MAX_CHARS)
+        for item in preferences[-visible_limit:]
+    ]
+    return {
+        "source": "memory.deep.preferences",
+        "items": visible,
+        "total": total,
+        "truncated": total > len(visible),
+    }
 
 
 def active_work_session(state):
@@ -1640,7 +1663,7 @@ def select_work_recovery_plan_item(recovery_plan):
     return items[-1]
 
 
-def build_work_session_resume(session, task=None, limit=8):
+def build_work_session_resume(session, task=None, limit=8, state=None):
     if not session:
         return None
     calls = list(session.get("tool_calls") or [])
@@ -1901,6 +1924,7 @@ def build_work_session_resume(session, task=None, limit=8):
         calls,
         pending_approvals,
     )
+    user_preferences = build_work_user_preferences(state, limit=limit)
 
     return {
         "session_id": session.get("id"),
@@ -1929,6 +1953,7 @@ def build_work_session_resume(session, task=None, limit=8):
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "working_memory": working_memory,
+        "user_preferences": user_preferences,
         "context": build_work_context_metrics(calls, turns),
         "stop_request": (
             {
@@ -2160,6 +2185,15 @@ def format_work_session_resume(resume):
                 f"stale_after_tool_call: #{memory.get('stale_after_tool_call_id')} "
                 f"({memory.get('stale_after_tool')} ran after this memory; refresh before relying on next_step)"
             )
+
+    preferences = resume.get("user_preferences") or {}
+    preference_items = preferences.get("items") or []
+    if preference_items:
+        lines.extend(["", "User preferences"])
+        for preference in preference_items:
+            lines.append(f"- {preference}")
+        if preferences.get("truncated"):
+            lines.append(f"... {preferences.get('total')} total preferences; older items omitted")
 
     lines.extend(["", "Recent decisions"])
     decisions = resume.get("recent_decisions") or []

@@ -372,7 +372,7 @@ def build_work_model_context(
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
-    resume = build_work_session_resume(session, task=task, limit=8)
+    resume = build_work_session_resume(session, task=task, limit=8, state=state)
     world_state = build_work_world_state(
         resume,
         allowed_read_roots or [],

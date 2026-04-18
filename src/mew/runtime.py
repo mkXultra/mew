@@ -371,7 +371,7 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
     session_id = session.get("id")
     resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
     retry_command = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
-    recovery_plan = build_work_session_resume(session, task=task).get("recovery_plan") or {}
+    recovery_plan = build_work_session_resume(session, task=task, state=state).get("recovery_plan") or {}
     recovery_suggestion = native_work_recovery_suggestion_from_plan(recovery_plan, task_id=task_id)
     exit_part = ""
     if last_step.get("timed_out"):
@@ -468,7 +468,7 @@ def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, cur
         return None
     if work_session_has_pending_write_approval(session):
         return None
-    recovery_plan = (build_work_session_resume(session, task=task) or {}).get("recovery_plan") or {}
+    recovery_plan = (build_work_session_resume(session, task=task, state=state) or {}).get("recovery_plan") or {}
     selected_recovery = select_work_recovery_plan_item(recovery_plan)
     source_call = find_work_tool_call(session, selected_recovery.get("tool_call_id"))
     selected_action = selected_recovery.get("action")
@@ -748,7 +748,7 @@ def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task
             "task_id": resolved_task_id,
         }
     if normalized_reason == "pending_write_approval" and session:
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
         approval = ((resume.get("pending_approvals") or [])[:1] or [{}])[0]
         pairing = approval.get("pairing_status") or {}
         approve_command = approval.get("cli_approve_hint") or ""
@@ -782,7 +782,7 @@ def native_work_skip_recovery_suggestion(state, reason, *, session_id=None, task
             suggestion["alternate_command"] = approval.get("cli_reject_hint")
         return suggestion
     if normalized_reason == "previous_native_work_step_failed" and session:
-        resume = build_work_session_resume(session, task=task)
+        resume = build_work_session_resume(session, task=task, state=state)
         suggestion = native_work_recovery_suggestion_from_plan(
             resume.get("recovery_plan") or {},
             task_id=resolved_task_id,

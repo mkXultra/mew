@@ -835,6 +835,7 @@ def build_parser():
             "  mew code <task-id> --read-only --no-verify\n"
             "  mew code <task-id> --quiet --timeout 0\n"
             "  mew work <task-id> --session --resume --allow-read .\n"
+            "  mew memory --add \"Prefer compact diffs\" --category preferences\n"
             "  mew chat --kind coding --work-mode"
         ),
     )

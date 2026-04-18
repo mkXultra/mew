@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and passive auto-recovery for interrupted verifier plus safe read/git cases exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -429,6 +429,11 @@ Evidence:
 - Humans can add the same durable work-session notes with `mew work --session-note` or `/work-session note`, and task-qualified `mew work <task-id> --session-note ...` can annotate the latest closed task session after review, making persistent guidance distinct from one-shot `/continue` guidance.
 - Work model context now carries a bounded `session_knowledge` digest for older tool calls that have fallen out of the full recent tool-call window, preserving what was inspected without raw file contents.
 - Work model context now includes a bounded live `world_state` summary when read access is allowed, so resumed work can compare durable history with current git/file metadata.
+- Work-session resume bundles now include bounded `memory.deep.preferences`
+  items as `user_preferences`; the same resume flows into the native work THINK
+  prompt and `.mew/follow/latest.json`, making durable human preferences
+  visible to both the resident model and external observer agents after
+  reentry.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -505,7 +510,6 @@ Missing proof:
 - Watcher-driven passive output now has controlled, real-repo one-shot,
   short resident-loop, native-work-start, and real API native-work-advance
   proofs, but not yet a long-running cadence proof across several hours or days.
-- User preference memory is not yet clearly shaping behavior.
 
 Next action:
 
@@ -669,6 +673,21 @@ Next action:
 
 ## Latest Validation
 
+- Persistent Advantage current: `claude-ultra` recommended wiring
+  `memory.deep.preferences` into native work as the smallest M3 slice that
+  turns resident memory into observable model behavior. Work-session resumes now
+  expose `user_preferences`; native work THINK prompts receive the same resume;
+  follow snapshots carry it; and `mew code --help` / `/help work` point users
+  at `mew memory --add ... --category preferences`. `codex-ultra` reviewed the
+  diff and returned `NO_BLOCKERS`; its blank-entry metadata suggestion was
+  folded in. Validated with focused preference/help/follow snapshot tests
+  (`4 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py tests/test_brief.py tests/test_runtime.py`
+  (`522 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`964 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), `git diff --check` (pass), and
+  `./mew dogfood --scenario all --cleanup --json` (pass).
 - Native self-improve dogfood task #127 current: mew used a read-only
   `--follow` pass to choose the next small Milestone 2 improvement, then landed
   `follow-status` discoverability in native self-improve output/help. Validated

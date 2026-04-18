@@ -706,7 +706,7 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
             continue
         if kind and task_kind(task or {}) != kind:
             continue
-        resume = build_work_session_resume(session, task=task, limit=3) or {}
+        resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
         task_id = session.get("task_id")
         task_parts = [task_id] if task_id is not None else []
         resume_command = _work_session_resume_command(session, task_parts)

@@ -1189,6 +1189,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("Common flows:", output)
         self.assertIn("mew code <task-id> --quiet --timeout 0", output)
         self.assertIn("mew work <task-id> --session --resume --allow-read .", output)
+        self.assertIn('mew memory --add "Prefer compact diffs" --category preferences', output)
         self.assertIn("mew chat --kind coding --work-mode", output)
 
     def test_chat_activity_slash_uses_kind_scope(self):
@@ -4420,6 +4421,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("mew code <task-id>", output)
         self.assertIn("mew do <task-id>", output)
         self.assertIn("/continue --allow-read .", output)
+        self.assertIn('mew memory --add "Prefer compact diffs" --category preferences', output)
         self.assertIn("/work-session resume --auto-recover-safe", output)
         self.assertIn("/work-session live --allow-read . --max-steps 3", output)
         self.assertIn("/work-session <task-id> live --allow-read .", output)
