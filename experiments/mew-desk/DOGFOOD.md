@@ -106,3 +106,41 @@ Product learning:
   tray app should not need to understand resident internals.
 - The next useful UI proof is no longer "can it render?" but "can it stay open
   and refresh calmly?"
+
+Follow-up built in the same session:
+
+- Added `browser_server.py`, a local-only HTTP shell that serves the same HTML
+  and reloads either a JSON file or a `--source-command`.
+- Added `/view-model` so external observers can inspect the raw view model
+  while the browser page stays open.
+- Kept command loading shell-free: the source command is an argv list, not a
+  shell string.
+- Added `watch_browser_pet.py`, an atomic file rewriter with unchanged-content
+  skips for the static HTML path.
+- Added `--refresh-seconds` to `browser_pet.py` so the watched file can refresh
+  itself in a normal browser tab.
+- Tightened the local HTTP shell after review: unknown paths now return `404`
+  before loading the source command, non-loopback Host headers return `403`,
+  and non-loopback binds require explicit `--allow-non-loopback`.
+
+Follow-up validation:
+
+- `uv run pytest -q experiments/mew-desk` -> `31 passed`.
+- Local handler coverage proves `/` returns HTML and `/view-model` returns the
+  current JSON payload.
+- Manual source-command check:
+  `uv run python experiments/mew-desk/browser_server.py --port 0 --source-command ./mew desk --json`
+  served live `alerting` HTML and matching `/view-model` JSON.
+- Manual hardening check on the same server: `/` returned `200`,
+  non-loopback `Host: example.com` returned `403`, and `/favicon.ico` returned
+  `404`.
+- Re-review fix: explicit `--allow-non-loopback` now passes through to the
+  handler so trusted-network mode can actually serve non-loopback Host headers.
+- Manual explicit-share check:
+  `--allow-non-loopback` with `Host: example.com` returned `200`.
+- Manual watcher check:
+  `uv run python experiments/mew-desk/watch_browser_pet.py --output /tmp/mew-desk-watch.html --interval 60 --source-command ./mew desk --json`
+  wrote refresh-enabled `alerting` HTML and stopped cleanly with Ctrl-C.
+- `./mew dogfood --all` -> pass after hardening.
+- `codex-ultra` re-review -> PASS after route-before-load, Host-header, and
+  explicit non-loopback fixes.

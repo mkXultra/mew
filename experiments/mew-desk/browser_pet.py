@@ -9,6 +9,7 @@ from typing import Any, TextIO
 
 
 MAX_FOCUS_LENGTH = 160
+DEFAULT_REFRESH_SECONDS = 10
 
 PET_FRAMES: dict[str, list[str]] = {
     "sleeping": [
@@ -106,13 +107,22 @@ def render_count_items(counts: dict[str, int]) -> str:
     )
 
 
-def render_browser_pet(view_model: dict[str, Any]) -> str:
+def render_refresh_meta(refresh_seconds: int | None) -> str:
+    if refresh_seconds is None:
+        return ""
+    if refresh_seconds < 1:
+        raise ValueError("refresh_seconds must be at least 1")
+    return f'  <meta http-equiv="refresh" content="{refresh_seconds}">\n'
+
+
+def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None = None) -> str:
     state = normalize_pet_state(view_model.get("pet_state"))
     focus = compact_focus(view_model.get("focus"))
     date = str(view_model.get("date") or "")
     counts = count_items(view_model)
     cat = "\n".join(PET_FRAMES[state])
     count_nodes = render_count_items(counts)
+    refresh_meta = render_refresh_meta(refresh_seconds)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -120,7 +130,7 @@ def render_browser_pet(view_model: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>mew desk</title>
-  <style>
+{refresh_meta}  <style>
     :root {{
       color-scheme: light;
       --ink: #20231f;
@@ -287,10 +297,17 @@ def main(argv: list[str] | None = None, stdin: TextIO = sys.stdin) -> int:
         help="path to a mew desk JSON view model; omit or pass - to read stdin",
     )
     parser.add_argument("--output", type=Path, help="write HTML to this path instead of stdout")
+    parser.add_argument(
+        "--refresh-seconds",
+        type=int,
+        help=f"add a browser meta refresh tag; suggested with watch mode (default: none, watch uses {DEFAULT_REFRESH_SECONDS})",
+    )
     args = parser.parse_args(argv)
+    if args.refresh_seconds is not None and args.refresh_seconds < 1:
+        parser.error("--refresh-seconds must be at least 1")
 
     view_model = load_view_model(args.view_model, stdin=stdin)
-    rendered = render_browser_pet(view_model)
+    rendered = render_browser_pet(view_model, refresh_seconds=args.refresh_seconds)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")

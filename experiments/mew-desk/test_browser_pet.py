@@ -82,6 +82,20 @@ def test_main_reads_stdin_and_writes_file(tmp_path: Path) -> None:
     assert exit_code == 0
     assert output.exists()
     assert "Working on browser shell" in output.read_text(encoding="utf-8")
+    assert "http-equiv" not in output.read_text(encoding="utf-8")
+
+
+def test_main_can_add_refresh_meta(tmp_path: Path) -> None:
+    output = tmp_path / "desk.html"
+    view_model = {"pet_state": "typing", "focus": "Working on browser shell", "counts": {"open_tasks": 1}}
+
+    exit_code = browser_pet.main(
+        ["-", "--output", str(output), "--refresh-seconds", "11"],
+        stdin=io.StringIO(json.dumps(view_model)),
+    )
+
+    assert exit_code == 0
+    assert '<meta http-equiv="refresh" content="11">' in output.read_text(encoding="utf-8")
 
 
 def test_main_prints_html_to_stdout(tmp_path: Path) -> None:
