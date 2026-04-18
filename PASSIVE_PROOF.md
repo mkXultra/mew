@@ -450,6 +450,8 @@ Judgment:
   instead of inheriting stale write/verify defaults from an older session.
 - `mew focus` now reuses those same session defaults for next/resume/continue/follow
   reentry commands, so the visible cockpit path keeps the runtime boundary.
+- Direct `mew work <task> --live` reentry also applies saved session defaults
+  to planning and tool execution, so a shorter command still enters the same body.
 - Remaining cadence work: decide whether global/non-task questions should also
   age into a summary/reminder path, and tune the 24-hour threshold after longer
   dogfood.

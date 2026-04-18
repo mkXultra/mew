@@ -411,7 +411,8 @@ Evidence:
   and the created session inherits current runtime read/verify/model defaults
   plus a runtime provenance note without stale write/verify authority from
   older sessions. `mew focus` reuses those same saved defaults for active
-  session next/resume/continue/follow commands.
+  session next/resume/continue/follow commands, and direct `mew work <task>
+  --live` reentry applies saved session defaults to planning/tool execution.
 
 Missing proof:
 
@@ -507,7 +508,7 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `880 passed, 6 subtests passed`.
+- `uv run pytest -q` current: `881 passed, 6 subtests passed`.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.

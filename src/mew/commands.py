@@ -1258,6 +1258,13 @@ def _work_control_options(args, session=None):
     return options
 
 
+def _work_effective_args(args, options):
+    effective = SimpleNamespace(**vars(args))
+    for key, value in (options or {}).items():
+        setattr(effective, key, value)
+    return effective
+
+
 def safe_work_write_roots(roots):
     safe = []
     for root in roots or []:
@@ -2668,6 +2675,8 @@ def cmd_work_ai(args):
     if progress:
         progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
 
+    options = _work_control_options(args, session=session)
+    effective_args = _work_effective_args(args, options)
     report = {
         "session_id": session_id,
         "task_id": task_id,
@@ -2688,7 +2697,7 @@ def cmd_work_ai(args):
         if getattr(args, "json", False):
             print(json.dumps(report, ensure_ascii=False, indent=2))
         elif not getattr(args, "quiet", False):
-            print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
+            print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
         if (
             getattr(args, "live", False)
             and not getattr(args, "quiet", False)
@@ -2701,18 +2710,27 @@ def cmd_work_ai(args):
         return 0
 
     try:
-        model_auth = load_model_auth(model_backend, args.auth)
+        model_backend = normalize_model_backend(effective_args.model_backend)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    model = effective_args.model or model_backend_default_model(model_backend)
+    base_url = effective_args.base_url or model_backend_default_base_url(model_backend)
+    effective_args.model_backend = model_backend
+    effective_args.model = model
+    effective_args.base_url = base_url
+    try:
+        model_auth = load_model_auth(model_backend, effective_args.auth)
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
 
-    options = _work_control_options(args, session=session)
     live_cells_seen = len(build_work_session_cells(session, limit=None))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
         report["stop_reason"] = "missing_gates"
         if progress:
             progress("no work tool gates enabled; skipping model call")
-        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
+        print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
         print(
             "No work tool gates are enabled. Rerun with `--allow-read .`, explicit write/verify gates, "
             "or use `mew do <task-id>` for the supervised default loop."
@@ -2797,7 +2815,7 @@ def cmd_work_ai(args):
                     continue
                 live_delta_buffers[current_phase] = ""
                 total = live_delta_totals.get(current_phase) or buffered
-                if getattr(args, "compact_live", False) and total.lstrip().startswith("{"):
+                if getattr(effective_args, "compact_live", False) and total.lstrip().startswith("{"):
                     for line in _compact_live_model_delta_lines(
                         current_phase,
                         total,
@@ -2858,20 +2876,20 @@ def cmd_work_ai(args):
                 model=model,
                 base_url=base_url,
                 model_backend=model_backend,
-                timeout=args.model_timeout,
-                allowed_read_roots=args.allow_read or [],
-                allowed_write_roots=args.allow_write or [],
-                allow_shell=args.allow_shell,
-                allow_verify=args.allow_verify,
-                verify_command=args.verify_command or "",
+                timeout=effective_args.model_timeout,
+                allowed_read_roots=effective_args.allow_read or [],
+                allowed_write_roots=effective_args.allow_write or [],
+                allow_shell=effective_args.allow_shell,
+                allow_verify=effective_args.allow_verify,
+                verify_command=effective_args.verify_command or "",
                 guidance=step_guidance,
                 progress=progress,
-                act_mode=getattr(args, "act_mode", "model") or "model",
+                act_mode=getattr(effective_args, "act_mode", "model") or "model",
                 stream_model=bool(getattr(args, "stream_model", False)),
                 model_delta_sink=(
                     live_model_delta if bool(getattr(args, "stream_model", False)) else None
                 ),
-                progress_model_deltas=not bool(getattr(args, "compact_live", False)),
+                progress_model_deltas=not bool(getattr(effective_args, "compact_live", False)),
             )
             flush_live_model_delta()
         except KeyboardInterrupt:
@@ -2991,7 +3009,7 @@ def cmd_work_ai(args):
                 if getattr(args, "follow", False)
                 else format_work_planning(
                     planned,
-                    include_stream_preview=not (getattr(args, "compact_live", False) and live_model_delta_seen),
+                    include_stream_preview=not (getattr(effective_args, "compact_live", False) and live_model_delta_seen),
                 )
             )
         if action_type == "batch":
@@ -3006,7 +3024,7 @@ def cmd_work_ai(args):
                     index,
                     planned,
                     action,
-                    args,
+                    effective_args,
                     progress,
                     turn_id=planning_turn_id,
                 )
@@ -3035,7 +3053,7 @@ def cmd_work_ai(args):
                     task,
                     live_cells_seen,
                 )
-                if not getattr(args, "compact_live", False):
+                if not getattr(effective_args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
                     print(format_work_session_resume(resume))
@@ -3111,7 +3129,7 @@ def cmd_work_ai(args):
                     task,
                     live_cells_seen,
                 )
-                if not getattr(args, "compact_live", False):
+                if not getattr(effective_args, "compact_live", False):
                     print("")
                     print(f"Work live step #{index} resume")
                     print(format_work_session_resume(resume))
@@ -3141,11 +3159,11 @@ def cmd_work_ai(args):
 
         parameters = work_tool_parameters_from_action(
             action,
-            allowed_write_roots=args.allow_write or [],
-            allow_shell=args.allow_shell,
-            allow_verify=args.allow_verify,
-            verify_command=args.verify_command or "",
-            verify_timeout=args.verify_timeout,
+            allowed_write_roots=effective_args.allow_write or [],
+            allow_shell=effective_args.allow_shell,
+            allow_verify=effective_args.allow_verify,
+            verify_command=effective_args.verify_command or "",
+            verify_timeout=effective_args.verify_timeout,
         )
         with state_lock():
             state = load_state()
@@ -3219,7 +3237,7 @@ def cmd_work_ai(args):
             result = execute_work_tool_with_output(
                 action_type,
                 parameters,
-                args.allow_read or [],
+                effective_args.allow_read or [],
                 work_tool_output_progress(progress, tool_call_id),
             )
             error = work_tool_result_error(action_type, result)
@@ -3290,28 +3308,28 @@ def cmd_work_ai(args):
                 task,
                 live_cells_seen,
             )
-            if not getattr(args, "compact_live", False):
+            if not getattr(effective_args, "compact_live", False):
                 print("")
                 print(f"Work live step #{index} resume")
                 print(format_work_session_resume(resume))
         if pending_approval:
-            if live_approval_prompt_enabled(args):
+            if live_approval_prompt_enabled(effective_args):
                 with state_lock():
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
-                approval_verify_command = args.verify_command or work_session_default_verify_command(session, task=task)
+                approval_verify_command = effective_args.verify_command or work_session_default_verify_command(session, task=task)
                 approval = prompt_live_write_approval(tool_call, verify_command=approval_verify_command)
                 report["steps"][-1]["inline_approval"] = approval
                 if approval == "approve":
                     approve_args = SimpleNamespace(
                         task_id=task_id,
                         approve_tool=tool_call.get("id"),
-                        allow_write=args.allow_write or [],
-                        allow_verify=args.allow_verify,
-                        verify_command=args.verify_command or "",
+                        allow_write=effective_args.allow_write or [],
+                        allow_verify=effective_args.allow_verify,
+                        verify_command=effective_args.verify_command or "",
                         verify_cwd=args.verify_cwd,
-                        verify_timeout=args.verify_timeout,
+                        verify_timeout=effective_args.verify_timeout,
                         progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
                         json=False,
                     )
@@ -3362,7 +3380,7 @@ def cmd_work_ai(args):
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(format_work_ai_report(report, compact=getattr(args, "compact_live", False)))
+        print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
         if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
             state = load_state()
             session = find_work_session(state, session_id)

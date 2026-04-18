@@ -7961,6 +7961,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_uses_persisted_session_options_after_reentry(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("fresh direct continue\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "."]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(["work", "1", "--live", "--auth", "auth.json", "--max-steps", "1"]),
+                                0,
+                            )
+
+                state = load_state()
+                call = state["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(call["status"], "completed")
+                self.assertIn("fresh direct continue", call["result"]["text"])
+                self.assertIn('"allowed_read_roots"', prompts[0])
+                self.assertIn('"."', prompts[0])
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_work_session_can_run_ai_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
