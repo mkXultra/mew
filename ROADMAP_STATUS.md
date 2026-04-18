@@ -218,6 +218,10 @@ Follow-up self-improve dogfood then used the new native session path to choose
 a tiny reentry-doc fix: `01e9f2a` aligns `mew self-improve --help` with the
 actual generated resume control by documenting `mew work <task-id> --session
 --resume --allow-read .`.
+One more small dogfood pass fixed the empty coding-queue recommendation:
+`d437460` now suggests `mew self-improve --start-session --ready ...`, so the
+created native self-improvement task enters the ready coding queue instead of
+being left as a todo task.
 
 ## Milestone 1: Native Hands
 
@@ -822,6 +826,12 @@ Next action:
   Validation: focused self-improve help test (pass), ruff on changed files
   (pass), direct `./mew self-improve --help` output check, and full
   `uv run python -m unittest` (`980 tests`, pass).
+- Follow-up native self-improve dogfood task #173 used read-only `mew work
+  --live` steps to inspect the focus/brief next-move surface, then changed the
+  empty coding-queue recommendation to include `--ready` in `d437460`.
+  Validation: focused brief tests (pass), `tests.test_brief` (pass), ruff on
+  changed files (pass), direct `./mew focus --kind coding` output check, and
+  full `uv run python -m unittest` (`980 tests`, pass).
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
