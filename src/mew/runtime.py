@@ -1,5 +1,6 @@
 from copy import deepcopy
 import os
+import shlex
 import signal
 import sys
 import time
@@ -14,10 +15,6 @@ from .agent import (
 from .archive import archive_state_records
 from .cli_command import mew_command
 from .config import (
-    DEFAULT_CODEX_MODEL,
-    DEFAULT_CODEX_WEB_BASE_URL,
-    DEFAULT_INTERVAL_SECONDS,
-    DEFAULT_TASK_TIMEOUT_SECONDS,
     DESIRES_FILE,
     GUIDANCE_FILE,
     POLICY_FILE,
@@ -55,6 +52,7 @@ from .state import (
     state_lock,
     update_runtime_effect,
 )
+from .read_tools import resolve_allowed_path
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
@@ -62,18 +60,24 @@ from .work_session import (
     active_work_sessions,
     add_work_session_note,
     build_work_session_resume,
+    execute_work_tool,
     find_work_session,
+    find_work_tool_call,
+    finish_work_tool_call,
     mark_work_session_running_interrupted,
     select_work_recovery_plan_item,
+    start_work_tool_call,
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_session_runtime_command,
     work_session_started_by_runtime,
     work_session_task,
+    work_tool_result_error,
 )
 
 
 NATIVE_WORK_STEP_SKIP_HISTORY_LIMIT = 20
+WORK_TOOL_RESULT_STALE_ERROR = "work tool result could not be recorded; work session changed during tool execution"
 
 
 def set_runtime_running(state, started_at):
@@ -410,6 +414,219 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
     runtime_status["last_native_work_recovery"] = recovery
     runtime_status["last_action"] = f"asked for native work recovery session #{session_id}"
     return recovery
+
+
+def latest_recoverable_interrupted_verifier(session):
+    for call in reversed((session or {}).get("tool_calls") or []):
+        if call.get("status") != "interrupted" or call.get("recovery_status"):
+            continue
+        if call.get("tool") != "run_tests":
+            continue
+        command = interrupted_work_verifier_command(call)
+        if command:
+            return call
+    return None
+
+
+def interrupted_work_verifier_command(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    return result.get("command") or parameters.get("command") or ""
+
+
+def interrupted_work_verifier_cwd(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    return result.get("cwd") or parameters.get("cwd") or "."
+
+
+def runtime_recovery_commands_match(expected, requested):
+    expected = expected or ""
+    requested = requested or ""
+    if expected == requested:
+        return True
+    try:
+        return shlex.split(expected) == shlex.split(requested)
+    except ValueError:
+        return False
+
+
+def prepare_runtime_native_work_verifier_recovery(state, args, *, event_id=None, current_time=None):
+    runtime_status = state.setdefault("runtime_status", {})
+    last_step = runtime_status.get("last_native_work_step") or {}
+    if last_step.get("outcome") != "failed":
+        return None
+    session = find_work_session(state, last_step.get("session_id"))
+    if not session:
+        return None
+    task = work_session_task(state, session)
+    if not previous_native_work_step_failure_unresolved(state, session, task):
+        return None
+    if work_session_has_pending_write_approval(session):
+        return None
+    source_call = latest_recoverable_interrupted_verifier(session)
+    if not source_call:
+        return None
+
+    command = interrupted_work_verifier_command(source_call)
+    cwd = interrupted_work_verifier_cwd(source_call)
+    recovery = {
+        "at": current_time or now_iso(),
+        "action": "auto_retry_verification_blocked",
+        "reason": "",
+        "session_id": session.get("id"),
+        "task_id": (task or {}).get("id") or session.get("task_id"),
+        "source_tool_call_id": source_call.get("id"),
+        "tool": source_call.get("tool"),
+        "command": command,
+        "cwd": cwd,
+    }
+    recovery_plan = (build_work_session_resume(session, task=task) or {}).get("recovery_plan") or {}
+    selected_recovery = select_work_recovery_plan_item(recovery_plan)
+    if (
+        selected_recovery.get("action") != "retry_verification"
+        or str(selected_recovery.get("tool_call_id")) != str(source_call.get("id"))
+    ):
+        recovery["reason"] = "runtime verifier recovery only auto-runs the selected safe recovery-plan item"
+        recovery["selected_recovery_action"] = selected_recovery.get("action")
+        recovery["selected_tool_call_id"] = selected_recovery.get("tool_call_id")
+        recovery["selected_effect_classification"] = selected_recovery.get("effect_classification")
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+    if not getattr(args, "allow_read", None):
+        recovery["reason"] = "runtime verifier recovery needs explicit --allow-read roots"
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+    try:
+        resolve_allowed_path(cwd, getattr(args, "allow_read", None) or [])
+    except ValueError as exc:
+        recovery["reason"] = "runtime verifier recovery needs --allow-read to cover the verifier cwd"
+        recovery["allow_read"] = list(getattr(args, "allow_read", None) or [])
+        recovery["error"] = str(exc)
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+    if not getattr(args, "allow_verify", False):
+        recovery["reason"] = "runtime verifier recovery needs explicit --allow-verify"
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+    requested_command = getattr(args, "verify_command", None) or ""
+    if not requested_command:
+        recovery["reason"] = "runtime verifier recovery needs --verify-command"
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+    if not runtime_recovery_commands_match(command, requested_command):
+        recovery["reason"] = "runtime verifier recovery only reruns the exact interrupted command"
+        recovery["requested_command"] = requested_command
+        runtime_status["last_native_work_recovery"] = recovery
+        return None
+
+    parameters = dict(source_call.get("parameters") or {})
+    parameters["recovered_from_tool_call_id"] = source_call.get("id")
+    parameters["command"] = command
+    parameters["cwd"] = cwd
+    parameters["allow_verify"] = True
+    tool_call = start_work_tool_call(state, session, "run_tests", parameters)
+    recovery.update(
+        {
+            "at": current_time or now_iso(),
+            "action": "auto_retry_verification_started",
+            "reason": "previous passive native advance left an interrupted verifier",
+            "recovered_by_tool_call_id": tool_call.get("id"),
+            "event_id": event_id,
+        }
+    )
+    runtime_status["last_native_work_recovery"] = recovery
+    runtime_status["last_action"] = f"auto retrying native work verifier session #{session.get('id')}"
+    add_work_session_note(
+        session,
+        f"runtime auto-retrying interrupted verifier tool #{source_call.get('id')}: {command}",
+        source="runtime",
+        current_time=current_time,
+    )
+    return {
+        "session_id": session.get("id"),
+        "task_id": recovery.get("task_id"),
+        "source_tool_call_id": source_call.get("id"),
+        "tool_call_id": tool_call.get("id"),
+        "tool": "run_tests",
+        "parameters": parameters,
+        "command": command,
+        "cwd": cwd,
+        "event_id": event_id,
+    }
+
+
+def run_runtime_native_work_recovery_step(step, args):
+    tool = step.get("tool") or "run_tests"
+    parameters = dict(step.get("parameters") or {})
+    try:
+        result = execute_work_tool(
+            tool,
+            parameters,
+            getattr(args, "allow_read", None) or [],
+        )
+        error = work_tool_result_error(tool, result)
+    except (OSError, ValueError) as exc:
+        result = None
+        error = str(exc)
+
+    completed_at = now_iso()
+    with state_lock():
+        state = load_state()
+        tool_call = finish_work_tool_call(
+            state,
+            step.get("session_id"),
+            step.get("tool_call_id"),
+            result=result,
+            error=error,
+        )
+        if not tool_call:
+            error = error or WORK_TOOL_RESULT_STALE_ERROR
+            tool_call = {
+                "id": step.get("tool_call_id"),
+                "tool": tool,
+                "status": "failed",
+                "result": result,
+                "error": error,
+            }
+        session = find_work_session(state, step.get("session_id"))
+        source_call = find_work_tool_call(session, step.get("source_tool_call_id"))
+        if source_call:
+            source_call["recovery_status"] = "superseded" if not error else "retry_failed"
+            source_call["recovered_by_tool_call_id"] = step.get("tool_call_id")
+            source_call["recovered_at"] = completed_at
+            for turn in (session or {}).get("model_turns") or []:
+                if turn.get("tool_call_id") != source_call.get("id"):
+                    continue
+                turn["recovery_status"] = source_call["recovery_status"]
+                turn["recovered_by_tool_call_id"] = step.get("tool_call_id")
+                turn["recovered_at"] = completed_at
+        runtime_status = state.setdefault("runtime_status", {})
+        runtime_status["last_native_work_recovery"] = {
+            "at": completed_at,
+            "action": "auto_retry_verification_completed" if not error else "auto_retry_verification_failed",
+            "session_id": step.get("session_id"),
+            "task_id": step.get("task_id"),
+            "source_tool_call_id": step.get("source_tool_call_id"),
+            "recovered_by_tool_call_id": step.get("tool_call_id"),
+            "tool": tool,
+            "command": step.get("command"),
+            "cwd": step.get("cwd"),
+            "status": (tool_call or {}).get("status"),
+            "error": error,
+        }
+        runtime_status["last_action"] = (
+            f"auto verifier recovery {'completed' if not error else 'failed'} "
+            f"session #{step.get('session_id')}"
+        )
+        save_state(state)
+
+    return {
+        "tool_call": tool_call,
+        "result": result,
+        "error": error,
+        "exit_code": (result or {}).get("exit_code"),
+    }
 
 
 def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
@@ -996,6 +1213,7 @@ def run_runtime(args):
             decision_plan = None
             action_plan = None
             native_work_step = None
+            native_recovery_step = None
             precomputed_effects = False
             current_time = None
             cycle_started_monotonic = None
@@ -1329,11 +1547,18 @@ def run_runtime(args):
                         recovery=native_skip_recovery,
                     )
                     if native_work_skip == "previous_native_work_step_failed":
-                        recover_previous_native_work_step_failure(
+                        native_recovery_step = prepare_runtime_native_work_verifier_recovery(
                             state,
+                            args,
                             event_id=event_id,
                             current_time=native_skip_time,
                         )
+                        if native_recovery_step is None:
+                            recover_previous_native_work_step_failure(
+                                state,
+                                event_id=event_id,
+                                current_time=native_skip_time,
+                            )
                     if native_work_step:
                         runtime_status["last_action"] = (
                             f"selected native work step for session #{native_work_step.get('session_id')}"
@@ -1344,6 +1569,27 @@ def run_runtime(args):
                     next_passive_at = time.time() + args.interval
 
             print(f"processed {processed_count} event(s) reason={reason}")
+            if native_recovery_step:
+                print(
+                    "recovering native work verifier "
+                    f"session=#{native_recovery_step.get('session_id')} "
+                    f"task=#{native_recovery_step.get('task_id')}"
+                )
+                recovery_result = run_runtime_native_work_recovery_step(native_recovery_step, args)
+                if recovery_result.get("error"):
+                    append_log(
+                        "- "
+                        f"{now_iso()}: native work verifier recovery failed "
+                        f"session={native_recovery_step.get('session_id')} "
+                        f"error={recovery_result.get('error')!r}"
+                    )
+                else:
+                    append_log(
+                        "- "
+                        f"{now_iso()}: native work verifier recovery completed "
+                        f"session={native_recovery_step.get('session_id')} "
+                        f"task={native_recovery_step.get('task_id')}"
+                    )
             if native_work_step:
                 print(
                     "advancing native work "
