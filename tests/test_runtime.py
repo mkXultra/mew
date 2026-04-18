@@ -216,6 +216,54 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNone(step)
         self.assertEqual(skip, "session_started_this_cycle")
 
+    def test_select_runtime_native_work_step_skips_unresolved_previous_failure(self):
+        state = default_state()
+        task = {"id": 1, "title": "Recover failure", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(
+            session,
+            event_id=7,
+            current_time="2026-04-18T00:00:00Z",
+        )
+        state["runtime_status"]["last_native_work_step"] = {
+            "finished_at": "2026-04-18T00:01:00Z",
+            "session_id": session["id"],
+            "task_id": task["id"],
+            "outcome": "failed",
+            "exit_code": 1,
+        }
+        session["updated_at"] = "2026-04-18T00:01:00Z"
+
+        step, skip = select_runtime_native_work_step(state)
+
+        self.assertIsNone(step)
+        self.assertEqual(skip, "previous_native_work_step_failed")
+
+    def test_select_runtime_native_work_step_allows_retry_after_new_session_activity(self):
+        state = default_state()
+        task = {"id": 1, "title": "Recover failure", "status": "ready", "plans": [], "runs": []}
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        mark_work_session_runtime_owned(
+            session,
+            event_id=7,
+            current_time="2026-04-18T00:00:00Z",
+        )
+        state["runtime_status"]["last_native_work_step"] = {
+            "finished_at": "2026-04-18T00:01:00Z",
+            "session_id": session["id"],
+            "task_id": task["id"],
+            "outcome": "failed",
+            "exit_code": 1,
+        }
+        session["updated_at"] = "2026-04-18T00:02:00Z"
+
+        step, skip = select_runtime_native_work_step(state)
+
+        self.assertIsNone(skip)
+        self.assertEqual(step["session_id"], session["id"])
+
     def test_should_defer_commit_for_new_user_message(self):
         state = default_state()
         add_event(state, "user_message", "test", {"text": "urgent"})
@@ -469,6 +517,107 @@ class RuntimeTests(unittest.TestCase):
                 self.assertTrue(state["test_observations"]["runner_acquired_state_lock"])
                 self.assertEqual(state["runtime_status"]["last_native_work_step"]["outcome"], "completed")
                 self.assertIn("runtime passive advance step completed", state["work_sessions"][0]["notes"][-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_does_not_blindly_retry_failed_native_work_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="before")
+                    session["default_options"] = {"allow_read": ["."]}
+                    save_state(state)
+
+                def fake_failure(command, cwd=None, timeout=None, **kwargs):
+                    return {
+                        "command": command,
+                        "argv": command.split(),
+                        "cwd": cwd or ".",
+                        "started_at": "start",
+                        "finished_at": "finish",
+                        "exit_code": 1,
+                        "timed_out": False,
+                        "stdout": "",
+                        "stderr": "failed",
+                    }
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record", side_effect=fake_failure) as first_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        first_code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(first_code, 0)
+                first_runner.assert_called_once()
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as second_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        second_code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(second_code, 0)
+                second_runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                self.assertEqual(
+                    state["runtime_status"]["last_native_work_step_skip"],
+                    "previous_native_work_step_failed",
+                )
             finally:
                 os.chdir(old_cwd)
 

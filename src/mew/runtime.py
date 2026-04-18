@@ -54,7 +54,7 @@ from .state import (
     update_runtime_effect,
 )
 from .sweep import sweep_agent_runs
-from .timeutil import now_iso
+from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
 from .work_session import (
     active_work_sessions,
@@ -292,6 +292,22 @@ def record_runtime_native_work_step_skip(
     return entry
 
 
+def previous_native_work_step_failure_unresolved(state, session, task=None):
+    last_step = (state.get("runtime_status") or {}).get("last_native_work_step") or {}
+    if last_step.get("outcome") != "failed":
+        return False
+    if str(last_step.get("session_id")) != str(session.get("id")):
+        return False
+    task_id = (task or {}).get("id") or session.get("task_id")
+    if last_step.get("task_id") is not None and str(last_step.get("task_id")) != str(task_id):
+        return False
+    failed_at = parse_time(last_step.get("finished_at"))
+    updated_at = parse_time(session.get("updated_at"))
+    if failed_at and updated_at and updated_at > failed_at:
+        return False
+    return True
+
+
 def select_runtime_native_work_step(state, *, current_event_id=None):
     active_sessions = active_work_sessions(state)
     if not active_sessions:
@@ -325,6 +341,8 @@ def select_runtime_native_work_step(state, *, current_event_id=None):
         return None, "work_session_running"
     if work_session_has_pending_write_approval(session):
         return None, "pending_write_approval"
+    if previous_native_work_step_failure_unresolved(state, session, task):
+        return None, "previous_native_work_step_failed"
 
     task_id = (task or {}).get("id") or session.get("task_id")
     return (
