@@ -979,6 +979,9 @@ Next action:
   commands use that exact item for chat auto-recovery hints instead of
   action-only matching. Validated with `tests/test_work_session.py`, all dogfood
   scenarios, and full pytest (`915 passed, 6 subtests passed`).
+- `mew status` and `mew brief` now surface the latest passive native-work skip
+  plus the structured recovery command, so a paused passive coding loop is
+  visible without requiring raw `runtime_status` JSON inspection.
 
 ## Current Roadmap Focus
 

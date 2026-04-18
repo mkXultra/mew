@@ -863,6 +863,31 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_status_reports_native_work_skip_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["runtime_status"]["last_native_work_step_skip"] = "pending_write_approval"
+                    state["runtime_status"]["last_native_work_skip_recovery"] = {
+                        "action": "resolve_pending_write_approval",
+                        "command": "mew work 1 --approve-tool 3",
+                    }
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["status"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("last_native_work_step_skip: pending_write_approval", output)
+                self.assertIn('"action": "resolve_pending_write_approval"', output)
+                self.assertIn("mew work 1 --approve-tool 3", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_wait_outbox_skips_quiet_read_event_messages(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -1036,6 +1036,10 @@ def build_brief(state, limit=5, kind=None):
         f"memory: {_first_nonempty(shallow.get('current_context'), shallow.get('latest_task_summary'), '(empty)')}",
         "",
     ]
+    skip_recovery = runtime.get("last_native_work_skip_recovery") or {}
+    if runtime.get("last_native_work_step_skip"):
+        recovery = f" next={skip_recovery.get('command')}" if skip_recovery.get("command") else ""
+        lines.insert(-1, f"native_work_skip: {runtime.get('last_native_work_step_skip')}{recovery}")
     snapshot_item = _project_snapshot_item(deep.get("project_snapshot"))
     if snapshot_item:
         project_types = ", ".join(snapshot_item.get("project_types") or []) or "(unknown)"

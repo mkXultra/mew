@@ -364,6 +364,21 @@ class BriefTests(unittest.TestCase):
         self.assertIn("#1 [verified] event=#2 reason=passive_tick", brief)
         self.assertEqual(data["recent_runtime_effects"][0]["status"], "verified")
 
+    def test_brief_surfaces_native_work_skip_recovery(self):
+        state = default_state()
+        state["runtime_status"]["last_native_work_step_skip"] = "pending_write_approval"
+        state["runtime_status"]["last_native_work_skip_recovery"] = {
+            "action": "resolve_pending_write_approval",
+            "command": "mew work 1 --approve-tool 3",
+        }
+
+        brief = build_brief(state)
+
+        self.assertIn(
+            "native_work_skip: pending_write_approval next=mew work 1 --approve-tool 3",
+            brief,
+        )
+
     def test_brief_marks_rolled_back_recent_writes(self):
         state = default_state()
         state["write_runs"].append(
