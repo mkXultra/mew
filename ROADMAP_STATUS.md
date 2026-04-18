@@ -576,6 +576,12 @@ Next action:
   `uv run pytest -q tests/test_runtime.py` (`29 passed`), native-advance
   dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`898 passed,
   6 subtests passed`).
+- Real Codex Web API dogfood after the verification-recovery work current:
+  `./mew dogfood --duration 80 ... --ai --auth auth.json --allow-native-work
+  --allow-native-advance` completed startup plus two passive ticks; it started
+  native work session #1, advanced one quiet resident step through Codex Web
+  API, completed the seeded task on the next tick, and ended with
+  `native_work_advance.by_outcome.completed=1`.
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 80 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-seed-note.json --json` completed startup plus two passive ticks; `native_work_advance.attempts=2`, `by_outcome.completed=2`, `last_native_work_step.outcome=completed`, and the earlier refused-complete warning is gone because the dogfood seed task is now marked as self-proposed.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
