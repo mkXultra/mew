@@ -5477,6 +5477,7 @@ def cmd_task_update(args):
             return 1
 
         changed = False
+        previous_status = task.get("status")
         for field in (
             "title",
             "kind",
@@ -5499,7 +5500,17 @@ def cmd_task_update(args):
             changed = True
 
         if changed:
-            task["updated_at"] = now_iso()
+            current_time = now_iso()
+            task["updated_at"] = current_time
+            if previous_status != "done" and task.get("status") == "done":
+                summary = getattr(args, "notes", None) or ""
+                resolve_open_questions_for_task(
+                    state,
+                    task["id"],
+                    reason="task marked done",
+                )
+                record_user_reported_verification(state, None, task, summary, current_time)
+                sync_task_done_state(state, task, summary, current_time)
             save_state(state)
     if getattr(args, "json", False):
         print(json.dumps(task_json_response(task, changed=changed), ensure_ascii=False, indent=2))

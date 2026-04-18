@@ -563,6 +563,68 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_task_update_done_syncs_completion_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_outbox_message, add_question, load_state, save_state, state_lock
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Finish docs"]), 0)
+                with state_lock():
+                    state = load_state()
+                    add_question(state, "Should I mark task #1 done?", related_task_id=1)
+                    state["memory"]["shallow"]["current_context"] = "stale context"
+                    state["agent_status"]["mode"] = "reviewing_tasks"
+                    state["agent_status"]["active_task_id"] = 1
+                    add_outbox_message(state, "info", "Next: plan task #1 with `mew task plan 1`")
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Finish docs",
+                            "goal": "Finish the task.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "update",
+                                "1",
+                                "--status",
+                                "done",
+                                "--notes",
+                                "Ran pytest; result: passed.",
+                            ]
+                        ),
+                        0,
+                    )
+
+                state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "done")
+                self.assertEqual(state["questions"][0]["status"], "answered")
+                self.assertEqual(state["attention"]["items"][0]["status"], "resolved")
+                self.assertEqual(
+                    state["memory"]["shallow"]["current_context"],
+                    "Task #1 completed: Finish docs. Ran pytest; result: passed.",
+                )
+                self.assertEqual(state["agent_status"]["mode"], "idle")
+                self.assertIn("Task #1 completed", state["agent_status"]["last_thought"])
+                self.assertIsNotNone(state["outbox"][0]["read_at"])
+                self.assertEqual(state["work_sessions"][0]["status"], "closed")
+                self.assertEqual(len(state["verification_runs"]), 1)
+                self.assertEqual(state["verification_runs"][0]["exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_task_done_summary_records_user_reported_verification(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

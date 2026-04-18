@@ -1001,6 +1001,11 @@ Next action:
   produced an unpaired source dry-run and was correctly stopped by
   `pairing_status: missing_test_edit`; after paired test dry-runs were added,
   the source edit was approved with focused pytest.
+- The same post-dogfood reentry exposed stale shallow memory after completing a
+  task with `mew task update --status done`; that path now shares the
+  `task done` completion sync, so related questions, active work sessions,
+  shallow memory, agent status, and user-reported verification are updated on
+  done transitions.
 
 ## Current Roadmap Focus
 
