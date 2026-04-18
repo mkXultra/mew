@@ -1951,10 +1951,13 @@ def run_work_session_scenario(workspace, env=None):
 
     (workspace / "README.md").write_text("# Dogfood\nnative hands\n", encoding="utf-8")
     (workspace / "src").mkdir(exist_ok=True)
+    (workspace / "src" / "mew").mkdir(exist_ok=True)
+    (workspace / "tests").mkdir(exist_ok=True)
     (workspace / "src" / "sample.py").write_text(
         "print('native hands')\nprint('line two')\nprint('line three')\n",
         encoding="utf-8",
     )
+    (workspace / "src" / "mew" / "pairing.py").write_text("PAIRING = 'old'\n", encoding="utf-8")
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
     (workspace / "large_no_newline.py").write_text("x" * 120000 + " old_call()", encoding="utf-8")
 
@@ -2056,6 +2059,23 @@ def run_work_session_scenario(workspace, env=None):
             "old_call()",
             "--new",
             "new_call()",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    source_edit_result = run(
+        [
+            "work",
+            "1",
+            "--tool",
+            "edit_file",
+            "--path",
+            "src/mew/pairing.py",
+            "--old",
+            "old",
+            "--new",
+            "new",
             "--allow-write",
             ".",
             "--json",
@@ -2495,6 +2515,7 @@ def run_work_session_scenario(workspace, env=None):
     line_read_data = _json_stdout(line_read_result)
     large_edit_data = _json_stdout(large_edit_result)
     large_no_newline_edit_data = _json_stdout(large_no_newline_edit_result)
+    source_edit_data = _json_stdout(source_edit_result)
     approve_data = _json_stdout(approve_result)
     approve_all_first_data = _json_stdout(approve_all_first_result)
     approve_all_second_data = _json_stdout(approve_all_second_result)
@@ -2530,6 +2551,20 @@ def run_work_session_scenario(workspace, env=None):
     workbench_session_writes = work_data.get("work_session_writes") or []
     timeline = timeline_data.get("timeline") or []
     cells = cells_data.get("cells") or []
+    def is_source_pairing_path(value):
+        normalized = str(value or "").replace("\\", "/")
+        return normalized == "src/mew/pairing.py" or normalized.endswith("/src/mew/pairing.py")
+
+    source_pairing_approvals = [
+        approval
+        for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
+        if is_source_pairing_path(approval.get("path"))
+    ]
+    source_pairing_cells = [
+        cell
+        for cell in cells
+        if cell.get("kind") == "approval" and is_source_pairing_path(cell.get("target"))
+    ]
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
     interrupted_review = interrupted_recovery.get("review_item") or {}
@@ -2683,6 +2718,35 @@ def run_work_session_scenario(workspace, env=None):
         and "old_call()" in (workspace / "large_no_newline.py").read_text(encoding="utf-8"),
         observed=large_no_newline_edit_data.get("tool_call"),
         expected="large no-newline dry-run edit reports full +1/-1 diff stats",
+    )
+    _scenario_check(
+        checks,
+        "work_source_edit_pairing_advisory",
+        source_edit_result.get("exit_code") == 0
+        and ((source_edit_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and ((source_pairing_approvals[0].get("pairing_status") or {}).get("status") if source_pairing_approvals else None)
+        == "missing_test_edit"
+        and (
+            (source_pairing_cells[0].get("pairing_status") or {}).get("status") if source_pairing_cells else None
+        )
+        == "missing_test_edit"
+        and "paired test missing" in ((source_pairing_cells[0].get("preview") or "") if source_pairing_cells else ""),
+        observed={
+            "tool_call_id": (source_edit_data.get("tool_call") or {}).get("id"),
+            "approval_path": (source_pairing_approvals[0] or {}).get("path") if source_pairing_approvals else None,
+            "approval_pairing_status": (
+                ((source_pairing_approvals[0] or {}).get("pairing_status") or {}).get("status")
+                if source_pairing_approvals
+                else None
+            ),
+            "cell_pairing_status": (
+                ((source_pairing_cells[0] or {}).get("pairing_status") or {}).get("status")
+                if source_pairing_cells
+                else None
+            ),
+            "cell_preview": (source_pairing_cells[0] or {}).get("preview") if source_pairing_cells else None,
+        },
+        expected="src/mew dry-run edits surface a non-blocking missing paired test advisory",
     )
     _scenario_check(
         checks,
@@ -2847,7 +2911,11 @@ def run_work_session_scenario(workspace, env=None):
         "work_resume_surfaces_stop_phase",
         resume_result.get("exit_code") == 0
         and (resume_data.get("resume") or {}).get("phase") == "stop_requested",
-        observed=resume_data.get("resume"),
+        observed={
+            "phase": (resume_data.get("resume") or {}).get("phase"),
+            "pending_approval_count": len((resume_data.get("resume") or {}).get("pending_approvals") or []),
+            "has_stop_request": bool((resume_data.get("resume") or {}).get("stop_request")),
+        },
         expected="resume reports phase=stop_requested",
     )
     _scenario_check(
@@ -2926,7 +2994,7 @@ def run_work_session_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "workbench_surfaces_tool_journal",
-        len(tool_calls) == 11
+        len(tool_calls) == 12
         and [call.get("tool") for call in tool_calls]
         == [
             "read_file",
@@ -2935,6 +3003,7 @@ def run_work_session_scenario(workspace, env=None):
             "run_command",
             "edit_file",
             "read_file",
+            "edit_file",
             "edit_file",
             "edit_file",
             "write_file",
@@ -2949,6 +3018,7 @@ def run_work_session_scenario(workspace, env=None):
             "run_command",
             "edit_file",
             "read_file",
+            "edit_file",
             "edit_file",
             "edit_file",
             "write_file",

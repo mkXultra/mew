@@ -961,6 +961,10 @@ Next action:
   advance outcomes and route the next tick toward a safe recovery/ask-user path
   instead of blind retry. That first deterministic recovery slice is now
   implemented; the next gap is richer recovery action selection after the skip.
+- Source edits under `src/mew/**` now surface an advisory paired-test status in
+  pending approvals and approval cells. `work-session` dogfood now exercises a
+  real dry-run source edit and verifies `missing_test_edit`, while the follow
+  schema documents the optional observer field.
 
 ## Current Roadmap Focus
 
