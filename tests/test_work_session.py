@@ -3467,6 +3467,134 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_recovers_interrupted_run_tests_with_verify_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c \"print('verify ok')\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover verification.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 1,
+                            "last_model_turn_id": 1,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "run_tests",
+                                    "status": "interrupted",
+                                    "parameters": {"command": command, "cwd": "."},
+                                    "result": None,
+                                    "summary": "interrupted verifier",
+                                    "error": "Interrupted before the verifier completed.",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "interrupted",
+                                    "decision_plan": {},
+                                    "action_plan": {},
+                                    "action": {"type": "run_tests", "command": command},
+                                    "tool_call_id": 1,
+                                    "summary": "interrupted verifier turn",
+                                    "error": "Interrupted before the work tool completed.",
+                                    "started_at": "then",
+                                    "finished_at": None,
+                                }
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                interrupted_resume = json.loads(stdout.getvalue())["resume"]
+                item = interrupted_resume["recovery_plan"]["items"][0]
+                self.assertEqual(item["action"], "retry_verification")
+                self.assertEqual(item["safety"], "verification")
+                self.assertEqual(item["command"], command)
+                self.assertIn("--allow-verify", item["hint"])
+                self.assertIn(shlex.quote(command), item["hint"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--recover-session", "--allow-read", ".", "--json"]), 0)
+                no_gate = json.loads(stdout.getvalue())
+                self.assertEqual(no_gate["recovery"]["action"], "needs_verify_gate")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                f"{shlex.quote(sys.executable)} -V",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                mismatch = json.loads(stdout.getvalue())
+                self.assertEqual(mismatch["recovery"]["action"], "needs_matching_verifier")
+                self.assertEqual(mismatch["recovery"]["command"], command)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "retry_tool")
+                self.assertEqual(report["recovery"]["tool"], "run_tests")
+                self.assertIn("world_state_before", report["recovery"])
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["exit_code"], 0)
+                self.assertIn("verify ok", report["tool_call"]["result"]["stdout"])
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+                self.assertEqual(session["model_turns"][0]["recovery_status"], "superseded")
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                recovered_resume = json.loads(stdout.getvalue())["resume"]
+                self.assertEqual(recovered_resume["phase"], "idle")
+                self.assertEqual(recovered_resume["failures"][0]["recovery_status"], "superseded")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recovery_next_action_prioritizes_missing_touched_paths(self):
         from mew.work_session import attach_work_resume_world_state
 
@@ -4037,7 +4165,7 @@ class WorkSessionTests(unittest.TestCase):
             "tool_calls": [
                 {
                     "id": 1,
-                    "tool": "run_tests",
+                    "tool": "run_command",
                     "status": "interrupted",
                     "parameters": {"command": "python mutate.py", "cwd": "."},
                 },
@@ -4095,7 +4223,7 @@ class WorkSessionTests(unittest.TestCase):
                                     "id": 1,
                                     "session_id": 1,
                                     "task_id": 1,
-                                    "tool": "run_tests",
+                                    "tool": "run_command",
                                     "status": "interrupted",
                                     "parameters": {"command": "python mutate.py"},
                                 }

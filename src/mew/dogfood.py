@@ -1792,7 +1792,7 @@ def run_work_session_scenario(workspace, env=None):
             "id": tool_call_id,
             "session_id": interrupted_session.get("id"),
             "task_id": 2,
-            "tool": "run_tests",
+            "tool": "run_command",
             "status": "interrupted",
             "parameters": {"command": f"{sys.executable} mutate.py", "cwd": "."},
             "result": None,
@@ -2009,6 +2009,52 @@ def run_work_session_scenario(workspace, env=None):
     write_json_file(state_path, state)
     done_resume_json_result = run(["work", "8", "--session", "--resume", "--json"])
 
+    verification_command = f"{sys.executable} -c \"print('dogfood verify recovered')\""
+    verification_task_result = run(["task", "add", "Interrupted verification task", "--kind", "coding", "--json"])
+    verification_task_data = _json_stdout(verification_task_result)
+    verification_task_id = (verification_task_data.get("task") or {}).get("id") or 9
+    run(["work", str(verification_task_id), "--start-session", "--json"])
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    verification_session = None
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("task_id")) == str(verification_task_id):
+            verification_session = candidate
+            break
+    if verification_session:
+        tool_call_id = next_id(state, "work_tool_call")
+        verification_call = {
+            "id": tool_call_id,
+            "session_id": verification_session.get("id"),
+            "task_id": verification_task_id,
+            "tool": "run_tests",
+            "status": "interrupted",
+            "parameters": {"command": verification_command, "cwd": "."},
+            "result": None,
+            "summary": "interrupted dogfood verifier",
+            "error": "Interrupted before the verifier completed.",
+            "started_at": now_iso(),
+            "finished_at": now_iso(),
+        }
+        verification_session.setdefault("tool_calls", []).append(verification_call)
+        verification_session["last_tool_call_id"] = tool_call_id
+        verification_session["updated_at"] = now_iso()
+        write_json_file(state_path, state)
+    verification_resume_result = run(["work", str(verification_task_id), "--session", "--resume", "--json"])
+    verification_recover_result = run(
+        [
+            "work",
+            str(verification_task_id),
+            "--recover-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verification_command,
+            "--json",
+        ]
+    )
+
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
     task_show_json_data = _json_stdout(task_show_json_result)
@@ -2035,6 +2081,8 @@ def run_work_session_scenario(workspace, env=None):
     task_done_json_seed_data = _json_stdout(task_done_json_seed_result)
     task_done_json_data = _json_stdout(task_done_json_result)
     done_resume_json_data = _json_stdout(done_resume_json_result)
+    verification_resume_data = _json_stdout(verification_resume_result)
+    verification_recover_data = _json_stdout(verification_recover_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -2060,6 +2108,9 @@ def run_work_session_scenario(workspace, env=None):
     interrupted_review = interrupted_recovery.get("review_item") or {}
     auto_recovery = auto_recover_data.get("auto_recovery") or {}
     auto_tool_call = auto_recovery.get("tool_call") or {}
+    verification_items = ((verification_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
+    verification_recovery = verification_recover_data.get("recovery") or {}
+    verification_tool_call = verification_recover_data.get("tool_call") or {}
     pending_diff_previews = [
         approval.get("diff_preview") or ""
         for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
@@ -2608,6 +2659,30 @@ def run_work_session_scenario(workspace, env=None):
         and (auto_recover_data.get("resume") or {}).get("phase") == "idle",
         observed=auto_recovery,
         expected="resume --auto-recover-safe retries interrupted read_file after read gate",
+    )
+    _scenario_check(
+        checks,
+        "work_recover_retries_interrupted_run_tests",
+        verification_resume_result.get("exit_code") == 0
+        and verification_recover_result.get("exit_code") == 0
+        and bool(verification_items)
+        and verification_items[0].get("action") == "retry_verification"
+        and verification_items[0].get("command") == verification_command
+        and verification_recovery.get("action") == "retry_tool"
+        and verification_recovery.get("tool") == "run_tests"
+        and verification_tool_call.get("status") == "completed"
+        and ((verification_tool_call.get("result") or {}).get("stdout") or "").find("dogfood verify recovered") >= 0,
+        observed={
+            "items": verification_items[:1],
+            "recovery": verification_recovery,
+            "tool_call": {
+                "id": verification_tool_call.get("id"),
+                "status": verification_tool_call.get("status"),
+                "tool": verification_tool_call.get("tool"),
+                "exit_code": (verification_tool_call.get("result") or {}).get("exit_code"),
+            },
+        },
+        expected="recover-session can rerun an interrupted run_tests verifier with explicit read and verify gates",
     )
     return _scenario_report("work-session", workspace, commands, checks)
 

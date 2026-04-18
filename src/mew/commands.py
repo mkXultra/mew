@@ -198,6 +198,7 @@ from .work_session import (
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
     WRITE_WORK_TOOLS,
+    work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_session_task,
 )
@@ -1717,6 +1718,17 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
     elif action == "needs_user_review":
         kind = "needs_human_review"
         command = item.get("review_hint") or _work_task_command(task_id, "--session", "--resume", "--allow-read", ".")
+    elif action == "retry_verification":
+        kind = "retry_verification"
+        command = item.get("hint") or _work_task_command(
+            task_id,
+            "--recover-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            item.get("command") or "<command>",
+        )
     elif action == "replan":
         kind = "replannable"
         command = item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", ".")
@@ -4960,6 +4972,63 @@ def latest_recoverable_interrupted_call(session):
     return None
 
 
+def interrupted_run_tests_command(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    return result.get("command") or parameters.get("command") or ""
+
+
+def work_recover_verification_blocker(args, session, source_call, *, safe_only=False):
+    if safe_only:
+        return {
+            "action": "needs_user",
+            "reason": "automatic safe recovery only retries read/git tools",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    if work_session_has_pending_write_approval(session):
+        return {
+            "action": "needs_user",
+            "reason": "resolve pending write approvals before retrying verification",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    if not getattr(args, "allow_read", None):
+        return {
+            "action": "needs_read_gate",
+            "reason": "verification recovery needs explicit --allow-read roots for world-state review",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    if not getattr(args, "allow_verify", False):
+        return {
+            "action": "needs_verify_gate",
+            "reason": "verification recovery needs explicit --allow-verify",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    source_command = interrupted_run_tests_command(source_call)
+    requested_command = getattr(args, "verify_command", None) or getattr(args, "command", None) or ""
+    if not requested_command:
+        return {
+            "action": "needs_verify_command",
+            "reason": "verification recovery needs the interrupted command passed as --verify-command",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "command": source_command,
+        }
+    if requested_command != source_command:
+        return {
+            "action": "needs_matching_verifier",
+            "reason": "verification recovery only reruns the exact interrupted command",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "command": source_command,
+            "requested_command": requested_command,
+        }
+    return None
+
+
 def _work_recover_session_once(args, progress=None, safe_only=False):
     progress = progress if progress is not None else work_tool_progress(args)
     with state_lock():
@@ -4971,7 +5040,11 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         if not source_call:
             return 0, {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
         tool = source_call.get("tool")
-        if tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+        if tool == "run_tests":
+            blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
+            if blocker:
+                return 0, {"recovery": blocker}
+        elif tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
             resume = build_work_session_resume(session, task=work_session_task(state, session))
             review_item = {}
             for item in (resume.get("recovery_plan") or {}).get("items") or []:
@@ -5019,8 +5092,15 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                     "tool": tool,
                 }
             }
+        if tool == "run_tests":
+            blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
+            if blocker:
+                return 0, {"recovery": blocker}
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
+        if tool == "run_tests":
+            parameters["command"] = interrupted_run_tests_command(source_call)
+            parameters["allow_verify"] = True
         tool_call = start_work_tool_call(state, session, tool, parameters)
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
@@ -5096,6 +5176,13 @@ def print_work_recovery_report(report):
         return
     if action == "needs_read_gate":
         print(recovery.get("reason") or "Safe recovery needs explicit --allow-read roots.")
+        return
+    if action in {"needs_verify_gate", "needs_verify_command", "needs_matching_verifier"}:
+        print(recovery.get("reason") or "Verification recovery needs explicit verifier gates.")
+        if recovery.get("command"):
+            print(f"command: {recovery.get('command')}")
+        if recovery.get("requested_command"):
+            print(f"requested_command: {recovery.get('requested_command')}")
         return
     if action == "retry_tool":
         tool_call = (report or {}).get("tool_call") or {}

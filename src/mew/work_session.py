@@ -1366,6 +1366,11 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 "inspect git status/diff and the touched path before retrying",
                 "retry or re-apply only after the verifier is known",
             ]
+        elif tool == "run_tests" and command:
+            action = "retry_verification"
+            safety = "verification"
+            reason = "interrupted verifier can be rerun with the same explicit verification command after checking world state"
+            review_steps = []
         elif tool in COMMAND_WORK_TOOLS:
             action = "needs_user_review"
             safety = "command"
@@ -1401,6 +1406,15 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-read {read_arg} --auto-recover-safe"
             if path:
                 item["path"] = path
+        if action == "retry_verification":
+            read_root = work_recovery_read_root(call)
+            read_arg = shlex.quote(read_root)
+            command_arg = shlex.quote(command)
+            item["hint"] = (
+                f"{mew_executable()} work{task_arg} --recover-session --allow-read {read_arg} "
+                f"--allow-verify --verify-command {command_arg}"
+            )
+            item["command"] = command
         if action == "needs_user_review":
             review_arg = shlex.quote(work_recovery_read_root(call))
             item["review_hint"] = f"{mew_executable()} work{task_arg} --session --resume --allow-read {review_arg}"
@@ -1437,6 +1451,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         next_action = "verify the world and review interrupted side-effecting work before retry"
     elif any(item.get("action") == "retry_tool" for item in items):
         next_action = "verify the world, then retry recoverable interrupted read/git tool after checking read roots"
+    elif any(item.get("action") == "retry_verification" for item in items):
+        next_action = "verify the world, then rerun the interrupted verifier with the same explicit command"
     else:
         next_action = "verify world state and replan the interrupted model step"
     return {"next_action": next_action, "items": items}
