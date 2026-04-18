@@ -843,6 +843,13 @@ Next action:
   tests.test_brief` (`56 tests`, pass), ruff on changed files (pass), direct
   `./mew desk --kind coding --json` output check, and full `uv run python -m
   unittest` (`982 tests`, pass).
+- Post-`e32f633` evaluator check: `claude-ultra` scored mew `6.5/10`, calling
+  it a real task-scoped resident shell but not yet a proven long-lived body;
+  `codex-ultra` scored mew `7.2/10`, preferring it over a fresh CLI for
+  interrupted scoped work while still preferring Claude Code/Codex CLI for
+  fast one-off edits. Both point at the same next blockers: cockpit fluency,
+  durable multi-day cadence, and stronger verification confidence before
+  finish/approval.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked
