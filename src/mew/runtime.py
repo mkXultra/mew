@@ -61,6 +61,7 @@ from .toolbox import run_command_record
 from .work_session import (
     active_work_sessions,
     add_work_session_note,
+    build_work_session_resume,
     find_work_session,
     mark_work_session_running_interrupted,
     work_session_has_pending_write_approval,
@@ -344,6 +345,8 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
     session_id = session.get("id")
     resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
     retry_command = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
+    recovery_plan = build_work_session_resume(session, task=task).get("recovery_plan") or {}
+    recovery_suggestion = native_work_recovery_suggestion_from_plan(recovery_plan, task_id=task_id)
     exit_part = ""
     if last_step.get("timed_out"):
         exit_part = "timed out"
@@ -352,7 +355,15 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
     reason = f" after {exit_part}" if exit_part else ""
     text = (
         f"Passive native work session #{session_id} for task #{task_id} failed{reason}. "
-        f"Inspect with `{resume_command}`. Should I retry with `{retry_command}`, keep it paused, "
+        f"Inspect with `{resume_command}`. "
+    )
+    if recovery_suggestion:
+        text += (
+            f"Recovery plan suggests {recovery_suggestion.get('label')}: "
+            f"`{recovery_suggestion.get('command')}`. "
+        )
+    text += (
+        f"Should I retry with `{retry_command}`, keep it paused, "
         "or close/replan the task?"
     )
     question, created = add_question(
@@ -382,9 +393,43 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
         "exit_code": last_step.get("exit_code"),
         "timed_out": bool(last_step.get("timed_out")),
     }
+    if recovery_suggestion:
+        recovery["recovery_plan_action"] = recovery_suggestion.get("action")
+        recovery["recovery_plan_command"] = recovery_suggestion.get("command")
+        recovery["recovery_plan_reason"] = recovery_suggestion.get("reason")
     runtime_status["last_native_work_recovery"] = recovery
     runtime_status["last_action"] = f"asked for native work recovery session #{session_id}"
     return recovery
+
+
+def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
+    items = (recovery_plan or {}).get("items") or []
+    if not items:
+        return {}
+    item = items[-1]
+    action = item.get("action") or ""
+    command = item.get("hint") or item.get("auto_hint") or item.get("review_hint") or ""
+    label = action.replace("_", " ") if action else "review"
+    if action == "retry_tool":
+        command = item.get("auto_hint") or item.get("hint") or command
+        label = "safe read/git recovery"
+    elif action == "retry_verification":
+        label = "verification recovery"
+    elif action == "needs_user_review":
+        command = item.get("review_hint") or command
+        label = "side-effect review"
+    elif action == "replan":
+        label = "replan"
+    if not command:
+        command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+    return {
+        "action": action,
+        "label": label,
+        "command": command,
+        "reason": (recovery_plan or {}).get("next_action") or item.get("reason") or "",
+        "tool_call_id": item.get("tool_call_id"),
+        "model_turn_id": item.get("model_turn_id"),
+    }
 
 
 def select_runtime_native_work_step(state, *, current_event_id=None):
