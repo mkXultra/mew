@@ -2332,7 +2332,91 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
     return execute_work_tool(tool, parameters, allowed_read_roots)
 
 
+def compact_repeat_guard_action(action):
+    return {
+        key: action.get(key)
+        for key in (
+            "kind",
+            "label",
+            "command",
+            "task_id",
+            "question_id",
+            "session_id",
+            "attention_id",
+            "effort_summary",
+        )
+        if action.get(key) not in (None, "")
+    }
+
+
+def work_session_guard_command(session, *parts):
+    command_parts = ["work"]
+    task_id = (session or {}).get("task_id")
+    if task_id is not None:
+        command_parts.append(task_id)
+    command_parts.extend(parts)
+    return mew_command(*command_parts)
+
+
+def repeat_guard_session_actions(session):
+    return [
+        {
+            "kind": "review_work_session",
+            "label": "Review current work session",
+            "command": work_session_guard_command(session, "--session", "--resume", "--allow-read", "."),
+            "task_id": (session or {}).get("task_id"),
+            "session_id": (session or {}).get("id"),
+        },
+        {
+            "kind": "steer_work_session",
+            "label": "Steer next work step",
+            "command": work_session_guard_command(session, "--steer", "<guidance>"),
+            "task_id": (session or {}).get("task_id"),
+            "session_id": (session or {}).get("id"),
+        },
+    ]
+
+
+def repeat_guard_desk_actions(state, session, limit=3):
+    try:
+        actions = build_desk_view_model(state).get("actions") or []
+    except (TypeError, ValueError):
+        return []
+    current_session_id = str((session or {}).get("id") or "")
+    current_task_id = str((session or {}).get("task_id") or "")
+    suggestions = []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if action.get("kind") == "resume_work" and (
+            str(action.get("session_id") or "") == current_session_id
+            or str(action.get("task_id") or "") == current_task_id
+        ):
+            continue
+        suggestions.append(compact_repeat_guard_action(action))
+        if len(suggestions) >= limit:
+            break
+    return suggestions
+
+
+def enrich_repeat_guard_with_actions(state, session, guard):
+    guard = dict(guard or {})
+    actions = [
+        compact_repeat_guard_action(action)
+        for action in repeat_guard_session_actions(session)
+    ]
+    actions.extend(repeat_guard_desk_actions(state, session))
+    if actions:
+        guard["suggested_actions"] = actions
+        guard["suggested_next"] = (
+            "review the current work session, steer the next step with new guidance, "
+            "or choose one of suggested_actions"
+        )
+    return guard
+
+
 def finish_repeated_work_tool_guard(state, session, tool, parameters, guard):
+    guard = enrich_repeat_guard_with_actions(state, session, guard)
     tool_call = start_work_tool_call(state, session, tool, parameters)
     tool_call["repeat_guard"] = guard
     tool_call = finish_work_tool_call(

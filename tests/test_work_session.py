@@ -8025,7 +8025,10 @@ class WorkSessionTests(unittest.TestCase):
                 }
                 with state_lock():
                     state = load_state()
+                    from mew.state import add_question
+
                     task = add_coding_task(state)
+                    add_question(state, "Need product input?")
                     session, _created = create_work_session(state, task)
                     for _index in range(2):
                         call = start_work_tool_call(state, session, "read_file", parameters)
@@ -8073,6 +8076,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(blocked_call["repeat_guard"]["reason"], "consecutive_repeat")
                 self.assertIsNone(blocked_call["result"])
                 self.assertEqual(blocked_call["repeat_guard"]["matching_tool_call_ids"], [1, 2])
+                suggested_actions = blocked_call["repeat_guard"]["suggested_actions"]
+                self.assertEqual(suggested_actions[0]["kind"], "review_work_session")
+                self.assertIn("mew work 1 --session --resume --allow-read .", suggested_actions[0]["command"])
+                self.assertEqual(suggested_actions[1]["kind"], "steer_work_session")
+                self.assertIn("mew work 1 --steer '<guidance>'", suggested_actions[1]["command"])
+                self.assertTrue(any(action.get("kind") == "reply" for action in suggested_actions))
                 self.assertEqual(session["model_turns"][-1]["status"], "failed")
                 from mew.work_loop import work_tool_call_for_model
 
@@ -8080,9 +8089,17 @@ class WorkSessionTests(unittest.TestCase):
                     work_tool_call_for_model(blocked_call)["repeat_guard"]["reason"],
                     "consecutive_repeat",
                 )
+                self.assertEqual(
+                    work_tool_call_for_model(blocked_call)["repeat_guard"]["suggested_actions"][0]["kind"],
+                    "review_work_session",
+                )
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["stop_reason"], "tool_failed")
                 self.assertEqual(snapshot["last_step"]["tool_call"]["repeat_guard"]["reason"], "consecutive_repeat")
+                self.assertEqual(
+                    snapshot["last_step"]["tool_call"]["repeat_guard"]["suggested_actions"][1]["kind"],
+                    "steer_work_session",
+                )
             finally:
                 os.chdir(old_cwd)
 
