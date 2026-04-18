@@ -8466,6 +8466,20 @@ def native_self_improve_read_root(task):
     return resolved
 
 
+def seed_native_self_improve_session_defaults(session, task):
+    if not session:
+        return
+    defaults = session.setdefault("default_options", {})
+    read_root = native_self_improve_read_root(task)
+    allow_read = []
+    for root in list(defaults.get("allow_read") or []) + [read_root]:
+        if root and root not in allow_read:
+            allow_read.append(root)
+    defaults["allow_read"] = allow_read
+    defaults["compact_live"] = True
+    session["updated_at"] = now_iso()
+
+
 def native_self_improve_controls(task, *, include_start_hint=False):
     read_root = native_self_improve_read_root(task)
     controls = {
@@ -8567,6 +8581,7 @@ def cmd_self_improve(args):
                 start_agent_run(state, run)
         if getattr(args, "start_session", False):
             session, session_created = create_work_session(state, task)
+            seed_native_self_improve_session_defaults(session, task)
         save_state(state)
 
     if getattr(args, "json", False):

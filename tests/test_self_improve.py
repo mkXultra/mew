@@ -15,7 +15,7 @@ from mew.self_improve import (
     create_self_improve_task,
     ensure_self_improve_plan,
 )
-from mew.state import default_state, load_state
+from mew.state import default_state, load_state, save_state
 from mew.timeutil import now_iso
 
 
@@ -363,6 +363,9 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(state["work_sessions"][0]["task_id"], 1)
                 self.assertEqual(state["work_sessions"][0]["status"], "active")
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["."])
+                self.assertTrue(defaults["compact_live"])
             finally:
                 os.chdir(old_cwd)
 
@@ -382,6 +385,8 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(data["task"]["id"], 1)
                 self.assertEqual(data["work_session"]["id"], 1)
                 self.assertEqual(data["work_session"]["task_id"], 1)
+                self.assertEqual(data["work_session"]["default_options"]["allow_read"], ["."])
+                self.assertTrue(data["work_session"]["default_options"]["compact_live"])
                 self.assertEqual(data["controls"]["work_cwd"], str(Path(tmp).resolve()))
                 self.assertEqual(
                     data["controls"]["continue"],
@@ -420,6 +425,37 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_start_session_seeds_defaults_on_reused_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    first_code = main(["self-improve", "--start-session", "--focus", "First focus"])
+                self.assertEqual(first_code, 0)
+
+                state = load_state()
+                state["work_sessions"][0]["default_options"] = {
+                    "allow_read": ["README.md"],
+                    "compact_live": False,
+                }
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    second_code = main(["self-improve", "--start-session", "--focus", "Second focus", "--json"])
+
+                self.assertEqual(second_code, 0)
+                data = json.loads(stdout.getvalue())
+                self.assertFalse(data["session_created"])
+                defaults = data["work_session"]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["README.md", "."])
+                self.assertTrue(defaults["compact_live"])
+                state = load_state()
+                self.assertEqual(state["work_sessions"][0]["default_options"]["allow_read"], ["README.md", "."])
+                self.assertTrue(state["work_sessions"][0]["default_options"]["compact_live"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_controls_use_task_cwd_read_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as workdir:
@@ -445,6 +481,10 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn(f"follow: mew work 1 --follow --quiet --allow-read {resolved} --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn(f"resume: mew work 1 --session --resume --allow-read {resolved}", output)
+                state = load_state()
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["allow_read"], [resolved])
+                self.assertTrue(defaults["compact_live"])
             finally:
                 os.chdir(old_cwd)
 
