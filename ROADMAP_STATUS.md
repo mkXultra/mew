@@ -1500,6 +1500,9 @@ Next action:
 - Workbench reentry now explains stale working memory with the specific
   later tool call or model turn that made it stale, so a returning resident can
   decide what to refresh without opening the full session detail view first.
+- Verifier coverage warnings are no longer trapped in the full resume view:
+  compact live session output and `work --follow-status` now surface the short
+  warning when the latest green verifier appears to miss the edited mew source.
 
 ## Current Roadmap Focus
 

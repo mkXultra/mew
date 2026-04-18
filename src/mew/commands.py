@@ -1103,6 +1103,21 @@ def _append_live_section(lines, title, items):
         lines.extend(f"  {line}" for line in str(item).splitlines())
 
 
+def _format_verification_coverage_warning_inline(warning):
+    if not warning:
+        return ""
+    command = clip_inline_text(warning.get("command") or "latest verifier", 120)
+    source = clip_inline_text(warning.get("source_path") or "edited source", 120)
+    expected = clip_inline_text(
+        warning.get("expected_command") or warning.get("expected_test_path") or "",
+        180,
+    )
+    text = f"verification_warning: {command} did not cover {source}"
+    if expected:
+        text += f"; expected {expected}"
+    return clip_inline_text(text, 360)
+
+
 def format_work_live_step_result(step, resume=None):
     action = step.get("action") or {}
     status = step.get("status") or "unknown"
@@ -1154,6 +1169,9 @@ def format_work_live_step_result(step, resume=None):
                 f"queued_followups: {len(queued_followups)} "
                 f"next={clip_inline_text(queued_followups[0].get('text'), 220)}"
             )
+        coverage_warning = resume.get("verification_coverage_warning") or {}
+        if coverage_warning:
+            session_lines.append(_format_verification_coverage_warning_inline(coverage_warning))
         memory = resume.get("working_memory") or {}
         if memory:
             if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
@@ -4937,6 +4955,7 @@ def _work_follow_status_from_snapshot(path, task_id=None):
     else:
         status = "stale"
     suggested_recovery = work_follow_status_suggested_recovery(status, snapshot_data=data, task_id=task_id)
+    resume = data.get("resume") or {}
     return {
         "snapshot_path": str(path),
         "status": status,
@@ -4951,6 +4970,7 @@ def _work_follow_status_from_snapshot(path, task_id=None):
         "producer_alive": producer_alive,
         "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
         "suggested_recovery": suggested_recovery,
+        "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
         "pending_approval_count": len(data.get("pending_approvals") or []),
@@ -4987,6 +5007,9 @@ def format_work_follow_status(data):
         lines.append(f"recovery: {recovery.get('kind') or '-'}")
         if recovery.get("command"):
             lines.append(f"recovery_command: {recovery.get('command')}")
+    coverage_warning = data.get("verification_coverage_warning") or {}
+    if coverage_warning:
+        lines.append(_format_verification_coverage_warning_inline(coverage_warning))
     return "\n".join(lines)
 
 

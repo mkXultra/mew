@@ -1667,6 +1667,23 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stale_memory_next: Use the old plan.", text)
         self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 
+    def test_work_live_step_result_surfaces_verification_coverage_warning(self):
+        text = format_work_live_step_result(
+            {"status": "completed", "action": {"type": "run_tests"}, "summary": "verified"},
+            resume={
+                "phase": "idle",
+                "verification_coverage_warning": {
+                    "command": "uv run python -m unittest tests.test_work_session",
+                    "source_path": "src/mew/commands.py",
+                    "expected_command": "uv run python -m unittest tests.test_commands",
+                },
+            },
+        )
+
+        self.assertIn("verification_warning:", text)
+        self.assertIn("did not cover src/mew/commands.py", text)
+        self.assertIn("expected uv run python -m unittest tests.test_commands", text)
+
     def test_work_live_step_result_surfaces_recurring_failure_ribbon(self):
         text = format_work_live_step_result(
             {"status": "failed", "action": {"type": "run_tests"}, "summary": "verification failed"},
@@ -13197,6 +13214,13 @@ class WorkSessionTests(unittest.TestCase):
                             "heartbeat_at": now_iso(),
                             "producer": {"pid": os.getpid()},
                             "pending_approvals": [{"tool_call_id": 3}],
+                            "resume": {
+                                "verification_coverage_warning": {
+                                    "command": "uv run python -m unittest tests.test_work_session",
+                                    "source_path": "src/mew/commands.py",
+                                    "expected_command": "uv run python -m unittest tests.test_commands",
+                                }
+                            },
                         }
                     ),
                     encoding="utf-8",
@@ -13210,7 +13234,18 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["producer_health"]["state"], "fresh")
                 self.assertEqual(data["suggested_recovery"], {})
                 self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(
+                    data["verification_coverage_warning"]["expected_command"],
+                    "uv run python -m unittest tests.test_commands",
+                )
                 self.assertIsInstance(data["heartbeat_age_seconds"], float)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("verification_warning:", text)
+                self.assertIn("did not cover src/mew/commands.py", text)
+                self.assertIn("expected uv run python -m unittest tests.test_commands", text)
             finally:
                 os.chdir(old_cwd)
 
