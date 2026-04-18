@@ -594,6 +594,9 @@ approve pending dry-run writes without scraping terminal text. See
 `docs/FOLLOW_REPLY_SCHEMA.md` for the snapshot and reply contract, including
 the stale-snapshot guard and `mew work <task-id> --follow-status --json`, or run
 `mew work <task-id> --reply-schema --json` to print a session-specific template.
+When a pending write touches `src/mew/**`, the approval entry may also include
+an advisory `pairing_status`; `missing_test_edit` means the same work session
+has not yet produced a paired changed write/edit under `tests/**`.
 Inline approval prompts show the clipped diff preview and the verification
 command that will run on approval.
 

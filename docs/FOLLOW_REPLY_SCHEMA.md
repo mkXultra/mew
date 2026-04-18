@@ -14,6 +14,10 @@ The snapshot is a local contract for another model or UI. It includes:
 - `pending_approvals`: top-level pending dry-run write approvals for observers
   with both chat-style `approve_hint`/`reject_hint` and CLI-style
   `cli_approve_hint`/`cli_reject_hint`
+  - approvals may include an advisory `pairing_status`. For `src/mew/**`
+    writes, `missing_test_edit` means no changed `tests/**` write/edit has been
+    produced in the same work session yet; `ok` points at the paired test tool
+    call. The advisory is informational and does not block approval.
 - `suggested_recovery`: a machine-readable recovery hint when the resume has a
   retryable interrupted read, side-effecting interruption, or replannable model
   turn. When the source is known, `effect_classification` explains the risk
