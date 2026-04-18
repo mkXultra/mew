@@ -209,7 +209,9 @@ from .work_session import (
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
+    suggested_verify_command_for_call_path,
     update_work_model_turn_plan,
+    verification_command_covers_suggestion,
     work_tool_repeat_guard,
     GIT_WORK_TOOLS,
     NON_PENDING_APPROVAL_STATUSES,
@@ -219,6 +221,7 @@ from .work_session import (
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_recovery_read_root,
+    work_call_path,
     work_session_runtime_command,
     work_session_task,
     work_write_pairing_status,
@@ -4283,6 +4286,46 @@ def _work_unpaired_source_approval_error(session, source_call, args):
     )
 
 
+def _maybe_promote_paired_source_verify_command(session, source_call, args, task=None):
+    if not session or not source_call or getattr(args, "verify_command", None):
+        return {}
+    defaults = session.setdefault("default_options", {})
+    if defaults.get("verify_disabled"):
+        return {}
+    suggestion = suggested_verify_command_for_call_path(work_call_path(source_call))
+    if not suggestion:
+        return {}
+    current = work_session_default_verify_command(session, task=task)
+    if verification_command_covers_suggestion(current, suggestion):
+        return {}
+    command = suggestion.get("command") or ""
+    if not command:
+        return {}
+    args.verify_command = command
+    args.allow_verify = True
+    defaults["allow_verify"] = True
+    defaults["verify_command"] = command
+    defaults["verify_disabled"] = False
+    promotion = {
+        "source": "paired_source_edit",
+        "source_path": suggestion.get("source_path") or "",
+        "test_path": suggestion.get("test_path") or "",
+        "command": command,
+        "previous_command": current,
+        "promoted_at": now_iso(),
+    }
+    defaults["verify_command_promotion"] = promotion
+    add_work_session_note(
+        session,
+        (
+            "promoted default verifier for paired source edit: "
+            f"{promotion['source_path']} -> {promotion['test_path']} with `{command}`"
+        ),
+        source="system",
+    )
+    return promotion
+
+
 def _apply_work_approval(args, approve_tool_id):
     progress = work_tool_progress(args)
     with state_lock():
@@ -4298,11 +4341,6 @@ def _apply_work_approval(args, approve_tool_id):
             print("mew: reply file was based on a stale work-session snapshot", file=sys.stderr)
             return 1, None
         task = work_session_task(state, session)
-        if not getattr(args, "verify_command", None):
-            inferred_verify_command = work_session_default_verify_command(session, task=task)
-            if inferred_verify_command:
-                args.verify_command = inferred_verify_command
-                args.allow_verify = True
         source_call = find_work_tool_call(session, approve_tool_id)
         if not source_call:
             print(f"mew: work tool call not found: {approve_tool_id}", file=sys.stderr)
@@ -4333,6 +4371,13 @@ def _apply_work_approval(args, approve_tool_id):
                 ),
                 source="system",
             )
+        if not getattr(args, "verify_command", None):
+            _maybe_promote_paired_source_verify_command(session, source_call, args, task=task)
+        if not getattr(args, "verify_command", None):
+            inferred_verify_command = work_session_default_verify_command(session, task=task)
+            if inferred_verify_command:
+                args.verify_command = inferred_verify_command
+                args.allow_verify = True
         parameters = _approval_parameters_from_call(source_call, args)
         tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)
         source_call["approval_status"] = "applying"
@@ -4439,6 +4484,31 @@ def _pending_approval_tool_ids(session):
     return ids
 
 
+def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_source_verifiers=False):
+    ids = _pending_approval_tool_ids(session)
+    if not promote_paired_source_verifiers:
+        return ids
+    calls_by_id = {call.get("id"): call for call in (session or {}).get("tool_calls") or []}
+    id_set = set(ids)
+    ordered = []
+    seen = set()
+    for approve_id in ids:
+        if approve_id in seen:
+            continue
+        call = calls_by_id.get(approve_id)
+        suggestion = suggested_verify_command_for_call_path(work_call_path(call))
+        current = work_session_default_verify_command(session, task=task)
+        if suggestion and not verification_command_covers_suggestion(current, suggestion):
+            pairing = work_write_pairing_status(session, call)
+            paired_id = pairing.get("paired_tool_call_id")
+            if paired_id in id_set and paired_id not in seen:
+                ordered.append(paired_id)
+                seen.add(paired_id)
+        ordered.append(approve_id)
+        seen.add(approve_id)
+    return ordered
+
+
 def cmd_work_approve_all(args):
     with state_lock():
         state = load_state()
@@ -4449,7 +4519,12 @@ def cmd_work_approve_all(args):
                 return 1
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1
-        approve_ids = _pending_approval_tool_ids(session)
+        task = work_session_task(state, session)
+        approve_ids = _pending_approval_tool_ids_for_batch(
+            session,
+            task=task,
+            promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
+        )
     if not approve_ids:
         if args.json:
             print(json.dumps({"approved": [], "count": 0}, ensure_ascii=False, indent=2))
@@ -5404,7 +5479,12 @@ def _apply_work_reply_approval_action(args, session_id, action, expected_updated
             print("mew: no active work session for reply approval", file=sys.stderr)
             return 1, approved
         if action["type"] == "approve_all":
-            approve_ids = _pending_approval_tool_ids(session)
+            task = work_session_task(state, session)
+            approve_ids = _pending_approval_tool_ids_for_batch(
+                session,
+                task=task,
+                promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
+            )
         else:
             approve_ids = [action["tool_call_id"]]
 

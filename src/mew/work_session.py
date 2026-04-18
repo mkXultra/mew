@@ -1768,6 +1768,10 @@ def _verification_command_covers_suggestion(command, suggestion):
     return False
 
 
+def verification_command_covers_suggestion(command, suggestion):
+    return _verification_command_covers_suggestion(command, suggestion)
+
+
 def verification_coverage_warning_for_calls(calls, task=None):
     suggestions = suggested_verify_commands_for_calls(calls)
     if not suggestions:

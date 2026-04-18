@@ -7610,6 +7610,228 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_promotes_paired_source_verifier(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import _apply_work_approval
+
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing_demo.py")
+                source.write_text("VALUE = 'before'\n", encoding="utf-8")
+                test_path = Path("tests/test_pairing_demo.py")
+                test_path.write_text(
+                    "import unittest\n\n"
+                    "class PairingDemoTests(unittest.TestCase):\n"
+                    "    def test_placeholder(self):\n"
+                    "        self.assertTrue(True)\n",
+                    encoding="utf-8",
+                )
+                stale_command = f"{sys.executable} -c \"print('stale verifier')\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                stale_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(source),
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(test_path),
+                                "--old",
+                                "self.assertTrue(True)",
+                                "--new",
+                                "self.assertEqual(1, 1)",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                captured_parameters = []
+
+                def fake_execute_work_tool(tool, parameters, allowed_read_roots, progress):
+                    captured_parameters.append(parameters)
+                    return {
+                        "path": parameters.get("path"),
+                        "changed": True,
+                        "written": True,
+                        "verification": {
+                            "exit_code": 0,
+                            "command": parameters.get("verify_command"),
+                            "cwd": ".",
+                        },
+                        "verification_exit_code": 0,
+                    }
+
+                args = SimpleNamespace(
+                    task_id="1",
+                    allow_write=["."],
+                    allow_read=[],
+                    allow_verify=False,
+                    verify_command=None,
+                    verify_cwd=".",
+                    verify_timeout=300.0,
+                    allow_unpaired_source_edit=False,
+                    progress=False,
+                    json=False,
+                )
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute_work_tool):
+                    code, data = _apply_work_approval(args, 1)
+
+                promoted_command = "uv run python -m unittest tests.test_pairing_demo"
+                self.assertEqual(code, 0)
+                self.assertEqual(data["tool_call"]["parameters"]["verify_command"], promoted_command)
+                self.assertEqual(captured_parameters[0]["verify_command"], promoted_command)
+                state = load_state()
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["verify_command"], promoted_command)
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command_promotion"]["previous_command"], stale_command)
+                self.assertEqual(defaults["verify_command_promotion"]["test_path"], "tests/test_pairing_demo.py")
+                notes = state["work_sessions"][0]["notes"]
+                self.assertIn("promoted default verifier for paired source edit", notes[-1]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_approve_all_applies_paired_test_before_promoted_source_verifier(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing_demo.py")
+                source.write_text("VALUE = 'before'\n", encoding="utf-8")
+                test_path = Path("tests/test_pairing_demo.py")
+                test_path.write_text(
+                    "import unittest\n"
+                    "from pathlib import Path\n\n"
+                    "class PairingDemoTests(unittest.TestCase):\n"
+                    "    def test_value(self):\n"
+                    "        self.assertIn('before', Path('src/mew/pairing_demo.py').read_text())\n",
+                    encoding="utf-8",
+                )
+                stale_command = f"{sys.executable} -c \"print('stale verifier')\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                stale_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(source),
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(test_path),
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--approve-all", "--allow-write", ".", "--json"]), 0)
+                approved = json.loads(stdout.getvalue())
+
+                promoted_command = "uv run python -m unittest tests.test_pairing_demo"
+                self.assertEqual(approved["count"], 2)
+                self.assertEqual(approved["approved"][0]["approved_tool_call"]["id"], 2)
+                self.assertEqual(approved["approved"][1]["approved_tool_call"]["id"], 1)
+                self.assertIn("after", source.read_text(encoding="utf-8"))
+                self.assertIn("after", test_path.read_text(encoding="utf-8"))
+                state = load_state()
+                session = state["work_sessions"][0]
+                self.assertEqual(session["default_options"]["verify_command"], promoted_command)
+                applied_source = session["tool_calls"][3]
+                self.assertEqual(applied_source["parameters"]["verify_command"], promoted_command)
+                self.assertEqual(applied_source["result"]["verification_exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_allows_exact_new_file_write_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
