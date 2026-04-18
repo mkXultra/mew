@@ -397,6 +397,9 @@ Evidence:
 - `mew dogfood --scenario resident-loop` now starts a real resident runtime,
   lets it process startup plus passive ticks, stops it cleanly, and checks that
   passive effects and stdout summaries were recorded.
+- Repeated passive waits on the same unresolved question now compact into a
+  single thought journal entry with `repeat_count`, preserving cadence evidence
+  without flooding long-running memory.
 
 Missing proof:
 
@@ -492,8 +495,8 @@ Next action:
 
 ## Latest Validation
 
-- `uv run pytest -q` current: `866 passed, 6 subtests passed`.
-- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
+- `uv run pytest -q` current: `867 passed, 6 subtests passed`.
+- `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, chat-cockpit, and work-session; runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, and observer reply-file checks.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
 - `uv run pytest -q` current: `813 passed, 6 subtests passed`.
 - `uv run pytest -q tests/test_dogfood.py` current: `34 passed`.

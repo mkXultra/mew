@@ -829,6 +829,10 @@ def run_resident_loop_scenario(workspace, env=None):
         effect for effect in state.get("runtime_effects", [])
         if effect.get("reason") == "passive_tick"
     ]
+    repeated_wait_thoughts = [
+        thought for thought in state.get("thought_journal", [])
+        if int(thought.get("repeat_count") or 1) >= 2
+    ]
     runtime_output = "\n".join(resident_report.get("runtime_output_tail") or [])
     passive_times = [
         parsed
@@ -877,6 +881,20 @@ def run_resident_loop_scenario(workspace, env=None):
         and all(effect.get("status") == "applied" for effect in passive_effects[-2:]),
         observed=runtime_effect_summary(state),
         expected="at least two applied passive_tick runtime effects",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_compacts_repeated_wait_thoughts",
+        bool(repeated_wait_thoughts),
+        observed=[
+            {
+                "id": thought.get("id"),
+                "repeat_count": thought.get("repeat_count"),
+                "last_event_id": thought.get("last_event_id"),
+            }
+            for thought in repeated_wait_thoughts[-3:]
+        ],
+        expected="repeated passive wait thoughts are compacted instead of appended every tick",
     )
     _scenario_check(
         checks,

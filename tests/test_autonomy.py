@@ -30,7 +30,7 @@ from mew.state import (
     has_open_question,
     migrate_state,
 )
-from mew.thoughts import format_thought_entry
+from mew.thoughts import format_thought_entry, record_thought_journal_entry
 from mew.timeutil import now_iso
 
 
@@ -252,6 +252,48 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(state["thought_journal"][-1]["dropped_threads"], [])
         context = build_context(state, second, "later")
         self.assertIsNone(context["thought_thread_warning"])
+
+    def test_thought_journal_compacts_repeated_passive_waits(self):
+        state = default_state()
+        decision_plan = {
+            "summary": "Waiting.",
+            "decisions": [{"type": "remember", "summary": "Waiting."}],
+        }
+        action_plan = {
+            "summary": "Waiting.",
+            "actions": [
+                {"type": "record_memory", "summary": "Waiting."},
+                {"type": "wait_for_user", "task_id": 1, "reason": "Question #1 is still unanswered."},
+            ],
+        }
+        counts = {"actions": 2, "messages": 0, "executed": 0, "waits": 1}
+
+        first = record_thought_journal_entry(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            "2026-04-18T00:00:00Z",
+            decision_plan,
+            action_plan,
+            counts,
+            cycle_reason="passive_tick",
+        )
+        second = record_thought_journal_entry(
+            state,
+            {"id": 2, "type": "passive_tick"},
+            "2026-04-18T00:01:00Z",
+            decision_plan,
+            action_plan,
+            counts,
+            cycle_reason="passive_tick",
+        )
+
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(state["thought_journal"]), 1)
+        self.assertEqual(state["next_ids"]["thought"], 2)
+        self.assertEqual(second["repeat_count"], 2)
+        self.assertEqual(second["last_event_id"], 2)
+        self.assertEqual(second["last_repeated_at"], "2026-04-18T00:01:00Z")
+        self.assertIn("repeats=2", format_thought_entry(second))
 
     def test_thought_journal_keeps_task_threads_when_wording_changes(self):
         state = default_state()

@@ -232,6 +232,63 @@ def dropped_thread_warning_for_context(state):
     }
 
 
+def _thought_action_types(thought):
+    return [
+        action.get("type") or "unknown"
+        for action in thought.get("actions", [])
+        if isinstance(action, dict)
+    ]
+
+
+def _thread_keys(state, threads):
+    return {
+        compact_thread_key(state, thread)
+        for thread in normalize_thread_list(threads)
+    }
+
+
+def repeated_passive_wait_thought(state, previous, entry):
+    if not previous or entry.get("event_type") != "passive_tick":
+        return False
+    if previous.get("event_type") != "passive_tick":
+        return False
+    counts = entry.get("counts") or {}
+    if counts.get("messages") or counts.get("executed"):
+        return False
+    if entry.get("resolved_threads") or entry.get("dropped_threads"):
+        return False
+    open_keys = _thread_keys(state, entry.get("open_threads"))
+    if not open_keys or open_keys != _thread_keys(state, previous.get("open_threads")):
+        return False
+    action_types = _thought_action_types(entry)
+    previous_action_types = _thought_action_types(previous)
+    allowed = {"record_memory", "wait_for_user"}
+    if "wait_for_user" not in action_types or "wait_for_user" not in previous_action_types:
+        return False
+    if any(action_type not in allowed for action_type in action_types):
+        return False
+    if any(action_type not in allowed for action_type in previous_action_types):
+        return False
+    return True
+
+
+def compact_repeated_passive_wait_thought(state, entry, current_time):
+    thoughts = state.get("thought_journal", [])
+    previous = thoughts[-1] if thoughts else None
+    if not repeated_passive_wait_thought(state, previous, entry):
+        return None
+    previous["repeat_count"] = int(previous.get("repeat_count") or 1) + 1
+    previous["last_repeated_at"] = current_time
+    previous["last_event_id"] = entry.get("event_id")
+    previous["summary"] = entry.get("summary")
+    previous["decision_summary"] = entry.get("decision_summary")
+    previous["action_summary"] = entry.get("action_summary")
+    previous["agent_mode"] = entry.get("agent_mode")
+    previous["agent_focus"] = entry.get("agent_focus")
+    previous["counts"] = dict(entry.get("counts") or {})
+    return previous
+
+
 def record_thought_journal_entry(
     state,
     event,
@@ -296,6 +353,9 @@ def record_thought_journal_entry(
         "actions": _compact_items(action_plan.get("actions")),
         "counts": dict(counts or {}),
     }
+    compacted = compact_repeated_passive_wait_thought(state, entry, current_time)
+    if compacted is not None:
+        return compacted
     state["next_ids"]["thought"] = entry_id + 1
     state.setdefault("thought_journal", []).append(entry)
     del state["thought_journal"][:-MAX_THOUGHT_JOURNAL_ENTRIES]
@@ -317,6 +377,9 @@ def recent_thoughts_for_context(state, limit=8):
             "dropped_threads": thought.get("dropped_threads", []),
             "dropped_thread_ratio": thought.get("dropped_thread_ratio", 0.0),
             "counts": thought.get("counts", {}),
+            "repeat_count": thought.get("repeat_count", 1),
+            "last_repeated_at": thought.get("last_repeated_at"),
+            "last_event_id": thought.get("last_event_id"),
         }
         for thought in reversed(thoughts)
     ]
@@ -327,6 +390,12 @@ def format_thought_entry(thought, details=False):
         f"#{thought.get('id')} event={thought.get('event_type')}#{thought.get('event_id')} "
         f"at={thought.get('at')} summary={thought.get('summary') or ''}"
     )
+    if int(thought.get("repeat_count") or 1) > 1:
+        line += (
+            f" repeats={thought.get('repeat_count')}"
+            f" last_event=#{thought.get('last_event_id')}"
+            f" last_at={thought.get('last_repeated_at')}"
+        )
     if not details:
         return line
     lines = [line]
