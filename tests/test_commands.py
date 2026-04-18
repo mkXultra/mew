@@ -4728,8 +4728,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("- /c\n", controls)
                 self.assertIn("- /follow\n", controls)
                 self.assertIn("- /work-session resume --allow-read .", controls)
+                self.assertIn("- /work-session details", controls)
                 self.assertIn("- /help work", controls)
-                self.assertNotIn("- /work-session details", controls)
                 self.assertNotIn("- /work-session timeline", controls)
                 self.assertNotIn("- /work-session interrupt", controls)
             finally:

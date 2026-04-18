@@ -2498,7 +2498,8 @@ def run_chat_cockpit_scenario(workspace, env=None):
         and "--model-backend" not in code_primary_controls
         and "--allow-read" not in code_primary_controls
         and "--act-mode" not in code_primary_controls
-        and "/work-session resume --allow-read ." in code_controls,
+        and "/work-session resume --allow-read ." in code_controls
+        and "/work-session details" in code_controls,
         observed=command_result_tail(code_result),
         expected="mew code startup keeps primary controls short while resume preserves read gates",
     )

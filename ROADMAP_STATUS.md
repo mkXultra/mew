@@ -1493,6 +1493,10 @@ Next action:
   a successful line-window `read_file` on the same target, the safe reobserve
   hint keeps that `line_start`/`line_count` instead of falling back to a broad
   full-file reread.
+- A follow-up self-improve pass tightened compact cockpit scanability:
+  compact controls now expose `/work-session details` directly before the
+  shorter `/help work` fallback, while keeping the primary `/c`/`/follow`
+  section short.
 
 ## Current Roadmap Focus
 

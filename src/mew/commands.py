@@ -10250,7 +10250,8 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
     if compact:
         lines.append("Inspect")
         lines.append(f"- /work-session resume {read_flags}")
-        lines.append("- /help work for details, diffs, tests, commands, manage, and advanced controls")
+        lines.append("- /work-session details")
+        lines.append("- /help work for diffs, tests, commands, manage, and advanced controls")
         return "\n".join(lines)
     lines.append("Inspect")
     lines.append(f"- /work-session resume {read_flags}")
