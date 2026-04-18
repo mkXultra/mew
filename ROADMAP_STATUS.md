@@ -1010,6 +1010,9 @@ Next action:
   finalization: if an apply tool call disappears while a long approval is
   running, `_apply_work_approval` no longer crashes on `None`; it marks the
   source approval failed and returns a clean error.
+- The same stale-finish guard is now shared by regular work tools, batch/live
+  tools, and recovery retries: missing finished tool calls are surfaced as
+  failed synthetic tool results instead of crashing the cockpit.
 
 ## Current Roadmap Focus
 

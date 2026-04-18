@@ -1844,6 +1844,53 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_tool_handles_missing_call_after_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                def delete_running_call(*_args, **_kwargs):
+                    with state_lock():
+                        state = load_state()
+                        state["work_sessions"][0]["tool_calls"] = []
+                        save_state(state)
+                    return {
+                        "path": str(Path("README.md").resolve()),
+                        "type": "file",
+                        "text": "ok",
+                        "truncated": False,
+                    }
+
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=delete_running_call):
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "read_file",
+                                "--path",
+                                "README.md",
+                                "--allow-read",
+                                ".",
+                                "--json",
+                            ]
+                        )
+
+                self.assertEqual(code, 1)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["tool_call"]["status"], "failed")
+                self.assertIn("work session changed during tool execution", data["tool_call"]["error"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_runs_tests_behind_verify_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

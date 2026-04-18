@@ -2093,6 +2093,9 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+            if not tool_call:
+                error = WORK_TOOL_RESULT_STALE_ERROR
+                tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
             save_state(state)
         tool_calls.append(tool_call)
         if progress:
@@ -3362,6 +3365,9 @@ def cmd_work_ai(args):
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+            if not tool_call:
+                error = WORK_TOOL_RESULT_STALE_ERROR
+                tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             turn = finish_work_model_turn(state, session_id, turn_id, tool_call_id=tool_call_id, error=error)
@@ -3598,6 +3604,20 @@ def _approval_parameters_from_call(call, args):
     parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or "."
     parameters["verify_timeout"] = getattr(args, "verify_timeout", None)
     return {key: value for key, value in parameters.items() if value is not None}
+
+
+WORK_TOOL_RESULT_STALE_ERROR = "work tool result could not be recorded; work session changed during tool execution"
+
+
+def _missing_finished_work_tool_call(tool, tool_call_id, error=WORK_TOOL_RESULT_STALE_ERROR):
+    tool_name = tool or "work_tool"
+    return {
+        "id": tool_call_id,
+        "tool": tool_name,
+        "status": "failed",
+        "error": error,
+        "summary": f"{tool_name} failed: {error}",
+    }
 
 
 def _work_unpaired_source_approval_error(session, source_call, args):
@@ -5243,6 +5263,9 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
         session = find_work_session(state, session_id)
         source_call = find_work_tool_call(session, parameters.get("recovered_from_tool_call_id"))
+        if not tool_call:
+            error = WORK_TOOL_RESULT_STALE_ERROR
+            tool_call = _missing_finished_work_tool_call(tool, tool_call_id, error)
         if source_call:
             source_call["recovery_status"] = "superseded" if not error else "retry_failed"
             source_call["recovered_by_tool_call_id"] = tool_call_id
@@ -5398,6 +5421,9 @@ def cmd_work_tool(args):
     with state_lock():
         state = load_state()
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
+        if not tool_call:
+            error = WORK_TOOL_RESULT_STALE_ERROR
+            tool_call = _missing_finished_work_tool_call(args.tool, tool_call_id, error)
         session = find_work_session(state, session_id)
         remember_successful_work_verification(session, args.tool, result)
         save_state(state)
