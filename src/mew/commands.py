@@ -96,6 +96,7 @@ from .programmer import (
     latest_task_plan,
 )
 from .question_view import format_question_context
+from .repair import repair_incomplete_runtime_effects
 from .self_improve import create_self_improve_task, ensure_self_improve_plan
 from .self_memory import (
     build_self_memory_view_model,
@@ -137,7 +138,6 @@ from .state import (
     save_state,
     state_digest,
     state_lock,
-    update_runtime_effect,
 )
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
@@ -6547,44 +6547,6 @@ def repair_stale_task_questions(state):
             }
         )
     return repairs
-
-def runtime_effect_recovery_hint(effect, old_status):
-    event_id = effect.get("event_id")
-    event_ref = "the selected event" if event_id is None else f"event #{event_id}"
-    if old_status in ("planning", "planned", "precomputing", "precomputed"):
-        return f"Re-run {event_ref}; no action was recorded as committed."
-    if old_status == "committing":
-        actions = ", ".join(effect.get("action_types") or []) or "unknown actions"
-        return f"Inspect effect #{effect.get('id')} before retrying; it stopped while committing {actions}."
-    return f"Inspect effect #{effect.get('id')} before retrying {event_ref}."
-
-def repair_incomplete_runtime_effects(state):
-    current_time = now_iso()
-    repairs = []
-    for effect in incomplete_runtime_effects(state):
-        old_status = effect.get("status")
-        recovery_hint = runtime_effect_recovery_hint(effect, old_status)
-        update_runtime_effect(
-            state,
-            effect.get("id"),
-            current_time=current_time,
-            status="interrupted",
-            error="Runtime stopped before this effect reached a terminal state.",
-            recovery_hint=recovery_hint,
-            finished_at=current_time,
-        )
-        repairs.append(
-            {
-                "type": "interrupted_runtime_effect",
-                "effect_id": effect.get("id"),
-                "event_id": effect.get("event_id"),
-                "old_status": old_status,
-                "new_status": "interrupted",
-                "recovery_hint": recovery_hint,
-            }
-        )
-    return repairs
-
 
 def repair_incomplete_work_sessions(state):
     return mark_running_work_interrupted(state)

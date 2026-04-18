@@ -42,7 +42,6 @@ from .state import (
     ensure_self,
     find_runtime_effect,
     has_pending_user_message,
-    incomplete_runtime_effects,
     load_state,
     read_desires,
     read_guidance,
@@ -54,6 +53,7 @@ from .state import (
     update_runtime_effect,
 )
 from .read_tools import resolve_allowed_path
+from .repair import repair_incomplete_runtime_effects
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
@@ -105,42 +105,9 @@ def set_runtime_stopped(state, stopped_at):
     runtime["last_action"] = "runtime stopped"
 
 
-def runtime_effect_recovery_hint(effect, old_status):
-    event_id = effect.get("event_id")
-    event_ref = "the selected event" if event_id is None else f"event #{event_id}"
-    if old_status in ("planning", "planned", "precomputing", "precomputed"):
-        return f"Re-run {event_ref}; no action was recorded as committed."
-    if old_status == "committing":
-        actions = ", ".join(effect.get("action_types") or []) or "unknown actions"
-        return f"Inspect effect #{effect.get('id')} before retrying; it stopped while committing {actions}."
-    return f"Inspect effect #{effect.get('id')} before retrying {event_ref}."
-
-
 def repair_runtime_startup_state(state, current_time=None):
     current_time = current_time or now_iso()
-    repairs = []
-    for effect in incomplete_runtime_effects(state):
-        old_status = effect.get("status")
-        recovery_hint = runtime_effect_recovery_hint(effect, old_status)
-        update_runtime_effect(
-            state,
-            effect.get("id"),
-            current_time=current_time,
-            status="interrupted",
-            error="Runtime stopped before this effect reached a terminal state.",
-            recovery_hint=recovery_hint,
-            finished_at=current_time,
-        )
-        repairs.append(
-            {
-                "type": "interrupted_runtime_effect",
-                "effect_id": effect.get("id"),
-                "event_id": effect.get("event_id"),
-                "old_status": old_status,
-                "new_status": "interrupted",
-                "recovery_hint": recovery_hint,
-            }
-        )
+    repairs = repair_incomplete_runtime_effects(state, current_time=current_time)
     if repairs:
         runtime = state.setdefault("runtime_status", {})
         runtime["last_startup_repairs"] = repairs[-20:]
