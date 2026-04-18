@@ -274,3 +274,72 @@ Judgment:
 - The remaining gap is broader polish: approval and recovery subcommands should
   be audited for the same Ctrl-C durability, and the recovery flow should avoid
   making the human know when `repair` is necessary.
+
+#### B1: Self-Improve Reentry After A Committed Fix
+
+Setup:
+
+- After committing B4 as `e03f6cd`, started a native self-improvement session:
+  `mew self-improve --start-session --focus "Audit the next highest-value
+  Ctrl-C recovery gap after B4..." --json`.
+- Mew created task #142 and work session #161.
+- Ran `mew work 142 --follow --quiet --auth auth.json --model-backend codex
+  --allow-read . --allow-write . --allow-verify --verify-command "uv run
+  python -m unittest tests.test_work_session" --compact-live --max-steps ...`.
+
+Observed mew advantage:
+
+- The resident model used the recent commit list to avoid repeating B4 and
+  searched the remaining Ctrl-C/recovery surface instead of starting from a
+  blank repo scan.
+- After a steer asking for a concrete target, it inspected the manual
+  work-tool interrupt path and made a small source edit: text-mode interrupted
+  work tools should always print an actionable `recovery_hint`, even on the
+  defensive missing-call fallback path.
+- The paired test edit failed verification and was rolled back, but the work
+  session preserved exactly what happened: source edit #856 succeeded,
+  attempted test edit #859 failed and rolled back, the intended hypothesis was
+  saved in working memory, and the safe reobserve path pointed back to
+  `tests/test_work_session.py`.
+- A human supervisor could take over without reconstructing the whole task,
+  correct the fallback command to use the task id rather than session id, add a
+  white-box regression, and verify through both normal commands and
+  `mew work 142 --tool run_tests`.
+
+Observed mew weakness:
+
+- The resident edit initially used `session_id` in a `mew work <id>` fallback
+  command, which is wrong because the CLI positional id is a task id. Fresh
+  review caught the same class of risk in B4; mew still needs better discipline
+  around command identity and CLI semantics.
+- The model's first pass was too abstract. It needed explicit steering to move
+  from "undercovered controls" to a concrete, testable behavior change.
+
+Change shipped:
+
+- Text-mode interrupted work-tool output now always prints a `recovery_hint`.
+  If the stored tool call is missing, the fallback command is built from
+  `tool_call.task_id`, then the reloaded session's task id, then the CLI task
+  id, never the session id.
+- Added a regression where task id and session id intentionally differ and the
+  stored call lookup is unavailable, proving the fallback command remains
+  task-scoped.
+
+Validation:
+
+- `mew work 142 --tool run_tests --command "uv run python -m unittest
+  tests.test_work_session.WorkSessionTests.test_work_tool_interrupt_text_fallback_hint_uses_task_id"
+  --allow-verify` passed and recorded the verification in the work session.
+- `tests.test_work_session`: `288 tests OK`.
+- `./mew dogfood --all`: pass.
+- Full pytest: `981 passed, 25 subtests`.
+- Fresh `codex-ultra` review: PASS. It judged the white-box fallback test worth
+  keeping because the missing-call branch is a defensive stale-state path.
+
+Judgment:
+
+- This is a real persistent-advantage win, but not a fully autonomous win.
+  Mew found and partially implemented the follow-up, then its durable session
+  record made the failed handoff cheap and safe.
+- The best current use is "resident coding buddy with supervised commits", not
+  "fully unattended self-improving engineer."

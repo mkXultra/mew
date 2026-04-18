@@ -1453,6 +1453,12 @@ Next action:
   records the tool call as `interrupted`, returns structured JSON under
   `--json`, exits 130, and can be recovered with the normal
   `recover-session` verifier retry flow.
+- Native self-improve task #142/session #161 then dogfooded that recovery
+  surface. Mew selected a small follow-up in text-mode interrupted tool output,
+  made the source edit, failed and rolled back the paired test edit, and still
+  left enough durable work-session context for a supervised handoff. The landed
+  follow-up always prints a task-scoped fallback `recovery_hint` if the stored
+  interrupted tool call is unavailable.
 
 ## Current Roadmap Focus
 
