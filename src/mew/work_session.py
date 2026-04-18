@@ -1178,6 +1178,58 @@ def _turn_tool_call_ids(turn):
     return ids
 
 
+def _normalized_work_path_text(path):
+    return str(path or "").strip().replace("\\", "/")
+
+
+def _is_mew_source_path(path):
+    normalized = _normalized_work_path_text(path)
+    return normalized == "src/mew" or normalized.startswith("src/mew/") or "/src/mew/" in normalized
+
+
+def _is_test_path(path):
+    normalized = _normalized_work_path_text(path)
+    return normalized == "tests" or normalized.startswith("tests/") or "/tests/" in normalized
+
+
+def _work_call_changed_write(call):
+    result = (call or {}).get("result") or {}
+    return (call or {}).get("tool") in WRITE_WORK_TOOLS and bool(result.get("changed"))
+
+
+def work_write_pairing_status(session, call):
+    """Return advisory test-pairing status for resident edits to mew source files."""
+    if not session or not call or not _work_call_changed_write(call):
+        return {}
+    source_path = work_call_path(call)
+    if not _is_mew_source_path(source_path):
+        return {}
+
+    paired = None
+    for candidate in session.get("tool_calls") or []:
+        if candidate.get("id") == call.get("id"):
+            continue
+        if _work_call_changed_write(candidate) and _is_test_path(work_call_path(candidate)):
+            paired = candidate
+            break
+
+    if paired:
+        return {
+            "status": "ok",
+            "source_path": source_path,
+            "required": "tests/** write/edit in the same work session",
+            "paired_tool_call_id": paired.get("id"),
+            "paired_path": work_call_path(paired),
+        }
+    return {
+        "status": "missing_test_edit",
+        "source_path": source_path,
+        "required": "tests/** write/edit in the same work session",
+        "reason": "mew source edit has no paired test write/edit in the same work session",
+        "advisory": True,
+    }
+
+
 def _latest_tool_call_after_memory(turn, calls):
     if not turn or not calls:
         return None
@@ -1599,33 +1651,35 @@ def build_work_session_resume(session, task=None, limit=8):
             write_path = path or "."
             diff = result.get("diff") or ""
             diff_stats = _result_diff_stats(result, diff)
-            pending_approvals.append(
-                {
-                    "tool_call_id": tool_call_id,
-                    "tool": call.get("tool"),
-                    "path": path,
-                    "summary": call.get("summary") or "",
-                    "approval_status": call.get("approval_status") or "",
-                    "approval_error": call.get("approval_error") or "",
-                    "diff_stats": diff_stats,
-                    "diff_preview": format_diff_preview(diff, max_chars=1200, diff_stats=diff_stats),
-                    "approve_hint": (
-                        f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
-                        f"--allow-verify --verify-command {verify_command_hint}"
-                    ),
-                    "reject_hint": f"/work-session reject {tool_call_id} <reason>",
-                    "cli_approve_hint": work_task_command(
-                        "--approve-tool",
-                        tool_call_id,
-                        "--allow-write",
-                        write_path,
-                        "--allow-verify",
-                        "--verify-command",
-                        verify_command or "<command>",
-                    ),
-                    "cli_reject_hint": work_task_command("--reject-tool", tool_call_id, "--reject-reason", "<reason>"),
-                }
-            )
+            pairing_status = work_write_pairing_status(session, call)
+            approval = {
+                "tool_call_id": tool_call_id,
+                "tool": call.get("tool"),
+                "path": path,
+                "summary": call.get("summary") or "",
+                "approval_status": call.get("approval_status") or "",
+                "approval_error": call.get("approval_error") or "",
+                "diff_stats": diff_stats,
+                "diff_preview": format_diff_preview(diff, max_chars=1200, diff_stats=diff_stats),
+                "approve_hint": (
+                    f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
+                    f"--allow-verify --verify-command {verify_command_hint}"
+                ),
+                "reject_hint": f"/work-session reject {tool_call_id} <reason>",
+                "cli_approve_hint": work_task_command(
+                    "--approve-tool",
+                    tool_call_id,
+                    "--allow-write",
+                    write_path,
+                    "--allow-verify",
+                    "--verify-command",
+                    verify_command or "<command>",
+                ),
+                "cli_reject_hint": work_task_command("--reject-tool", tool_call_id, "--reject-reason", "<reason>"),
+            }
+            if pairing_status:
+                approval["pairing_status"] = pairing_status
+            pending_approvals.append(approval)
 
     approve_all_hint = ""
     cli_approve_all_hint = ""
@@ -1852,6 +1906,15 @@ def format_work_session_resume(resume):
                 lines.append(f"  approve: {approval.get('approve_hint')}")
             if approval.get("reject_hint"):
                 lines.append(f"  reject: {approval.get('reject_hint')}")
+            pairing = approval.get("pairing_status") or {}
+            if pairing:
+                lines.append(f"  pairing_status: {pairing.get('status')}")
+                if pairing.get("reason"):
+                    lines.append(f"  pairing_reason: {pairing.get('reason')}")
+                if pairing.get("paired_tool_call_id") is not None:
+                    lines.append(
+                        f"  paired_test: #{pairing.get('paired_tool_call_id')} {pairing.get('paired_path') or ''}".rstrip()
+                    )
     else:
         lines.append("(none)")
 

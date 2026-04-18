@@ -18,9 +18,11 @@ from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
 from mew.work_session import (
+    build_work_session_resume,
     create_work_session,
     format_diff_preview,
     format_work_action,
+    format_work_session_resume,
     format_work_session_tests,
     select_work_recovery_plan_item,
     work_recovery_effect_classification,
@@ -322,6 +324,113 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approve_once: mew work 9 --approve-tool 3 --allow-write README.md --allow-verify --verify-command 'uv run pytest -q'", text)
         self.assertIn("reject_with_feedback: mew work 9 --reject-tool 3 --reject-reason <feedback>", text)
         self.assertIn("id: s3:approval:3", text)
+
+    def test_source_edit_approval_surfaces_missing_test_pairing(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Pairing",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "tool_call_ids": [3],
+                    "action": {"type": "batch"},
+                    "summary": "edit source only",
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                        "diff_stats": {"added": 1, "removed": 1},
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        approval = resume["pending_approvals"][0]
+        cells = build_work_session_cells(session, limit=None)
+        approval_cell = [cell for cell in cells if cell["kind"] == "approval"][0]
+        text = format_work_session_cells(session, limit=None)
+        resume_text = format_work_session_resume(resume)
+
+        self.assertEqual(approval["pairing_status"]["status"], "missing_test_edit")
+        self.assertTrue(approval["pairing_status"]["advisory"])
+        self.assertEqual(approval_cell["pairing_status"]["status"], "missing_test_edit")
+        self.assertIn("paired test missing", approval_cell["preview"])
+        self.assertIn("pairing_status: missing_test_edit", text)
+        self.assertIn("pairing_status: missing_test_edit", resume_text)
+
+    def test_source_edit_approval_marks_paired_test_write_ok(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Pairing",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "tool_call_ids": [3, 4],
+                    "action": {"type": "batch"},
+                    "summary": "edit source and tests",
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/pairing.py\n+++ b/src/mew/pairing.py\n@@ -1 +1 @@\n-old\n+new\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- /dev/null\n+++ b/tests/test_pairing.py\n@@ -0,0 +1 @@\n+def test_pairing(): pass\n",
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        source_approval = [
+            approval for approval in resume["pending_approvals"] if approval["path"] == "src/mew/pairing.py"
+        ][0]
+        test_approval = [
+            approval for approval in resume["pending_approvals"] if approval["path"] == "tests/test_pairing.py"
+        ][0]
+        cells = build_work_session_cells(session, limit=None)
+        source_approval_cell = [
+            cell for cell in cells if cell["kind"] == "approval" and cell["target"] == "src/mew/pairing.py"
+        ][0]
+
+        self.assertEqual(source_approval["pairing_status"]["status"], "ok")
+        self.assertEqual(source_approval["pairing_status"]["paired_tool_call_id"], 4)
+        self.assertEqual(source_approval_cell["pairing_status"]["status"], "ok")
+        self.assertNotIn("pairing_status", test_approval)
+        self.assertNotIn("paired test missing", source_approval_cell["preview"])
 
     def test_work_session_cells_pane_is_available_from_cli(self):
         old_cwd = os.getcwd()
@@ -6010,6 +6119,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("instead of repeating same-file searches", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("exact old and new strings", prompt)
+        self.assertIn("include a paired tests/ change", prompt)
+        self.assertIn("record the intended test in working_memory.next_step", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)

@@ -10,6 +10,7 @@ from .work_session import (
     diff_line_counts,
     format_diff_preview,
     latest_work_verify_command,
+    work_write_pairing_status,
 )
 
 
@@ -402,6 +403,9 @@ def approval_cell(session, call):
         preview_prefix = "approval failed; retry or reject"
     else:
         preview_prefix = "approval needed"
+    pairing_status = work_write_pairing_status(session, call)
+    if pairing_status.get("status") == "missing_test_edit":
+        preview_prefix += "; paired test missing"
     preview = f"{preview_prefix} for {call.get('tool')} #{call.get('id')} {path}".strip()
     cell = _cell_base(
         session,
@@ -415,6 +419,8 @@ def approval_cell(session, call):
     )
     cell["operation"] = "file_write"
     cell["target"] = path
+    if pairing_status:
+        cell["pairing_status"] = pairing_status
     cell["actions"] = (
         {"review": f"mew work {task_ref} --session --resume"}
         if unavailable
@@ -432,6 +438,14 @@ def approval_cell(session, call):
             "dry_run: true",
             f"approval_status: {approval_status}" if approval_status else "",
             f"approval_error: {clip_inline_text(call.get('approval_error'), 240)}" if call.get("approval_error") else "",
+            f"pairing_status: {pairing_status.get('status')}" if pairing_status else "",
+            f"pairing_required: {pairing_status.get('required')}" if pairing_status else "",
+            f"pairing_reason: {pairing_status.get('reason')}" if pairing_status.get("reason") else "",
+            (
+                f"paired_test: #{pairing_status.get('paired_tool_call_id')} {pairing_status.get('paired_path')}"
+                if pairing_status.get("paired_tool_call_id") is not None
+                else ""
+            ),
             "approval_unavailable: session is not active" if unavailable else "",
             f"approve_once: {approve_command}" if not unavailable else "",
             f"reject: {reject_command}" if not unavailable else "",

@@ -110,6 +110,12 @@ The latest Persistent Advantage pass adds a deterministic `day-reentry`
 dogfood scenario and `focus` age display, proving that an active work session
 aged by more than a day still surfaces last-active time, working memory,
 resume/follow commands, notes, live file world state, and old activity events.
+Claude's follow-up evaluation judged mew inhabitable for small supervised
+coding slices, but called out paired implementation+test discipline as a top
+remaining blocker versus Claude Code/Codex CLI. The latest cockpit pass adds
+an advisory pairing status for `src/mew/**` write approvals and tells the
+resident to carry the intended paired test in `working_memory` when the write
+approval boundary stops the loop.
 
 ## Milestone 1: Native Hands
 
@@ -161,6 +167,10 @@ Evidence:
 - `mew work --ai` streams progress events to stderr in normal mode, and with `--progress` when JSON output is requested.
 - Work-session details now include a `Recent diffs` section for write/edit tool calls, including verification exit code and rollback state.
 - Pending write approvals in resume output and inline `--prompt-approval` now include clipped diff previews with added/removed line counts, so the cockpit can support approve/reject decisions without opening a separate details view.
+- Pending write approvals for changed `src/mew/**` files now carry advisory
+  `pairing_status`. If the work session has no changed `tests/**` write/edit,
+  approval cells and resume output show `missing_test_edit`; if a paired test
+  write exists in the session, they show the paired test tool id.
 - Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
 - `mew work --approve-all` and `/work-session approve all ...` can apply multiple pending dry-run write/edit calls with the same explicit write and verification gates, reducing scaffold dogfood approval churn.
 - `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
@@ -572,6 +582,11 @@ Evidence:
 - Native self-improvement task #106/session #133 used `mew work --follow` with Codex Web API to choose and attempt a real cockpit/recovery improvement. It selected recovery controls correctly and verification rollback caught the first implementation-only edit, but the resident then failed to produce a paired implementation+test edit without supervisor help. The landed change now surfaces concrete recovery commands from the recovery plan in cockpit controls, including side-effect review commands, and the friction is recorded on the work session.
 - Follow-up dogfood task #107 clarified the rollback friction without changing the retryable-approval model: failed approvals remain available for retry, but CLI controls now label them as `retry failed approval #<id>` instead of the misleading plain `approve tool #<id>`.
 - Native self-improvement task #108/session #134 targeted the deeper rollback-context gap from #106. The resident found the right context slice but again produced an implementation-only dry-run; the supervisor landed the paired test. Resident context now places verification stdout/stderr tails beside write-run records when `verification_run_id` is available, so failed write/rollback recovery can see the failing test output near the write that caused it.
+- Claude's current HEAD review identified the #106/#108 implementation-only
+  edit pattern as the top one-hour blocker. Source edit approvals now surface
+  paired-test advisory state, and the resident prompt explicitly says to pair
+  `src/mew` edits with `tests/` changes or preserve the intended test in
+  `working_memory.next_step` when the approval boundary stops the loop.
 - `codex-ultra` human-role dogfood reported that `mew work <task> --tests/--commands/--diffs` looked like inert flags unless `--session` was also passed; these flags now route directly to their focused work-session panes.
 - `codex-ultra` human-role dogfood on HEAD `600bb1a` verified persisted read, shell, write, and verify gates; read-only review probes on closed/done sessions; and combined `--tests --commands --diffs` panes using temporary tasks #66/#67, then closed the sessions and left tracked git status clean.
 - Direct work tools now reuse session default gates while merging explicit per-call roots, and sensitive write roots such as `.mew/...` are filtered from persisted session defaults and generated controls so copy-paste follow-ups do not advertise roots the write tool will refuse.
@@ -592,6 +607,16 @@ Next action:
 
 ## Latest Validation
 
+- Claude current-HEAD evaluation (`claude-ultra`, session
+  `e8ffa27e-5e27-45c9-b37f-68cca4897a95`) verdict: qualified yes for small,
+  supervised bounded coding work; the highest-leverage next slice was paired
+  test discipline for model-authored writes. Implemented advisory
+  `pairing_status` on `src/mew/**` pending approvals and prompt guidance to
+  carry the paired test plan across approval boundaries. Validated with
+  `uv run pytest -q tests/test_work_session.py` (`244 passed`),
+  `./mew dogfood --scenario work-session --cleanup --json` (pass),
+  `./mew dogfood --scenario all --cleanup --json` (pass), and full
+  `uv run pytest -q` (`908 passed, 6 subtests passed`).
 - Follow-up current: `mew focus` now shows active work-session age, and
   `dogfood --scenario day-reentry` proves day-scale reentry across focus,
   resume, world-state, notes, and activity history. Validated with
