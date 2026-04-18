@@ -160,6 +160,9 @@ work-session failure as a `risk:` line, while hiding only superseded recovered
 failures. This keeps failed verifier recovery or failed work tools visible from
 the top-level `mew work <task-id>` front door instead of requiring a full
 session resume.
+The newest dogfood friction fix makes `mew dogfood --all` an exact shortcut for
+`--scenario all`, so the command a resident/human naturally tries no longer
+collides with the `--allow-*` gate flags.
 
 ## Milestone 1: Native Hands
 
@@ -704,6 +707,17 @@ Next action:
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`964 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py tests/test_work_session.py`
   (pass), and `./mew dogfood --scenario all` (pass).
+- Interactive Parity current: dogfood task #132 captured a real CLI papercut
+  from this long session: `./mew dogfood --all` was rejected as ambiguous with
+  `--allow-*` flags. The parser now has an exact `--all` shortcut normalized to
+  `--scenario all`, rejects conflicting specific scenarios, and README lists
+  the shortcut. Validated with focused shortcut tests (`3 passed`), real
+  `./mew dogfood --all` (pass), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_commands.py tests/test_dogfood.py`
+  (`209 passed, 4 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`967 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/cli.py src/mew/commands.py tests/test_dogfood.py tests/test_commands.py`
+  (pass), and `git diff --check` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
   candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now

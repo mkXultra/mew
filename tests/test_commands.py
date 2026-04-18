@@ -3931,6 +3931,30 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(runner.call_args.args[0].send_message, ["hello"])
         self.assertIn("Mew dogfood report", stdout.getvalue())
 
+    def test_dogfood_all_shortcut_runs_all_scenarios(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "scenario": "all",
+            "status": "pass",
+            "scenarios": [],
+        }
+        with patch("mew.commands.run_dogfood_scenario", return_value=report) as runner:
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(["dogfood", "--all"])
+
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+        self.assertEqual(runner.call_args.args[0].scenario, "all")
+        self.assertIn("Mew dogfood scenario report", stdout.getvalue())
+
+    def test_dogfood_all_shortcut_rejects_specific_scenario(self):
+        with redirect_stderr(StringIO()) as stderr:
+            code = main(["dogfood", "--scenario", "trace-smoke", "--all"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--all cannot be combined with --scenario", stderr.getvalue())
+
     def test_dogfood_command_can_write_report_file(self):
         report = {
             "generated_at": "now",

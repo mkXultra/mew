@@ -229,6 +229,7 @@ uv run mew step --ai --auth auth.json --allow-read . --focus "Review the current
 uv run mew step --ai --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --focus "Make one small verified change"
 uv run mew snapshot --allow-read .
 uv run mew dogfood --ai --duration 60
+uv run mew dogfood --all
 uv run mew dogfood --source-workspace . --ai --duration 60
 uv run mew dogfood --source-workspace . --pre-snapshot --ai --duration 60
 uv run mew dogfood --source-workspace . --cycles 3 --duration 30

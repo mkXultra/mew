@@ -53,6 +53,14 @@ class DogfoodTests(unittest.TestCase):
             args = parser.parse_args(["dogfood", "--scenario", scenario, "--json"])
             self.assertEqual(args.scenario, scenario)
 
+    def test_cli_dogfood_all_shortcut_parses_exactly(self):
+        parser = build_parser()
+
+        args = parser.parse_args(["dogfood", "--all", "--json"])
+
+        self.assertTrue(args.all_scenarios)
+        self.assertIsNone(args.scenario)
+
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
 

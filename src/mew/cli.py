@@ -642,6 +642,12 @@ def build_parser():
         choices=("all", *DOGFOOD_SCENARIOS),
         help="run a deterministic CLI dogfood scenario instead of a timed runtime dogfood",
     )
+    dogfood_parser.add_argument(
+        "--all",
+        dest="all_scenarios",
+        action="store_true",
+        help="shortcut for --scenario all",
+    )
     dogfood_parser.add_argument("--workspace", help="workspace to use; default creates a temporary directory")
     dogfood_parser.add_argument(
         "--source-workspace",

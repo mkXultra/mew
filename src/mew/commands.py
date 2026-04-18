@@ -7508,6 +7508,11 @@ def cmd_next(args):
     return 0
 
 def cmd_dogfood(args):
+    if getattr(args, "all_scenarios", False):
+        if getattr(args, "scenario", "") and args.scenario != "all":
+            print("mew: --all cannot be combined with --scenario", file=sys.stderr)
+            return 1
+        args.scenario = "all"
     if args.allow_verify and not args.verify_command:
         print("mew: --allow-verify requires --verify-command", file=sys.stderr)
         return 1
