@@ -982,6 +982,10 @@ Next action:
 - `mew status` and `mew brief` now surface the latest passive native-work skip
   plus the structured recovery command, so a paused passive coding loop is
   visible without requiring raw `runtime_status` JSON inspection.
+- `native-advance` dogfood now includes a runtime-owned session blocked by a
+  pending dry-run write approval. It verifies passive advance does not call
+  `mew work --live` through the fake executable and records concrete
+  approve/reject recovery commands under `last_native_work_skip_recovery`.
 
 ## Current Roadmap Focus
 

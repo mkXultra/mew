@@ -1259,6 +1259,117 @@ def run_native_advance_scenario(workspace, env=None):
         expected="advance scenario uses an explicitly runtime-owned work session",
     )
 
+    approval_workspace = Path(workspace) / "pending-approval-skip"
+    approval_workspace.mkdir(parents=True, exist_ok=True)
+    approval_task_result = run_command(
+        _scenario_command(
+            "task",
+            "add",
+            "Native advance pending approval task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ),
+        approval_workspace,
+        timeout=15,
+        env=env,
+    )
+    commands.append(approval_task_result)
+    approval_task_data = _json_stdout(approval_task_result)
+    approval_task = (
+        approval_task_data.get("task")
+        if isinstance(approval_task_data.get("task"), dict)
+        else approval_task_data
+    )
+    approval_task_id = approval_task.get("id") if isinstance(approval_task, dict) else None
+    approval_state_path = approval_workspace / STATE_FILE
+    approval_state = migrate_state(read_json_file(approval_state_path, default_state()))
+    reconcile_next_ids(approval_state)
+    approval_session_id = next_id(approval_state, "work_session")
+    approval_tool_call_id = next_id(approval_state, "work_tool_call")
+    approval_time = now_iso()
+    approval_state.setdefault("work_sessions", []).append(
+        {
+            "id": approval_session_id,
+            "task_id": approval_task_id,
+            "status": "active",
+            "title": "Native advance pending approval task",
+            "goal": "Hold a pending approval during passive advance.",
+            "created_at": approval_time,
+            "updated_at": approval_time,
+            "runtime_managed": True,
+            "owner": "runtime",
+            "runtime_started_event_id": 99,
+            "default_options": {"allow_read": ["."]},
+            "last_tool_call_id": approval_tool_call_id,
+            "last_model_turn_id": None,
+            "tool_calls": [
+                {
+                    "id": approval_tool_call_id,
+                    "session_id": approval_session_id,
+                    "task_id": approval_task_id,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pending.py"},
+                    "result": {"dry_run": True, "changed": True, "diff": "+pending\n"},
+                    "summary": "pending approval dogfood write",
+                    "error": "",
+                    "started_at": approval_time,
+                    "finished_at": approval_time,
+                }
+            ],
+            "model_turns": [],
+        }
+    )
+    write_json_file(approval_state_path, approval_state)
+    approval_fake_log = approval_workspace / "fake-mew-approval-calls.json"
+    approval_fake_mew = write_fake_mew_executable(approval_workspace / "fake-mew-approval")
+    approval_env = dict(env or os.environ)
+    approval_env["MEW_EXECUTABLE"] = str(approval_fake_mew)
+    approval_env["MEW_FAKE_WORK_LOG"] = str(approval_fake_log)
+    approval_runtime_args = SimpleNamespace(**vars(runtime_args))
+    approval_runtime_args.duration = 1.5
+    approval_report = _run_dogfood_in_workspace(
+        approval_runtime_args,
+        approval_workspace,
+        created_temp=False,
+        env=approval_env,
+    )
+    commands.append(
+        {
+            "command": approval_report.get("command") or [],
+            "exit_code": approval_report.get("exit_code"),
+            "stdout": "\n".join(approval_report.get("runtime_output_tail") or []),
+            "stderr": "",
+        }
+    )
+    approval_state = read_json_file(approval_state_path, {})
+    approval_runtime = approval_state.get("runtime_status") or {}
+    approval_skip_recovery = approval_runtime.get("last_native_work_skip_recovery") or {}
+    approval_fake_calls = read_json_file(approval_fake_log, [])
+    _scenario_check(
+        checks,
+        "native_advance_pending_approval_records_recovery_hint",
+        approval_task_result.get("exit_code") == 0
+        and approval_report.get("exit_code") == 0
+        and approval_runtime.get("last_native_work_step_skip") == "pending_write_approval"
+        and approval_skip_recovery.get("action") == "resolve_pending_write_approval"
+        and "--approve-tool" in (approval_skip_recovery.get("command") or "")
+        and "--reject-tool" in (approval_skip_recovery.get("alternate_command") or "")
+        and not [
+            call for call in approval_fake_calls if (call.get("argv") or [])[:2] == ["work", str(approval_task_id)]
+        ],
+        observed={
+            "last_native_work_step_skip": approval_runtime.get("last_native_work_step_skip"),
+            "last_native_work_skip_recovery": approval_skip_recovery,
+            "fake_calls": approval_fake_calls,
+        },
+        expected="pending write approval skips passive advance and records concrete approve/reject recovery commands",
+    )
+
     failure_workspace = Path(workspace) / "failed-advance"
     failure_workspace.mkdir(parents=True, exist_ok=True)
     failure_task_result = run_command(

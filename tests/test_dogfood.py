@@ -293,6 +293,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "native-advance")
             self.assertIn("native_advance_invokes_mew_work_live_once_per_tick", text)
+            self.assertIn("native_advance_pending_approval_records_recovery_hint", text)
 
     def test_run_dogfood_passive_recovery_loop_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
