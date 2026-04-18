@@ -11183,6 +11183,10 @@ def chat_self_improve(rest):
             print(" ".join(run["command"]))
         else:
             print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
+            if run.get("status") != "running":
+                detail = clip_output(run.get("stderr") or run.get("result") or "", 500)
+                suffix = f": {detail}" if detail else ""
+                print(f"mew: self-improve run #{run['id']} status={run.get('status')}{suffix}")
 
 
 def run_chat_slash_command(line, chat_state):

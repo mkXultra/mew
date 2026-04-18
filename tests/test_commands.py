@@ -5205,6 +5205,36 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_self_improve_dispatch_surfaces_failed_start(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state
+
+                def fail_start(_state, run):
+                    run["status"] = "failed"
+                    run["stderr"] = "spawn failed"
+
+                stdin = StringIO("/self dispatch improve failing chat run\n/exit\n")
+                with (
+                    patch("mew.commands.start_agent_run", side_effect=fail_start),
+                    patch("sys.stdin", stdin),
+                    redirect_stdout(StringIO()) as stdout,
+                    redirect_stderr(StringIO()),
+                ):
+                    code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                self.assertEqual(code, 0)
+                output = stdout.getvalue()
+                self.assertIn("started self-improve run #1 status=failed", output)
+                self.assertIn("mew: self-improve run #1 status=failed: spawn failed", output)
+                state = load_state()
+                self.assertEqual(state["agent_runs"][0]["status"], "failed")
+                self.assertEqual(state["agent_runs"][0]["stderr"], "spawn failed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_chat_self_improve_native_skips_programmer_plan(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
