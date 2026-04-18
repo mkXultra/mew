@@ -14,6 +14,10 @@ The snapshot is a local contract for another model or UI. It includes:
 - `pending_approvals`: top-level pending dry-run write approvals for observers
   with chat-style `approve_hint`/`reject_hint` and CLI-style
   `cli_approve_hint`/`cli_reject_hint` when approval is currently allowed
+  - each approval includes `diff_preview` for terminal display plus a capped
+    `diff` for machine review. `diff_truncated` tells observers whether the
+    diff hit `diff_max_chars`; when true, refresh/re-read the file before
+    approving if the omitted tail matters.
   - approvals may include an advisory `pairing_status`. For `src/mew/**`
     writes, `missing_test_edit` means no changed `tests/**` write/edit has been
     produced in the same work session yet; `ok` points at the paired test tool

@@ -73,6 +73,7 @@ WORK_RECOVERY_EFFECT_CLASSES = {
     "unknown",
 }
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
+DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS = 50_000
 DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
@@ -134,6 +135,15 @@ def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS, diff_sta
         f"Diff preview (+{counts['added']} -{counts['removed']})\n"
         f"{clip_output(diff, max_chars)}"
     )
+
+
+def clipped_approval_diff(diff, max_chars=DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS):
+    diff = str(diff or "")
+    if len(diff) <= max_chars:
+        return diff, False
+    marker = "\n... output truncated ..."
+    prefix_limit = max(0, max_chars - len(marker))
+    return diff[:prefix_limit] + marker, True
 
 
 def active_work_session(state):
@@ -1687,6 +1697,7 @@ def build_work_session_resume(session, task=None, limit=8):
             write_path = path or "."
             diff = result.get("diff") or ""
             diff_stats = _result_diff_stats(result, diff)
+            approval_diff, diff_truncated = clipped_approval_diff(diff)
             pairing_status = work_write_pairing_status(session, call)
             approval = {
                 "tool_call_id": tool_call_id,
@@ -1697,6 +1708,9 @@ def build_work_session_resume(session, task=None, limit=8):
                 "approval_error": call.get("approval_error") or "",
                 "diff_stats": diff_stats,
                 "diff_preview": format_diff_preview(diff, max_chars=1200, diff_stats=diff_stats),
+                "diff": approval_diff,
+                "diff_truncated": diff_truncated,
+                "diff_max_chars": DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
                 "approve_hint": (
                     f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
                     f"--allow-verify --verify-command {verify_command_hint}"

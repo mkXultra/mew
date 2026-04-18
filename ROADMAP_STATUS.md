@@ -669,6 +669,17 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: pending write approvals in resume/follow JSON now include
+  a capped machine-review `diff` plus `diff_truncated` and `diff_max_chars`,
+  so observer agents can review the exact dry-run change from
+  `.mew/follow/latest.json` without scraping terminal preview text. Validated
+  with targeted approval/follow snapshot tests (`3 passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py`
+  (`438 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`958 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), `./mew dogfood --scenario all` (pass), and `codex-ultra` review
+  (`NO_BLOCKERS`).
 - Follow-up current: real dogfood task #122 used `mew code`/`mew work` as the
   buddy surface to probe paired-test approval UX, found misleading approve
   paths and narrow-test default pollution, and the tree now fixes both. Reviewed
@@ -1135,6 +1146,11 @@ Next action:
 - Native self-improve task #126/session #148 then chose a small UX follow-up:
   the native self-improve help and printed next commands now show
   `--compact-live`, matching the calmer long-session defaults used elsewhere.
+- External observer review then identified a small but important approval
+  visibility gap: top-level `pending_approvals` still only carried a short
+  preview. Resume/follow JSON now includes a capped machine-review `diff` with
+  `diff_truncated` and `diff_max_chars`, while terminal resume output stays on
+  the concise preview.
 
 ## Current Roadmap Focus
 

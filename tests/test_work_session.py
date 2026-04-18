@@ -27,6 +27,7 @@ from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
 from mew.work_cells import build_work_session_cells, format_work_session_cells
 from mew.work_session import (
+    DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
     build_work_session_resume,
     create_work_session,
     format_diff_preview,
@@ -1183,6 +1184,39 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("Diff preview (+1 -1)", preview)
         self.assertIn("... output truncated ...", preview)
+
+    def test_pending_approval_resume_includes_capped_full_diff(self):
+        diff = "--- a/large.py\n+++ b/large.py\n@@ -1 +1 @@\n-" + (
+            "x" * (DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS + 200)
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "large.py", "old": "x", "new": "y"},
+                    "result": {
+                        "path": "large.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": diff,
+                    },
+                }
+            ],
+        }
+
+        approval = build_work_session_resume(session)["pending_approvals"][0]
+
+        self.assertEqual(approval["diff_max_chars"], DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS)
+        self.assertTrue(approval["diff_truncated"])
+        self.assertLessEqual(len(approval["diff"]), DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS)
+        self.assertIn("--- a/large.py", approval["diff"])
+        self.assertIn("... output truncated ...", approval["diff"])
+        self.assertIn("Diff preview", approval["diff_preview"])
 
     def test_work_live_step_result_marks_stale_working_memory(self):
         text = format_work_live_step_result(
@@ -2878,6 +2912,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Diff preview (+1 -1)", resume["pending_approvals"][0]["diff_preview"])
                 self.assertIn("-before", resume["pending_approvals"][0]["diff_preview"])
                 self.assertIn("+after", resume["pending_approvals"][0]["diff_preview"])
+                self.assertIn("README.md", resume["pending_approvals"][0]["diff"])
+                self.assertIn("-before", resume["pending_approvals"][0]["diff"])
+                self.assertIn("+after", resume["pending_approvals"][0]["diff"])
+                self.assertFalse(resume["pending_approvals"][0]["diff_truncated"])
+                self.assertEqual(resume["pending_approvals"][0]["diff_max_chars"], DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS)
                 self.assertIn("/work-session approve 3", resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn(shlex.quote(command), resume["pending_approvals"][0]["approve_hint"])
                 self.assertIn("/work-session reject 3", resume["pending_approvals"][0]["reject_hint"])
@@ -10162,6 +10201,9 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(data["pending_approvals"][0]["tool_call_id"], 3)
                 self.assertEqual(data["pending_approvals"], data["resume"]["pending_approvals"])
+                self.assertEqual(data["pending_approvals"][0]["diff"], "--- notes.md\n+++ notes.md\n@@\n-before\n+after\n")
+                self.assertFalse(data["pending_approvals"][0]["diff_truncated"])
+                self.assertEqual(data["pending_approvals"][0]["diff_max_chars"], DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS)
                 self.assertEqual(data["pending_approvals"][0]["cli_approve_hint"], "mew work 1 --approve-tool 3 --allow-write notes.md --allow-verify --verify-command '<command>'")
                 self.assertEqual(data["pending_approvals"][0]["cli_reject_hint"], "mew work 1 --reject-tool 3 --reject-reason '<reason>'")
                 self.assertEqual(data["reply_template"]["actions"][0], {"type": "approve", "tool_call_id": 3})
