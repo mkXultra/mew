@@ -7892,6 +7892,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("instead of repeating same-file searches", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("exact old and new strings", prompt)
+        self.assertIn("do not reread the full file solely to prepare edit_file", prompt)
         self.assertIn("include a paired tests/ change", prompt)
         self.assertIn("pairing_status.suggested_test_path", prompt)
         self.assertIn("record the intended test in working_memory.next_step", prompt)

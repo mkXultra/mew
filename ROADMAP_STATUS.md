@@ -1476,6 +1476,10 @@ Next action:
   wording loop: after entering `mew code <task-id>`, the compact startup brief
   still said "Next: enter coding cockpit". Active coding cockpits now say the
   cockpit is already open and point to `/c`, `/follow`, or `/continue`.
+- Follow-up task #144 captured another concrete friction from that same
+  dogfood: once a resident has already read the exact line window needed for an
+  edit, the THINK prompt now tells it not to reread the whole file solely to
+  prepare `edit_file`.
 
 ## Current Roadmap Focus
 
