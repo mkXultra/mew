@@ -1568,6 +1568,117 @@ def latest_work_verify_command(calls, task=None):
     return command
 
 
+def _same_surface_audit_note_state(note_text):
+    text = str(note_text or "").casefold()
+    if not any(
+        marker in text
+        for marker in (
+            "same-surface audit",
+            "same surface audit",
+            "sibling code path",
+            "sibling surface",
+            "同系コード",
+            "周辺コード",
+        )
+    ):
+        return None
+    if any(
+        marker in text
+        for marker in (
+            "not checked",
+            "not covered",
+            "not done",
+            "not inspected",
+            "still needed",
+            "needs audit",
+            "audit needed",
+            "pending audit",
+            "未確認",
+            "未完了",
+        )
+    ):
+        return False
+    if any(
+        marker in text
+        for marker in (
+            "checked",
+            "covered",
+            "out of scope",
+            "out-of-scope",
+            "done",
+            "inspected",
+            "reviewed",
+            "確認",
+            "対象外",
+        )
+    ):
+        return True
+    return None
+
+
+def _same_surface_audit_item_time(item):
+    return str(
+        (item or {}).get("finished_at")
+        or (item or {}).get("updated_at")
+        or (item or {}).get("created_at")
+        or (item or {}).get("started_at")
+        or ""
+    )
+
+
+def _same_surface_audit_noted(session, latest_source_edit_at):
+    latest_state = None
+    for note in (session or {}).get("notes") or []:
+        note_time = str((note or {}).get("created_at") or "")
+        if latest_source_edit_at and (not note_time or note_time < latest_source_edit_at):
+            continue
+        state = _same_surface_audit_note_state((note or {}).get("text") or "")
+        if state is not None:
+            latest_state = state
+    return bool(latest_state)
+
+
+def _same_surface_audit_display_path(path):
+    normalized = _normalized_work_path_text(path)
+    if normalized == "src/mew" or normalized.startswith("src/mew/"):
+        return normalized
+    marker = "/src/mew/"
+    if marker in normalized:
+        return f"src/mew/{normalized.split(marker, 1)[1]}"
+    return normalized
+
+
+def build_same_surface_audit_checkpoint(session, task, calls):
+    if (task or {}).get("kind") != "coding" or (task or {}).get("status") == "done":
+        return {}
+    paths = []
+    latest_source_edit_at = ""
+    for call in calls or []:
+        if call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        raw_path = work_call_path(call)
+        if not raw_path or not _is_mew_source_path(raw_path):
+            continue
+        path = _same_surface_audit_display_path(raw_path)
+        result = call.get("result") or {}
+        if not (result.get("changed") or result.get("applied") or result.get("written")):
+            continue
+        if path not in paths:
+            paths.append(path)
+        edit_time = _same_surface_audit_item_time(call)
+        if edit_time and edit_time >= latest_source_edit_at:
+            latest_source_edit_at = edit_time
+    if not paths:
+        return {}
+    noted = _same_surface_audit_noted(session, latest_source_edit_at)
+    return {
+        "status": "noted" if noted else "needed",
+        "reason": "src/mew source edits should inspect sibling code paths on the same surface before done",
+        "paths": paths[-3:],
+        "prompt": "search nearby command/json/control peers and record why they are covered or out of scope",
+    }
+
+
 def latest_work_verification_state(calls, task=None):
     for call in reversed(list(calls or [])):
         result = call.get("result") or {}
@@ -2689,6 +2800,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     user_preferences = build_work_user_preferences(state, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
+    same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
 
     return {
         "session_id": session.get("id"),
@@ -2721,6 +2833,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "recent_decisions": recent_decisions,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
+        "same_surface_audit": same_surface_audit,
         "effort": effort,
         "context": build_work_context_metrics(calls, turns),
         "stop_request": (
@@ -2933,6 +3046,16 @@ def format_work_session_resume(resume):
             lines.append(f"- {note.get('created_at') or ''} [{source}] {note.get('text') or ''}".strip())
     else:
         lines.append("(none)")
+
+    audit = resume.get("same_surface_audit") or {}
+    if audit:
+        lines.extend(["", "Same-surface audit"])
+        lines.append(f"status={audit.get('status')} reason={audit.get('reason')}")
+        paths = audit.get("paths") or []
+        if paths:
+            lines.append(f"paths: {', '.join(str(path) for path in paths)}")
+        if audit.get("prompt"):
+            lines.append(f"prompt: {audit.get('prompt')}")
 
     memory = resume.get("working_memory") or {}
     if memory:

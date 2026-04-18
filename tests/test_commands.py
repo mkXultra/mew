@@ -2168,6 +2168,13 @@ class CommandTests(unittest.TestCase):
                         result={"path": "README.md", "content": "fresh content\n"},
                     )
                     finish_work_model_turn(state, session["id"], turn["id"], tool_call_id=call["id"])
+                    edit_call = start_work_tool_call(state, session, "edit_file", {"path": "src/mew/commands.py"})
+                    finish_work_tool_call(
+                        state,
+                        session["id"],
+                        edit_call["id"],
+                        result={"path": "src/mew/commands.py", "changed": True},
+                    )
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -2183,7 +2190,8 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("memory: stale; refresh before relying on next_step", output)
                 self.assertIn("stale_next_step: Edit after checking the latest README.", output)
                 self.assertNotIn("\nnext_step: Edit after checking the latest README.", output)
-                self.assertIn("stale_after_tool_call: #1 (read_file ran)", output)
+                self.assertIn("stale_after_tool_call: #2 (edit_file ran)", output)
+                self.assertIn("same_surface_audit: needed for src/mew/commands.py", output)
                 self.assertIn("--allow-verify --verify-command 'uv run pytest'", output)
                 self.assertIn("mew reply 1", output)
 

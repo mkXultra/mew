@@ -685,6 +685,15 @@ def _format_workbench_reentry(resume, task):
     if risk:
         lines.append(f"risk: {risk}")
 
+    audit = resume.get("same_surface_audit") or {}
+    if audit:
+        paths = audit.get("paths") or []
+        path_text = f" for {', '.join(str(path) for path in paths[:2])}" if paths else ""
+        lines.append(
+            f"same_surface_audit: {audit.get('status')}{path_text}; "
+            f"{clip_inline_text(audit.get('prompt') or audit.get('reason') or '', 240)}"
+        )
+
     recurring = resume.get("recurring_failures") or []
     if recurring:
         item = recurring[-1]

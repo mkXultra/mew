@@ -145,6 +145,94 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(context["work_session"]["effort"]["pressure"], "medium")
         self.assertEqual(context["work_session"]["resume"]["effort"]["steps"]["used"], 24)
 
+    def test_resume_surfaces_same_surface_audit_for_mew_source_edit(self):
+        task = {"id": 1, "title": "Audit surface", "status": "ready", "kind": "coding", "notes": ""}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Audit surface",
+            "goal": "Show same-surface audit.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "finished_at": "2026-04-17T00:01:00Z",
+                    "parameters": {"path": "/tmp/project/src/mew/commands.py"},
+                    "result": {"path": "/tmp/project/src/mew/commands.py", "changed": True, "dry_run": True},
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session, task=task)
+        audit = resume["same_surface_audit"]
+        self.assertEqual(audit["status"], "needed")
+        self.assertEqual(audit["paths"], ["src/mew/commands.py"])
+        text = format_work_session_resume(resume)
+        self.assertIn("Same-surface audit", text)
+        self.assertIn("status=needed", text)
+        self.assertIn("search nearby command/json/control peers", text)
+
+        session["notes"] = [{"text": "same-surface audit: sibling code path checked", "source": "user"}]
+        untimed_note_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(untimed_note_resume["same_surface_audit"]["status"], "needed")
+
+        session["notes"] = [
+            {
+                "created_at": "2026-04-17T00:02:00Z",
+                "text": "same-surface audit not done; sibling code path not covered",
+                "source": "user",
+            }
+        ]
+        still_needed_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(still_needed_resume["same_surface_audit"]["status"], "needed")
+
+        session["notes"].append(
+            {
+                "created_at": "2026-04-17T00:03:00Z",
+                "text": "same-surface audit: sibling code path checked",
+                "source": "user",
+            }
+        )
+        noted_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(noted_resume["same_surface_audit"]["status"], "noted")
+
+        session["tool_calls"].append(
+            {
+                "id": 2,
+                "tool": "edit_file",
+                "status": "completed",
+                "finished_at": "2026-04-17T00:04:00Z",
+                "parameters": {"path": "/tmp/project/src/mew/other.py"},
+                "result": {"path": "/tmp/project/src/mew/other.py", "changed": True},
+            }
+        )
+        newer_edit_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(newer_edit_resume["same_surface_audit"]["status"], "needed")
+
+        session["notes"].append(
+            {
+                "created_at": "2026-04-17T00:05:00Z",
+                "text": "same-surface audit: sibling code path checked for the newer edit",
+                "source": "user",
+            }
+        )
+        newer_noted_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(newer_noted_resume["same_surface_audit"]["status"], "noted")
+
+        session["tool_calls"] = session["tool_calls"][:1]
+        session["tool_calls"][0]["result"] = {
+            "path": "/tmp/project/src/mew/commands.py",
+            "changed": False,
+            "dry_run": True,
+        }
+        no_op_resume = build_work_session_resume(session, task=task)
+        self.assertEqual(no_op_resume["same_surface_audit"], {})
+
     def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
         active_session = {
             "id": 1,

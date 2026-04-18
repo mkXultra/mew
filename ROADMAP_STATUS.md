@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
@@ -208,6 +208,12 @@ External human-role dogfood then found two arbitrary-cwd handoff footguns that
 are fixed in `c8f3109`: generated commands now preserve a path-style `mew`
 launcher when the observer invoked `/path/to/mew`, and session-scoped git/run
 tools default to the task cwd when no meaningful `--cwd` was provided.
+The evaluator-requested same-surface checkpoint is now visible in the resident
+resume/workbench path: changed `src/mew/**` work-session writes surface a
+`same_surface_audit` prompt until a newer session note records that sibling
+code paths on the same surface were checked, while no-op dry-runs and stale
+pre-edit notes do not satisfy it. The deterministic work-session dogfood now
+covers this alongside the existing paired-test advisory.
 
 ## Milestone 1: Native Hands
 
@@ -263,6 +269,12 @@ Evidence:
   `pairing_status`. If the work session has no changed `tests/**` write/edit,
   approval cells and resume output show `missing_test_edit`; if a paired test
   write exists in the session, they show the paired test tool id.
+- Changed `src/mew/**` work-session writes now add a `same_surface_audit`
+  checkpoint to structured resume JSON, text resume output, and top-level task
+  workbench reentry. The checkpoint prompts the resident to inspect sibling
+  command/JSON/control peers on the same surface and remains `needed` until the
+  latest post-edit relevant session note records the audit as checked, covered,
+  reviewed, or out of scope.
 - Dry-run `write_file`/`edit_file` tool calls can be explicitly applied with `mew work --approve-tool ...` or rejected with `mew work --reject-tool ...`.
 - `mew work --approve-all` and `/work-session approve all ...` can apply multiple pending dry-run write/edit calls with the same explicit write and verification gates, reducing scaffold dogfood approval churn.
 - `/work-session approve <tool-call-id> --allow-write ... --verify-command ...` and `/work-session reject <tool-call-id> ...` expose the same approval flow inside chat.
@@ -790,6 +802,16 @@ Next action:
   asked to inspect sibling code paths on the same surface and note why they are
   covered or out of scope. This is not yet a hard checkpoint, but it turns the
   evaluator finding into default resident guidance.
+- The same-surface audit is now a visible work-session checkpoint rather than
+  only prompt guidance: `build_work_session_resume` emits structured
+  `same_surface_audit`, `format_work_session_resume` and `mew work <task-id>`
+  render it, and `dogfood --scenario work-session` asserts the checkpoint on a
+  `src/mew/**` dry-run edit. Validation included focused workbench/resume tests
+  (`2 passed`), ruff on changed files (pass), `./mew dogfood --scenario
+  work-session --json` (pass), related `tests.test_dogfood tests.test_work_session
+  tests.test_commands` (`536 tests`, pass), full `uv run python -m unittest`
+  (`980 tests`, pass), and `codex-ultra` review with two rounds of findings
+  fixed followed by re-review PASS.
 - Interactive Parity current: the 2026-04-19 long dogfood session added five
   bounded cockpit/body improvements across commits `803ce79`, `cf165f9`,
   `e64a2eb`, `99a9734`, and `ea7368d`: repeated resident work tools are blocked

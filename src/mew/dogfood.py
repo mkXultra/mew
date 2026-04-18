@@ -3458,6 +3458,7 @@ def run_work_session_scenario(workspace, env=None):
     ]
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
     user_preferences = (resume_data.get("resume") or {}).get("user_preferences") or {}
+    same_surface_audit = (resume_data.get("resume") or {}).get("same_surface_audit") or {}
     running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
     done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
@@ -3625,6 +3626,8 @@ def run_work_session_scenario(workspace, env=None):
             else None
         )
         == "tests/test_pairing.py"
+        and same_surface_audit.get("status") == "needed"
+        and "src/mew/pairing.py" in (same_surface_audit.get("paths") or [])
         and "paired test missing" in ((source_pairing_cells[0].get("preview") or "") if source_pairing_cells else ""),
         observed={
             "tool_call_id": (source_edit_data.get("tool_call") or {}).get("id"),
@@ -3644,9 +3647,12 @@ def run_work_session_scenario(workspace, env=None):
                 if source_pairing_approvals
                 else None
             ),
+            "same_surface_audit": same_surface_audit,
             "cell_preview": (source_pairing_cells[0] or {}).get("preview") if source_pairing_cells else None,
         },
-        expected="src/mew dry-run edits surface a missing paired test advisory with a suggested test path",
+        expected=(
+            "src/mew dry-run edits surface a missing paired test advisory and same-surface audit checkpoint"
+        ),
     )
     _scenario_check(
         checks,
