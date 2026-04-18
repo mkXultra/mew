@@ -2962,6 +2962,45 @@ def complete_work_session_followup(session, followup, step_index):
     return False
 
 
+def planned_unpaired_source_write_pairing_status(session, action_type, parameters, *, allow_unpaired=False):
+    if allow_unpaired or action_type not in WRITE_WORK_TOOLS:
+        return {}
+    if not (parameters or {}).get("path"):
+        return {}
+    planned_call = {
+        "id": "__planned__",
+        "tool": action_type,
+        "parameters": parameters,
+        "result": {"changed": True},
+    }
+    pairing = work_write_pairing_status(session, planned_call)
+    if pairing.get("status") != "missing_test_edit":
+        return {}
+    return pairing
+
+
+def paired_test_steer_text(pairing):
+    source_path = pairing.get("source_path") or "src/mew/**"
+    suggested = pairing.get("suggested_test_path") or "the matching tests/** file"
+    return (
+        f"Before retrying the src/mew source edit for {source_path}, add or update a paired tests/** "
+        f"write/edit in this same work session. Suggested first test path: {suggested}. "
+        "Use a narrow read_file/search_text/edit_file step on the test first; after the test edit exists, retry the source edit. "
+        "Only use --allow-unpaired-source-edit if this source-only edit is intentional."
+    )
+
+
+def paired_test_steer_action(pairing):
+    action = {
+        "type": "paired_test_steer",
+        "source_path": pairing.get("source_path") or "",
+        "reason": paired_test_steer_text(pairing),
+    }
+    if pairing.get("suggested_test_path"):
+        action["suggested_test_path"] = pairing.get("suggested_test_path")
+    return action
+
+
 def request_work_session_interrupt_submit(session, text, source="user"):
     text = str(text or "").strip()
     if not session or not text:
@@ -3475,7 +3514,6 @@ def cmd_work_ai(args):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
-                task = work_session_task(state, session) or find_task(state, task_id)
                 turn = update_work_model_turn_plan(
                     state,
                     session_id,
@@ -3775,6 +3813,70 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: continuing after interrupt submit")
                 continue
+            break
+        pairing_status = planned_unpaired_source_write_pairing_status(
+            session,
+            action_type,
+            parameters,
+            allow_unpaired=bool(getattr(effective_args, "allow_unpaired_source_edit", False)),
+        )
+        if pairing_status:
+            steer_action = paired_test_steer_action(pairing_status)
+            steer_text = steer_action["reason"]
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session) or find_task(state, task_id)
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    steer_action,
+                )
+                steer = queue_work_session_steer(session, steer_text, source="paired_test_steer")
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
+                if turn is not None:
+                    turn["paired_test_steer"] = pairing_status
+                    turn["pending_steer"] = steer
+                    turn["summary"] = clip_output(steer_text, 4000)
+                save_state(state)
+            step = {
+                "index": index,
+                "status": "completed",
+                "action": steer_action,
+                "model_turn": turn,
+                "pairing_status": pairing_status,
+                "pending_steer": steer,
+                "summary": steer_text,
+            }
+            report["steps"].append(step)
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                write_work_follow_snapshot(args, report, session, task, resume, step=step)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+                if not getattr(effective_args, "compact_live", False):
+                    print("")
+                    print(f"Work live step #{index} resume")
+                    print(format_work_session_resume(resume))
+            if progress:
+                progress(f"step #{index}: paired-test steer")
+            if index < max_steps:
+                continue
+            report["stop_reason"] = "paired_test_steer"
             break
         with state_lock():
             state = load_state()

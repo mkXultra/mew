@@ -8712,6 +8712,274 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_steers_unpaired_mew_source_edit_before_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview source edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "src/mew/pairing.py",
+                        "old": "old",
+                        "new": "new",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "paired_test_steer")
+                self.assertEqual(report["steps"][0]["action"]["type"], "paired_test_steer")
+                self.assertEqual(report["steps"][0]["pairing_status"]["suggested_test_path"], "tests/test_pairing.py")
+                self.assertIn("tests/test_pairing.py", report["steps"][0]["summary"])
+                self.assertEqual(Path("src/mew/pairing.py").read_text(encoding="utf-8"), "VALUE = 'old'\n")
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"], [])
+                self.assertEqual(session["pending_steer"]["source"], "paired_test_steer")
+                self.assertIn("tests/test_pairing.py", session["pending_steer"]["text"])
+                self.assertEqual(session["model_turns"][0]["action"]["type"], "paired_test_steer")
+                self.assertEqual(
+                    session["model_turns"][0]["paired_test_steer"]["suggested_test_path"],
+                    "tests/test_pairing.py",
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_pairing_steer_is_consumed_by_next_step(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview source edit first",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "src/mew/pairing.py",
+                            "old": "old",
+                            "new": "new",
+                        },
+                    },
+                    {
+                        "summary": "add paired test first",
+                        "action": {
+                            "type": "write_file",
+                            "path": "tests/test_pairing.py",
+                            "content": "def test_pairing():\n    assert True\n",
+                            "create": True,
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["action"]["type"], "paired_test_steer")
+                self.assertEqual(report["steps"][1]["action"]["type"], "write_file")
+                self.assertEqual(report["stop_reason"], "pending_approval")
+
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("pending_steer", session)
+                self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertEqual(session["tool_calls"][0]["parameters"]["path"], "tests/test_pairing.py")
+                self.assertIn("User steer for this step", session["model_turns"][1]["guidance_snapshot"])
+                self.assertTrue(
+                    any(
+                        note["source"] == "paired_test_steer"
+                        and "tests/test_pairing.py" in note["text"]
+                        for note in session["notes"]
+                    )
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_allows_mew_source_edit_when_paired_test_write_exists(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    call = start_work_tool_call(
+                        state,
+                        session,
+                        "write_file",
+                        {"path": "tests/test_pairing.py"},
+                    )
+                    finish_work_tool_call(
+                        state,
+                        session["id"],
+                        call["id"],
+                        result={
+                            "path": "tests/test_pairing.py",
+                            "changed": True,
+                            "dry_run": True,
+                            "diff": "--- /dev/null\n+++ b/tests/test_pairing.py\n@@ -0,0 +1 @@\n+def test_pairing(): pass\n",
+                        },
+                    )
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview source edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "src/mew/pairing.py",
+                        "old": "old",
+                        "new": "new",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "pending_approval")
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("pending_steer", session)
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["write_file", "edit_file"])
+                self.assertEqual(session["tool_calls"][-1]["parameters"]["path"], "src/mew/pairing.py")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_unpaired_source_override_bypasses_pairing_steer(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview source edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "src/mew/pairing.py",
+                        "old": "old",
+                        "new": "new",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-unpaired-source-edit",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "pending_approval")
+                session = load_state()["work_sessions"][0]
+                self.assertNotIn("pending_steer", session)
+                self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertEqual(session["tool_calls"][0]["parameters"]["path"], "src/mew/pairing.py")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_prompt_approval_can_reject_dry_run_write_inline(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
