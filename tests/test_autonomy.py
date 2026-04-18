@@ -3243,6 +3243,27 @@ class AutonomyTests(unittest.TestCase):
             ],
         )
 
+    def test_native_work_start_precedes_due_verification(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            now_iso(),
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="act",
+            allow_native_work=True,
+            allow_verify=True,
+            verify_command="uv run pytest -q",
+        )
+
+        decision_types = [decision["type"] for decision in plan["decisions"]]
+        self.assertIn("start_work_session", decision_types)
+        self.assertNotIn("run_verification", decision_types)
+
     def test_passive_decision_skips_ready_question_when_work_session_exists(self):
         state = default_state()
         task = add_planned_ready_task(state)

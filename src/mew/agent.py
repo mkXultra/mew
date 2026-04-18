@@ -736,17 +736,6 @@ def append_autonomous_decisions(
             decisions.append({"type": "followup_review", "run_id": run["id"]})
             return
 
-    if append_runtime_verification_decision(
-        state,
-        decisions,
-        autonomy_level,
-        allow_verify,
-        verify_command,
-        verify_interval_seconds,
-        current_time,
-    ):
-        return
-
     tasks = sorted(open_tasks(state), key=task_sort_key)
     running_tasks = [task for task in tasks if task.get("status") == "running"]
     autonomous_task_candidates = running_tasks or tasks
@@ -795,6 +784,17 @@ def append_autonomous_decisions(
                         and decision.get("question") == task_question(task)
                     )
                 ]
+
+    if append_runtime_verification_decision(
+        state,
+        decisions,
+        autonomy_level,
+        allow_verify,
+        verify_command,
+        verify_interval_seconds,
+        current_time,
+    ):
+        return
 
     if autonomy_level in ("propose", "act"):
         for task in autonomous_task_candidates:
