@@ -1006,6 +1006,10 @@ Next action:
   `task done` completion sync, so related questions, active work sessions,
   shallow memory, agent status, and user-reported verification are updated on
   done transitions.
+- `claude-ultra` review then identified a stale-state race in work approval
+  finalization: if an apply tool call disappears while a long approval is
+  running, `_apply_work_approval` no longer crashes on `None`; it marks the
+  source approval failed and returns a clean error.
 
 ## Current Roadmap Focus
 

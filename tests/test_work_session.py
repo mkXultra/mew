@@ -10813,6 +10813,105 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_approval_handles_missing_apply_tool_after_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import _apply_work_approval
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                verify_command = f"{sys.executable} -c \"import sys; sys.exit(0)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                def delete_apply_tool_call(*_args, **_kwargs):
+                    with state_lock():
+                        state = load_state()
+                        session = state["work_sessions"][0]
+                        session["tool_calls"] = [
+                            call
+                            for call in session.get("tool_calls", [])
+                            if (call.get("parameters") or {}).get("approved_from_tool_call_id") != 1
+                        ]
+                        save_state(state)
+                    return {
+                        "operation": "edit_file",
+                        "path": str(target.resolve()),
+                        "matched": 1,
+                        "replaced": 1,
+                        "changed": True,
+                        "dry_run": False,
+                        "written": True,
+                    }
+
+                approval_args = SimpleNamespace(
+                    task_id="1",
+                    allow_write=["."],
+                    allow_read=[],
+                    allow_verify=True,
+                    verify_command=verify_command,
+                    verify_cwd=".",
+                    verify_timeout=300.0,
+                    progress=False,
+                    json=False,
+                    expected_session_updated_at=None,
+                    allow_unpaired_source_edit=False,
+                )
+                with (
+                    patch("mew.commands.execute_work_tool_with_output", side_effect=delete_apply_tool_call),
+                    redirect_stderr(StringIO()) as stderr,
+                ):
+                    code, data = _apply_work_approval(approval_args, 1)
+
+                self.assertEqual(code, 1)
+                self.assertIsNone(data)
+                self.assertIn("approval result could not be recorded", stderr.getvalue())
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 1)
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "failed")
+                self.assertIn("work session changed during approval", session["tool_calls"][0]["approval_error"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_can_interrupt_submit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

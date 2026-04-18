@@ -3691,6 +3691,14 @@ def _apply_work_approval(args, approve_tool_id):
         source_call = find_work_tool_call(session, approve_tool_id)
         tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
         remember_successful_work_verification(session, source_call.get("tool") if source_call else "", result)
+        if not tool_call:
+            stale_error = "approval result could not be recorded; work session changed during approval"
+            if source_call:
+                source_call["approval_status"] = "failed"
+                source_call["approval_error"] = stale_error
+            save_state(state)
+            print(f"mew: {stale_error}", file=sys.stderr)
+            return 1, None
         if source_call:
             source_call["approval_status"] = "applied" if tool_call.get("status") == "completed" else "failed"
             source_call["approval_error"] = tool_call.get("error") or ""
