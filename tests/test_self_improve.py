@@ -181,7 +181,7 @@ class SelfImproveTests(unittest.TestCase):
                     )
 
                 self.assertEqual(code, 0)
-                self.assertIn("created dry-run self-improve run", stdout.getvalue())
+                self.assertIn("created dry-run self-improve run #1 from plan #1", stdout.getvalue())
                 state = load_state()
                 self.assertEqual(len(state["tasks"]), 1)
                 self.assertEqual(len(state["agent_runs"]), 1)

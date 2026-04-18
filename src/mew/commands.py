@@ -7361,7 +7361,7 @@ def cmd_self_improve(args):
         print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', '.')}")
     if run:
         if args.dry_run:
-            print(f"created dry-run self-improve run #{run['id']}")
+            print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
             print(" ".join(run["command"]))
         else:
             print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")

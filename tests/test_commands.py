@@ -5106,7 +5106,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("created #1 [ready/normal/coding] Improve mew itself", output)
                 self.assertIn("created plan #1", output)
                 self.assertIn("implementation_prompt:", output)
-                self.assertIn("created dry-run self-improve run #1", output)
+                self.assertIn("created dry-run self-improve run #1 from plan #1", output)
 
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["title"], "Improve mew itself")
