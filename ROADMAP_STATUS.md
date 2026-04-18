@@ -481,6 +481,10 @@ Evidence:
   exact interrupted verifier when the user provides explicit read roots,
   `--allow-verify`, and the matching `--verify-command`; arbitrary
   `run_command`, write, and edit recovery still stay on the manual-review path.
+- Passive native-work failure questions now include the current work-session
+  recovery plan's suggested command when one exists, so the user/model sees a
+  classified path such as `retry_verification` or side-effect review instead of
+  only a generic inspect/retry prompt.
 
 Missing proof:
 
@@ -566,6 +570,12 @@ Next action:
   `uv run pytest -q tests/test_work_session.py` (`239 passed`),
   `./mew dogfood --scenario all --cleanup --json` (pass), and full
   `uv run pytest -q` (`898 passed, 6 subtests passed`).
+- Follow-up task #111 current: passive native-work failure prompts now include
+  classified recovery-plan commands, preserving the `retry_verification` or
+  side-effect review path in the seeded runtime question. Validated with
+  `uv run pytest -q tests/test_runtime.py` (`29 passed`), native-advance
+  dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`898 passed,
+  6 subtests passed`).
 - `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
 - Real Codex Web API dogfood current: `./mew dogfood --duration 80 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-seed-note.json --json` completed startup plus two passive ticks; `native_work_advance.attempts=2`, `by_outcome.completed=2`, `last_native_work_step.outcome=completed`, and the earlier refused-complete warning is gone because the dogfood seed task is now marked as self-proposed.
 - `uv run pytest -q` previous native-work rollout: `881 passed, 6 subtests passed`.
