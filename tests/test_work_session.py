@@ -4231,6 +4231,77 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_mutators_without_active_return_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                commands = [
+                    ["work", "1", "--close-session", "--json"],
+                    ["work", "1", "--stop-session", "--json"],
+                    ["work", "1", "--session-note", "remember this", "--json"],
+                    ["work", "1", "--steer", "next guidance", "--json"],
+                    ["work", "1", "--queue-followup", "later message", "--json"],
+                    ["work", "1", "--interrupt-submit", "urgent message", "--json"],
+                ]
+                for command in commands:
+                    with self.subTest(command=command):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(main(command), 0)
+                        data = json.loads(stdout.getvalue())
+                        self.assertIsNone(data["work_session"])
+                        self.assertEqual(data["error"], "no_active_work_session")
+                        self.assertEqual(data["message"], "No active work session.")
+                        self.assertEqual(data["task_id"], "1")
+                        self.assertIn("mew work 1 --start-session", data["start_commands"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_action_commands_without_active_return_error_json(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                commands = [
+                    ["work", "1", "--approve-tool", "1", "--json"],
+                    ["work", "1", "--approve-all", "--json"],
+                    ["work", "1", "--reject-tool", "1", "--json"],
+                    [
+                        "work",
+                        "1",
+                        "--tool",
+                        "read_file",
+                        "--path",
+                        "README.md",
+                        "--allow-read",
+                        ".",
+                        "--json",
+                    ],
+                ]
+                for command in commands:
+                    with self.subTest(command=command):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(main(command), 1)
+                        data = json.loads(stdout.getvalue())
+                        self.assertIsNone(data["work_session"])
+                        self.assertEqual(data["error"], "no_active_work_session")
+                        self.assertEqual(data["message"], "No active work session.")
+                        self.assertEqual(data["task_id"], "1")
+                        self.assertIn("mew work 1 --start-session", data["start_commands"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_multi_pane_without_task_session_prints_single_hint(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

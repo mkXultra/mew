@@ -3929,6 +3929,8 @@ def _apply_work_approval(args, approve_tool_id):
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
+            if getattr(args, "json", False):
+                return 1, no_active_work_session_json(state, args=args)
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1, None
         expected_updated_at = getattr(args, "expected_session_updated_at", None)
@@ -4052,6 +4054,9 @@ def cmd_work_approve_all(args):
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
+            if args.json:
+                print(json.dumps(no_active_work_session_json(state, args=args), ensure_ascii=False, indent=2))
+                return 1
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1
         approve_ids = _pending_approval_tool_ids(session)
@@ -4109,6 +4114,9 @@ def cmd_work_reject_tool(args):
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
+            if args.json:
+                print(json.dumps(no_active_work_session_json(state, args=args), ensure_ascii=False, indent=2))
+                return 1
             print("mew: no active work session; run `mew work <task-id> --start-session`", file=sys.stderr)
             return 1
         source_call = find_work_tool_call(session, args.reject_tool)
@@ -4203,6 +4211,35 @@ def format_no_active_work_session(state, limit=5, kind=None):
         ["", "Start or resume", f"- {mew_executable()} work <task-id> --start-session", "- /work-session start <task-id>"]
     )
     return "\n".join(lines)
+
+
+def no_active_work_session_json(state, args=None, limit=5, kind=None):
+    task_id = getattr(args, "task_id", None) if args is not None else None
+    payload = {
+        "work_session": None,
+        "error": "no_active_work_session",
+        "message": f"No active {kind} work session." if kind else "No active work session.",
+    }
+    if task_id is not None:
+        payload["task_id"] = str(task_id)
+        payload["start_commands"] = [
+            mew_command("work", task_id, "--start-session"),
+            f"/work-session start {task_id}",
+        ]
+        return payload
+    payload["recent_work_sessions"] = recent_work_session_summaries(state, limit=limit, kind=kind)
+    payload["start_commands"] = [
+        f"{mew_executable()} work <task-id> --start-session",
+        "/work-session start <task-id>",
+    ]
+    return payload
+
+
+def print_no_active_work_session_response(state, args=None, limit=5, kind=None):
+    if getattr(args, "json", False):
+        print(json.dumps(no_active_work_session_json(state, args=args, limit=limit, kind=kind), ensure_ascii=False, indent=2))
+    else:
+        print(f"No active {kind} work session." if kind else "No active work session.")
 
 
 def cmd_work_show_session(args):
@@ -4348,7 +4385,7 @@ def cmd_work_close_session(args):
                     session = candidate
                     break
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         close_work_session(session)
         save_state(state)
@@ -4364,7 +4401,7 @@ def cmd_work_stop_session(args):
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         request_work_session_stop(session, reason=getattr(args, "stop_reason", None) or "")
         save_state(state)
@@ -4387,7 +4424,7 @@ def cmd_work_session_note(args):
         if not session and getattr(args, "task_id", None):
             session = _latest_work_session_for_task(state, args.task_id)
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         note = add_work_session_note(session, text, source="user")
         save_state(state)
@@ -5285,7 +5322,7 @@ def cmd_work_steer(args):
                 return 1
         session = _select_active_work_session_for_args(state, args)
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         steer = queue_work_session_steer(session, text)
         save_state(state)
@@ -5327,7 +5364,7 @@ def cmd_work_queue_followup(args):
                 return 1
         session = _select_active_work_session_for_args(state, args)
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         followup = queue_work_session_followup(session, text)
         save_state(state)
@@ -5375,7 +5412,7 @@ def cmd_work_interrupt_submit(args):
                 return 1
         session = _select_active_work_session_for_args(state, args)
         if not session:
-            print("No active work session.")
+            print_no_active_work_session_response(state, args)
             return 0
         stop_request, steer = request_work_session_interrupt_submit(session, text, source="interrupt_submit")
         save_state(state)
@@ -5720,6 +5757,22 @@ def cmd_work_tool(args):
         state = load_state()
         session, review_probe = _select_work_tool_session_for_args(state, args)
         if not session:
+            if getattr(args, "json", False):
+                if getattr(args, "task_id", None) and not find_task(state, args.task_id):
+                    print(
+                        json.dumps(
+                            {
+                                "error": "task_not_found",
+                                "task_id": str(args.task_id),
+                                "message": f"mew: task not found: {args.task_id}",
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                    return 1
+                print(json.dumps(no_active_work_session_json(state, args=args), ensure_ascii=False, indent=2))
+                return 1
             print(format_no_work_tool_session(state, args), file=sys.stderr)
             return 1
         gate_options = _work_tool_gate_options(args, session)

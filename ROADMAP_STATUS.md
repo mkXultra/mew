@@ -182,6 +182,10 @@ from the latest task description, so changing `--focus` does not leave an old
 resident objective inside the active session.
 The native self-improve help now advertises the structured
 `--start-session --json` entrypoint directly in the work-session flow.
+The bake-off ledger `WHY_MEW.md` now records real mew-vs-fresh evidence; the
+first task proved mew's resume advantage after a failed model call, while a
+fresh `codex-ultra` review found broader same-surface JSON gaps that were then
+fixed.
 
 ## Milestone 1: Native Hands
 
@@ -822,6 +826,21 @@ Next action:
   (`24 passed`), full `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`974
   passed, 15 subtests passed`),
   `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/cli.py tests/test_self_improve.py`
+  (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
+- Bake-off current: task #139 created `WHY_MEW.md` and ran the first
+  mew-vs-fresh product proof. Mew preserved a failed model call in resume
+  memory, retried the session, searched/read the relevant code, and diagnosed
+  the `--close-session --json` no-active plaintext path. A fresh `codex-ultra`
+  review then caught wider same-surface misses, so the fix now covers
+  `--close-session`, `--stop-session`, `--session-note`, `--steer`,
+  `--queue-followup`, `--interrupt-submit`, `--approve-tool`, `--approve-all`,
+  `--reject-tool`, and no-session `--tool` action paths with structured
+  no-active JSON. Fresh re-review returned PASS. Validated with focused
+  no-active JSON tests (`2 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest tests.test_work_session`
+  (`285 tests OK`), full `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`976
+  passed, 25 subtests passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py tests/test_work_session.py`
   (pass), `git diff --check` (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
