@@ -6,7 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .cli_command import mew_command
 from .state import open_questions as canonical_open_questions
+from .tasks import task_kind
 
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -116,6 +118,61 @@ def task_label(task: dict[str, Any]) -> str:
     return f"{prefix}{title} [{status}]"
 
 
+def primary_action_for_desk(state: dict[str, Any]) -> dict[str, Any] | None:
+    questions = open_questions_for_desk(state)
+    if questions:
+        question = questions[0]
+        question_id = question.get("id") or question.get("question_id")
+        action = {
+            "kind": "reply",
+            "label": "Reply to question",
+            "command": mew_command("chat"),
+        }
+        if question_id is not None:
+            action["question_id"] = question_id
+            action["label"] = f"Reply to question #{question_id}"
+            action["command"] = mew_command("reply", question_id, "<reply>")
+        related_task_id = question.get("related_task_id")
+        if related_task_id is not None:
+            action["task_id"] = related_task_id
+        return action
+
+    sessions = active_work_sessions_for_desk(state)
+    if sessions:
+        session = sessions[-1]
+        task_id = session.get("task_id")
+        session_id = session.get("id")
+        action = {
+            "kind": "resume_work",
+            "label": "Resume active work",
+            "command": mew_command("work", "--session", "--resume", "--allow-read", "."),
+        }
+        if task_id is not None:
+            action["task_id"] = task_id
+            action["label"] = f"Resume task #{task_id}"
+            action["command"] = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+        if session_id is not None:
+            action["session_id"] = session_id
+        return action
+
+    tasks = open_tasks_for_desk(state)
+    if tasks:
+        task = tasks[0]
+        task_id = task.get("id")
+        if task_id is None:
+            return {"kind": "open_task", "label": "Open next task", "command": mew_command("task", "list")}
+        kind = normalize_text(task.get("effective_kind")).casefold() or task_kind(task)
+        command = mew_command("code", task_id) if kind == "coding" else mew_command("task", "show", task_id)
+        return {
+            "kind": "open_task",
+            "label": f"Open task #{task_id}",
+            "command": command,
+            "task_id": task_id,
+        }
+
+    return None
+
+
 def focus_summary(state: dict[str, Any]) -> str:
     questions = open_questions_for_desk(state)
     if questions:
@@ -137,10 +194,12 @@ def build_desk_view_model(state: dict[str, Any], explicit_date: str | None = Non
     tasks = open_tasks_for_desk(state)
     sessions = active_work_sessions_for_desk(state)
     attention = open_attention_for_desk(state)
+    primary_action = primary_action_for_desk(state)
     return {
         "date": day,
         "pet_state": choose_pet_state(state),
         "focus": focus_summary(state),
+        "primary_action": primary_action,
         "counts": {
             "open_tasks": len(tasks),
             "open_questions": len(questions),
@@ -152,17 +211,28 @@ def build_desk_view_model(state: dict[str, Any], explicit_date: str | None = Non
 
 def format_desk_view(view_model: dict[str, Any]) -> str:
     counts = view_model["counts"]
-    return "\n".join(
+    lines = [
+        f"Mew desk {view_model['date']}",
+        f"pet_state: {view_model['pet_state']}",
+        f"focus: {view_model['focus']}",
+    ]
+    action = view_model.get("primary_action")
+    if isinstance(action, dict):
+        label = normalize_text(action.get("label"))
+        command = normalize_text(action.get("command"))
+        if label:
+            lines.append(f"primary_action: {label}")
+        if command:
+            lines.append(f"primary_command: {command}")
+    lines.extend(
         [
-            f"Mew desk {view_model['date']}",
-            f"pet_state: {view_model['pet_state']}",
-            f"focus: {view_model['focus']}",
             f"open_tasks: {counts['open_tasks']}",
             f"open_questions: {counts['open_questions']}",
             f"active_work_sessions: {counts['active_work_sessions']}",
             f"open_attention: {counts['open_attention']}",
         ]
     )
+    return "\n".join(lines)
 
 
 def render_desk_markdown(view_model: dict[str, Any]) -> str:

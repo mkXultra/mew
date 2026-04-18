@@ -144,3 +144,32 @@ Follow-up validation:
 - `./mew dogfood --all` -> pass after hardening.
 - `codex-ultra` re-review -> PASS after route-before-load, Host-header, and
   explicit non-loopback fixes.
+
+Task: `#154 Surface primary action in mew desk`
+
+Built:
+
+- Added `primary_action` to the core `mew desk --json` view model.
+- The first action points to the safest next human move: reply to the oldest
+  open question, resume active work, or open the next task.
+- Rendered the action in the browser shell as escaped copyable text.
+
+Dogfood finding:
+
+- `mew work --tool run_tests` is argv-based. A verification string containing
+  `&&` failed because it was passed to `unittest` as arguments instead of to a
+  shell. Splitting into separate `run_tests` calls worked. This should become a
+  future multi-command verification feature, not an implicit shell escape.
+
+Validation:
+
+- `uv run python -m unittest tests.test_desk` -> `9 passed`.
+- `uv run pytest -q experiments/mew-desk` -> `32 passed`.
+- Live `mew desk --json` produced a `primary_action.command` using the local
+  `mew_command()` executable hint, such as `./mew reply 2 '<reply>'`.
+- Generated browser HTML rendered `Reply to question #2` and the escaped reply
+  command.
+- `./mew dogfood --all` -> pass.
+- `uv run python -m unittest` -> `954 passed`.
+- `codex-ultra` review -> PASS after switching command suggestions to
+  `mew_command()` and coding-task detection to `task_kind()`.

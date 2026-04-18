@@ -6,6 +6,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
+from mew.cli_command import mew_command
 from mew.cli import main
 from mew.desk import build_desk_view_model, format_desk_view
 from mew.state import add_outbox_message, load_state, save_state, state_lock
@@ -24,6 +25,8 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["focus"], "Waiting for reply: Need input?")
         self.assertEqual(view["counts"]["open_tasks"], 1)
         self.assertEqual(view["counts"]["open_questions"], 1)
+        self.assertEqual(view["primary_action"]["kind"], "reply")
+        self.assertEqual(view["primary_action"]["command"], mew_command("reply", 1, "<reply>"))
 
     def test_build_desk_view_model_uses_canonical_question_status_when_available(self):
         deferred = {
@@ -50,6 +53,7 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(deferred_view["counts"]["open_questions"], 0)
         self.assertEqual(reopened_view["pet_state"], "alerting")
         self.assertEqual(reopened_view["focus"], "Waiting for reply: Reopened?")
+        self.assertEqual(reopened_view["primary_action"]["command"], mew_command("reply", 1, "<reply>"))
 
     def test_build_desk_view_model_tracks_runtime_and_work_session(self):
         thinking = build_desk_view_model(
@@ -74,6 +78,11 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(committing["pet_state"], "typing")
         self.assertEqual(typing["pet_state"], "typing")
         self.assertEqual(typing["focus"], "Working on: Continue work")
+        self.assertEqual(typing["primary_action"]["kind"], "resume_work")
+        self.assertEqual(
+            typing["primary_action"]["command"],
+            mew_command("work", "--session", "--resume", "--allow-read", "."),
+        )
 
     def test_build_desk_view_model_dedupes_sessions_and_skips_done_task_session(self):
         view = build_desk_view_model(
@@ -110,6 +119,7 @@ class DeskTests(unittest.TestCase):
                 "date": "2026-04-17",
                 "pet_state": "sleeping",
                 "focus": "No active work recorded",
+                "primary_action": {"label": "Open task #1", "command": mew_command("task", "show", 1)},
                 "counts": {
                     "open_tasks": 0,
                     "open_questions": 0,
@@ -121,6 +131,18 @@ class DeskTests(unittest.TestCase):
 
         self.assertIn("Mew desk 2026-04-17", text)
         self.assertIn("pet_state: sleeping", text)
+        self.assertIn("primary_action: Open task #1", text)
+        self.assertIn(f"primary_command: {mew_command('task', 'show', 1)}", text)
+
+    def test_build_desk_view_model_action_for_coding_task(self):
+        view = build_desk_view_model(
+            {"tasks": [{"id": 3, "title": "Fix unit test failure", "status": "ready", "kind": ""}]},
+            explicit_date="2026-04-17",
+        )
+
+        self.assertEqual(view["focus"], "Next: #3 Fix unit test failure [ready]")
+        self.assertEqual(view["primary_action"]["kind"], "open_task")
+        self.assertEqual(view["primary_action"]["command"], mew_command("code", 3))
 
     def test_desk_command_outputs_json_and_can_write_files(self):
         old_cwd = os.getcwd()
@@ -136,6 +158,7 @@ class DeskTests(unittest.TestCase):
                     self.assertEqual(main(["desk", "--date", "2026-04-17", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["pet_state"], "alerting")
+                self.assertIn("reply 1", data["primary_action"]["command"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["desk", "--date", "2026-04-17", "--write", "--json"]), 0)

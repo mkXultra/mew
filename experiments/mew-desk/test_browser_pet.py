@@ -22,6 +22,7 @@ def test_render_browser_pet_for_alerting_state() -> None:
             "date": "2026-04-19",
             "pet_state": "alerting",
             "focus": "Waiting for reply",
+            "primary_action": {"label": "Reply to question #1", "command": 'mew reply 1 "<reply>"'},
             "counts": {
                 "open_tasks": 2,
                 "open_questions": 1,
@@ -34,8 +35,24 @@ def test_render_browser_pet_for_alerting_state() -> None:
     assert '<main data-state="alerting">' in html
     assert "( O.O )" in html
     assert "Needs input" in html
+    assert "Reply to question #1" in html
+    assert "mew reply 1 &quot;&lt;reply&gt;&quot;" in html
     assert "<strong>2</strong>" in html
     assert "<strong>3</strong>" in html
+
+
+def test_primary_action_escapes_label_and_command() -> None:
+    html = browser_pet.render_browser_pet(
+        {
+            "pet_state": "typing",
+            "primary_action": {"label": "<b>Do it</b>", "command": 'mew reply 1 "<script>"'},
+            "counts": {},
+        }
+    )
+
+    assert "<b>Do it</b>" not in html
+    assert "&lt;b&gt;Do it&lt;/b&gt;" in html
+    assert "mew reply 1 &quot;&lt;script&gt;&quot;" in html
 
 
 def test_unknown_state_falls_back_to_sleeping() -> None:

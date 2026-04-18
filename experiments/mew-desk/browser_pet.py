@@ -107,6 +107,19 @@ def render_count_items(counts: dict[str, int]) -> str:
     )
 
 
+def render_primary_action(view_model: dict[str, Any]) -> str:
+    action = view_model.get("primary_action")
+    if not isinstance(action, dict):
+        return ""
+    label = " ".join(str(action.get("label") or "").split())
+    command = " ".join(str(action.get("command") or "").split())
+    if not label and not command:
+        return ""
+    label_node = f"<strong>{html.escape(label)}</strong>" if label else ""
+    command_node = f"<code>{html.escape(command)}</code>" if command else ""
+    return f'<div class="action">{label_node}{command_node}</div>'
+
+
 def render_refresh_meta(refresh_seconds: int | None) -> str:
     if refresh_seconds is None:
         return ""
@@ -122,6 +135,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
     counts = count_items(view_model)
     cat = "\n".join(PET_FRAMES[state])
     count_nodes = render_count_items(counts)
+    action_node = render_primary_action(view_model)
     refresh_meta = render_refresh_meta(refresh_seconds)
 
     return f"""<!doctype html>
@@ -227,6 +241,25 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
       line-height: 1.45;
       overflow-wrap: anywhere;
     }}
+    .action {{
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow-wrap: anywhere;
+    }}
+    .action strong {{
+      font-size: 13px;
+      line-height: 1.2;
+    }}
+    .action code {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--muted);
+    }}
     ul {{
       list-style: none;
       margin: 0;
@@ -278,6 +311,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
         <div class="state">{html.escape(STATE_COPY[state])}</div>
       </div>
       <p class="focus">{html.escape(focus)}</p>
+      {action_node}
       <ul aria-label="counts">
         {count_nodes}
       </ul>
