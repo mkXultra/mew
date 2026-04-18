@@ -681,7 +681,10 @@ Next action:
   (`442 passed, 9 subtests passed`), full
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`962 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
-  (pass), and `./mew dogfood --scenario all` (pass).
+  (pass), `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_dogfood.py`
+  (`43 passed`), and `./mew dogfood --scenario all` (pass with
+  `work_follow_snapshot_surfaces_running_output` across 77 work-session
+  commands).
 - Follow-up current: pending write approvals in resume/follow JSON now include
   a capped machine-review `diff` plus `diff_truncated` and `diff_max_chars`,
   so observer agents can review the exact dry-run change from
@@ -1168,7 +1171,8 @@ Next action:
   active `run_command` and `run_tests` cells, mirrored into `resume.commands[]`
   without advancing `session_updated_at`. The mirror is timer-flushed and
   rate-capped so observer replies do not go stale just because command output
-  arrived.
+  arrived. The deterministic work-session dogfood scenario now also checks
+  zero-step follow snapshots for running command/test output tails.
 
 ## Current Roadmap Focus
 

@@ -3109,6 +3109,61 @@ def run_work_session_scenario(workspace, env=None):
             "--json",
         ]
     )
+    running_output_task_result = run(
+        ["task", "add", "Running output snapshot task", "--kind", "coding", "--json"]
+    )
+    running_output_task_data_for_id = _json_stdout(running_output_task_result)
+    running_output_task_id = (running_output_task_data_for_id.get("task") or {}).get("id") or 11
+    running_output_start_result = run(["work", str(running_output_task_id), "--start-session", "--json"])
+    running_output_start_data_for_state = _json_stdout(running_output_start_result)
+    running_output_session_id = (running_output_start_data_for_state.get("work_session") or {}).get("id")
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    running_output_session = None
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("id")) == str(running_output_session_id):
+            running_output_session = candidate
+            break
+    if running_output_session:
+        current_time = now_iso()
+        tool_call_id = next_id(state, "work_tool_call")
+        running_output_session.setdefault("tool_calls", []).append(
+            {
+                "id": tool_call_id,
+                "session_id": running_output_session.get("id"),
+                "task_id": running_output_task_id,
+                "tool": "run_tests",
+                "status": "running",
+                "parameters": {"command": "pytest -q", "cwd": "."},
+                "result": None,
+                "summary": "",
+                "error": "",
+                "started_at": current_time,
+                "finished_at": None,
+                "running_output": {
+                    "stdout": "dogfood partial output\nstill running\n",
+                    "stdout_truncated": False,
+                    "updated_at": now_iso(),
+                    "max_chars": 4000,
+                },
+            }
+        )
+        running_output_session["last_tool_call_id"] = tool_call_id
+        running_output_session["updated_at"] = current_time
+        write_json_file(state_path, state)
+    running_output_snapshot_result = run(
+        [
+            "work",
+            str(running_output_task_id),
+            "--follow",
+            "--max-steps",
+            "0",
+            "--quiet",
+            "--allow-read",
+            ".",
+        ]
+    )
+    running_output_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
 
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
@@ -3142,6 +3197,7 @@ def run_work_session_scenario(workspace, env=None):
     unpaired_task_data = _json_stdout(unpaired_task_result)
     unpaired_edit_data = _json_stdout(unpaired_edit_result)
     unpaired_override_data = _json_stdout(unpaired_override_result)
+    running_output_task_data = _json_stdout(running_output_task_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -3192,6 +3248,14 @@ def run_work_session_scenario(workspace, env=None):
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
     done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
     done_resume_controls = done_resume_json_data.get("next_cli_controls") or []
+    running_output_commands = (running_output_snapshot_data.get("resume") or {}).get("commands") or []
+    running_output_cells = running_output_snapshot_data.get("cells") or []
+    running_output_cell = next((cell for cell in running_output_cells if cell.get("kind") == "test"), {})
+    running_output_tail = "\n".join(
+        line
+        for tail in running_output_cell.get("tail") or []
+        for line in tail.get("lines") or []
+    )
 
     _scenario_check(
         checks,
@@ -3448,6 +3512,32 @@ def run_work_session_scenario(workspace, env=None):
             "reply": reply_approve_data,
         },
         expected="reply-file approve applies a pending dry-run write from a zero-step follow snapshot",
+    )
+    _scenario_check(
+        checks,
+        "work_follow_snapshot_surfaces_running_output",
+        running_output_task_result.get("exit_code") == 0
+        and running_output_start_result.get("exit_code") == 0
+        and running_output_snapshot_result.get("exit_code") == 0
+        and not (running_output_snapshot_result.get("stdout") or "")
+        and not (running_output_snapshot_result.get("stderr") or "")
+        and (running_output_task_data.get("id") or (running_output_task_data.get("task") or {}).get("id"))
+        == running_output_task_id
+        and any(
+            command.get("output_running") is True
+            and "dogfood partial output" in (command.get("stdout") or "")
+            for command in running_output_commands
+        )
+        and "still running" in running_output_tail,
+        observed={
+            "task": running_output_task_data,
+            "snapshot": {
+                "session_updated_at": running_output_snapshot_data.get("session_updated_at"),
+                "commands": running_output_commands,
+                "cell_tail": running_output_tail,
+            },
+        },
+        expected="zero-step follow snapshots include bounded output for running command/test cells",
     )
     _scenario_check(
         checks,
