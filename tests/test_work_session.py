@@ -12306,6 +12306,85 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_approval_interrupt_marks_apply_indeterminate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import _apply_work_approval
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                verify_command = f"{sys.executable} -c \"import sys; sys.exit(0)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                approval_args = SimpleNamespace(
+                    task_id="1",
+                    allow_write=["."],
+                    allow_read=[],
+                    allow_verify=True,
+                    verify_command=verify_command,
+                    verify_cwd=".",
+                    verify_timeout=300.0,
+                    progress=False,
+                    json=False,
+                    expected_session_updated_at=None,
+                    allow_unpaired_source_edit=False,
+                )
+                with patch("mew.commands.execute_work_tool_with_output", side_effect=KeyboardInterrupt):
+                    code, data = _apply_work_approval(approval_args, 1)
+
+                self.assertEqual(code, 130)
+                self.assertTrue(data["interrupted"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 2)
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "indeterminate")
+                self.assertIn("Interrupted while applying", session["tool_calls"][0]["approval_error"])
+                self.assertEqual(session["tool_calls"][1]["status"], "interrupted")
+                self.assertEqual(session["tool_calls"][1]["tool"], "edit_file")
+                self.assertEqual(build_work_session_resume(session)["pending_approvals"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_can_interrupt_submit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

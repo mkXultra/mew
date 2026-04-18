@@ -4016,6 +4016,36 @@ def _apply_work_approval(args, approve_tool_id):
             work_tool_output_progress(progress, tool_call_id),
         )
         error = work_tool_result_error(source_call.get("tool"), result)
+    except KeyboardInterrupt:
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            repairs = mark_work_tool_call_interrupted(session, tool_call_id)
+            source_call = find_work_tool_call(session, approve_tool_id)
+            tool_call = find_work_tool_call(session, tool_call_id)
+            interrupted_error = (
+                "Interrupted while applying approved work tool; inspect the work-session resume before retrying."
+            )
+            if source_call:
+                source_call["approval_status"] = APPROVAL_STATUS_INDETERMINATE
+                source_call["approval_error"] = interrupted_error
+            if not tool_call:
+                tool_call = {
+                    "id": tool_call_id,
+                    "tool": source_call.get("tool") if source_call else "work_tool",
+                    "status": "interrupted",
+                    "error": interrupted_error,
+                    "summary": "interrupted approval apply tool call",
+                }
+            save_state(state)
+        if progress:
+            progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} interrupted")
+        return 130, {
+            "approved_tool_call": source_call,
+            "tool_call": tool_call,
+            "interrupted": True,
+            "repairs": repairs,
+        }
     except (OSError, ValueError) as exc:
         result = None
         error = str(exc)

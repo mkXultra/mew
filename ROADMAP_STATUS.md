@@ -1459,6 +1459,11 @@ Next action:
   left enough durable work-session context for a supervised handoff. The landed
   follow-up always prints a task-scoped fallback `recovery_hint` if the stored
   interrupted tool call is unavailable.
+- Approval recovery now handles Ctrl-C during write/edit application: the apply
+  tool call is marked `interrupted`, the source dry-run approval becomes
+  `indeterminate`, and pending approval controls disappear until the user/model
+  reviews the resume. This avoids blind re-approval when write side effects may
+  be unknown.
 
 ## Current Roadmap Focus
 
