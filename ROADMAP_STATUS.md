@@ -488,6 +488,9 @@ Evidence:
 - Review follow-up tightened interrupted verifier recovery: `--allow-read` must
   cover the verifier's recorded `cwd`, missing-gate reports include that cwd,
   and only the latest interrupted verifier receives a runnable recovery hint.
+- Verifier recovery now accepts quote-only command differences when
+  `shlex.split` produces the same argv, reducing false `needs_matching_verifier`
+  rejections while preserving exact interrupted-command recovery semantics.
 
 Missing proof:
 
@@ -593,6 +596,12 @@ Next action:
   `uv run pytest -q tests/test_self_improve.py -k start_session` (`3 passed`),
   self-improve command tests (`23 passed`), work-session dogfood (pass), all
   dogfood (pass), and full `uv run pytest -q` (`899 passed, 6 subtests passed`).
+- Follow-up task #114 current: verifier recovery now treats argv-equivalent
+  commands as matching, so quoting-only differences in `--verify-command` do
+  not falsely block recovery. Validated with the focused recovery test,
+  `uv run pytest -q tests/test_work_session.py` (`239 passed`), work-session
+  dogfood (pass), all dogfood (pass), and full `uv run pytest -q` (`899 passed,
+  6 subtests passed`).
 - Real Codex Web API dogfood after the verification-recovery work current:
   `./mew dogfood --duration 80 ... --ai --auth auth.json --allow-native-work
   --allow-native-advance` completed startup plus two passive ticks; it started
