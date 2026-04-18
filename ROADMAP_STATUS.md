@@ -171,6 +171,9 @@ State persistence is also less noisy under live output mirroring: `state_lock`
 now serializes same-process threads as well as external processes, and
 `save_state` uses per-thread/per-call temp names for both state and backup
 writes.
+Search navigation is more forgiving for resident models: `search_text`
+normalizes space-separated include globs such as `src/** tests/** docs/**` and
+adds absolute-path-friendly `**/` variants before invoking `rg`.
 
 ## Milestone 1: Native Hands
 
@@ -453,6 +456,10 @@ Evidence:
 - State saving now uses an in-process `RLock` around the existing file lock and
   unique pid/thread/monotonic temp names for both state and backup writes,
   reducing live-output mirror races during concurrent save paths.
+- `search_text` now accepts resident-style space-separated include glob strings
+  and expands relative directory globs to `**/...` variants, so a model can
+  search `src/** tests/** docs/**` from an absolute workspace path instead of
+  getting a silent zero-match result.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
@@ -760,6 +767,18 @@ Next action:
   (`553 passed, 9 subtests passed`), full
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`970 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/state.py tests/test_validation.py`
+  (pass), and `./mew dogfood --all` (pass).
+- Interactive/Persistent current: self-improve task #135 exposed that the
+  resident naturally emitted `search_text` with a space-separated include glob
+  pattern (`src/** tests/** docs/**`), which previously returned zero matches
+  because it was sent to `rg` as one glob. `search_text` now splits
+  shell-style whitespace, de-dupes patterns, and adds `**/` variants for
+  relative path globs. The exact failed work-session command now returns
+  repository matches. Validated with focused search tests (`2 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py`
+  (`282 passed, 5 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`971 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/read_tools.py tests/test_work_session.py`
   (pass), and `./mew dogfood --all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test

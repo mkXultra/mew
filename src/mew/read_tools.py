@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import fnmatch
+import shlex
 
 
 DEFAULT_READ_MAX_CHARS = 50000
@@ -260,7 +261,33 @@ def _normalize_search_patterns(pattern):
         values = pattern
     else:
         values = [pattern]
-    return [str(value).strip() for value in values if str(value).strip()][:10]
+    patterns = []
+
+    def add_pattern(item):
+        if item and item not in patterns:
+            patterns.append(item)
+        if (
+            item
+            and "/" in item
+            and not item.startswith(("!", "/", "**/"))
+            and f"**/{item}" not in patterns
+        ):
+            patterns.append(f"**/{item}")
+
+    for value in values:
+        text = str(value).strip()
+        if not text:
+            continue
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            parts = text.split()
+        for part in parts or [text]:
+            item = str(part).strip()
+            add_pattern(item)
+            if len(patterns) >= 10:
+                return patterns[:10]
+    return patterns[:10]
 
 
 def search_text(

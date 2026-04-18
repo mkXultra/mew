@@ -7382,6 +7382,40 @@ class WorkSessionTests(unittest.TestCase):
             self.assertIn("visible.txt", result["matches"][0])
             self.assertNotIn(".mew", "\n".join(result["matches"]))
 
+    def test_search_text_splits_space_separated_include_patterns(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "docs").mkdir()
+            (root / "src" / "app.py").write_text("needle in source\n", encoding="utf-8")
+            (root / "tests" / "test_app.py").write_text("needle in tests\n", encoding="utf-8")
+            (root / "docs" / "note.md").write_text("needle in docs\n", encoding="utf-8")
+            (root / "outside.txt").write_text("needle outside\n", encoding="utf-8")
+
+            result = search_text(
+                "needle",
+                str(root),
+                [str(root)],
+                max_matches=10,
+                context_lines=0,
+                pattern="src/** tests/** docs/**",
+            )
+
+            matches = "\n".join(result["matches"])
+            self.assertIn("src/**", result["patterns"])
+            self.assertIn("**/src/**", result["patterns"])
+            self.assertIn("tests/**", result["patterns"])
+            self.assertIn("**/tests/**", result["patterns"])
+            self.assertIn("docs/**", result["patterns"])
+            self.assertIn("**/docs/**", result["patterns"])
+            self.assertIn("src/app.py", matches)
+            self.assertIn("tests/test_app.py", matches)
+            self.assertIn("docs/note.md", matches)
+            self.assertNotIn("outside.txt", matches)
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 
