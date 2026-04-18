@@ -882,6 +882,109 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_startup_repairs_incomplete_effects_without_touching_work_sessions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    state["inbox"].append(
+                        {
+                            "id": 1,
+                            "type": "passive_tick",
+                            "source": "runtime",
+                            "payload": {},
+                            "created_at": "then",
+                            "processed_at": "then",
+                        }
+                    )
+                    state["runtime_effects"].append(
+                        {
+                            "id": 1,
+                            "event_id": 1,
+                            "reason": "passive_tick",
+                            "status": "planning",
+                            "phase": "planning",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "finished_at": None,
+                        }
+                    )
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["tool_calls"].append(
+                        {
+                            "id": 1,
+                            "session_id": session.get("id"),
+                            "task_id": task.get("id"),
+                            "tool": "read_file",
+                            "status": "running",
+                            "parameters": {"path": "README.md"},
+                            "result": None,
+                            "summary": "",
+                            "error": "",
+                            "started_at": "then",
+                            "finished_at": None,
+                        }
+                    )
+                    session["last_tool_call_id"] = 1
+                    state["next_ids"]["event"] = 2
+                    state["next_ids"]["runtime_effect"] = 2
+                    state["next_ids"]["work_tool_call"] = 2
+                    save_state(state)
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                ):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertIn("startup repaired 1 interrupted item(s)", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                old_effect = next(effect for effect in state["runtime_effects"] if effect.get("id") == 1)
+                self.assertEqual(old_effect["status"], "interrupted")
+                self.assertIn("no action was recorded", old_effect["recovery_hint"])
+                tool_call = state["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(tool_call["status"], "running")
+                self.assertEqual(tool_call.get("error") or "", "")
+                repairs = state["runtime_status"]["last_startup_repairs"]
+                self.assertEqual(
+                    [repair["type"] for repair in repairs],
+                    ["interrupted_runtime_effect"],
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_once_passive_now_auto_recovers_interrupted_native_verifier(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

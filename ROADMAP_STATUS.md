@@ -116,6 +116,11 @@ The same selected-item pattern now covers interrupted safe read/git tools:
 `read_file`, `search_text`, `glob`, `inspect_dir`, and `git_*` can be replayed
 by the next passive tick when they are the recovery plan's selected item and
 the runtime read gate covers the recorded path/cwd.
+Runtime startup now performs the safest part of the repair path that previously
+required an explicit `mew repair`: incomplete runtime effects are marked
+`interrupted` before the new runtime cycle begins. Running work-session
+tools/model turns remain reserved for explicit repair because a startup process
+cannot prove a human-owned or orphaned subprocess is dead.
 The latest Persistent Advantage pass adds a deterministic `day-reentry`
 dogfood scenario and `focus` age display, proving that an active work session
 aged by more than a day still surfaces last-active time, working memory,
@@ -564,6 +569,10 @@ Evidence:
 - `dogfood --scenario passive-auto-recovery-read` proves the safe-read path end
   to end with an interrupted `read_file`, a passive auto-retry, and a following
   passive native advance.
+- `mew run` startup now repairs incomplete prior runtime effects before
+  processing the next event. It deliberately leaves running work-session items
+  to explicit `mew repair`, avoiding accidental interruption of human-owned or
+  still-live work.
 
 Missing proof:
 
@@ -665,6 +674,17 @@ Next action:
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_runtime.py tests/test_work_session.py tests/test_dogfood.py`
   (`339 passed`), and `./mew dogfood --scenario all --json` (pass, including
   `passive-auto-recovery-read`).
+- Follow-up current: runtime startup now performs conservative repair for
+  incomplete runtime effects before processing a new event, while deliberately
+  leaving running work-session items for explicit `mew repair`. `codex-ultra`
+  caught and the implementation fixed the unsafe first version that interrupted
+  all running work sessions. Validated with focused startup repair coverage,
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_runtime.py tests/test_validation.py`
+  (`58 passed`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/runtime.py tests/test_runtime.py`
+  (pass),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_runtime.py tests/test_work_session.py tests/test_dogfood.py tests/test_validation.py`
+  (`360 passed`), and `./mew dogfood --scenario all --json` (pass).
 - Claude current-HEAD evaluation (`claude-ultra`, session
   `e8ffa27e-5e27-45c9-b37f-68cca4897a95`) verdict: qualified yes for small,
   supervised bounded coding work; the highest-leverage next slice was paired

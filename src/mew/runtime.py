@@ -42,6 +42,7 @@ from .state import (
     ensure_self,
     find_runtime_effect,
     has_pending_user_message,
+    incomplete_runtime_effects,
     load_state,
     read_desires,
     read_guidance,
@@ -102,6 +103,51 @@ def set_runtime_stopped(state, stopped_at):
     runtime["current_phase"] = None
     runtime["cycle_started_at"] = None
     runtime["last_action"] = "runtime stopped"
+
+
+def runtime_effect_recovery_hint(effect, old_status):
+    event_id = effect.get("event_id")
+    event_ref = "the selected event" if event_id is None else f"event #{event_id}"
+    if old_status in ("planning", "planned", "precomputing", "precomputed"):
+        return f"Re-run {event_ref}; no action was recorded as committed."
+    if old_status == "committing":
+        actions = ", ".join(effect.get("action_types") or []) or "unknown actions"
+        return f"Inspect effect #{effect.get('id')} before retrying; it stopped while committing {actions}."
+    return f"Inspect effect #{effect.get('id')} before retrying {event_ref}."
+
+
+def repair_runtime_startup_state(state, current_time=None):
+    current_time = current_time or now_iso()
+    repairs = []
+    for effect in incomplete_runtime_effects(state):
+        old_status = effect.get("status")
+        recovery_hint = runtime_effect_recovery_hint(effect, old_status)
+        update_runtime_effect(
+            state,
+            effect.get("id"),
+            current_time=current_time,
+            status="interrupted",
+            error="Runtime stopped before this effect reached a terminal state.",
+            recovery_hint=recovery_hint,
+            finished_at=current_time,
+        )
+        repairs.append(
+            {
+                "type": "interrupted_runtime_effect",
+                "effect_id": effect.get("id"),
+                "event_id": effect.get("event_id"),
+                "old_status": old_status,
+                "new_status": "interrupted",
+                "recovery_hint": recovery_hint,
+            }
+        )
+    if repairs:
+        runtime = state.setdefault("runtime_status", {})
+        runtime["last_startup_repairs"] = repairs[-20:]
+        runtime["last_startup_repair_at"] = current_time
+        runtime["last_action"] = f"runtime startup repaired {len(repairs)} interrupted item(s)"
+    return repairs
+
 
 def apply_runtime_autonomy_controls(state, args, pending_user, current_time):
     autonomy = state["autonomy"]
@@ -1167,12 +1213,16 @@ def run_runtime(args):
     previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
 
     try:
+        startup_repairs = []
         with state_lock():
             state = load_state()
             set_runtime_running(state, lock["started_at"])
+            startup_repairs = repair_runtime_startup_state(state, current_time=lock["started_at"])
             save_state(state)
         append_log(f"## {lock['started_at']}: runtime started pid={os.getpid()}")
         print(f"mew runtime started pid={os.getpid()} state={STATE_FILE}")
+        if startup_repairs:
+            print(f"startup repaired {len(startup_repairs)} interrupted item(s)")
         if model_auth:
             print(
                 f"{model_backend_label(model_backend)} enabled "
