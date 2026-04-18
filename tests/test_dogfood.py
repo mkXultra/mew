@@ -331,7 +331,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)
             self.assertNotIn("stdout", command)
-            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 120_000)
+            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 125_000)
 
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):
         report = {

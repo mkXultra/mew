@@ -1911,6 +1911,28 @@ def run_work_session_scenario(workspace, env=None):
     task_done_json_seed_result = run(["task", "add", "Done JSON dogfood task", "--kind", "admin", "--json"])
     task_done_json_result = run(["task", "done", "8", "--summary", "dogfood verified", "--json"])
 
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    done_resume_task = next((task for task in state.get("tasks", []) if str(task.get("id")) == "8"), {})
+    current_time = now_iso()
+    state.setdefault("work_sessions", []).append(
+        {
+            "id": next_id(state, "work_session"),
+            "task_id": 8,
+            "status": "closed",
+            "title": done_resume_task.get("title") or "Done JSON dogfood task",
+            "goal": done_resume_task.get("description") or done_resume_task.get("title") or "",
+            "created_at": current_time,
+            "updated_at": current_time,
+            "last_tool_call_id": None,
+            "last_model_turn_id": None,
+            "tool_calls": [],
+            "model_turns": [],
+        }
+    )
+    write_json_file(state_path, state)
+    done_resume_json_result = run(["work", "8", "--session", "--resume", "--json"])
+
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
     task_show_json_data = _json_stdout(task_show_json_result)
@@ -1936,6 +1958,7 @@ def run_work_session_scenario(workspace, env=None):
     reply_approve_data = _json_stdout(reply_approve_result)
     task_done_json_seed_data = _json_stdout(task_done_json_seed_result)
     task_done_json_data = _json_stdout(task_done_json_result)
+    done_resume_json_data = _json_stdout(done_resume_json_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -1967,6 +1990,8 @@ def run_work_session_scenario(workspace, env=None):
     ]
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
+    done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
+    done_resume_controls = done_resume_json_data.get("next_cli_controls") or []
 
     _scenario_check(
         checks,
@@ -2213,6 +2238,24 @@ def run_work_session_scenario(workspace, env=None):
             "completion_summary": task_done_json_data.get("completion_summary"),
         },
         expected="task done --json returns the completed task without text parsing",
+    )
+    _scenario_check(
+        checks,
+        "work_done_task_closed_resume_suggests_reopen",
+        task_done_json_result.get("exit_code") == 0
+        and (task_done_json_data.get("task") or {}).get("status") == "done"
+        and done_resume_json_result.get("exit_code") == 0
+        and "task #8 is done" in done_resume_next_action
+        and "task update 8 --status ready" in done_resume_next_action
+        and "work 8 --start-session" not in done_resume_next_action
+        and any("task update 8 --status ready" in control for control in done_resume_controls)
+        and not any("work 8 --start-session" in control for control in done_resume_controls),
+        observed={
+            "done": task_done_json_data,
+            "next_action": done_resume_next_action,
+            "controls": done_resume_controls,
+        },
+        expected="closed resumes for done tasks point at task reopen instead of an invalid start-session command",
     )
     _scenario_check(
         checks,
