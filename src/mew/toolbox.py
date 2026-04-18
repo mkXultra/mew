@@ -1,5 +1,6 @@
 import os
 import shlex
+import signal
 import subprocess
 import threading
 from pathlib import Path
@@ -33,7 +34,21 @@ def split_command_env(command):
     return parts, env_overrides
 
 
-def run_command_record(command, cwd=None, timeout=300, extra_env=None):
+def _terminate_process_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False):
     argv, env_overrides = split_command_env(command)
     if not argv:
         raise ValueError("command is empty")
@@ -41,6 +56,46 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
     resolved_cwd = resolve_tool_cwd(cwd)
     started_at = now_iso()
     try:
+        env = {**os.environ, **env_overrides, **(extra_env or {})}
+        if kill_process_group:
+            process = subprocess.Popen(
+                argv,
+                cwd=str(resolved_cwd),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=False,
+                env=env,
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                _terminate_process_group(process)
+                stdout, stderr = process.communicate()
+                stdout = stdout if isinstance(stdout, str) else (exc.stdout if isinstance(exc.stdout, str) else "")
+                stderr = stderr if isinstance(stderr, str) else (exc.stderr if isinstance(exc.stderr, str) else "")
+                return {
+                    "command": command,
+                    "argv": argv,
+                    "cwd": str(resolved_cwd),
+                    "started_at": started_at,
+                    "finished_at": now_iso(),
+                    "exit_code": None,
+                    "timed_out": True,
+                    "stdout": clip_output(stdout),
+                    "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
+                }
+            return {
+                "command": command,
+                "argv": argv,
+                "cwd": str(resolved_cwd),
+                "started_at": started_at,
+                "finished_at": now_iso(),
+                "exit_code": process.returncode,
+                "stdout": clip_output(stdout),
+                "stderr": clip_output(stderr),
+            }
         result = subprocess.run(
             argv,
             cwd=str(resolved_cwd),
@@ -48,7 +103,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None):
             capture_output=True,
             timeout=timeout,
             shell=False,
-            env={**os.environ, **env_overrides, **(extra_env or {})},
+            env=env,
         )
         return {
             "command": command,

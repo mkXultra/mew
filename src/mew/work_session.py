@@ -291,15 +291,10 @@ def mark_work_session_runtime_owned(session, *, event_id=None, current_time=None
 def work_session_started_by_runtime(session):
     if not session:
         return False
-    if (
+    return (
         session.get("runtime_managed") is True
         or session.get("owner") == "runtime"
         or bool(session.get("runtime_started_at"))
-    ):
-        return True
-    return any(
-        (note or {}).get("source") == "runtime" and "started native work" in str((note or {}).get("text") or "")
-        for note in session.get("notes") or []
     )
 
 

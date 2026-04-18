@@ -17,6 +17,7 @@ from mew.dogfood import (
     build_dogfood_report,
     build_runtime_command,
     copy_source_workspace,
+    dogfood_subprocess_env,
     dogfood_stop_timeout,
     format_dogfood_loop_report,
     format_dogfood_report,
@@ -39,6 +40,12 @@ from mew.state import add_event, add_outbox_message, default_state
 
 
 class DogfoodTests(unittest.TestCase):
+    def test_dogfood_subprocess_env_preserves_explicit_mew_executable(self):
+        with patch.dict(os.environ, {"MEW_EXECUTABLE": "/tmp/custom-mew"}):
+            env = dogfood_subprocess_env()
+
+        self.assertEqual(env["MEW_EXECUTABLE"], "/tmp/custom-mew")
+
     def test_cli_dogfood_scenario_choices_follow_registered_scenarios(self):
         parser = build_parser()
 

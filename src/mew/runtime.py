@@ -328,6 +328,7 @@ def run_runtime_native_work_step(step, args):
         step["command"],
         cwd=".",
         timeout=timeout,
+        kill_process_group=True,
     )
     finished_at = now_iso()
     success = result.get("exit_code") == 0 and not result.get("timed_out")

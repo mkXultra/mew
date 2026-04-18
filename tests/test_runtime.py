@@ -395,7 +395,7 @@ class RuntimeTests(unittest.TestCase):
                     session["default_options"] = {"allow_read": ["."], "auth": "auth.json"}
                     save_state(state)
 
-                def fake_run_command(command, cwd=None, timeout=None):
+                def fake_run_command(command, cwd=None, timeout=None, **kwargs):
                     with state_lock():
                         state = load_state()
                         state.setdefault("test_observations", {})["runner_acquired_state_lock"] = True
@@ -476,7 +476,7 @@ class RuntimeTests(unittest.TestCase):
                     session["default_options"] = {"allow_read": ["."]}
                     save_state(state)
 
-                def fake_timeout(command, cwd=None, timeout=None):
+                def fake_timeout(command, cwd=None, timeout=None, **kwargs):
                     with state_lock():
                         state = load_state()
                         state["work_sessions"][0]["model_turns"].append({"id": 1, "status": "running"})
