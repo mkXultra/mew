@@ -27,8 +27,9 @@ Current guiding judgment:
 - Reflex observation exists: with bounded opt-in rounds, mew can read/inspect/search, rethink with the observation, and then act.
 - Gated write/verify/rollback exists, and write runs link to verification runs; this is now a real feedback loop.
 - Runtime effect journaling has started: cycles now persist planning/commit/apply/verify status and surface it in doctor/brief/dogfood.
-- Repair can explicitly mark unfinished runtime effects as interrupted after process death and attach a recovery hint.
-- The remaining frontier is true interruption recovery: use the journal to automatically resume or repair unfinished effects, not only explain the next step.
+- Repair can explicitly mark unfinished runtime effects as interrupted after process death and attach a recovery hint; runtime startup now performs the safe subset automatically for incomplete runtime effects.
+- True interruption recovery has started: passive native work can auto-retry the selected interrupted verifier or safe read/git tool when explicit gates match, while side-effecting write/shell recovery stays on the visible review path.
+- The remaining recovery frontier is side-effecting command/write recovery and broader runtime-effect recovery: use the journal to automatically choose safe next actions without hiding risk from the user.
 - The next maintainability frontier is extracting action application from the large agent/command modules so mew can reason about and improve its own execution layer.
 - Native work sessions are now the main evidence for "inside mew": THINK/ACT is journaled before model calls, live work has stop boundaries, resume bundles include world state/recovery plans, older context is digested, and oversized model context is compacted.
 - Passive native work advance is now part of the bar: with explicit gates, mew can start a runtime-owned coding work session and later passive ticks can advance it by one bounded native step while preserving auditability.
