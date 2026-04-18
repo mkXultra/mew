@@ -23,6 +23,16 @@ def test_render_browser_pet_for_alerting_state() -> None:
             "pet_state": "alerting",
             "focus": "Waiting for reply",
             "primary_action": {"label": "Reply to question #1", "command": 'mew reply 1 "<reply>"'},
+            "details": {
+                "questions": [
+                    {
+                        "label": "Question #1",
+                        "summary": "Need input",
+                        "command": 'mew reply 1 "<reply>"',
+                    }
+                ],
+                "tasks": [{"label": "Task #2", "summary": "Build desk", "command": "mew code 2"}],
+            },
             "counts": {
                 "open_tasks": 2,
                 "open_questions": 1,
@@ -37,6 +47,10 @@ def test_render_browser_pet_for_alerting_state() -> None:
     assert "Needs input" in html
     assert "Reply to question #1" in html
     assert "mew reply 1 &quot;&lt;reply&gt;&quot;" in html
+    assert "Questions" in html
+    assert "Need input" in html
+    assert "Task #2" in html
+    assert "mew code 2" in html
     assert "<strong>2</strong>" in html
     assert "<strong>3</strong>" in html
 
@@ -53,6 +67,52 @@ def test_primary_action_escapes_label_and_command() -> None:
     assert "<b>Do it</b>" not in html
     assert "&lt;b&gt;Do it&lt;/b&gt;" in html
     assert "mew reply 1 &quot;&lt;script&gt;&quot;" in html
+
+
+def test_detail_sections_escape_nested_items() -> None:
+    html = browser_pet.render_browser_pet(
+        {
+            "pet_state": "alerting",
+            "details": {
+                "attention": [
+                    {
+                        "label": "<b>Attention</b>",
+                        "summary": '<script>alert("detail")</script>',
+                        "command": 'mew attention "<bad>"',
+                    }
+                ]
+            },
+            "counts": {},
+        }
+    )
+
+    assert "<b>Attention</b>" not in html
+    assert '<script>alert("detail")</script>' not in html
+    assert "&lt;b&gt;Attention&lt;/b&gt;" in html
+    assert "&lt;script&gt;alert(&quot;detail&quot;)&lt;/script&gt;" in html
+    assert "mew attention &quot;&lt;bad&gt;&quot;" in html
+
+
+def test_detail_sections_are_bounded_for_arbitrary_json() -> None:
+    html = browser_pet.render_browser_pet(
+        {
+            "pet_state": "typing",
+            "details": {
+                "tasks": [
+                    {"label": f"Task #{index}", "summary": "A" * 240, "command": f"mew task show {index}"}
+                    for index in range(1, 6)
+                ]
+            },
+            "counts": {},
+        }
+    )
+
+    assert "Task #1" in html
+    assert "Task #3" in html
+    assert "Task #4" not in html
+    rendered_summary = "A" * (browser_pet.MAX_DETAIL_TEXT_LENGTH - 3) + "..."
+    assert rendered_summary in html
+    assert "A" * browser_pet.MAX_DETAIL_TEXT_LENGTH not in html
 
 
 def test_unknown_state_falls_back_to_sleeping() -> None:

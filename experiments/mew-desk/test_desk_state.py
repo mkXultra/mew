@@ -32,7 +32,10 @@ def test_generate_alerting_view_model_for_open_question(tmp_path: Path) -> None:
     assert data["pet_state"] == "alerting"
     assert data["counts"]["open_questions"] == 1
     assert data["focus"] == "Waiting for reply: Need input?"
+    assert data["details"]["questions"][0]["label"] == "Question #2"
+    assert data["details"]["questions"][0]["command"].endswith("reply 2 '<reply>'")
     assert "- pet_state: alerting" in markdown
+    assert "questions:" in markdown
 
 
 def test_runtime_planning_maps_to_thinking(tmp_path: Path) -> None:

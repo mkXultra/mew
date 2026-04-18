@@ -15,8 +15,8 @@ from mew.state import add_outbox_message, load_state, save_state, state_lock
 class DeskTests(unittest.TestCase):
     def test_build_desk_view_model_alerts_on_open_question(self):
         state = {
-            "tasks": [{"id": 1, "title": "Build desk", "status": "ready"}],
-            "outbox": [{"id": 1, "requires_reply": True, "text": "Need input?"}],
+            "tasks": [{"id": 1, "title": "Build desk", "status": "ready", "kind": "coding"}],
+            "outbox": [{"id": 1, "requires_reply": True, "text": "Need input?", "related_task_id": 1}],
         }
 
         view = build_desk_view_model(state, explicit_date="2026-04-17")
@@ -27,6 +27,12 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["counts"]["open_questions"], 1)
         self.assertEqual(view["primary_action"]["kind"], "reply")
         self.assertEqual(view["primary_action"]["command"], mew_command("reply", 1, "<reply>"))
+        self.assertEqual(view["details"]["questions"][0]["label"], "Question #1")
+        self.assertEqual(view["details"]["questions"][0]["summary"], "Need input?")
+        self.assertEqual(view["details"]["questions"][0]["command"], mew_command("reply", 1, "<reply>"))
+        self.assertEqual(view["details"]["questions"][0]["task_id"], 1)
+        self.assertEqual(view["details"]["tasks"][0]["label"], "Task #1")
+        self.assertEqual(view["details"]["tasks"][0]["command"], mew_command("code", 1))
 
     def test_build_desk_view_model_uses_canonical_question_status_when_available(self):
         deferred = {
@@ -83,6 +89,11 @@ class DeskTests(unittest.TestCase):
             typing["primary_action"]["command"],
             mew_command("work", "--session", "--resume", "--allow-read", "."),
         )
+        self.assertEqual(typing["details"]["active_work_sessions"][0]["label"], "Work session #1")
+        self.assertEqual(
+            typing["details"]["active_work_sessions"][0]["command"],
+            mew_command("work", "--session", "--resume", "--allow-read", "."),
+        )
 
     def test_build_desk_view_model_dedupes_sessions_and_skips_done_task_session(self):
         view = build_desk_view_model(
@@ -112,6 +123,24 @@ class DeskTests(unittest.TestCase):
 
         self.assertEqual(view["pet_state"], "alerting")
         self.assertEqual(view["counts"]["open_attention"], 1)
+        self.assertEqual(view["details"]["attention"][0]["label"], "Attention #1")
+        self.assertEqual(view["details"]["attention"][0]["summary"], "Needs review")
+        self.assertEqual(view["details"]["attention"][0]["command"], mew_command("attention"))
+
+    def test_build_desk_view_model_limits_and_compacts_details(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {"id": index, "title": "Task " + ("A" * 180), "status": "ready", "kind": "research"}
+                    for index in range(1, 6)
+                ]
+            },
+            explicit_date="2026-04-17",
+        )
+
+        self.assertEqual(len(view["details"]["tasks"]), 3)
+        self.assertTrue(view["details"]["tasks"][0]["summary"].endswith("..."))
+        self.assertEqual(view["details"]["tasks"][0]["command"], mew_command("task", "show", 1))
 
     def test_format_desk_view(self):
         text = format_desk_view(
@@ -126,6 +155,15 @@ class DeskTests(unittest.TestCase):
                     "active_work_sessions": 0,
                     "open_attention": 0,
                 },
+                "details": {
+                    "tasks": [
+                        {
+                            "label": "Task #1",
+                            "summary": "Review desk",
+                            "command": mew_command("task", "show", 1),
+                        }
+                    ]
+                },
             }
         )
 
@@ -133,6 +171,8 @@ class DeskTests(unittest.TestCase):
         self.assertIn("pet_state: sleeping", text)
         self.assertIn("primary_action: Open task #1", text)
         self.assertIn(f"primary_command: {mew_command('task', 'show', 1)}", text)
+        self.assertIn("tasks:", text)
+        self.assertIn(f"- Task #1: Review desk -> {mew_command('task', 'show', 1)}", text)
 
     def test_build_desk_view_model_action_for_coding_task(self):
         view = build_desk_view_model(

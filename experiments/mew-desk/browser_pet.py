@@ -9,6 +9,8 @@ from typing import Any, TextIO
 
 
 MAX_FOCUS_LENGTH = 160
+MAX_DETAIL_ITEMS = 3
+MAX_DETAIL_TEXT_LENGTH = 180
 DEFAULT_REFRESH_SECONDS = 10
 
 PET_FRAMES: dict[str, list[str]] = {
@@ -120,6 +122,50 @@ def render_primary_action(view_model: dict[str, Any]) -> str:
     return f'<div class="action">{label_node}{command_node}</div>'
 
 
+def compact_detail_value(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= MAX_DETAIL_TEXT_LENGTH:
+        return text
+    return text[: MAX_DETAIL_TEXT_LENGTH - 3].rstrip() + "..."
+
+
+def render_detail_sections(view_model: dict[str, Any]) -> str:
+    details = view_model.get("details")
+    if not isinstance(details, dict):
+        return ""
+    sections = [
+        ("questions", "Questions"),
+        ("active_work_sessions", "Work"),
+        ("tasks", "Tasks"),
+        ("attention", "Attention"),
+    ]
+    section_nodes = []
+    for key, title in sections:
+        raw_items = details.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        item_nodes = []
+        for raw_item in raw_items[:MAX_DETAIL_ITEMS]:
+            if not isinstance(raw_item, dict):
+                continue
+            label = compact_detail_value(raw_item.get("label"))
+            summary = compact_detail_value(raw_item.get("summary"))
+            command = compact_detail_value(raw_item.get("command"))
+            if not label and not summary and not command:
+                continue
+            label_node = f'<strong>{html.escape(label)}</strong>' if label else ""
+            summary_node = f'<span>{html.escape(summary)}</span>' if summary else ""
+            command_node = f'<code>{html.escape(command)}</code>' if command else ""
+            item_nodes.append(f'<div class="detail-item">{label_node}{summary_node}{command_node}</div>')
+        if item_nodes:
+            section_nodes.append(
+                f'<section class="detail-section"><h2>{html.escape(title)}</h2>{"".join(item_nodes)}</section>'
+            )
+    if not section_nodes:
+        return ""
+    return f'<div class="details">{"".join(section_nodes)}</div>'
+
+
 def render_refresh_meta(refresh_seconds: int | None) -> str:
     if refresh_seconds is None:
         return ""
@@ -136,6 +182,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
     cat = "\n".join(PET_FRAMES[state])
     count_nodes = render_count_items(counts)
     action_node = render_primary_action(view_model)
+    details_node = render_detail_sections(view_model)
     refresh_meta = render_refresh_meta(refresh_seconds)
 
     return f"""<!doctype html>
@@ -288,6 +335,44 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
       font-size: 19px;
       line-height: 1;
     }}
+    .details {{
+      display: grid;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }}
+    .detail-section {{
+      display: grid;
+      gap: 7px;
+    }}
+    h2 {{
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.2;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .detail-item {{
+      display: grid;
+      gap: 4px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+      overflow-wrap: anywhere;
+    }}
+    .detail-section h2 + .detail-item {{ border-top: 0; padding-top: 0; }}
+    .detail-item strong {{
+      font-size: 13px;
+      line-height: 1.2;
+    }}
+    .detail-item span {{
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.35;
+    }}
+    .detail-item code {{
+      color: var(--muted);
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }}
     @media (max-width: 420px) {{
       body {{ padding: 12px; }}
       header {{ align-items: flex-start; flex-direction: column; }}
@@ -312,6 +397,7 @@ def render_browser_pet(view_model: dict[str, Any], refresh_seconds: int | None =
       </div>
       <p class="focus">{html.escape(focus)}</p>
       {action_node}
+      {details_node}
       <ul aria-label="counts">
         {count_nodes}
       </ul>

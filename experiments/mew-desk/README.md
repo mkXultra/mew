@@ -14,7 +14,10 @@ This experiment still does not create a tray app or Tauri project. It answers
 the next UI question first: can a dumb visual shell consume `mew desk --json`
 without reading raw `.mew/state.json` or touching the resident runtime?
 The view model can include a `primary_action` hint such as a reply or resume
-command; the browser shell renders it as a copyable next move.
+command; the browser shell renders it as a copyable next move. Newer view
+models also include shallow `details` lists for questions, active work
+sessions, tasks, and attention, capped to a few items so a visual shell can
+explain why mew is alerting without reading raw state.
 
 Pet states:
 

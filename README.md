@@ -72,9 +72,10 @@ are written under `--reports-root`; pass the same path to `--reports-root` and
 generated reports would overwrite different existing content, mew writes a
 sibling `.bak` first.
 `desk` prints a small desktop-pet view model with `sleeping`, `thinking`,
-`typing`, or `alerting` state plus a compact focus summary. Use `mew desk --json`
-for a future tray/window process, or `mew desk --write` to write `.mew/desk`
-artifacts.
+`typing`, or `alerting` state plus a compact focus summary, primary action,
+counts, and shallow detail lists for questions, active work sessions, tasks,
+and attention. Use `mew desk --json` for a future tray/window process, or
+`mew desk --write` to write `.mew/desk` artifacts.
 `mood` scores current state across `energy`, `worry`, and `joy`, then can write
 `.mew/mood/YYYY-MM-DD.md` for `mew bundle`.
 When an active work session has working memory, `focus` includes the current
