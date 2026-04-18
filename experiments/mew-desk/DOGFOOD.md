@@ -69,3 +69,40 @@ Product learning:
   counts into a shape the human can keep nearby.
 - A terminal renderer is not the final pet, but it proves the boundary before
   platform-specific desktop work.
+
+## 2026-04-19
+
+Task: `#153 Prototype mew-desk browser shell`
+
+Buddy use:
+
+- Created work session `#172` for task `#153`.
+- Asked `mew work --live --max-steps 1` to inspect `experiments/mew-desk`
+  before editing.
+- Mew chose the same first move: inspect the existing isolated scaffold instead
+  of touching core runtime code.
+
+Built:
+
+- Added `browser_pet.py`, a standalone HTML renderer for the existing
+  `mew desk --json` view model.
+- Kept it local-first: it reads a JSON file or stdin and writes HTML to stdout
+  or `--output`.
+- Added tests for state rendering, escaping, focus compaction, stdin/file
+  handling, and unknown-state fallback.
+
+Validation:
+
+- `uv run pytest -q experiments/mew-desk` -> `17 passed`.
+- `uv run --with ruff ruff check experiments/mew-desk` -> passed.
+- Generated live-state HTML at `/tmp/mew-desk-browser.html`; it rendered
+  `data-state="alerting"` from the current `mew desk` view model.
+
+Product learning:
+
+- `mew desk --json` can now drive both terminal and browser shells without any
+  direct dependency on `.mew/state.json`.
+- The UI boundary is still intentionally dumb. That is good: a future Tauri or
+  tray app should not need to understand resident internals.
+- The next useful UI proof is no longer "can it render?" but "can it stay open
+  and refresh calmly?"
