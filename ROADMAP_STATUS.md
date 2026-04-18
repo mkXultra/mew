@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, and passive auto-recovery for interrupted verifier plus safe read/git cases exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -155,6 +155,11 @@ candidate: `pairing_status.missing_test_edit` includes an inferred
 `suggested_test_path` such as `src/mew/work_session.py` ->
 `tests/test_work_session.py`, visible in resume text, approval cells, follow
 snapshots, and reply-file steer text.
+Compact task workbench reentry now also surfaces the latest unresolved
+work-session failure as a `risk:` line, while hiding only superseded recovered
+failures. This keeps failed verifier recovery or failed work tools visible from
+the top-level `mew work <task-id>` front door instead of requiring a full
+session resume.
 
 ## Milestone 1: Native Hands
 
@@ -426,6 +431,11 @@ Evidence:
 - Context builder includes recent runtime effects and clipped summaries.
 - Project snapshot and memory systems exist.
 - Native work sessions now have task-local resume bundles with files touched, commands, failures, pending approvals, working memory, recent decisions, next action, and context pressure.
+- Top-level task workbench reentry now includes the latest unresolved
+  work-session failure as an explicit `risk:` line, including `retry_failed`
+  recovery records, while hiding superseded recovered failures. This preserves
+  open risk across compact reentry without forcing the user or resident model
+  to reopen the full session resume first.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
@@ -679,6 +689,21 @@ Next action:
 
 ## Latest Validation
 
+- Persistent Advantage current: native self-improve task #131 used two
+  read-only `mew work --follow` steps to identify that compact task workbench
+  reentry under-surfaced open risk from failed verification/work tools. The
+  workbench now prints the latest unresolved failure as `risk: ...`, keeps
+  `retry_failed` recovery records visible even when they reference a retry
+  tool call, and hides only `recovery_status=superseded` failures. An initial
+  `codex-ultra` review found that `recovered_by_tool_call_id` must not hide
+  failed retries; that blocker was fixed, and the re-review returned no
+  blockers with a superseded-path test suggestion that was added. Validated
+  with focused reentry/recovery tests (`3 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py`
+  (`444 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`964 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/commands.py tests/test_work_session.py`
+  (pass), and `./mew dogfood --scenario all` (pass).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
   candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now

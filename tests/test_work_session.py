@@ -8600,6 +8600,34 @@ class WorkSessionTests(unittest.TestCase):
                                     "result": {"command": "uv run pytest -q", "exit_code": 1, "stderr": "same failure\n"},
                                     "error": "verification failed with exit_code=1",
                                 },
+                                {
+                                    "id": 3,
+                                    "tool": "run_tests",
+                                    "status": "failed",
+                                    "parameters": {"command": "uv run pytest -q tests/test_runtime.py"},
+                                    "result": {
+                                        "command": "uv run pytest -q tests/test_runtime.py",
+                                        "exit_code": 1,
+                                        "stderr": "retry failed\n",
+                                    },
+                                    "error": "retry failed after interrupted verifier recovery",
+                                    "recovery_status": "retry_failed",
+                                    "recovered_by_tool_call_id": 4,
+                                },
+                                {
+                                    "id": 5,
+                                    "tool": "run_tests",
+                                    "status": "failed",
+                                    "parameters": {"command": "uv run pytest -q tests/test_old.py"},
+                                    "result": {
+                                        "command": "uv run pytest -q tests/test_old.py",
+                                        "exit_code": 1,
+                                        "stderr": "old failure\n",
+                                    },
+                                    "error": "old verifier was already recovered",
+                                    "recovery_status": "superseded",
+                                    "recovered_by_tool_call_id": 6,
+                                },
                             ],
                             "model_turns": [
                                 {
@@ -8637,6 +8665,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("note[user]: Use the workbench first.", output)
                 self.assertIn("note[model]: Resume from the latest evidence.", output)
                 self.assertNotIn("note[system]: Follow reached max_steps", output)
+                self.assertIn("risk: run_tests#3 failed exit=1: retry failed after interrupted verifier recovery", output)
+                self.assertNotIn("risk: run_tests#5", output)
+                self.assertNotIn("old verifier was already recovered", output)
                 self.assertIn("repeat: run_tests uv run pytest -q failed 2x", output)
                 self.assertIn("latest_decision: #1 remember recorded reentry guidance", output)
                 self.assertNotIn("guidance: Keep this visible on reentry.", output)

@@ -644,6 +644,17 @@ def _format_workbench_reentry(resume, task):
             source = note.get("source") or "note"
             lines.append(f"note[{source}]: {text}")
 
+    for failure in reversed(resume.get("failures") or []):
+        if failure.get("recovery_status") == "superseded":
+            continue
+        tool = failure.get("tool") or "tool"
+        tool_id = failure.get("tool_call_id")
+        tool_ref = f"{tool}#{tool_id}" if tool_id is not None else tool
+        exit_text = f" exit={failure.get('exit_code')}" if failure.get("exit_code") is not None else ""
+        summary = failure.get("error") or failure.get("summary") or "failed"
+        lines.append(f"risk: {tool_ref} failed{exit_text}: {clip_inline_text(summary, 260)}")
+        break
+
     recurring = resume.get("recurring_failures") or []
     if recurring:
         item = recurring[-1]
