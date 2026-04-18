@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, and work-session/global ledgers; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, and task-kind scoped reentry views now exist; day-scale reentry and passive watcher advantage are not yet proven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, older-tool digests, live world-state context, task-kind scoped reentry views, and short passive native-work advancement now exist; day-scale reentry is not yet proven. |
 | 4. True Recovery | `foundation` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, `outcome`, recovery plans, and safe read/git retries exist; automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -413,14 +413,23 @@ Evidence:
   older sessions. `mew focus` reuses those same saved defaults for active
   session next/resume/continue/follow commands, and direct `mew work <task>
   --live` reentry applies saved session defaults to planning/tool execution.
+- Autonomous act-level runtime can now advance runtime-owned native work
+  sessions on later passive ticks when `--allow-native-advance` is explicitly
+  enabled. Each advance runs one bounded `mew work --live --max-steps 1`
+  subprocess, preserves the runtime auth/model/read/write/verify defaults,
+  disables inline approval prompts, skips human-started/running/approval-waiting
+  sessions, records outcome notes, and is summarized in dogfood metrics. Real
+  Codex Web API dogfood in temporary workspaces completed two passive native
+  work advances after startup, including read-only model/tool turns and runtime
+  verification.
 
 Missing proof:
 
 - Task-local resume and scoped reentry views exist for native work sessions, but they are not yet proven across day-scale interruption/resume cycles.
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - Watcher-driven passive output now has controlled, real-repo one-shot,
-  short resident-loop, and native-work-start proofs, but not yet a long-running
-  cadence proof across several hours or days.
+  short resident-loop, native-work-start, and real API native-work-advance
+  proofs, but not yet a long-running cadence proof across several hours or days.
 - User preference memory is not yet clearly shaping behavior.
 
 Next action:
@@ -508,6 +517,9 @@ Next action:
 
 ## Latest Validation
 
+- `uv run pytest -q` current: `890 passed, 6 subtests passed`.
+- `./mew dogfood --scenario native-work --allow-native-work --allow-native-advance` current: pass; validates native work session start, runtime defaults, visible reentry commands, no redundant ready-task question, and no external agent run.
+- Real Codex Web API dogfood current: `./mew dogfood --duration 90 --interval 20 --poll-interval 0.2 --ai --auth auth.json --autonomy-level act --allow-native-work --allow-native-advance --seed-ready-coding-task --allow-verify --verify-command '/usr/bin/python3 -V' --report .mew/dogfood-native-advance-ai-20260418-env.json --json` completed startup plus two passive ticks; `last_native_work_step.outcome=completed`, exit_code 0, and log tail recorded two `native work advance completed` entries.
 - `uv run pytest -q` current: `881 passed, 6 subtests passed`.
 - `./mew dogfood --scenario all --cleanup --json` current: pass across interrupted-focus, trace-smoke, memory-search, runtime-focus, resident-loop, native-work, chat-cockpit, and work-session; interrupted-focus checks ready coding questions route to `mew code`, runtime-focus includes stale passive question refresh, resident-loop proves startup/passive tick cadence and repeated-wait thought compaction, native-work proves explicit `--allow-native-work` act-level runtime starts a native work session for a ready coding task with current runtime read/verify/model defaults, provenance, visible live/follow commands, no external agent runs, no stale write/verify authority, and no redundant ready-task questions, `observe --json`, and work-session includes task lifecycle JSON, follow-status producer health, suggested recovery, reply-file checks, and stable cockpit cells.
 - `uv run pytest -q experiments/mew-desk` current: `11 passed`, including the isolated terminal-pet renderer over `mew desk --json`.
