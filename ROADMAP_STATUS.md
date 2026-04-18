@@ -1122,6 +1122,10 @@ Next action:
 - The same stale-finish guard is now shared by regular work tools, batch/live
   tools, and recovery retries: missing finished tool calls are surfaced as
   failed synthetic tool results instead of crashing the cockpit.
+- Native dogfood task #124/session #146 tightened long-session reentry output:
+  `mew work --follow` and `--compact-live` now print compact CLI controls by
+  default, and code-mode `/work-session resume` keeps terse cockpit controls
+  instead of expanding back into the full command list.
 
 ## Current Roadmap Focus
 

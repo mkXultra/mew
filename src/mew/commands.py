@@ -1814,9 +1814,45 @@ def work_cli_control_commands(session, args, task=None):
     return [item["command"] for item in work_cli_control_items(session, args, task=task)]
 
 
-def format_work_cli_controls(session, args, task=None):
+def compact_work_cli_control_items(items):
+    keep_labels = {
+        "start a work session",
+        "review closed session",
+        "reopen task",
+        "start a new session",
+        "submit pending interrupt",
+        "interrupt snapshot",
+        "stop requested snapshot",
+        "one live step",
+        "follow loop",
+        "steer next step",
+        "queue follow-up",
+        "resume snapshot",
+        "open chat",
+    }
+    keep_prefixes = (
+        "add paired test",
+        "add paired tests",
+        "approve",
+        "auto-recover",
+        "override unpaired",
+        "reject",
+        "retry failed approval",
+    )
+    compact = []
+    for item in items or []:
+        label = item.get("label") or ""
+        if label in keep_labels or label.startswith(keep_prefixes):
+            compact.append(item)
+    return compact or list(items or [])[:6]
+
+
+def format_work_cli_controls(session, args, task=None, compact=False):
     lines = ["", "Next CLI controls"]
-    for item in work_cli_control_items(session, args, task=task):
+    items = work_cli_control_items(session, args, task=task)
+    if compact:
+        items = compact_work_cli_control_items(items)
+    for item in items:
         label = item.get("label") or "run"
         lines.append(f"{label}: {item.get('command')}")
     return "\n".join(lines)
@@ -2859,6 +2895,7 @@ def cmd_work_ai(args):
 
     options = _work_control_options(args, session=session)
     effective_args = _work_effective_args(args, options)
+    compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
         "session_id": session_id,
         "task_id": task_id,
@@ -2888,7 +2925,7 @@ def cmd_work_ai(args):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)
-            print(format_work_cli_controls(session, args))
+            print(format_work_cli_controls(session, args, compact=compact_cli_controls))
         return 0
 
     with state_lock():
@@ -2913,7 +2950,7 @@ def cmd_work_ai(args):
                 with state_lock():
                     state = load_state()
                     session = find_work_session(state, session_id)
-                print(format_work_cli_controls(session, args))
+                print(format_work_cli_controls(session, args, compact=compact_cli_controls))
         return 1
 
     try:
@@ -2942,7 +2979,7 @@ def cmd_work_ai(args):
             "No work tool gates are enabled. Rerun with `--allow-read .`, explicit write/verify gates, "
             "or use `mew do <task-id>` for the supervised default loop."
         )
-        print(format_work_cli_controls(session, args))
+        print(format_work_cli_controls(session, args, compact=compact_cli_controls))
         return 1
 
     for index in range(1, max_steps + 1):
@@ -3607,7 +3644,7 @@ def cmd_work_ai(args):
         if getattr(args, "live", False) and not getattr(args, "suppress_cli_controls", False):
             state = load_state()
             session = find_work_session(state, session_id)
-            print(format_work_cli_controls(session, args))
+            print(format_work_cli_controls(session, args, compact=compact_cli_controls))
     if report.get("stop_reason") == "user_interrupt":
         return 130
     return 0 if report.get("stop_reason") not in (
@@ -10195,7 +10232,16 @@ def chat_work_session(rest, chat_state=None):
                 continue_options = _replace_work_allow_read_options(continue_options, allow_read)
                 if chat_state is not None:
                     chat_state["work_continue_options"] = continue_options
-            print(format_work_cockpit_controls(state=state, session=session, continue_options=continue_options))
+            compact_controls = bool((chat_state or {}).get("compact_controls"))
+            print(
+                format_work_cockpit_controls(
+                    state=state,
+                    session=session,
+                    continue_options=continue_options,
+                    compact=compact_controls,
+                    terse=compact_controls,
+                )
+            )
         return
 
     if action == "timeline":

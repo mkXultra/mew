@@ -4562,6 +4562,38 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_code_work_session_resume_keeps_next_controls_terse(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+                from mew.state import load_state, save_state, state_lock
+                from mew.work_session import create_work_session
+
+                with state_lock():
+                    state = load_state()
+                    task = {"id": 1, "title": "Improve cockpit", "status": "todo", "kind": "coding"}
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    session["default_options"] = {"allow_read": ["."], "model_backend": "codex"}
+                    save_state(state)
+
+                chat_state = {"kind": "coding", "compact_controls": True}
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(run_chat_slash_command("/work-session resume --allow-read .", chat_state), "continue")
+
+                controls = stdout.getvalue().split("Next controls", 1)[1]
+                self.assertIn("- /c\n", controls)
+                self.assertIn("- /follow\n", controls)
+                self.assertIn("- /work-session resume --allow-read .", controls)
+                self.assertIn("- /help work", controls)
+                self.assertNotIn("- /work-session details", controls)
+                self.assertNotIn("- /work-session timeline", controls)
+                self.assertNotIn("- /work-session interrupt", controls)
+            finally:
+                os.chdir(old_cwd)
+
     def test_done_task_work_sessions_do_not_capture_active_cockpit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

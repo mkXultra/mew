@@ -15,6 +15,7 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
+    format_work_cli_controls,
     format_work_cockpit_controls,
     format_work_live_step_result,
     remember_successful_work_verification,
@@ -4005,6 +4006,30 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew chat", output)
             finally:
                 os.chdir(old_cwd)
+
+    def test_compact_work_cli_controls_trim_secondary_reentry_commands(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build native hands",
+            "tool_calls": [],
+            "model_turns": [],
+            "default_options": {"model_backend": "codex", "allow_read": ["."], "compact_live": True},
+        }
+        args = SimpleNamespace(live=False)
+
+        controls = format_work_cli_controls(session, args, compact=True)
+
+        self.assertIn("one live step: ./mew work 1 --live --model-backend codex --allow-read .", controls)
+        self.assertIn("follow loop: ./mew work 1 --follow --model-backend codex --allow-read .", controls)
+        self.assertIn("steer next step: ./mew work 1 --steer <guidance>", controls)
+        self.assertIn("queue follow-up: ./mew work 1 --queue-followup <message>", controls)
+        self.assertIn("resume snapshot: ./mew work 1 --session --resume --allow-read .", controls)
+        self.assertIn("open chat: ./mew chat", controls)
+        self.assertNotIn("short live burst:", controls)
+        self.assertNotIn("interrupt and submit:", controls)
+        self.assertNotIn("pause at boundary:", controls)
 
     def test_work_session_recovers_interrupted_read_tool(self):
         old_cwd = os.getcwd()
@@ -9625,7 +9650,56 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew work ai: 2/10 step(s) stop=finish", output)
                 self.assertNotIn("Work live step #1 resume", output)
                 self.assertIn("Next CLI controls", output)
+                self.assertNotIn("short live burst:", output)
+                self.assertNotIn("interrupt and submit:", output)
+                self.assertNotIn("pause at boundary:", output)
                 self.assertIn("Work session finished: follow complete", load_state()["tasks"][0]["notes"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_active_stop_uses_compact_cli_controls(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {"summary": "pause", "action": {"type": "wait", "reason": "keep active"}}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--follow",
+                                        "--max-steps",
+                                        "1",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                controls = stdout.getvalue().split("Next CLI controls", 1)[1]
+                self.assertIn("one live step:", controls)
+                self.assertIn("follow loop:", controls)
+                self.assertIn("steer next step:", controls)
+                self.assertIn("queue follow-up:", controls)
+                self.assertIn("resume snapshot:", controls)
+                self.assertIn("open chat:", controls)
+                self.assertNotIn("short live burst:", controls)
+                self.assertNotIn("interrupt and submit:", controls)
+                self.assertNotIn("pause at boundary:", controls)
             finally:
                 os.chdir(old_cwd)
 
