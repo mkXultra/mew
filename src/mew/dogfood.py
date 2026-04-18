@@ -955,8 +955,8 @@ def run_native_work_scenario(workspace, env=None):
         model="",
         base_url="",
         allow_write=False,
-        allow_verify=False,
-        verify_command="",
+        allow_verify=True,
+        verify_command=f"{sys.executable} -V",
         verify_interval_minutes=0.05,
         execute_tasks=False,
         allow_agent_run=False,
@@ -1036,12 +1036,14 @@ def run_native_work_scenario(workspace, env=None):
         checks,
         "native_work_seeds_runtime_defaults",
         str(workspace) in (latest_defaults.get("allow_read") or [])
+        and latest_defaults.get("allow_verify") is True
+        and latest_defaults.get("verify_command") == runtime_args.verify_command
         and any(note.get("source") == "runtime" for note in latest_active_session.get("notes") or []),
         observed={
             "default_options": latest_defaults,
             "notes": latest_active_session.get("notes") or [],
         },
-        expected="passive-started session inherits runtime read roots and records provenance",
+        expected="passive-started session inherits runtime read/verify defaults and records provenance",
     )
     _scenario_check(
         checks,
@@ -1056,6 +1058,8 @@ def run_native_work_scenario(workspace, env=None):
         f"./mew code {task_id}" in outbox_text
         and f"mew work {task_id} --live" in outbox_text
         and f"mew work {task_id} --follow" in outbox_text
+        and "--allow-verify" in outbox_text
+        and "--verify-command" in outbox_text
         and "native work session" in outbox_text,
         observed=outbox_text,
         expected="outbox tells the user how to open, live-step, or follow the native work session",
