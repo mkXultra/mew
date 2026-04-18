@@ -163,6 +163,10 @@ session resume.
 The newest dogfood friction fix makes `mew dogfood --all` an exact shortcut for
 `--scenario all`, so the command a resident/human naturally tries no longer
 collides with the `--allow-*` gate flags.
+The same unresolved-risk signal now reaches `mew focus`: active work sessions
+carry a compact `risk:` line from the shared work-session failure formatter,
+and the day-reentry dogfood seeds a failed verifier to prove the quiet daily
+entrypoint preserves that risk.
 
 ## Milestone 1: Native Hands
 
@@ -439,6 +443,9 @@ Evidence:
   recovery records, while hiding superseded recovered failures. This preserves
   open risk across compact reentry without forcing the user or resident model
   to reopen the full session resume first.
+- `mew focus` active-session entries now use the same unresolved failure risk
+  formatter, so the daily quiet reentry surface shows failed verification/work
+  risk alongside age, working memory, and continue/follow controls.
 - The resident work model receives the resume bundle in its prompt, so separate invocations can continue from task-local work history.
 - Recent work model turns now feed bounded prior THINK/reasoning fields back into the next prompt, so the resident model can carry observations and hypotheses between steps instead of relying only on raw tool output.
 - THINK prompts now ask the resident model to persist a compact `working_memory` object for future reentry; old sessions fall back to latest turn summary/action reason plus verification state.
@@ -718,6 +725,20 @@ Next action:
   `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`967 passed, 15 subtests
   passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/cli.py src/mew/commands.py tests/test_dogfood.py tests/test_commands.py`
   (pass), and `git diff --check` (pass).
+- Persistent Advantage current: task #133 extended unresolved work-session
+  risk from the task workbench into `mew focus` by sharing the risk formatter
+  through `work_session`. Focus JSON/text now expose the latest non-superseded
+  failed tool, including failed verifier recovery, while day-reentry dogfood
+  seeds a failed verifier and asserts the quiet reentry surface preserves it.
+  `codex-ultra` found that the first focus implementation looked only at the
+  truncated resume failure window; the fix adds `unresolved_failure` before
+  truncation and re-review returned no blockers. Validated with focused
+  focus/workbench/day-reentry tests (`3 passed`), related
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_brief.py tests/test_commands.py tests/test_work_session.py tests/test_dogfood.py`
+  (`531 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`968 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check src/mew/brief.py src/mew/commands.py src/mew/work_session.py src/mew/dogfood.py tests/test_brief.py tests/test_work_session.py tests/test_dogfood.py`
+  (pass), and `./mew dogfood --all` (pass, including day-reentry risk checks).
 - Follow-up current: `claude-ultra` recommended closing the recurring
   implementation-only source-edit loop by adding a concrete paired-test
   candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now

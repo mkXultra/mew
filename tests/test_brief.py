@@ -634,6 +634,79 @@ class BriefTests(unittest.TestCase):
         self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
         self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
 
+    def test_focus_surfaces_active_work_session_unresolved_risk(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Recover verifier", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Recover verifier",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "run_tests",
+                        "status": "failed",
+                        "result": {"exit_code": 1},
+                        "error": "old verifier was recovered",
+                        "recovery_status": "superseded",
+                        "recovered_by_tool_call_id": 2,
+                    },
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "failed",
+                        "result": {"exit_code": 1},
+                        "error": "retry failed after interrupted verifier recovery",
+                        "recovery_status": "retry_failed",
+                        "recovered_by_tool_call_id": 4,
+                    },
+                    {
+                        "id": 5,
+                        "tool": "run_tests",
+                        "status": "failed",
+                        "result": {"exit_code": 1},
+                        "error": "newer recovered failure one",
+                        "recovery_status": "superseded",
+                        "recovered_by_tool_call_id": 8,
+                    },
+                    {
+                        "id": 6,
+                        "tool": "run_tests",
+                        "status": "failed",
+                        "result": {"exit_code": 1},
+                        "error": "newer recovered failure two",
+                        "recovery_status": "superseded",
+                        "recovered_by_tool_call_id": 9,
+                    },
+                    {
+                        "id": 7,
+                        "tool": "run_tests",
+                        "status": "failed",
+                        "result": {"exit_code": 1},
+                        "error": "newer recovered failure three",
+                        "recovery_status": "superseded",
+                        "recovered_by_tool_call_id": 10,
+                    },
+                ],
+                "model_turns": [],
+            }
+        )
+
+        data = build_focus_data(state, limit=3, kind="coding")
+        focus = format_focus(data)
+
+        self.assertEqual(
+            data["active_work_sessions"][0]["risk"],
+            "run_tests#3 failed exit=1: retry failed after interrupted verifier recovery",
+        )
+        self.assertIn("risk: run_tests#3 failed exit=1: retry failed after interrupted verifier recovery", focus)
+        self.assertNotIn("old verifier was recovered", focus)
+        self.assertNotIn("newer recovered failure", focus)
+
     def test_focus_surfaces_active_work_session_age(self):
         state = default_state()
         add_task(state, task_id=7, title="Resume after a day", kind="coding")

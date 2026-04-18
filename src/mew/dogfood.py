@@ -2208,6 +2208,22 @@ def run_day_reentry_scenario(workspace, env=None):
                 "finished_at": tool_at,
             }
         )
+        risk_tool_call_id = next_id(state, "work_tool_call")
+        candidate.setdefault("tool_calls", []).append(
+            {
+                "id": risk_tool_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "run_tests",
+                "status": "failed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 1, "stderr": "dogfood verifier failed\n"},
+                "error": "day-scale verifier still needs recovery",
+                "summary": "Verifier failed before day-scale reentry.",
+                "started_at": "2026-04-16T08:35:00Z",
+                "finished_at": "2026-04-16T08:35:00Z",
+            }
+        )
         memory_turn_id = next_id(state, "work_model_turn")
         candidate.setdefault("model_turns", []).append(
             {
@@ -2271,9 +2287,10 @@ def run_day_reentry_scenario(workspace, env=None):
         and focus_session.get("id") == session_id
         and focus_session.get("task_id") == task_id
         and (focus_session.get("inactive_hours") or 0) >= 24.0
-        and bool(focus_session.get("inactive_for")),
+        and bool(focus_session.get("inactive_for"))
+        and "day-scale verifier still needs recovery" in (focus_session.get("risk") or ""),
         observed=focus_session,
-        expected="focus --json surfaces the active session with day-scale inactive age",
+        expected="focus --json surfaces the active session with day-scale inactive age and unresolved risk",
     )
     _scenario_check(
         checks,
@@ -2281,12 +2298,14 @@ def run_day_reentry_scenario(workspace, env=None):
         focus_text_result.get("exit_code") == 0
         and "last_active:" in focus_text
         and "Day-scale reentry is viable" in focus_text
+        and "risk: run_tests#" in focus_text
+        and "day-scale verifier still needs recovery" in focus_text
         and f" work {task_id} --session --resume --allow-read ." in focus_text
         and f" work {task_id} --follow " in focus_text
         and "--allow-read ." in focus_text
         and "--allow-verify" in focus_text,
         observed=command_result_tail(focus_text_result),
-        expected="focus text shows age, working memory, and runnable resume/follow controls",
+        expected="focus text shows age, risk, working memory, and runnable resume/follow controls",
     )
     _scenario_check(
         checks,

@@ -7,7 +7,12 @@ from .state import is_routine_outbox_message
 from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import elapsed_hours, now_iso
-from .work_session import build_work_session_resume, work_session_task
+from .work_session import (
+    build_work_session_resume,
+    format_work_failure_risk,
+    latest_unresolved_failure,
+    work_session_task,
+)
 
 
 def _first_nonempty(*values):
@@ -714,6 +719,9 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
         follow_command = _work_session_reentry_command(session, task_parts, max_steps=10, follow=True)
         updated_at = session.get("updated_at") or session.get("created_at") or ""
         inactive_hours = elapsed_hours(updated_at, current_time)
+        risk = format_work_failure_risk(
+            resume.get("unresolved_failure") or latest_unresolved_failure(resume.get("failures") or [])
+        )
         items.append(
             {
                 "id": session.get("id"),
@@ -724,6 +732,7 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "inactive_hours": round(inactive_hours, 2) if inactive_hours is not None else None,
                 "inactive_for": format_waiting_hours(inactive_hours, minimum_hours=0.0),
                 "next_action": resume.get("next_action") or "",
+                "risk": risk,
                 "working_memory": resume.get("working_memory") or {},
                 "resume_command": resume_command,
                 "continue_command": continue_command,
@@ -847,6 +856,8 @@ def format_focus(data):
             )
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
+            if session.get("risk"):
+                lines.append(f"  risk: {session.get('risk')}")
             if session.get("updated_at"):
                 inactive = session.get("inactive_for")
                 if inactive:

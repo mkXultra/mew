@@ -190,6 +190,7 @@ from .work_session import (
     clip_inline_text,
     format_diff_preview,
     format_work_action,
+    format_work_failure_risk,
     format_work_session_commands,
     format_work_session_diffs,
     format_work_session_resume,
@@ -197,6 +198,7 @@ from .work_session import (
     format_work_session_tests,
     format_work_session_timeline,
     build_work_session_timeline,
+    latest_unresolved_failure,
     latest_work_verify_command,
     mark_running_work_interrupted,
     APPROVAL_STATUS_INDETERMINATE,
@@ -644,16 +646,11 @@ def _format_workbench_reentry(resume, task):
             source = note.get("source") or "note"
             lines.append(f"note[{source}]: {text}")
 
-    for failure in reversed(resume.get("failures") or []):
-        if failure.get("recovery_status") == "superseded":
-            continue
-        tool = failure.get("tool") or "tool"
-        tool_id = failure.get("tool_call_id")
-        tool_ref = f"{tool}#{tool_id}" if tool_id is not None else tool
-        exit_text = f" exit={failure.get('exit_code')}" if failure.get("exit_code") is not None else ""
-        summary = failure.get("error") or failure.get("summary") or "failed"
-        lines.append(f"risk: {tool_ref} failed{exit_text}: {clip_inline_text(summary, 260)}")
-        break
+    risk = format_work_failure_risk(
+        resume.get("unresolved_failure") or latest_unresolved_failure(resume.get("failures") or [])
+    )
+    if risk:
+        lines.append(f"risk: {risk}")
 
     recurring = resume.get("recurring_failures") or []
     if recurring:

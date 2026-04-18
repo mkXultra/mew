@@ -123,6 +123,25 @@ def clip_inline_text(text, limit=240):
     return f"{prefix}{marker}"
 
 
+def latest_unresolved_failure(failures):
+    for failure in reversed(failures or []):
+        if failure.get("recovery_status") == "superseded":
+            continue
+        return failure
+    return {}
+
+
+def format_work_failure_risk(failure, max_chars=260):
+    if not failure:
+        return ""
+    tool = failure.get("tool") or "tool"
+    tool_id = failure.get("tool_call_id")
+    tool_ref = f"{tool}#{tool_id}" if tool_id is not None else tool
+    exit_text = f" exit={failure.get('exit_code')}" if failure.get("exit_code") is not None else ""
+    summary = failure.get("error") or failure.get("summary") or "failed"
+    return f"{tool_ref} failed{exit_text}: {clip_inline_text(summary, max_chars)}"
+
+
 def _result_diff_stats(result, diff):
     stats = (result or {}).get("diff_stats")
     if isinstance(stats, dict) and "added" in stats and "removed" in stats:
@@ -1955,6 +1974,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
         "files_touched": paths[-limit:],
         "commands": commands[-limit:],
         "failures": failures[-limit:],
+        "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
