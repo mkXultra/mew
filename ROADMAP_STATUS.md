@@ -685,6 +685,14 @@ Next action:
   (`43 passed`), and `./mew dogfood --scenario all` (pass with
   `work_follow_snapshot_surfaces_running_output` across 77 work-session
   commands).
+- Follow-up current: zero-step snapshot refresh is now read-only for existing
+  active work sessions; validated with targeted zero-step/running-output tests
+  (`7 passed`), combined
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py tests/test_dogfood.py`
+  (`486 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`963 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), and `./mew dogfood --scenario all` (pass).
 - Follow-up current: pending write approvals in resume/follow JSON now include
   a capped machine-review `diff` plus `diff_truncated` and `diff_max_chars`,
   so observer agents can review the exact dry-run change from
@@ -1173,6 +1181,10 @@ Next action:
   rate-capped so observer replies do not go stale just because command output
   arrived. The deterministic work-session dogfood scenario now also checks
   zero-step follow snapshots for running command/test output tails.
+- Zero-step live/follow snapshot refresh now reuses an existing active work
+  session without touching `updated_at` or cached default gates, so observer
+  refreshes do not invalidate reply-file stale tokens or silently widen a
+  cockpit's remembered authority.
 
 ## Current Roadmap Focus
 

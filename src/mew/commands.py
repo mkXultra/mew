@@ -2980,10 +2980,23 @@ def cmd_work_ai(args):
         if task.get("status") == "done":
             print(done_task_work_session_error(task), file=sys.stderr)
             return 1
-        session, created = create_work_session(state, task)
-        remember_work_session_default_options(session, args)
+        session = None
+        created = False
+        if max_steps == 0:
+            session = next(
+                (
+                    candidate
+                    for candidate in reversed(state.get("work_sessions", []))
+                    if str(candidate.get("task_id")) == str(task_id)
+                    and candidate.get("status") == "active"
+                ),
+                None,
+            )
+        if session is None:
+            session, created = create_work_session(state, task)
+            remember_work_session_default_options(session, args)
+            save_state(state)
         session_id = session.get("id")
-        save_state(state)
     if progress:
         progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
 

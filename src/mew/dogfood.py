@@ -3124,6 +3124,7 @@ def run_work_session_scenario(workspace, env=None):
         if str(candidate.get("id")) == str(running_output_session_id):
             running_output_session = candidate
             break
+    running_output_observed_session_updated_at = ""
     if running_output_session:
         current_time = now_iso()
         tool_call_id = next_id(state, "work_tool_call")
@@ -3150,6 +3151,7 @@ def run_work_session_scenario(workspace, env=None):
         )
         running_output_session["last_tool_call_id"] = tool_call_id
         running_output_session["updated_at"] = current_time
+        running_output_observed_session_updated_at = current_time
         write_json_file(state_path, state)
     running_output_snapshot_result = run(
         [
@@ -3523,6 +3525,7 @@ def run_work_session_scenario(workspace, env=None):
         and not (running_output_snapshot_result.get("stderr") or "")
         and (running_output_task_data.get("id") or (running_output_task_data.get("task") or {}).get("id"))
         == running_output_task_id
+        and running_output_snapshot_data.get("session_updated_at") == running_output_observed_session_updated_at
         and any(
             command.get("output_running") is True
             and "dogfood partial output" in (command.get("stdout") or "")

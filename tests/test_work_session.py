@@ -11026,6 +11026,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_zero_max_steps_does_not_touch_existing_session(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", "README.md"]), 0)
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    session["default_options"]["allow_read"] = ["README.md"]
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth") as load_auth:
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(["work", "1", "--follow", "--max-steps", "0", "--quiet", "--allow-read", "."]),
+                                0,
+                            )
+
+                load_auth.assert_not_called()
+                call_model.assert_not_called()
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["updated_at"], "2026-04-18T00:00:00Z")
+                self.assertEqual(session["default_options"]["allow_read"], ["README.md"])
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["session_updated_at"], "2026-04-18T00:00:00Z")
+                self.assertEqual(snapshot["stop_reason"], "snapshot_refresh")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_zero_max_steps_allows_json_snapshot_refresh(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
