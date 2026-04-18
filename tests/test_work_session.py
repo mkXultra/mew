@@ -520,6 +520,142 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approve blocked: add a paired tests/** write/edit before approving", resume_text)
         self.assertIn("--allow-unpaired-source-edit", resume_text)
 
+    def test_resume_suggests_matching_verifier_for_mew_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                suggested = resume["suggested_verify_command"]
+                text = format_work_session_resume(resume)
+
+                self.assertEqual(suggested["source_path"], "src/mew/commands.py")
+                self.assertEqual(suggested["test_path"], "tests/test_commands.py")
+                self.assertEqual(suggested["command"], "uv run python -m unittest tests.test_commands")
+                self.assertIn("Suggested verification", text)
+                self.assertIn("command: uv run python -m unittest tests.test_commands", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_does_not_suggest_verifier_for_read_or_dry_run_source(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {"path": "src/mew/commands.py", "text": "source"},
+                        },
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": True,
+                                "changed": True,
+                                "written": False,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                text = format_work_session_resume(resume)
+
+                self.assertEqual(resume["suggested_verify_command"], {})
+                self.assertNotIn("Suggested verification", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_verifier_suggestion_skips_missing_matching_test(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/config.py"},
+                            "result": {
+                                "path": "src/mew/config.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+
+                self.assertEqual(
+                    resume["suggested_verify_command"]["command"],
+                    "uv run python -m unittest tests.test_commands",
+                )
+                self.assertEqual(resume["suggested_verify_command"]["source_path"], "src/mew/commands.py")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_template_steers_for_unpaired_source_approval(self):
         session = {
             "id": 3,

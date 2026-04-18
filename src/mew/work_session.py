@@ -1328,6 +1328,36 @@ def inferred_test_path_for_mew_source(path):
     return f"tests/test_{stem}.py"
 
 
+def suggested_verify_command_for_call_path(source_path):
+    test_path = inferred_test_path_for_mew_source(source_path)
+    if not test_path or not Path(test_path).is_file():
+        return {}
+    test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".")
+    return {
+        "source_path": source_path,
+        "test_path": test_path,
+        "command": f"uv run python -m unittest {test_module}",
+        "reason": "mew source edit has a matching test module",
+    }
+
+
+def suggested_verify_command_for_calls(calls):
+    for call in reversed(list(calls or [])):
+        result = (call or {}).get("result") or {}
+        if (
+            (call or {}).get("tool") not in WRITE_WORK_TOOLS
+            or (call or {}).get("status") != "completed"
+            or not result.get("changed")
+            or not result.get("written")
+        ):
+            continue
+        source_path = work_call_path(call)
+        suggestion = suggested_verify_command_for_call_path(source_path)
+        if suggestion:
+            return suggestion
+    return {}
+
+
 def _is_test_path(path):
     normalized = _normalized_work_path_text(path)
     return normalized == "tests" or normalized.startswith("tests/") or "/tests/" in normalized
@@ -1917,6 +1947,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
             approve_all_hint = ""
             cli_approve_all_hint = ""
 
+    suggested_verify_command = suggested_verify_command_for_calls(calls)
+
     recent_decisions = []
     for turn in turns[-limit:]:
         action = turn.get("action") or {}
@@ -2008,6 +2040,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
         "updated_at": session.get("updated_at"),
         "files_touched": paths[-limit:],
         "commands": commands[-limit:],
+        "suggested_verify_command": suggested_verify_command,
         "failures": failures[-limit:],
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
@@ -2115,6 +2148,15 @@ def format_work_session_resume(resume):
                     lines.append(f"    {output_line}")
     else:
         lines.append("(none)")
+
+    suggested_verify = resume.get("suggested_verify_command") or {}
+    if suggested_verify:
+        lines.extend(["", "Suggested verification"])
+        lines.append(f"command: {suggested_verify.get('command')}")
+        lines.append(f"source: {suggested_verify.get('source_path')}")
+        lines.append(f"test: {suggested_verify.get('test_path')}")
+        if suggested_verify.get("reason"):
+            lines.append(f"reason: {suggested_verify.get('reason')}")
 
     lines.extend(["", "Pending approvals"])
     approvals = resume.get("pending_approvals") or []

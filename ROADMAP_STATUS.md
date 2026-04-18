@@ -1468,6 +1468,10 @@ Next action:
   verifiers: the retry tool call is marked `interrupted`, returns code 130, and
   the original interrupted source remains unresolved rather than being falsely
   superseded.
+- Work-session resume now suggests a concrete verifier for touched
+  `src/mew/*.py` files when the matching `tests/test_*.py` module exists,
+  reducing the B3 failure mode where a resident trusts a too-broad or wrong
+  verification gate.
 
 ## Current Roadmap Focus
 
