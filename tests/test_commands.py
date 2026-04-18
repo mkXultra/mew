@@ -5550,6 +5550,7 @@ class CommandTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 output = stdout.getvalue()
+                self.assertIn("created #1 [ready/normal/coding] Improve mew itself", output)
                 self.assertIn("started work session #1", output)
                 self.assertNotIn("start session: mew work 1 --start-session", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --compact-live --max-steps 1", output)
@@ -5558,8 +5559,12 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
 
                 state = load_state()
+                self.assertEqual(state["tasks"][0]["status"], "ready")
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(state["work_sessions"][0]["task_id"], 1)
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["."])
+                self.assertTrue(defaults["compact_live"])
             finally:
                 os.chdir(old_cwd)
 

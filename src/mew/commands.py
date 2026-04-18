@@ -8554,7 +8554,7 @@ def cmd_self_improve(args):
             focus=args.focus or "",
             cwd=args.cwd or ".",
             priority=args.priority,
-            ready=args.ready or args.dispatch,
+            ready=args.ready or args.dispatch or getattr(args, "start_session", False),
             auto_execute=args.auto_execute,
             agent_model=args.agent_model,
             force=args.force,
@@ -12114,9 +12114,9 @@ def chat_self_improve(rest):
     force = "force" in flags or "--force" in flags
     force_plan = "force-plan" in flags or "--force-plan" in flags
     show_prompt = "prompt" in flags or "--prompt" in flags
-    ready = dispatch or "ready" in flags or "--ready" in flags
-    auto_execute = "auto-execute" in flags or "--auto-execute" in flags
     start_session = bool({"start", "--start", "start-session", "--start-session"} & flags)
+    ready = dispatch or start_session or "ready" in flags or "--ready" in flags
+    auto_execute = "auto-execute" in flags or "--auto-execute" in flags
     native = "native" in flags or "--native" in flags or start_session
     validation_error = self_improve_native_validation_error(
         native=native,
@@ -12154,6 +12154,7 @@ def chat_self_improve(rest):
         session_created = False
         if start_session:
             session, session_created = create_work_session(state, task)
+            seed_native_self_improve_session_defaults(session, task)
         save_state(state)
 
     print(("created " if created else "reused ") + format_task(task))
