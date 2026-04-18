@@ -85,6 +85,17 @@ DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 DEFAULT_RUNNING_OUTPUT_MAX_CHARS = 4_000
 DEFAULT_RESUME_USER_PREFERENCES_LIMIT = 5
 DEFAULT_RESUME_USER_PREFERENCE_MAX_CHARS = 300
+WORK_REPEAT_CONSECUTIVE_LIMIT = 2
+WORK_REPEAT_TOTAL_LIMIT = 4
+WORK_REPEAT_SIGNATURE_IGNORED_FIELDS = {
+    "reason",
+    "summary",
+    "text",
+    "note",
+    "question",
+    "message_type",
+    "completion_summary",
+}
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
     "query",
@@ -250,6 +261,193 @@ def find_work_tool_call(session, tool_call_id):
         if str(call.get("id")) == str(tool_call_id):
             return call
     return None
+
+
+def _canonical_work_parameter(value):
+    if isinstance(value, dict):
+        return {str(key): _canonical_work_parameter(value[key]) for key in sorted(value)}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_work_parameter(item) for item in value]
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float, str)):
+        return value
+    return str(value)
+
+
+def _int_work_parameter(parameters, key, default):
+    try:
+        return int(parameters.get(key) if parameters.get(key) is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamped_int_work_parameter(parameters, key, default, minimum, maximum):
+    return max(minimum, min(_int_work_parameter(parameters, key, default), maximum))
+
+
+def _float_work_parameter(parameters, key, default):
+    try:
+        return float(parameters.get(key) if parameters.get(key) is not None else default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _optional_int_work_parameter(parameters, key):
+    if parameters.get(key) is None:
+        return None
+    try:
+        return int(parameters.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_clamped_int_work_parameter(parameters, key, minimum, maximum):
+    value = _optional_int_work_parameter(parameters, key)
+    if value is None:
+        return None
+    return max(minimum, min(value, maximum))
+
+
+def work_tool_signature(tool, parameters):
+    tool = tool or ""
+    parameters = dict(parameters or {})
+    if tool == "inspect_dir":
+        parameters = {"path": parameters.get("path") or ".", "limit": _clamped_int_work_parameter(parameters, "limit", 50, 1, 200)}
+    elif tool == "read_file":
+        line_start = _optional_clamped_int_work_parameter(parameters, "line_start", 1, 1_000_000)
+        normalized = {
+            "path": parameters.get("path") or "",
+            "max_chars": _clamped_int_work_parameter(parameters, "max_chars", DEFAULT_READ_MAX_CHARS, 1, 50_000),
+        }
+        if line_start is not None:
+            normalized["line_start"] = line_start
+            normalized["line_count"] = _clamped_int_work_parameter(parameters, "line_count", 120, 1, 1000)
+        else:
+            normalized["offset"] = _clamped_int_work_parameter(parameters, "offset", 0, 0, 1_000_000)
+        parameters = normalized
+    elif tool == "search_text":
+        parameters = {
+            "query": parameters.get("query") or "",
+            "path": parameters.get("path") or ".",
+            "pattern": parameters.get("pattern") or "",
+            "max_matches": _clamped_int_work_parameter(parameters, "max_matches", 50, 1, 200),
+            "context_lines": _clamped_int_work_parameter(parameters, "context_lines", 3, 0, 5),
+        }
+    elif tool == "glob":
+        parameters = {
+            "pattern": parameters.get("pattern") or "",
+            "path": parameters.get("path") or ".",
+            "max_matches": _clamped_int_work_parameter(parameters, "max_matches", 100, 1, 500),
+        }
+    elif tool == "git_status":
+        parameters = {"cwd": parameters.get("cwd") or "."}
+    elif tool == "git_diff":
+        parameters = {
+            "cwd": parameters.get("cwd") or ".",
+            "staged": bool(parameters.get("staged")),
+            "stat": bool(parameters.get("stat")),
+            "base": parameters.get("base") or "",
+        }
+    elif tool == "git_log":
+        parameters = {"cwd": parameters.get("cwd") or ".", "limit": _clamped_int_work_parameter(parameters, "limit", 20, 1, 100)}
+    elif tool in ("run_command", "run_tests"):
+        parameters = {
+            "command": parameters.get("command") or "",
+            "cwd": parameters.get("cwd") or ".",
+            "timeout": _float_work_parameter(parameters, "timeout", 300),
+        }
+    elif tool == "write_file":
+        apply = bool(parameters.get("apply"))
+        normalized = {
+            "path": parameters.get("path") or "",
+            "content": parameters.get("content") or "",
+            "create": bool(parameters.get("create")),
+            "apply": apply,
+        }
+        if apply:
+            normalized.update(
+                {
+                    "verify_command": parameters.get("verify_command") or "",
+                    "verify_cwd": parameters.get("verify_cwd") or ".",
+                    "verify_timeout": _float_work_parameter(parameters, "verify_timeout", 300),
+                }
+            )
+        parameters = normalized
+    elif tool == "edit_file":
+        apply = bool(parameters.get("apply"))
+        normalized = {
+            "path": parameters.get("path") or "",
+            "old": parameters.get("old") or "",
+            "new": parameters.get("new") or "",
+            "replace_all": bool(parameters.get("replace_all")),
+            "apply": apply,
+        }
+        if apply:
+            normalized.update(
+                {
+                    "verify_command": parameters.get("verify_command") or "",
+                    "verify_cwd": parameters.get("verify_cwd") or ".",
+                    "verify_timeout": _float_work_parameter(parameters, "verify_timeout", 300),
+                }
+            )
+        parameters = normalized
+    else:
+        parameters = {
+            key: value
+            for key, value in parameters.items()
+            if key not in WORK_REPEAT_SIGNATURE_IGNORED_FIELDS
+        }
+    return {
+        "tool": tool,
+        "parameters": _canonical_work_parameter(parameters),
+    }
+
+
+def work_tool_repeat_guard(
+    session,
+    tool,
+    parameters,
+    *,
+    consecutive_limit=WORK_REPEAT_CONSECUTIVE_LIMIT,
+    total_limit=WORK_REPEAT_TOTAL_LIMIT,
+):
+    if not isinstance(session, dict):
+        return {}
+    signature = work_tool_signature(tool, parameters)
+    consecutive = 0
+    counting_consecutive = True
+    total = 0
+    matching_ids = []
+    for call in reversed(session.get("tool_calls") or []):
+        if not isinstance(call, dict):
+            continue
+        call_signature = work_tool_signature(call.get("tool"), call.get("parameters") or {})
+        is_match = call_signature == signature
+        if is_match:
+            total += 1
+            matching_ids.append(call.get("id"))
+            if counting_consecutive:
+                consecutive += 1
+        elif counting_consecutive:
+            counting_consecutive = False
+    if consecutive < consecutive_limit and total < total_limit:
+        return {}
+    reason = "consecutive_repeat" if consecutive >= consecutive_limit else "total_repeat"
+    count = consecutive if reason == "consecutive_repeat" else total
+    message = (
+        f"repeat-action guard blocked {tool}: identical parameters were used "
+        f"{count} previous time(s); review the prior result, change parameters, "
+        "summarize what is missing, or ask the user before retrying"
+    )
+    return {
+        "reason": reason,
+        "tool": tool,
+        "signature": signature,
+        "consecutive_count": consecutive,
+        "total_count": total,
+        "matching_tool_call_ids": list(reversed(matching_ids[:10])),
+        "message": message,
+        "suggested_next": "review prior result, change parameters, summarize the blocker, or ask the user",
+    }
 
 
 def create_work_session(state, task, current_time=None, inherit_defaults=True):

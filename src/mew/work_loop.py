@@ -183,7 +183,7 @@ def compact_turn_reasoning(turn):
 
 def work_tool_call_for_model(call):
     tool = call.get("tool") or ""
-    return {
+    item = {
         "id": call.get("id"),
         "tool": tool,
         "status": call.get("status"),
@@ -194,6 +194,9 @@ def work_tool_call_for_model(call):
         "started_at": call.get("started_at"),
         "finished_at": call.get("finished_at"),
     }
+    if call.get("repeat_guard"):
+        item["repeat_guard"] = _compact_context_value(call.get("repeat_guard"))
+    return item
 
 
 def work_model_turn_for_model(turn):

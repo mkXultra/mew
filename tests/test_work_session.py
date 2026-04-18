@@ -40,6 +40,8 @@ from mew.work_session import (
     format_work_session_tests,
     latest_work_verify_command,
     select_work_recovery_plan_item,
+    start_work_tool_call,
+    work_tool_repeat_guard,
     work_recovery_effect_classification,
 )
 
@@ -71,6 +73,152 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_work_tool_repeat_guard_detects_consecutive_and_total_repeats(self):
+        parameters = {"path": "README.md", "max_chars": 12000}
+        session = {
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "parameters": parameters, "status": "completed"},
+                {"id": 2, "tool": "search_text", "parameters": {"query": "mew"}, "status": "completed"},
+                {"id": 3, "tool": "read_file", "parameters": parameters, "status": "completed"},
+                {"id": 4, "tool": "read_file", "parameters": dict(reversed(list(parameters.items()))), "status": "failed"},
+            ]
+        }
+
+        guard = work_tool_repeat_guard(session, "read_file", parameters)
+
+        self.assertEqual(guard["reason"], "consecutive_repeat")
+        self.assertEqual(guard["consecutive_count"], 2)
+        self.assertEqual(guard["total_count"], 3)
+        self.assertEqual(guard["matching_tool_call_ids"], [1, 3, 4])
+        self.assertIn("repeat-action guard blocked read_file", guard["message"])
+
+        total_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "read_file", "parameters": parameters},
+                    {"id": 2, "tool": "search_text", "parameters": {"query": "mew"}},
+                    {"id": 3, "tool": "read_file", "parameters": parameters},
+                    {"id": 4, "tool": "glob", "parameters": {"pattern": "*.py"}},
+                    {"id": 5, "tool": "read_file", "parameters": parameters},
+                    {"id": 6, "tool": "inspect_dir", "parameters": {"path": "."}},
+                    {"id": 7, "tool": "read_file", "parameters": parameters},
+                ]
+            },
+            "read_file",
+            parameters,
+        )
+
+        self.assertEqual(total_guard["reason"], "total_repeat")
+        self.assertEqual(total_guard["total_count"], 4)
+
+        default_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "read_file", "parameters": {"path": "README.md"}},
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "parameters": {
+                            "path": "README.md",
+                            "offset": 0,
+                            "allow_verify": True,
+                            "reason": "same read with a different reason",
+                        },
+                    },
+                ]
+            },
+            "read_file",
+            {"path": "README.md", "offset": "0", "summary": "same read again"},
+        )
+
+        self.assertEqual(default_guard["reason"], "consecutive_repeat")
+
+        line_window_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "read_file", "parameters": {"path": "README.md", "line_start": 10}},
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "parameters": {"path": "README.md", "line_start": "10", "line_count": 120},
+                    },
+                ]
+            },
+            "read_file",
+            {"path": "README.md", "line_start": 10, "line_count": "120"},
+        )
+
+        self.assertEqual(line_window_guard["reason"], "consecutive_repeat")
+
+        ignored_line_count_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "read_file", "parameters": {"path": "README.md", "line_count": 12}},
+                    {"id": 2, "tool": "read_file", "parameters": {"path": "README.md"}},
+                ]
+            },
+            "read_file",
+            {"path": "README.md", "line_count": 999},
+        )
+
+        self.assertEqual(ignored_line_count_guard["reason"], "consecutive_repeat")
+
+        command_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "run_tests", "parameters": {"command": "uv run python -m unittest"}},
+                    {
+                        "id": 2,
+                        "tool": "run_tests",
+                        "parameters": {"command": "uv run python -m unittest", "cwd": ".", "timeout": 300},
+                    },
+                ]
+            },
+            "run_tests",
+            {"command": "uv run python -m unittest", "timeout": "300", "allow_verify": True},
+        )
+
+        self.assertEqual(command_guard["reason"], "consecutive_repeat")
+
+        inspect_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "inspect_dir", "parameters": {"path": ".", "limit": 999}},
+                    {"id": 2, "tool": "inspect_dir", "parameters": {"path": ".", "limit": 200}},
+                ]
+            },
+            "inspect_dir",
+            {"path": ".", "limit": 200},
+        )
+
+        self.assertEqual(inspect_guard["reason"], "consecutive_repeat")
+
+        git_log_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "git_log", "parameters": {"cwd": ".", "limit": 0}},
+                    {"id": 2, "tool": "git_log", "parameters": {"cwd": ".", "limit": 1}},
+                ]
+            },
+            "git_log",
+            {"cwd": ".", "limit": 1},
+        )
+
+        self.assertEqual(git_log_guard["reason"], "consecutive_repeat")
+
+        search_guard = work_tool_repeat_guard(
+            {
+                "tool_calls": [
+                    {"id": 1, "tool": "search_text", "parameters": {"query": "mew", "path": ".", "max_matches": 999}},
+                    {"id": 2, "tool": "search_text", "parameters": {"query": "mew", "path": ".", "max_matches": 200}},
+                ]
+            },
+            "search_text",
+            {"query": "mew", "path": ".", "max_matches": 200, "context_lines": 3},
+        )
+
+        self.assertEqual(search_guard["reason"], "consecutive_repeat")
+
     def test_first_unquoted_shell_operator_respects_quotes_and_adjacency(self):
         self.assertEqual(first_unquoted_shell_operator("python -V&& python -V"), ("&&", "chain"))
         self.assertEqual(first_unquoted_shell_operator("python -V >out.txt"), (">", "redirection"))
@@ -7764,6 +7912,84 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Model turns", text)
                 self.assertIn("README.md", text)
                 self.assertIn("read_file tool_call=#1", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_blocks_third_identical_tool_call_before_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("loop guard content\n", encoding="utf-8")
+                parameters = {
+                    "path": "README.md",
+                    "allowed_write_roots": [],
+                    "allow_shell": False,
+                    "allow_verify": False,
+                    "verify_cwd": ".",
+                    "verify_timeout": 300,
+                    "max_chars": 12000,
+                }
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    for _index in range(2):
+                        call = start_work_tool_call(state, session, "read_file", parameters)
+                        finish_work_tool_call(
+                            state,
+                            session["id"],
+                            call["id"],
+                            result={
+                                "path": "README.md",
+                                "size": 19,
+                                "text": "loop guard content\n",
+                                "offset": 0,
+                                "truncated": False,
+                            },
+                        )
+                    save_state(state)
+
+                model_output = {"summary": "read README again", "action": {"type": "read_file", "path": "README.md"}}
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--quiet",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 3)
+                blocked_call = session["tool_calls"][-1]
+                self.assertEqual(blocked_call["status"], "failed")
+                self.assertIn("repeat-action guard blocked read_file", blocked_call["error"])
+                self.assertEqual(blocked_call["repeat_guard"]["reason"], "consecutive_repeat")
+                self.assertIsNone(blocked_call["result"])
+                self.assertEqual(blocked_call["repeat_guard"]["matching_tool_call_ids"], [1, 2])
+                self.assertEqual(session["model_turns"][-1]["status"], "failed")
+                from mew.work_loop import work_tool_call_for_model
+
+                self.assertEqual(
+                    work_tool_call_for_model(blocked_call)["repeat_guard"]["reason"],
+                    "consecutive_repeat",
+                )
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["stop_reason"], "tool_failed")
+                self.assertEqual(snapshot["last_step"]["tool_call"]["repeat_guard"]["reason"], "consecutive_repeat")
             finally:
                 os.chdir(old_cwd)
 

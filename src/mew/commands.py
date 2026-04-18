@@ -210,6 +210,7 @@ from .work_session import (
     work_tool_result_error,
     start_work_tool_call,
     update_work_model_turn_plan,
+    work_tool_repeat_guard,
     GIT_WORK_TOOLS,
     NON_PENDING_APPROVAL_STATUSES,
     READ_ONLY_WORK_TOOLS,
@@ -2331,6 +2332,21 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
     return execute_work_tool(tool, parameters, allowed_read_roots)
 
 
+def finish_repeated_work_tool_guard(state, session, tool, parameters, guard):
+    tool_call = start_work_tool_call(state, session, tool, parameters)
+    tool_call["repeat_guard"] = guard
+    tool_call = finish_work_tool_call(
+        state,
+        session.get("id"),
+        tool_call.get("id"),
+        error=guard.get("message") or "repeat-action guard blocked tool call",
+    )
+    if tool_call:
+        tool_call["repeat_guard"] = guard
+        tool_call["summary"] = guard.get("message") or tool_call.get("summary") or ""
+    return tool_call
+
+
 BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
 
 
@@ -2415,9 +2431,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
-            tool_call = start_work_tool_call(state, session, action_type, parameters)
-            tool_call_id = tool_call.get("id")
+            repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
+            if repeat_guard:
+                tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+            else:
+                tool_call = start_work_tool_call(state, session, action_type, parameters)
+            tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
+        if repeat_guard:
+            error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+            tool_calls.append(tool_call)
+            if progress:
+                progress(f"step #{index}: batch tool #{tool_call_id} {action_type} repeat-guard")
+            break
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
         try:
@@ -3675,11 +3701,56 @@ def cmd_work_ai(args):
                 planned.get("action_plan") or {},
                 action,
             )
-            tool_call = start_work_tool_call(state, session, action_type, parameters)
-            turn["tool_call_id"] = tool_call.get("id")
+            repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
+            if repeat_guard:
+                tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+                turn["tool_call_id"] = tool_call.get("id") if tool_call else None
+                turn = finish_work_model_turn(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    tool_call_id=turn["tool_call_id"],
+                    error=repeat_guard.get("message") or "repeat-action guard blocked tool call",
+                )
+            else:
+                tool_call = start_work_tool_call(state, session, action_type, parameters)
+                turn["tool_call_id"] = tool_call.get("id")
             turn_id = turn.get("id")
-            tool_call_id = tool_call.get("id")
+            tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
+        if repeat_guard:
+            error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+            step = {
+                "index": index,
+                "status": "failed",
+                "action": action,
+                "model_turn": turn,
+                "tool_call": tool_call,
+                "error": error,
+                "summary": error,
+            }
+            report["steps"].append(step)
+            report["stop_reason"] = "tool_failed"
+            refresh_work_follow_snapshot(args, report, session_id, task_id)
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                write_work_follow_snapshot(args, report, session, task, resume, step=step)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+            if progress:
+                progress(f"step #{index}: tool #{tool_call_id} {action_type} repeat-guard")
+            break
         refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)
         if getattr(args, "live", False) and not getattr(args, "follow", False):
