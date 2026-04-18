@@ -1263,6 +1263,17 @@ def _is_mew_source_path(path):
     return normalized == "src/mew" or normalized.startswith("src/mew/") or "/src/mew/" in normalized
 
 
+def inferred_test_path_for_mew_source(path):
+    normalized = _normalized_work_path_text(path)
+    marker = "src/mew/"
+    if marker not in normalized or not normalized.endswith(".py"):
+        return ""
+    stem = Path(normalized.rsplit("/", 1)[-1]).stem
+    if not stem or stem == "__init__":
+        return ""
+    return f"tests/test_{stem}.py"
+
+
 def _is_test_path(path):
     normalized = _normalized_work_path_text(path)
     return normalized == "tests" or normalized.startswith("tests/") or "/tests/" in normalized
@@ -1305,12 +1316,19 @@ def work_write_pairing_status(session, call):
             "paired_tool_call_id": paired.get("id"),
             "paired_path": work_call_path(paired),
         }
+    suggested_test_path = inferred_test_path_for_mew_source(source_path)
     return {
         "status": "missing_test_edit",
         "source_path": source_path,
         "required": "tests/** write/edit in the same work session",
         "reason": "mew source edit has no paired test write/edit in the same work session",
         "advisory": True,
+        "suggested_test_path": suggested_test_path,
+        "suggestion_reason": (
+            "inferred from the src/mew source filename; adjust if another test file owns this behavior"
+            if suggested_test_path
+            else ""
+        ),
     }
 
 
@@ -2071,6 +2089,8 @@ def format_work_session_resume(resume):
                 lines.append(f"  pairing_status: {pairing.get('status')}")
                 if pairing.get("reason"):
                     lines.append(f"  pairing_reason: {pairing.get('reason')}")
+                if pairing.get("suggested_test_path"):
+                    lines.append(f"  suggested_test_path: {pairing.get('suggested_test_path')}")
                 if pairing.get("paired_tool_call_id") is not None:
                     lines.append(
                         f"  paired_test: #{pairing.get('paired_tool_call_id')} {pairing.get('paired_path') or ''}".rstrip()

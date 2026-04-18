@@ -458,6 +458,7 @@ def approval_cell(session, call):
             f"pairing_status: {pairing_status.get('status')}" if pairing_status else "",
             f"pairing_required: {pairing_status.get('required')}" if pairing_status else "",
             f"pairing_reason: {pairing_status.get('reason')}" if pairing_status.get("reason") else "",
+            f"suggested_test_path: {pairing_status.get('suggested_test_path')}" if pairing_status.get("suggested_test_path") else "",
             (
                 f"paired_test: #{pairing_status.get('paired_tool_call_id')} {pairing_status.get('paired_path')}"
                 if pairing_status.get("paired_tool_call_id") is not None

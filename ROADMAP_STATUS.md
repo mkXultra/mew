@@ -150,6 +150,11 @@ If the first successful verification is a narrow pytest node-id run, mew marks
 it as a narrow verification result and keeps it out of default verify fallback,
 so the next resident step does not inherit a one-test command as its long-lived
 gate.
+The paired-test loop now gives the resident a concrete first test-file
+candidate: `pairing_status.missing_test_edit` includes an inferred
+`suggested_test_path` such as `src/mew/work_session.py` ->
+`tests/test_work_session.py`, visible in resume text, approval cells, follow
+snapshots, and reply-file steer text.
 
 ## Milestone 1: Native Hands
 
@@ -674,6 +679,20 @@ Next action:
 
 ## Latest Validation
 
+- Follow-up current: `claude-ultra` recommended closing the recurring
+  implementation-only source-edit loop by adding a concrete paired-test
+  candidate to `pairing_status`. Missing `src/mew/**` paired-test approvals now
+  carry an inferred `suggested_test_path`; resume text, approval cells,
+  reply-file steer text, follow schema docs, and the THINK prompt surface it.
+  `codex-ultra` reviewed the diff and returned `NO_BLOCKERS`. Validated with
+  focused pairing/prompt tests (`3 passed, 278 deselected`),
+  `./mew dogfood --scenario work-session --cleanup --json` (pass with
+  suggested test path in `work_source_edit_pairing_advisory`),
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q tests/test_work_session.py tests/test_commands.py tests/test_dogfood.py`
+  (`487 passed, 9 subtests passed`), full
+  `UV_CACHE_DIR=/tmp/uv-cache uv run pytest -q` (`964 passed, 15 subtests
+  passed`), `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check .`
+  (pass), and `./mew dogfood --scenario all --cleanup --json` (pass).
 - Persistent Advantage current: `claude-ultra` recommended wiring
   `memory.deep.preferences` into native work as the smallest M3 slice that
   turns resident memory into observable model behavior. Work-session resumes now
@@ -1161,6 +1180,10 @@ Next action:
   pending approvals and approval cells. `work-session` dogfood now exercises a
   real dry-run source edit and verifies `missing_test_edit`, while the follow
   schema documents the optional observer field.
+- That paired-test status now includes an inferred `suggested_test_path` for
+  source-only dry-run approvals, and the resident THINK prompt tells the model
+  to use it as the first test-file candidate when the write boundary stops
+  before a paired test edit.
 - Passive native-work skips now keep a structured
   `last_native_work_skip_recovery`, including concrete approval/reject/resume
   commands for `pending_write_approval` instead of only a skip reason. Recovery

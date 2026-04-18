@@ -3903,9 +3903,14 @@ def _work_unpaired_source_approval_error(session, source_call, args):
     if getattr(args, "allow_unpaired_source_edit", False):
         return "", pairing
     path = pairing.get("source_path") or "src/mew/**"
+    suggestion = (
+        f"; suggested test path: {pairing.get('suggested_test_path')}"
+        if pairing.get("suggested_test_path")
+        else ""
+    )
     return (
         "src/mew source edit approval requires a paired tests/** write/edit in the same work session "
-        f"before approving {path}; pass --allow-unpaired-source-edit to override explicitly",
+        f"before approving {path}{suggestion}; pass --allow-unpaired-source-edit to override explicitly",
         pairing,
     )
 
@@ -4642,12 +4647,18 @@ def _work_reply_template(session=None, resume=None):
         pairing = first_approval.get("pairing_status") or {}
         if pairing.get("status") == "missing_test_edit":
             path = pairing.get("source_path") or first_approval.get("path") or "src/mew/**"
+            suggestion = (
+                f" Suggested test path: {pairing.get('suggested_test_path')}."
+                if pairing.get("suggested_test_path")
+                else ""
+            )
             actions = [
                 {
                     "type": "steer",
                     "text": (
                         f"Add a paired tests/** write/edit before approving tool #{first_approval_id} for {path}; "
                         "only set allow_unpaired_source_edit=true if this source-only edit is intentional."
+                        f"{suggestion}"
                     ),
                 }
             ]

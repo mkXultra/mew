@@ -484,6 +484,7 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(approval["pairing_status"]["status"], "missing_test_edit")
         self.assertTrue(approval["pairing_status"]["advisory"])
+        self.assertEqual(approval["pairing_status"]["suggested_test_path"], "tests/test_pairing.py")
         self.assertEqual(approval["approve_hint"], "")
         self.assertEqual(approval["cli_approve_hint"], "")
         self.assertIn("--allow-unpaired-source-edit", approval["override_approve_hint"])
@@ -494,7 +495,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approve_once_blocked: add a paired tests/** write/edit first", text)
         self.assertIn("override_approve_once: mew work 9 --approve-tool 3", text)
         self.assertIn("pairing_status: missing_test_edit", text)
+        self.assertIn("suggested_test_path: tests/test_pairing.py", text)
         self.assertIn("pairing_status: missing_test_edit", resume_text)
+        self.assertIn("suggested_test_path: tests/test_pairing.py", resume_text)
         self.assertIn("approve blocked: add a paired tests/** write/edit before approving", resume_text)
         self.assertIn("--allow-unpaired-source-edit", resume_text)
 
@@ -527,6 +530,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
         self.assertIn("paired tests/**", schema["reply_template"]["actions"][0]["text"])
         self.assertIn("tool #3", schema["reply_template"]["actions"][0]["text"])
+        self.assertIn("Suggested test path: tests/test_pairing.py", schema["reply_template"]["actions"][0]["text"])
         self.assertIn("allow_unpaired_source_edit=true", schema["reply_template"]["actions"][0]["text"])
 
     def test_work_reply_template_prefers_later_unpaired_source_approval(self):
@@ -7236,6 +7240,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("exact old and new strings", prompt)
         self.assertIn("include a paired tests/ change", prompt)
+        self.assertIn("pairing_status.suggested_test_path", prompt)
         self.assertIn("record the intended test in working_memory.next_step", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)

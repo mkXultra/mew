@@ -25,7 +25,9 @@ The snapshot is a local contract for another model or UI. It includes:
   - approvals may include an advisory `pairing_status`. For `src/mew/**`
     writes, `missing_test_edit` means no changed `tests/**` write/edit has been
     produced in the same work session yet; `ok` points at the paired test tool
-    call. `missing_test_edit` blocks approval by default; CLI approvals require
+    call. Missing-test statuses may include `suggested_test_path`, inferred
+    from the source filename, as the first paired-test candidate.
+    `missing_test_edit` blocks approval by default; CLI approvals require
     `--allow-unpaired-source-edit`, and reply-file `approve` / `approve_all`
     actions require `"allow_unpaired_source_edit": true` to override it.
   - blocked approvals leave `approve_hint` and `cli_approve_hint` empty, and

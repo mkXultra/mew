@@ -3412,6 +3412,12 @@ def run_work_session_scenario(workspace, env=None):
             (source_pairing_cells[0].get("pairing_status") or {}).get("status") if source_pairing_cells else None
         )
         == "missing_test_edit"
+        and (
+            (source_pairing_approvals[0].get("pairing_status") or {}).get("suggested_test_path")
+            if source_pairing_approvals
+            else None
+        )
+        == "tests/test_pairing.py"
         and "paired test missing" in ((source_pairing_cells[0].get("preview") or "") if source_pairing_cells else ""),
         observed={
             "tool_call_id": (source_edit_data.get("tool_call") or {}).get("id"),
@@ -3426,9 +3432,14 @@ def run_work_session_scenario(workspace, env=None):
                 if source_pairing_cells
                 else None
             ),
+            "suggested_test_path": (
+                ((source_pairing_approvals[0] or {}).get("pairing_status") or {}).get("suggested_test_path")
+                if source_pairing_approvals
+                else None
+            ),
             "cell_preview": (source_pairing_cells[0] or {}).get("preview") if source_pairing_cells else None,
         },
-        expected="src/mew dry-run edits surface a non-blocking missing paired test advisory",
+        expected="src/mew dry-run edits surface a missing paired test advisory with a suggested test path",
     )
     _scenario_check(
         checks,
