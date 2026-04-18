@@ -7749,10 +7749,13 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
         print(f"start session: {mew_command('work', task['id'], '--start-session')}")
     read_root = native_self_improve_read_root(task)
     print(f"work cwd: {resolved_task_cwd_text(task)}")
-    print(f"continue: {mew_command('work', task['id'], '--live', '--allow-read', read_root, '--max-steps', '1')}")
+    print(
+        "continue: "
+        f"{mew_command('work', task['id'], '--live', '--allow-read', read_root, '--compact-live', '--max-steps', '1')}"
+    )
     print(
         f"follow: "
-        f"{mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', read_root, '--max-steps', '3')}"
+        f"{mew_command('work', task['id'], '--follow', '--quiet', '--allow-read', read_root, '--compact-live', '--max-steps', '3')}"
     )
     print(f"resume: {mew_command('work', task['id'], '--session', '--resume', '--allow-read', read_root)}")
 

@@ -1132,6 +1132,9 @@ Next action:
   includes `/**/*` for recursive-directory patterns across Python versions, and
   keeps candidate results inside allowed read roots even through symlinks or
   rejected parent traversal.
+- Native self-improve task #126/session #148 then chose a small UX follow-up:
+  the native self-improve help and printed next commands now show
+  `--compact-live`, matching the calmer long-session defaults used elsewhere.
 
 ## Current Roadmap Focus
 

@@ -1133,8 +1133,8 @@ def build_parser():
         epilog=(
             "Native work-session flow:\n"
             "  mew self-improve --start-session --focus \"Make the coding cockpit calmer\"\n"
-            "  mew work <task-id> --live --allow-read . --max-steps 1\n"
-            "  mew work <task-id> --follow --quiet --allow-read . --max-steps 3\n\n"
+            "  mew work <task-id> --live --allow-read . --compact-live --max-steps 1\n"
+            "  mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 3\n\n"
             "Planned dispatcher flow:\n"
             "  mew self-improve --focus \"Improve stale agent-run handling\"\n"
             "  mew self-improve --focus \"Improve docs\" --ready --auto-execute --dispatch --dry-run"
