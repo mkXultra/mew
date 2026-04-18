@@ -274,6 +274,33 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["details"]["tasks"][0]["label"], "Task #1")
         self.assertEqual(view["details"]["questions"][0]["label"], "Question #1")
 
+    def test_build_desk_view_model_suggests_ready_self_improve_for_empty_coding_queue(self):
+        view = build_desk_view_model({"tasks": [], "questions": [], "work_sessions": []}, kind="coding")
+
+        self.assertEqual(view["primary_action"]["kind"], "start_self_improve")
+        self.assertEqual(
+            view["primary_action"]["command"],
+            mew_command(
+                "self-improve",
+                "--start-session",
+                "--ready",
+                "--focus",
+                "Pick the next small mew improvement",
+            ),
+        )
+
+    def test_build_desk_view_model_does_not_suggest_self_improve_outside_mew_project(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                view = build_desk_view_model({"tasks": [], "questions": [], "work_sessions": []}, kind="coding")
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertIsNone(view["primary_action"])
+        self.assertEqual(view["actions"], [])
+
     def test_format_desk_view(self):
         text = format_desk_view(
             {

@@ -53,6 +53,15 @@ def task_matches_kind(task: dict[str, Any] | None, kind: str) -> bool:
     return effective_task_kind(task) == kind
 
 
+def current_project_looks_like_mew() -> bool:
+    root = Path.cwd()
+    return (
+        (root / "pyproject.toml").is_file()
+        and (root / "src" / "mew").is_dir()
+        and (root / "mew").is_file()
+    )
+
+
 def task_ids_for_kind(state: dict[str, Any], kind: str) -> set[str]:
     if not kind:
         return set()
@@ -397,6 +406,24 @@ def attention_action_item(item: dict[str, Any], current_time: str | None = None)
     )
 
 
+def native_self_improve_action_item() -> dict[str, Any]:
+    return attach_action_metadata(
+        {
+            "kind": "start_self_improve",
+            "label": "Start native self-improve",
+            "command": mew_command(
+                "self-improve",
+                "--start-session",
+                "--ready",
+                "--focus",
+                "Pick the next small mew improvement",
+            ),
+        },
+        "coding queue is empty in the mew project",
+        None,
+    )
+
+
 def action_identity(value: Any) -> str:
     return "" if value is None else str(value)
 
@@ -516,6 +543,8 @@ def build_desk_view_model(
     sessions = active_work_sessions_for_desk(state, kind_filter)
     attention = filter_items_by_task_kind(open_attention_for_desk(state), task_ids, kind_filter)
     actions = desk_actions_for_desk(questions, tasks, sessions, attention, current_time=current_time)
+    if not actions and kind_filter == "coding" and current_project_looks_like_mew():
+        actions.append(native_self_improve_action_item())
     primary_action = actions[0] if actions else None
     view_model = {
         "date": day,
