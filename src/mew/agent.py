@@ -80,7 +80,12 @@ from .thoughts import (
     normalize_thread_list,
     record_thought_journal_entry,
 )
-from .work_session import create_work_session, work_session_for_task
+from .work_session import (
+    create_work_session,
+    seed_work_session_runtime_defaults,
+    work_session_for_task,
+    work_session_runtime_command,
+)
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -2014,7 +2019,20 @@ def apply_dispatch_task_action(state, event, action, current_time, autonomous, a
     return 1
 
 
-def apply_start_work_session_action(state, event, action, current_time, autonomous, autonomy_level, allow_native_work):
+def apply_start_work_session_action(
+    state,
+    event,
+    action,
+    current_time,
+    autonomous,
+    autonomy_level,
+    allow_native_work,
+    allowed_read_roots=None,
+    allowed_write_roots=None,
+    allow_write=False,
+    allow_verify=False,
+    verify_command="",
+):
     task_id = action.get("task_id")
     if not programmer_action_allowed(event, autonomous, autonomy_level, "act"):
         add_outbox_message(
@@ -2085,11 +2103,29 @@ def apply_start_work_session_action(state, event, action, current_time, autonomo
         )
         return 1
     session, created = create_work_session(state, task, current_time=current_time)
+    seed_work_session_runtime_defaults(
+        session,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        allow_write=allow_write,
+        allow_verify=allow_verify,
+        verify_command=verify_command,
+        source=f"runtime:{event.get('type')}",
+        reason=action.get("reason") or "native work session started by autonomous runtime",
+        current_time=current_time,
+    )
     verb = "Started" if created else "Reused"
+    live_command = work_session_runtime_command(session, task["id"], max_steps=1)
+    follow_command = work_session_runtime_command(session, task["id"], follow=True, max_steps=10)
     add_outbox_message(
         state,
         "assistant",
-        f"{verb} native work session #{session['id']} for task #{task['id']}. Continue with ./mew code {task['id']}.",
+        (
+            f"{verb} native work session #{session['id']} for task #{task['id']}. "
+            f"Open with ./mew code {task['id']}.\n"
+            f"live: {live_command}\n"
+            f"follow: {follow_command}"
+        ),
         event_id=event["id"],
         related_task_id=task["id"],
     )
@@ -2761,6 +2797,11 @@ def apply_action_plan(
                 autonomous,
                 autonomy_level,
                 allow_native_work,
+                allowed_read_roots=allowed_read_roots,
+                allowed_write_roots=allowed_write_roots,
+                allow_write=allow_write,
+                allow_verify=allow_verify,
+                verify_command=verify_command,
             )
         elif action_type == "dispatch_task":
             counts["messages"] += apply_dispatch_task_action(

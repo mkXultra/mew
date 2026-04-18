@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import re
 import shlex
 
@@ -7,6 +8,7 @@ from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
     glob_paths,
     inspect_dir,
+    is_sensitive_path,
     read_file,
     resolve_allowed_path,
     search_text,
@@ -186,6 +188,91 @@ def create_work_session(state, task, current_time=None):
         session["default_options"] = json.loads(json.dumps(latest.get("default_options") or {}))
     state.setdefault("work_sessions", []).append(session)
     return session, True
+
+
+def safe_work_write_roots(roots):
+    safe = []
+    for root in roots or []:
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if is_sensitive_path(path):
+            continue
+        if root and root not in safe:
+            safe.append(root)
+    return safe
+
+
+def _merge_option_list(current, incoming):
+    merged = []
+    for item in list(current or []) + list(incoming or []):
+        if item and item not in merged:
+            merged.append(item)
+    return merged
+
+
+def seed_work_session_runtime_defaults(
+    session,
+    *,
+    allowed_read_roots=None,
+    allowed_write_roots=None,
+    allow_write=False,
+    allow_verify=False,
+    verify_command="",
+    source="runtime",
+    reason="",
+    current_time=None,
+):
+    if not session:
+        return {}
+    defaults = session.setdefault("default_options", {})
+    read_roots = [root for root in allowed_read_roots or [] if root]
+    write_roots = safe_work_write_roots(allowed_write_roots or []) if allow_write else []
+    if read_roots:
+        defaults["allow_read"] = _merge_option_list(defaults.get("allow_read"), read_roots)
+    if write_roots:
+        defaults["allow_write"] = _merge_option_list(defaults.get("allow_write"), write_roots)
+    if allow_verify and verify_command:
+        defaults["allow_verify"] = True
+        defaults["verify_command"] = verify_command
+        defaults["verify_disabled"] = False
+    if source or reason:
+        note_text = f"{source or 'runtime'} started native work"
+        if reason:
+            note_text = f"{note_text}: {reason}"
+        add_work_session_note(session, note_text, source="runtime", current_time=current_time)
+    session["updated_at"] = current_time or now_iso()
+    return defaults
+
+
+def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1):
+    defaults = (session or {}).get("default_options") or {}
+    parts = ["work"]
+    if task_id is not None:
+        parts.append(task_id)
+    parts.append("--follow" if follow else "--live")
+    for root in defaults.get("allow_read") or ["."]:
+        parts.extend(["--allow-read", root])
+    for root in defaults.get("allow_write") or []:
+        parts.extend(["--allow-write", root])
+    if defaults.get("allow_shell"):
+        parts.append("--allow-shell")
+    if defaults.get("allow_verify"):
+        parts.append("--allow-verify")
+    if defaults.get("verify_command"):
+        parts.extend(["--verify-command", defaults["verify_command"]])
+    if defaults.get("act_mode"):
+        parts.extend(["--act-mode", defaults["act_mode"]])
+    if defaults.get("compact_live"):
+        parts.append("--compact-live")
+    if defaults.get("quiet"):
+        parts.append("--quiet")
+    if defaults.get("no_prompt_approval"):
+        parts.append("--no-prompt-approval")
+    elif defaults.get("prompt_approval"):
+        parts.append("--prompt-approval")
+    parts.extend(["--max-steps", str(max_steps)])
+    return mew_command(*parts)
 
 
 def close_work_session(session, current_time=None):

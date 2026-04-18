@@ -995,6 +995,8 @@ def run_native_work_scenario(workspace, env=None):
         if str(session.get("task_id")) == str(task_id)
     ]
     active_sessions = [session for session in sessions if session.get("status") == "active"]
+    latest_active_session = active_sessions[-1] if active_sessions else {}
+    latest_defaults = latest_active_session.get("default_options") or {}
     task_questions = [
         question for question in state.get("questions", [])
         if str(question.get("related_task_id")) == str(task_id)
@@ -1032,6 +1034,17 @@ def run_native_work_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "native_work_seeds_runtime_defaults",
+        str(workspace) in (latest_defaults.get("allow_read") or [])
+        and any(note.get("source") == "runtime" for note in latest_active_session.get("notes") or []),
+        observed={
+            "default_options": latest_defaults,
+            "notes": latest_active_session.get("notes") or [],
+        },
+        expected="passive-started session inherits runtime read roots and records provenance",
+    )
+    _scenario_check(
+        checks,
         "native_work_records_start_action",
         "start_work_session" in action_types,
         observed=runtime_effect_summary(state),
@@ -1040,9 +1053,12 @@ def run_native_work_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "native_work_routes_user_to_code_cockpit",
-        f"./mew code {task_id}" in outbox_text and "native work session" in outbox_text,
+        f"./mew code {task_id}" in outbox_text
+        and f"mew work {task_id} --live" in outbox_text
+        and f"mew work {task_id} --follow" in outbox_text
+        and "native work session" in outbox_text,
         observed=outbox_text,
-        expected="outbox tells the user how to continue the native work session",
+        expected="outbox tells the user how to open, live-step, or follow the native work session",
     )
     _scenario_check(
         checks,

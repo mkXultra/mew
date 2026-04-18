@@ -3279,14 +3279,27 @@ class AutonomyTests(unittest.TestCase):
             now_iso(),
             allow_task_execution=False,
             task_timeout=1,
+            allowed_read_roots=["src"],
             autonomous=True,
             autonomy_level="act",
             allow_native_work=True,
+            allow_verify=True,
+            verify_command="uv run pytest -q",
+            allow_write=True,
+            allowed_write_roots=["docs"],
         )
 
         self.assertEqual(len(state["work_sessions"]), 1)
-        self.assertEqual(state["work_sessions"][0]["task_id"], task["id"])
+        session = state["work_sessions"][0]
+        self.assertEqual(session["task_id"], task["id"])
+        self.assertEqual(session["default_options"]["allow_read"], ["src"])
+        self.assertEqual(session["default_options"]["allow_write"], ["docs"])
+        self.assertTrue(session["default_options"]["allow_verify"])
+        self.assertEqual(session["default_options"]["verify_command"], "uv run pytest -q")
+        self.assertIn("runtime:passive_tick started native work", session["notes"][0]["text"])
         self.assertIn("./mew code 1", state["outbox"][-1]["text"])
+        self.assertIn("work 1 --live --allow-read src", state["outbox"][-1]["text"])
+        self.assertIn("--verify-command 'uv run pytest -q'", state["outbox"][-1]["text"])
         self.assertEqual(state["outbox"][-1]["type"], "assistant")
         self.assertIsNone(state["outbox"][-1]["read_at"])
 
