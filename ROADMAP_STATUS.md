@@ -1489,6 +1489,10 @@ Next action:
   `interrupt_submit` request is idle and ready to continue, chat cockpit
   controls now show `/follow` alongside `/c`, preserving the normal multi-step
   cockpit path through that recovery branch.
+- Smart reentry now preserves bounded edit context: if `edit_file` fails after
+  a successful line-window `read_file` on the same target, the safe reobserve
+  hint keeps that `line_start`/`line_count` instead of falling back to a broad
+  full-file reread.
 
 ## Current Roadmap Focus
 

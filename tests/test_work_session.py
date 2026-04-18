@@ -5511,6 +5511,107 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("reobserve: read_file path=README.md", text)
         self.assertIn("safely re-read the target", text)
 
+    def test_work_resume_reuses_prior_read_window_after_failed_edit(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as project, tempfile.TemporaryDirectory() as other_cwd:
+            try:
+                read_result_path = str(Path(project) / "README.md")
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Recover edit",
+                    "goal": "Recover edit failure.",
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "README.md", "line_start": 40, "line_count": 12},
+                            "result": {
+                                "path": read_result_path,
+                                "line_start": 40,
+                                "line_count": 12,
+                                "text": "nearby target\n",
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file",
+                            "status": "failed",
+                            "parameters": {"path": "README.md", "old": "missing", "new": "replacement"},
+                            "error": "old text was not found",
+                            "summary": "edit failed",
+                        },
+                    ],
+                    "model_turns": [],
+                }
+                os.chdir(other_cwd)
+
+                resume = build_work_session_resume(session)
+                reobserve = resume["suggested_safe_reobserve"]
+
+                self.assertEqual(
+                    reobserve["parameters"],
+                    {"path": "README.md", "line_start": 40, "line_count": 12},
+                )
+                self.assertEqual(resume["failures"][0]["suggested_safe_reobserve"], reobserve)
+                text = format_work_session_resume(resume)
+                self.assertIn("reobserve: read_file path=README.md line_start=40 line_count=12", text)
+                self.assertIn("latest target window", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_resume_drops_prior_read_window_after_intervening_write(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Recover edit",
+            "goal": "Recover edit failure.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "README.md", "line_start": 40, "line_count": 12},
+                    "result": {
+                        "path": "README.md",
+                        "line_start": 40,
+                        "line_count": 12,
+                        "text": "nearby target\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "README.md"},
+                    "result": {"path": "README.md", "changed": True, "written": True},
+                },
+                {
+                    "id": 5,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "README.md", "old": "missing", "new": "replacement"},
+                    "error": "old text was not found",
+                    "summary": "edit failed",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        reobserve = resume["suggested_safe_reobserve"]
+
+        self.assertEqual(reobserve["parameters"], {"path": "README.md"})
+
     def test_work_resume_suggests_parent_inspection_after_failed_read_file(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 

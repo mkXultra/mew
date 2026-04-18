@@ -1059,7 +1059,62 @@ def parent_path_for_observation(path):
     return "."
 
 
-def suggested_safe_reobserve_for_call(call):
+def latest_prior_read_window_for_path(calls, path, before_id=None):
+    normalized_path = _normalized_work_path_text(path)
+    if not normalized_path:
+        return {}
+
+    def same_work_path(left, right):
+        left_text = _normalized_work_path_text(left)
+        right_text = _normalized_work_path_text(right)
+        if not left_text or not right_text:
+            return False
+        if left_text == right_text:
+            return True
+        left_path = Path(left_text)
+        right_path = Path(right_text)
+        if not left_path.is_absolute() or not right_path.is_absolute():
+            return False
+        return left_path.resolve(strict=False) == right_path.resolve(strict=False)
+
+    def candidate_paths(candidate):
+        parameters = candidate.get("parameters") or {}
+        result = candidate.get("result") or {}
+        paths = [work_call_path(candidate), parameters.get("path"), result.get("path")]
+        seen = set()
+        unique = []
+        for item in paths:
+            text = _normalized_work_path_text(item)
+            if text and text not in seen:
+                seen.add(text)
+                unique.append(text)
+        return unique
+
+    def call_matches_target(candidate):
+        return any(same_work_path(candidate_path, normalized_path) for candidate_path in candidate_paths(candidate))
+
+    for candidate in reversed(list(calls or [])):
+        candidate_id = candidate.get("id")
+        if before_id is not None and candidate_id is not None and candidate_id >= before_id:
+            continue
+        if candidate.get("tool") in WRITE_WORK_TOOLS and (candidate.get("result") or {}).get("written"):
+            if call_matches_target(candidate):
+                return {}
+        if candidate.get("tool") != "read_file" or candidate.get("status") != "completed":
+            continue
+        if not call_matches_target(candidate):
+            continue
+        parameters = candidate.get("parameters") or {}
+        result = candidate.get("result") or {}
+        line_start = parameters.get("line_start") or result.get("line_start")
+        line_count = parameters.get("line_count") or result.get("line_count")
+        if line_start is None or line_count is None:
+            continue
+        return {"line_start": line_start, "line_count": line_count}
+    return {}
+
+
+def suggested_safe_reobserve_for_call(call, calls=None):
     if not isinstance(call, dict):
         return {}
     if call.get("recovery_status"):
@@ -1086,10 +1141,20 @@ def suggested_safe_reobserve_for_call(call):
         return result
 
     if tool in WRITE_WORK_TOOLS and path:
+        window = {
+            key: parameters.get(key)
+            for key in ("line_start", "line_count")
+            if parameters.get(key) is not None
+        }
+        if not window:
+            window = latest_prior_read_window_for_path(calls, path, before_id=call.get("id"))
+        reason = "write/edit failed; safely re-read the target before planning another edit"
+        if window:
+            reason = "write/edit failed; safely re-read the latest target window before planning another edit"
         return suggestion(
             "read_file",
-            {"path": path},
-            "write/edit failed; safely re-read the target before planning another edit",
+            {"path": path, **window},
+            reason,
         )
     if tool == "read_file" and path:
         if call.get("status") == "interrupted":
@@ -1920,7 +1985,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None):
 
         failure_record = work_tool_failure_record(call)
         if call.get("status") in ("failed", "interrupted") or failure_record:
-            safe_reobserve = suggested_safe_reobserve_for_call(call)
+            safe_reobserve = suggested_safe_reobserve_for_call(call, calls=calls)
             failure = {
                 "tool_call_id": call.get("id"),
                 "tool": call.get("tool"),
