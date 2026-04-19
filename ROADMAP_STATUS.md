@@ -1924,8 +1924,12 @@ Next action:
   uses a runtime-specific selector that does not cross verifier or other
   non-read barriers, tags runtime-created recovery calls, and stops to ask the
   user after a failed runtime recovery instead of continuing past it.
+- Failed runtime-owned automatic recovery now becomes explicit user-facing
+  context: the recovery question names the failed recovery tool/result and
+  suppresses misleading lower-priority safe-read suggestions until that failure
+  is inspected.
 - Latest validation for the 2026-04-19 recovery/control slice:
-  `uv run pytest -q` passed with 1043 tests and 30 subtests,
+  `uv run pytest -q` passed with 1044 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,
   `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check` passed on
   changed files, `git diff --check` passed, and codex-ultra re-review of the
