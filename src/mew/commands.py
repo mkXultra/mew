@@ -8426,7 +8426,7 @@ def command_from_next_move(move):
     parts = (move or "").split("`")
     for index in range(1, len(parts), 2):
         candidate = parts[index].strip()
-        if candidate.startswith(("mew ", "./mew ", "uv run mew ")):
+        if command_candidate_invokes_mew(candidate):
             return candidate
     practical_prefixes = (
         "advance coding task #",
@@ -8442,6 +8442,21 @@ def command_from_next_move(move):
         if task_id.isdigit():
             return mew_command("work", task_id)
     return ""
+
+
+def command_candidate_invokes_mew(candidate):
+    try:
+        tokens = shlex.split(candidate or "")
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    if tokens[:3] == ["uv", "run", "mew"]:
+        return True
+    executable = tokens[0]
+    if executable in ("mew", "./mew"):
+        return True
+    return os.path.basename(executable) == "mew" and (os.path.isabs(executable) or os.sep in executable)
 
 def format_verification_run(run):
     label = run.get("label") or f"#{run.get('id')}"

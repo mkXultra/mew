@@ -3969,6 +3969,13 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(data["kind"], "coding")
                 self.assertEqual(data["command"], "mew code 2")
 
+                executable = str(Path(tmp) / ".venv" / "bin" / "mew")
+                with patch.dict(os.environ, {"MEW_EXECUTABLE": executable}):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["next", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["command"], f"{executable} code 2")
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["next"]), 0)
                 output = stdout.getvalue()
@@ -3993,6 +4000,23 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("mew code 2", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
+
+    def test_command_from_next_move_accepts_path_style_mew_launcher(self):
+        from mew.commands import command_from_next_move
+
+        self.assertEqual(
+            command_from_next_move('answer question #2 with `/tmp/project/.venv/bin/mew reply 2 "..."`'),
+            '/tmp/project/.venv/bin/mew reply 2 "..."',
+        )
+        self.assertEqual(
+            command_from_next_move("start with `../bin/mew self-improve --start-session`"),
+            "../bin/mew self-improve --start-session",
+        )
+        self.assertEqual(
+            command_from_next_move("start with `uv run mew work 1 --session`"),
+            "uv run mew work 1 --session",
+        )
+        self.assertEqual(command_from_next_move("ignore `not-mew work 1`"), "")
 
     def test_workbench_omits_embedded_current_coding_focus_description_block(self):
         old_cwd = os.getcwd()
