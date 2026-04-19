@@ -1127,6 +1127,15 @@ Evidence:
   behavior change, not only documentation. Focused `tests/test_brief.py` /
   `tests/test_desk.py`, `ruff`, manual focus/desk/brief checks, and full
   `uv run pytest --no-testmon -q` passed after the change.
+- The first M3-focused native self-improve task after M2 closeout, task `#296`
+  / session `#276`, proved useful no-change reentry behavior. The resident
+  stopped at a `remember` boundary with `continuity: 9/9`, resumed with active
+  project memory and a runnable next action, hit an old-text edit mismatch,
+  surfaced the exact safe re-read recovery, consumed a steer to re-read the
+  stale target window, and finished with a no-change summary instead of forcing
+  a weak continuity wording edit. This is not the long-running cadence proof
+  yet, but it is concrete M3 evidence that mew can preserve and recover a
+  resident investigation after interruption and a failed edit.
 
 Missing proof:
 
