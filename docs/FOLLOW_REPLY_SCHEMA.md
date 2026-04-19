@@ -10,6 +10,9 @@ The snapshot is a local contract for another model or UI. It includes:
 - `producer.pid`: the process that wrote the snapshot
 - `session_id` and `task_id`
 - `session_updated_at`: the session timestamp this snapshot observed
+- `latest_context_checkpoint`: a compact reentry checkpoint from
+  `mew context --save`, without the raw checkpoint `text`
+- `current_git`: the git head/status observed when the snapshot was written
 - `last_step`, `resume`, `cells`, and `controls`
 - running command/test cells may include bounded stdout/stderr `tail` entries
   while the tool is still active. The same partial output appears in
@@ -75,12 +78,16 @@ when a task id maps to a work session, and returns `status`, `producer_alive`,
 `fresh` means the heartbeat is recent, `working` means the producer is still
 alive, `completed` means the producer exited after writing a stopped snapshot,
 and `dead` means an old producer disappeared without a stop reason. It exits
-nonzero when no snapshot exists.
+nonzero when no snapshot exists. JSON and text output both include the compact
+`latest_context_checkpoint` and `current_git` when available, even for absent
+snapshots, so an observer can still recover the long-session reentry point.
 
 When the snapshot is absent, stale, or dead, `suggested_recovery.command` points
 at the next safe observer command, such as a zero-step refresh or
 `mew work <task-id> --session --resume --allow-read . --auto-recover-safe`.
 When the snapshot resume already has a recovery plan, that plan wins.
+Successful zero-step refreshes write `stop_reason: "snapshot_refresh"` without
+spending a model turn.
 
 ## Reply File
 
