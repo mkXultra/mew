@@ -45,7 +45,10 @@ class JournalTests(unittest.TestCase):
         self.assertIn("#2 Done work [done]: shipped the first report", view["completed"])
         self.assertIn("#1 Open work [ready/coding]", view["active"])
         self.assertIn("Question #2: What next?", view["questions"])
-        self.assertIn("Work session #5 task #1: Open work is idle: Continue work", view["sessions"])
+        self.assertIn(
+            "Work session #5 task #1: Open work is idle: Continue work; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: continue the work session with /continue in chat or ./mew work 1 --live --max-steps 1",
+            view["sessions"],
+        )
         self.assertIn("effect #6 [applied/passive_tick] actions=ask_user: Asked one question", view["runtime_effects"])
         self.assertIn("# Mew Journal 2026-04-17", text)
         self.assertIn("## Morning", text)

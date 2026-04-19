@@ -62,6 +62,9 @@ repair recommendation alongside phase and next action.
 Dream active-session lines now use the same resume-derived continuity signal,
 so overnight-style reflection preserves the active work score and repair cue
 instead of only raw phase/next-action text.
+Journal active-session lines use that resume-derived signal too, making daily
+reports preserve the same continuity score, repair recommendation, and next
+action that `focus`/`next` use.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
