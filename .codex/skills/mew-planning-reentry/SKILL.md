@@ -22,6 +22,13 @@ git status --short
 ./mew memory --search "decision roadmap next structural snapshot mailbox streaming trust reliability latency self-improve dogfood" --type project --json
 ```
 
+If the memory search returns no useful decisions, immediately fall back to broader decision queries:
+
+```bash
+./mew memory --search "decision" --type project --json
+./mew memory --search "next safe action context compression long session" --type project --json
+```
+
 If an active work session or task is visible, inspect it before acting:
 
 ```bash
