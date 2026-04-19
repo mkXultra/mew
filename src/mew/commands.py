@@ -3015,6 +3015,28 @@ def planned_unpaired_source_write_pairing_status(session, action_type, parameter
     return pairing
 
 
+def _work_path_is_tests_path(path):
+    normalized = str(path or "").replace("\\", "/").lstrip("./")
+    return normalized == "tests" or normalized.startswith("tests/")
+
+
+def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parameters, action):
+    if not pending_steer or pending_steer.get("source") != "paired_test_steer":
+        return False
+    if action_type not in WRITE_WORK_TOOLS:
+        return False
+    if not _work_path_is_tests_path((parameters or {}).get("path")):
+        return False
+    if not (parameters or {}).get("apply"):
+        return False
+    parameters["apply"] = False
+    if isinstance(action, dict):
+        action["apply"] = False
+        action["dry_run"] = True
+        action["coerced_dry_run_reason"] = "paired_test_steer"
+    return True
+
+
 def paired_test_steer_text(pairing):
     source_path = pairing.get("source_path") or "src/mew/**"
     suggested = pairing.get("suggested_test_path") or "the matching tests/** file"
@@ -3806,6 +3828,12 @@ def cmd_work_ai(args):
             verify_command=effective_args.verify_command or "",
             verify_timeout=effective_args.verify_timeout,
         )
+        coerced_test_dry_run = _force_paired_test_steer_write_to_dry_run(
+            pending_steer,
+            action_type,
+            parameters,
+            action,
+        )
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -3925,6 +3953,8 @@ def cmd_work_ai(args):
                 planned.get("action_plan") or {},
                 action,
             )
+            if coerced_test_dry_run:
+                turn["coerced_dry_run_reason"] = "paired_test_steer"
             repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
             if repeat_guard:
                 tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
