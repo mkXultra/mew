@@ -794,13 +794,15 @@ Next action:
   views, and `fec0bfe` fixes running search/glob cockpit summaries so live
   cells show the requested query/pattern instead of `None` before results
   land; `2eaacea` preserves path-style `mew` launchers in `mew next --json`
-  command fields for external observers using `MEW_EXECUTABLE`. Validation
-  included repeated `uv run --with ruff ruff check` on
-  changed files, focused command/brief/desk/work-session tests,
-  `tests.test_work_session` (`339 tests`, pass), repeated full
-  `uv run python -m unittest` runs (latest: `1002 tests`, pass), direct
-  `MEW_EXECUTABLE=/tmp/.../mew ./mew next --json` checks, and
-  repeated `./mew dogfood --all --cleanup --json` runs (pass).
+  command fields for external observers using `MEW_EXECUTABLE`; and `3fb8005`
+  makes injected dogfood messages use the same runtime environment as the
+  runtime process, so `PYTHONPATH`/`MEW_EXECUTABLE` do not diverge. Validation
+  included repeated `uv run --with ruff ruff check` on changed files, focused
+  command/brief/desk/work-session/dogfood tests, `tests.test_work_session`
+  (`339 tests`, pass), repeated full `uv run python -m unittest` runs (latest:
+  `1003 tests`, pass), direct `MEW_EXECUTABLE=/tmp/.../mew ./mew next --json`
+  checks, short Codex Web API dogfood with `injected_messages processed=1/1`,
+  and repeated `./mew dogfood --all --cleanup --json` runs (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
