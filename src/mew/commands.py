@@ -1244,15 +1244,16 @@ def format_work_live_step_result(step, resume=None):
             session_lines.append(_format_verification_confidence_inline(verification_confidence))
         memory = resume.get("working_memory") or {}
         if memory:
-            if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"):
+            stale_memory = bool(memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id"))
+            if stale_memory:
                 session_lines.append("memory: stale; refresh before relying on next_step")
                 session_lines.extend(_format_stale_working_memory_source_lines(memory))
-            if memory.get("hypothesis"):
+            if memory.get("hypothesis") and not stale_memory:
                 session_lines.append(f"memory_hypothesis: {clip_inline_text(memory.get('hypothesis'), 280)}")
             if memory.get("next_step"):
-                key = "stale_memory_next" if memory.get("stale_after_model_turn_id") or memory.get("stale_after_tool_call_id") else "memory_next"
+                key = "stale_memory_next" if stale_memory else "memory_next"
                 session_lines.append(f"{key}: {clip_inline_text(memory.get('next_step'), 280)}")
-            if memory.get("last_verified_state"):
+            if memory.get("last_verified_state") and not stale_memory:
                 session_lines.append(f"memory_verified: {clip_inline_text(memory.get('last_verified_state'), 280)}")
         if resume.get("next_action"):
             session_lines.append(f"next: {resume.get('next_action')}")

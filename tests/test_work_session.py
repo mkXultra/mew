@@ -2657,6 +2657,25 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stale_memory_next: Use the old plan.", text)
         self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 
+    def test_work_live_step_result_hides_stale_hypothesis_and_verified_state(self):
+        text = format_work_live_step_result(
+            {"status": "completed", "action": {"type": "remember"}, "summary": "noted"},
+            resume={
+                "phase": "idle",
+                "working_memory": {
+                    "hypothesis": "Old assumption.",
+                    "next_step": "Refresh from source.",
+                    "last_verified_state": "Old verification.",
+                    "stale_after_tool_call_id": 9,
+                    "stale_after_tool": "run_tests",
+                },
+            },
+        )
+
+        self.assertIn("stale_memory_next: Refresh from source.", text)
+        self.assertNotIn("memory_hypothesis: Old assumption.", text)
+        self.assertNotIn("memory_verified: Old verification.", text)
+
     def test_work_resume_next_action_refreshes_stale_memory_after_tool(self):
         session = {
             "id": 1,
