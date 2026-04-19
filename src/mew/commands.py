@@ -43,7 +43,13 @@ from .brief import (
 from .codex_api import load_codex_oauth
 from .config import CHAT_TRANSCRIPT_FILE, DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
-from .context_checkpoint import context_load_current_state, load_context_checkpoints
+from .context_checkpoint import (
+    compact_context_checkpoint,
+    context_load_current_state,
+    current_git_reentry_state,
+    latest_context_checkpoint,
+    load_context_checkpoints,
+)
 from .desk import build_desk_view_model, format_desk_view, write_desk_view
 from .dogfood import (
     format_dogfood_loop_report,
@@ -2100,6 +2106,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
     generated_at = now_iso()
     reply_path = STATE_DIR / "follow" / "reply.json"
     reply_schema = build_work_reply_schema(session, resume=resume)
+    checkpoint = compact_context_checkpoint(latest_context_checkpoint())
     payload = {
         "schema_version": 1,
         "generated_at": generated_at,
@@ -2117,6 +2124,8 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "resume": resume or {},
         "continuity": (resume or {}).get("continuity") or {},
         "pending_approvals": (resume or {}).get("pending_approvals") or [],
+        "latest_context_checkpoint": checkpoint,
+        "current_git": current_git_reentry_state(),
         "suggested_recovery": work_recovery_suggestion_from_plan(
             (resume or {}).get("recovery_plan") or {},
             task_id=task_id,
@@ -5574,6 +5583,8 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
 
 
 def _work_follow_status_from_snapshot(path, task_id=None, session=None):
+    checkpoint = compact_context_checkpoint(latest_context_checkpoint())
+    current_git = current_git_reentry_state()
     if not path.exists():
         status = "absent"
         return {
@@ -5585,6 +5596,8 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
             "producer_pid": None,
             "producer_alive": False,
             "producer_health": work_follow_producer_health(status),
+            "latest_context_checkpoint": checkpoint,
+            "current_git": current_git,
             "suggested_recovery": work_follow_status_suggested_recovery(status, task_id=task_id, session=session),
         }
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -5618,6 +5631,8 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     working_memory_stale = bool(
         working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
     )
+    checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
+    current_git = data.get("current_git") or current_git
     return {
         "snapshot_path": str(path),
         "status": status,
@@ -5634,6 +5649,8 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "phase": resume.get("phase") or data.get("phase") or "",
         "next_action": resume.get("next_action") or "",
         "working_memory_stale": working_memory_stale,
+        "latest_context_checkpoint": checkpoint,
+        "current_git": current_git,
         "suggested_recovery": suggested_recovery,
         "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
         "verification_confidence": resume.get("verification_confidence") or {},
@@ -5674,6 +5691,17 @@ def format_work_follow_status(data):
         lines.append("working_memory: stale")
     if data.get("next_action"):
         lines.append(f"next_action: {data.get('next_action')}")
+    checkpoint = data.get("latest_context_checkpoint") or {}
+    if checkpoint:
+        lines.append(
+            f"checkpoint: {checkpoint.get('name') or checkpoint.get('key')} "
+            f"({checkpoint.get('created_at') or '-'})"
+        )
+        current_git = data.get("current_git") or {}
+        if current_git:
+            lines.append(
+                f"checkpoint_git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
+            )
     recovery = data.get("suggested_recovery") or {}
     if recovery:
         lines.append(f"recovery: {recovery.get('kind') or '-'}")

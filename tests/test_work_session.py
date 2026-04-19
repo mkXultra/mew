@@ -14114,6 +14114,63 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_snapshot_surfaces_compact_context_checkpoint(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import write_work_follow_snapshot
+                from mew.typed_memory import FileMemoryBackend
+                from mew.work_session import build_work_session_resume
+
+                FileMemoryBackend().write(
+                    "Context save next safe action context compression long session\n"
+                    "Note: Follow checkpoint next safe action.",
+                    scope="private",
+                    memory_type="project",
+                    name="Follow checkpoint",
+                    description="Recover observer polling after compression.",
+                )
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Observer checkpoint",
+                    "updated_at": "2026-04-18T00:00:00Z",
+                }
+                resume = build_work_session_resume(session, task={"id": 1, "title": "Observer checkpoint"})
+                path = write_work_follow_snapshot(
+                    SimpleNamespace(live=True, follow=True),
+                    {"steps": [], "stop_reason": "max_steps"},
+                    session,
+                    {"id": 1, "title": "Observer checkpoint"},
+                    resume,
+                    force=True,
+                )
+
+                data = json.loads(path.read_text(encoding="utf-8"))
+                checkpoint = data["latest_context_checkpoint"]
+                self.assertEqual(checkpoint["name"], "Follow checkpoint")
+                self.assertIn("Follow checkpoint next safe action.", checkpoint["reentry_note"])
+                self.assertNotIn("text", checkpoint)
+                self.assertIn("current_git", data)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                status_data = json.loads(stdout.getvalue())
+                status_checkpoint = status_data["latest_context_checkpoint"]
+                self.assertEqual(status_checkpoint["name"], "Follow checkpoint")
+                self.assertNotIn("text", status_checkpoint)
+                self.assertEqual(status_data["current_git"], data["current_git"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("checkpoint: Follow checkpoint", text)
+                self.assertIn("checkpoint_git:", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_snapshot_surfaces_running_tool_output_tail(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

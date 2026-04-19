@@ -77,6 +77,19 @@ def context_checkpoint_to_dict(entry, *, recommended=False):
     return item
 
 
+def compact_context_checkpoint(checkpoint):
+    if not isinstance(checkpoint, dict):
+        return {}
+    return {
+        "name": checkpoint.get("name") or checkpoint.get("key") or "",
+        "created_at": checkpoint.get("created_at") or "",
+        "description": checkpoint.get("description") or "",
+        "path": checkpoint.get("path") or "",
+        "reentry_note": checkpoint.get("reentry_note") or "",
+        "diagnostics_are_historical": bool(checkpoint.get("diagnostics_are_historical")),
+    }
+
+
 def latest_context_checkpoint(query=CONTEXT_CHECKPOINT_QUERY, *, base_dir="."):
     entries = matching_context_checkpoints(query, base_dir=base_dir)
     if not entries:
