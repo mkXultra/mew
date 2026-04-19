@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from mew.cli_command import mew_command
 from mew.cli import main
@@ -297,6 +298,27 @@ class DeskTests(unittest.TestCase):
             ),
         )
 
+    def test_build_desk_view_model_surfaces_context_checkpoint(self):
+        with (
+            patch(
+                "mew.desk.latest_context_checkpoint",
+                return_value={
+                    "name": "Dogfood checkpoint",
+                    "created_at": "2026-04-19T00:00:00Z",
+                    "reentry_note": "Continue the saved plan.",
+                },
+            ),
+            patch(
+                "mew.desk.current_git_reentry_state",
+                return_value={"status": "clean", "head": "abc123"},
+            ),
+        ):
+            view = build_desk_view_model({"tasks": [], "questions": [], "work_sessions": []}, kind="coding")
+
+        self.assertEqual(view["latest_context_checkpoint"]["name"], "Dogfood checkpoint")
+        self.assertEqual(view["current_git"]["status"], "clean")
+        self.assertNotIn("text", view["latest_context_checkpoint"])
+
     def test_build_desk_view_model_does_not_suggest_self_improve_outside_mew_project(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -331,6 +353,11 @@ class DeskTests(unittest.TestCase):
                         }
                     ]
                 },
+                "latest_context_checkpoint": {
+                    "name": "Desk checkpoint",
+                    "created_at": "2026-04-19T00:00:00Z",
+                },
+                "current_git": {"status": "clean", "head": "abc123"},
                 "actions": [
                     {
                         "label": "Open task #1",
@@ -352,6 +379,8 @@ class DeskTests(unittest.TestCase):
         self.assertIn("pet_state: sleeping", text)
         self.assertIn("primary_action: Open task #1", text)
         self.assertIn(f"primary_command: {mew_command('task', 'show', 1)}", text)
+        self.assertIn("checkpoint: Desk checkpoint (2026-04-19T00:00:00Z)", text)
+        self.assertIn("checkpoint_git: clean head=abc123", text)
         self.assertIn("actions:", text)
         self.assertIn(
             f"- Review attention #2: independent attention item is open stale_for=2m -> {mew_command('attention')}",

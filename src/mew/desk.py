@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .cli_command import mew_command
+from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
 from .state import open_questions as canonical_open_questions
 from .tasks import task_kind
 from .timeutil import now_iso, parse_time
@@ -66,6 +67,19 @@ def current_project_looks_like_mew() -> bool:
         and (root / "src" / "mew").is_dir()
         and (root / "mew").is_file()
     )
+
+
+def context_checkpoint_detail_item(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(checkpoint, dict):
+        return {}
+    return {
+        "name": checkpoint.get("name") or checkpoint.get("key") or "",
+        "created_at": checkpoint.get("created_at") or "",
+        "description": checkpoint.get("description") or "",
+        "path": checkpoint.get("path") or "",
+        "reentry_note": checkpoint.get("reentry_note") or "",
+        "diagnostics_are_historical": bool(checkpoint.get("diagnostics_are_historical")),
+    }
 
 
 def task_ids_for_kind(state: dict[str, Any], kind: str) -> set[str]:
@@ -578,6 +592,10 @@ def build_desk_view_model(
         },
         "details": desk_detail_items(questions, tasks, sessions, attention, state=state),
     }
+    checkpoint = latest_context_checkpoint()
+    if checkpoint:
+        view_model["latest_context_checkpoint"] = context_checkpoint_detail_item(checkpoint)
+        view_model["current_git"] = current_git_reentry_state()
     if kind_filter:
         view_model["kind"] = kind_filter
     return view_model
@@ -601,6 +619,17 @@ def format_desk_view(view_model: dict[str, Any]) -> str:
             lines.append(f"primary_action: {label}")
         if command:
             lines.append(f"primary_command: {command}")
+    checkpoint = view_model.get("latest_context_checkpoint") or {}
+    if checkpoint:
+        lines.append(
+            f"checkpoint: {checkpoint.get('name') or checkpoint.get('key')} "
+            f"({checkpoint.get('created_at')})"
+        )
+        current_git = view_model.get("current_git") or {}
+        if current_git:
+            lines.append(
+                f"checkpoint_git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
+            )
     actions = view_model.get("actions")
     if isinstance(actions, list) and actions:
         action_lines = []
