@@ -972,7 +972,11 @@ def select_work_ai_task(state, task_id=None):
 
 
 def done_task_work_session_error(task):
-    return f"mew: task #{task.get('id')} is done; reopen it before starting a work session"
+    task_id = task.get("id")
+    return (
+        f"mew: task #{task_id} is done; reopen it before starting a work session with "
+        f"`{mew_command('task', 'update', task_id, '--status', 'ready')}`"
+    )
 
 
 def format_work_ai_report(report, compact=False):

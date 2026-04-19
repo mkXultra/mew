@@ -5250,14 +5250,17 @@ class CommandTests(unittest.TestCase):
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["work", "1", "--start-session"]), 1)
                 self.assertIn("task #1 is done", stderr.getvalue())
+                self.assertIn("mew task update 1 --status ready", stderr.getvalue())
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["code", "1", "--timeout", "0"]), 1)
                 self.assertIn("task #1 is done", stderr.getvalue())
+                self.assertIn("mew task update 1 --status ready", stderr.getvalue())
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["work", "1", "--live", "--auth", "missing-auth.json"]), 1)
                 self.assertIn("task #1 is done", stderr.getvalue())
+                self.assertIn("mew task update 1 --status ready", stderr.getvalue())
                 self.assertNotIn("auth", stderr.getvalue().casefold())
             finally:
                 os.chdir(old_cwd)

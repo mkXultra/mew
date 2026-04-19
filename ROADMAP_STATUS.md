@@ -264,6 +264,11 @@ Milestone 2 Done-when checklist:
   switching modes. The absent snapshot early-return remains out of scope; dead,
   completed, stale, and fresh non-absent statuses share the updated formatter
   path. The full `tests/test_work_session.py` suite passed.
+  Task `#283` came from a direct `mew code <done-task>` smoke: the error already
+  said to reopen the task, but did not print the exact command. Done-task
+  work-session/cockpit errors now include
+  `mew task update <id> --status ready`, reducing reentry friction when a user
+  points the cockpit at completed work.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.
