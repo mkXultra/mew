@@ -9445,6 +9445,110 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_all_orders_paired_test_before_source_with_existing_verifier(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing_demo.py")
+                source.write_text("VALUE = 'before'\n", encoding="utf-8")
+                test_path = Path("tests/test_pairing_demo.py")
+                test_path.write_text("assert 'before'\n", encoding="utf-8")
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert 'after' in Path('src/mew/pairing_demo.py').read_text(); "
+                    "assert 'after' in Path('tests/test_pairing_demo.py').read_text()\""
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(source),
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                str(test_path),
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-all",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+                self.assertEqual(approved["count"], 2)
+                self.assertEqual(approved["approved"][0]["approved_tool_call"]["id"], 2)
+                self.assertEqual(approved["approved"][1]["approved_tool_call"]["id"], 1)
+                self.assertIn("after", source.read_text(encoding="utf-8"))
+                self.assertIn("after", test_path.read_text(encoding="utf-8"))
+                session = load_state()["work_sessions"][0]
+                self.assertTrue(session["tool_calls"][2]["result"]["verification_deferred"])
+                self.assertEqual(session["tool_calls"][3]["result"]["verification_exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_allows_exact_new_file_write_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10486,6 +10590,251 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--details"]), 0)
                 self.assertIn("batch tool_calls=#1,#2", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_batch_previews_paired_source_and_test_writes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                Path("tests/test_pairing.py").write_text("def test_pairing():\n    assert 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview paired source and test",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "src/mew/pairing.py",
+                                "old": "old",
+                                "new": "new",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": "tests/test_pairing.py",
+                                "old": "'old'",
+                                "new": "'new'",
+                                "dry_run": False,
+                            },
+                        ],
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "pending_approval")
+                self.assertEqual(report["steps"][0]["action"]["type"], "batch")
+                self.assertEqual(
+                    [tool["path"] for tool in report["steps"][0]["action"]["tools"]],
+                    ["tests/test_pairing.py", "src/mew/pairing.py"],
+                )
+                self.assertEqual(Path("src/mew/pairing.py").read_text(encoding="utf-8"), "VALUE = 'old'\n")
+                self.assertIn("'old'", Path("tests/test_pairing.py").read_text(encoding="utf-8"))
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(
+                    [call["parameters"]["path"] for call in session["tool_calls"]],
+                    ["tests/test_pairing.py", "src/mew/pairing.py"],
+                )
+                self.assertEqual(report["steps"][0]["pending_approval_ids"], [1, 2])
+                for call in session["tool_calls"]:
+                    self.assertFalse(call["parameters"]["apply"])
+                    self.assertTrue(call["result"]["dry_run"])
+                    self.assertNotIn("verification_exit_code", call["result"])
+                self.assertTrue(session["tool_calls"][0]["parameters"]["defer_verify_on_approval"])
+                self.assertEqual(
+                    session["tool_calls"][0]["parameters"]["paired_test_source_path"],
+                    "src/mew/pairing.py",
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_batch_rejects_unpaired_mew_source_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                Path("README.md").write_text("old docs\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "invalid write batch",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "src/mew/pairing.py",
+                                "old": "old",
+                                "new": "new",
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": "README.md",
+                                "old": "old docs",
+                                "new": "new docs",
+                            },
+                        ],
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "wait")
+                self.assertIn("write batch is limited", report["steps"][0]["action"]["reason"])
+                self.assertEqual(load_state()["work_sessions"][0]["tool_calls"], [])
+                self.assertEqual(Path("src/mew/pairing.py").read_text(encoding="utf-8"), "VALUE = 'old'\n")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old docs\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_accept_edits_auto_approves_paired_write_batch_with_group_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing.py")
+                test_path = Path("tests/test_pairing.py")
+                source.write_text("VALUE = 'old'\n", encoding="utf-8")
+                test_path.write_text("from pathlib import Path\n\ndef test_pairing():\n    assert 'old' in Path('src/mew/pairing.py').read_text()\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "apply paired batch",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": str(source),
+                                "old": "old",
+                                "new": "new",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": str(test_path),
+                                "old": "'old'",
+                                "new": "'new'",
+                                "dry_run": False,
+                            },
+                        ],
+                    },
+                }
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert 'new' in Path('src/mew/pairing.py').read_text(); "
+                    "assert 'new' in Path('tests/test_pairing.py').read_text()\""
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        verify_command,
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["steps"][0]["inline_approval"], "auto_applied")
+                self.assertEqual(report["steps"][0]["inline_approval_count"], 2)
+                self.assertIn("new", source.read_text(encoding="utf-8"))
+                self.assertIn("'new'", test_path.read_text(encoding="utf-8"))
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(
+                    [call["parameters"]["path"] for call in session["tool_calls"][:2]],
+                    [str(test_path), str(source)],
+                )
+                self.assertEqual([call["approval_status"] for call in session["tool_calls"][:2]], ["applied", "applied"])
+                test_apply = session["tool_calls"][2]
+                source_apply = session["tool_calls"][3]
+                self.assertTrue(test_apply["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", test_apply["result"])
+                self.assertEqual(source_apply["result"]["verification_exit_code"], 0)
             finally:
                 os.chdir(old_cwd)
 

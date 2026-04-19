@@ -2550,16 +2550,61 @@ def finish_repeated_work_tool_guard(state, session, tool, parameters, guard):
 
 
 BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
+BATCH_WRITE_WORK_TOOLS = WRITE_WORK_TOOLS
+
+
+def _work_path_is_mew_source_path(path):
+    normalized = str(path or "").replace("\\", "/").lstrip("./")
+    return normalized.startswith("src/mew/") and normalized.endswith(".py")
+
+
+def _paired_write_batch_actions(actions):
+    write_actions = [
+        dict(action)
+        for action in actions or []
+        if (action.get("type") or action.get("tool")) in BATCH_WRITE_WORK_TOOLS
+    ]
+    if len(write_actions) != 2 or len(write_actions) != len(actions or []):
+        return []
+    tests = [action for action in write_actions if _work_path_is_tests_path(action.get("path"))]
+    sources = [action for action in write_actions if _work_path_is_mew_source_path(action.get("path"))]
+    if len(tests) != 1 or len(sources) != 1:
+        return []
+    source_path = sources[0].get("path")
+    ordered = []
+    for index, raw_action in enumerate((tests[0], sources[0])):
+        action = dict(raw_action)
+        action["apply"] = False
+        action["dry_run"] = True
+        if index == 0:
+            action["defer_verify_on_approval"] = True
+            action["paired_test_source_path"] = source_path
+        ordered.append(action)
+    return ordered
 
 
 def run_work_batch_action(session_id, task_id, index, planned, action, args, progress, turn_id=None):
-    sub_actions = [
-        sub_action
-        for sub_action in (action.get("tools") or [])[:5]
-        if (sub_action.get("type") or sub_action.get("tool")) in BATCH_READ_WORK_TOOLS
-    ]
+    raw_sub_actions = [sub_action for sub_action in (action.get("tools") or [])[:5] if isinstance(sub_action, dict)]
+    write_batch = any((sub_action.get("type") or sub_action.get("tool")) in BATCH_WRITE_WORK_TOOLS for sub_action in raw_sub_actions)
+    if write_batch:
+        sub_actions = _paired_write_batch_actions(raw_sub_actions)
+    else:
+        sub_actions = [
+            sub_action
+            for sub_action in raw_sub_actions
+            if (sub_action.get("type") or sub_action.get("tool")) in BATCH_READ_WORK_TOOLS
+        ]
     if not sub_actions:
-        sub_actions = [{"type": "wait", "reason": "batch has no read-only tools"}]
+        sub_actions = [
+            {
+                "type": "wait",
+                "reason": (
+                    "batch requires exactly one tests/** write/edit and one src/mew/** write/edit"
+                    if write_batch
+                    else "batch has no read-only tools"
+                ),
+            }
+        ]
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -2584,6 +2629,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         save_state(state)
 
     tool_calls = []
+    pending_approval_ids = []
     error = ""
     for sub_action in sub_actions:
         with state_lock():
@@ -2619,17 +2665,46 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 "summary": turn.get("summary") if turn else "stopped before next batch tool",
             }
         action_type = sub_action.get("type") or sub_action.get("tool")
-        if action_type not in BATCH_READ_WORK_TOOLS:
-            error = f"batch tool is not read-only: {action_type or 'missing'}"
+        expected_tools = BATCH_WRITE_WORK_TOOLS if write_batch else BATCH_READ_WORK_TOOLS
+        if action_type not in expected_tools:
+            error = (
+                f"batch write tool is not a paired write/edit: {action_type or 'missing'}"
+                if write_batch
+                else f"batch tool is not read-only: {action_type or 'missing'}"
+            )
             break
         parameters = work_tool_parameters_from_action(
             sub_action,
-            allowed_write_roots=[],
+            allowed_write_roots=args.allow_write or [] if write_batch else [],
             allow_shell=False,
-            allow_verify=False,
-            verify_command="",
+            allow_verify=bool(args.allow_verify) if write_batch else False,
+            verify_command=args.verify_command or "" if write_batch else "",
             verify_timeout=args.verify_timeout,
         )
+        if write_batch:
+            parameters["apply"] = False
+            if _work_path_is_tests_path(parameters.get("path")):
+                source_paths = [
+                    candidate.get("path")
+                    for candidate in sub_actions
+                    if _work_path_is_mew_source_path(candidate.get("path"))
+                ]
+                parameters["defer_verify_on_approval"] = True
+                if source_paths:
+                    parameters["paired_test_source_path"] = source_paths[0]
+        if write_batch:
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                pairing_status = planned_unpaired_source_write_pairing_status(
+                    session,
+                    action_type,
+                    parameters,
+                    allow_unpaired=bool(getattr(args, "allow_unpaired_source_edit", False)),
+                )
+            if pairing_status:
+                error = paired_test_steer_text(pairing_status)
+                break
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -2665,8 +2740,20 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+            session = find_work_session(state, session_id)
+            remember_successful_work_verification(session, action_type, result)
             save_state(state)
         tool_calls.append(tool_call)
+        result = tool_call.get("result") or {}
+        if (
+            write_batch
+            and action_type in WRITE_WORK_TOOLS
+            and tool_call.get("status") == "completed"
+            and result.get("dry_run")
+            and result.get("changed")
+            and not tool_call.get("approval_status")
+        ):
+            pending_approval_ids.append(tool_call.get("id"))
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {tool_call.get('status')}")
         if error:
@@ -2691,6 +2778,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         "action": action,
         "model_turn": turn,
         "tool_calls": tool_calls,
+        "pending_approval_ids": pending_approval_ids,
+        "pending_approval": bool(pending_approval_ids),
         "error": error,
         "summary": f"ran {len(tool_calls)} batch tool(s)",
     }
@@ -3840,6 +3929,33 @@ def cmd_work_ai(args):
                     report.pop("stop_request", None)
                     continue
                 break
+            if batch_step.get("pending_approval"):
+                pending_ids = batch_step.get("pending_approval_ids") or []
+                if pending_ids and work_auto_approve_edits_enabled(effective_args):
+                    approve_args = SimpleNamespace(
+                        task_id=task_id,
+                        approve_all=True,
+                        allow_write=effective_args.allow_write or [],
+                        allow_verify=effective_args.allow_verify,
+                        verify_command=effective_args.verify_command or "",
+                        verify_cwd=args.verify_cwd,
+                        verify_timeout=effective_args.verify_timeout,
+                        progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                        json=False,
+                        allow_unpaired_source_edit=False,
+                    )
+                    approval_code, approval_data = _apply_work_approval_batch(approve_args, pending_ids)
+                    batch_step["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                    batch_step["inline_approval_count"] = (approval_data or {}).get("count", 0)
+                    batch_step["inline_approvals"] = (approval_data or {}).get("approved") or []
+                    if approval_code != 0:
+                        report["stop_reason"] = "tool_failed"
+                        break
+                    continue
+                report["stop_reason"] = "pending_approval"
+                if progress:
+                    progress(f"step #{index}: pending batch write approval")
+                break
             continue
         if action_type not in WORK_TOOLS:
             if getattr(args, "live", False) and not getattr(args, "follow", False):
@@ -4770,8 +4886,6 @@ def _pending_approval_tool_ids(session):
 
 def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_source_verifiers=False):
     ids = _pending_approval_tool_ids(session)
-    if not promote_paired_source_verifiers:
-        return ids
     calls_by_id = {call.get("id"): call for call in (session or {}).get("tool_calls") or []}
     id_set = set(ids)
     ordered = []
@@ -4780,14 +4894,19 @@ def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_s
         if approve_id in seen:
             continue
         call = calls_by_id.get(approve_id)
-        suggestion = suggested_verify_command_for_call_path(work_call_path(call))
-        current = work_session_default_verify_command(session, task=task)
-        if suggestion and not verification_command_covers_suggestion(current, suggestion):
-            pairing = work_write_pairing_status(session, call)
-            paired_id = pairing.get("paired_tool_call_id")
-            if paired_id in id_set and paired_id not in seen:
-                ordered.append(paired_id)
-                seen.add(paired_id)
+        pairing = work_write_pairing_status(session, call)
+        paired_id = pairing.get("paired_tool_call_id")
+        if paired_id in id_set and paired_id not in seen:
+            ordered.append(paired_id)
+            seen.add(paired_id)
+        if promote_paired_source_verifiers:
+            suggestion = suggested_verify_command_for_call_path(work_call_path(call))
+            current = work_session_default_verify_command(session, task=task)
+            if suggestion and not verification_command_covers_suggestion(current, suggestion):
+                paired_id = pairing.get("paired_tool_call_id")
+                if paired_id in id_set and paired_id not in seen:
+                    ordered.append(paired_id)
+                    seen.add(paired_id)
         ordered.append(approve_id)
         seen.add(approve_id)
     return ordered
@@ -4851,6 +4970,42 @@ def _rollback_deferred_approval_batch(approved, reason):
     return rolled_back
 
 
+def _apply_work_approval_batch(args, approve_ids=None):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        if not session:
+            return 1, no_active_work_session_json(state, args=args) if getattr(args, "json", False) else None
+        task = work_session_task(state, session)
+        ordered_ids = _pending_approval_tool_ids_for_batch(
+            session,
+            task=task,
+            promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
+        )
+    if approve_ids is not None:
+        requested = set(approve_ids)
+        ordered_ids = [approve_id for approve_id in ordered_ids if approve_id in requested]
+    if not ordered_ids:
+        return 0, {"approved": [], "count": 0}
+
+    approved = []
+    exit_code = 0
+    deferred_verify_ids = _deferred_verify_approval_ids_for_batch(session, ordered_ids)
+    for approve_id in ordered_ids:
+        approve_args = SimpleNamespace(**vars(args))
+        approve_args.approve_tool = approve_id
+        approve_args.defer_verify = approve_id in deferred_verify_ids
+        code, data = _apply_work_approval(approve_args, approve_id)
+        if data is not None:
+            approved.append(data)
+        if code != 0:
+            rollback_reason = f"batch verification failed after approving tool #{approve_id}"
+            _rollback_deferred_approval_batch(approved, rollback_reason)
+            exit_code = code
+            break
+    return exit_code, {"approved": approved, "count": len(approved)}
+
+
 def cmd_work_approve_all(args):
     with state_lock():
         state = load_state()
@@ -4874,27 +5029,15 @@ def cmd_work_approve_all(args):
             print("No pending dry-run write/edit tool calls to approve.")
         return 0
 
-    approved = []
-    exit_code = 0
-    deferred_verify_ids = _deferred_verify_approval_ids_for_batch(session, approve_ids)
-    for approve_id in approve_ids:
-        approve_args = SimpleNamespace(**vars(args))
-        approve_args.approve_tool = approve_id
-        approve_args.defer_verify = approve_id in deferred_verify_ids
-        code, data = _apply_work_approval(approve_args, approve_id)
-        if data is not None:
-            approved.append(data)
-            if not args.json:
-                tool_call = data["tool_call"]
-                print(f"approved work tool #{approve_id} -> #{tool_call['id']} [{tool_call['status']}]")
-                print(tool_call.get("summary") or tool_call.get("error") or "")
-        if code != 0:
-            rollback_reason = f"batch verification failed after approving tool #{approve_id}"
-            _rollback_deferred_approval_batch(approved, rollback_reason)
-            exit_code = code
-            break
+    exit_code, data = _apply_work_approval_batch(args, approve_ids)
+    approved = data.get("approved") or []
+    if not args.json:
+        for approve_id, approval in zip(approve_ids, approved):
+            tool_call = approval["tool_call"]
+            print(f"approved work tool #{approve_id} -> #{tool_call['id']} [{tool_call['status']}]")
+            print(tool_call.get("summary") or tool_call.get("error") or "")
     if args.json:
-        print(json.dumps({"approved": approved, "count": len(approved)}, ensure_ascii=False, indent=2))
+        print(json.dumps(data, ensure_ascii=False, indent=2))
     return exit_code
 
 

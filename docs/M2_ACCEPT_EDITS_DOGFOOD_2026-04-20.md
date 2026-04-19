@@ -19,6 +19,14 @@ approval-time verification.
   output remains parseable instead of being polluted by nested approval output.
 - The final work-loop report records the auto approval status and applied tool
   id.
+- `batch` remains read-only by default, but now has one guarded write path:
+  exactly one `tests/**` write/edit plus one `src/mew/**` write/edit. Both are
+  forced to dry-run previews, ordered test-before-source, and remain behind the
+  existing approval boundary.
+- In `--approval-mode accept-edits`, that paired write batch is approved as one
+  group through the approve-all path: the test half defers verification and the
+  source half runs the final verifier, with existing rollback behavior on
+  failure.
 - M2 comparative dogfood now records the mew-side session's `approval_mode` and
   default permission posture, so future comparison artifacts can tell whether a
   run used the low-friction mode.
@@ -31,8 +39,11 @@ git diff --check
 uv run pytest --no-testmon -q \
   tests/test_work_session.py::WorkSessionTests::test_work_live_accept_edits_mode_auto_applies_dry_run_write \
   tests/test_work_session.py::WorkSessionTests::test_work_json_accept_edits_mode_keeps_stdout_parseable \
+  tests/test_work_session.py::WorkSessionTests::test_work_ai_batch_previews_paired_source_and_test_writes \
+  tests/test_work_session.py::WorkSessionTests::test_accept_edits_auto_approves_paired_write_batch_with_group_verification \
   tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario
 ./mew dogfood --scenario work-session --workspace /tmp/mew-accept-edits-work-session-dogfood --json
+./mew dogfood --scenario work-session --workspace /tmp/mew-paired-write-batch-dogfood --json
 ./mew dogfood --scenario m2-comparative \
   --workspace /tmp/mew-m2-approval-mode-evidence \
   --mew-session-id 250 \
@@ -46,6 +57,12 @@ Observed:
 - dogfood check added: `work_ai_accept_edits_auto_applies_preview`
 - dogfood check added after real test-first failure:
   `work_ai_accept_edits_defers_paired_test_first_verification`
+- dogfood check added for the paired write batch:
+  `work_ai_accept_edits_auto_approves_paired_write_batch`
+- `/tmp/mew-paired-write-batch-dogfood` passed and confirms a source/test batch
+  is previewed test-first, auto-approved as one guarded group under
+  `accept-edits`, defers the test verification, and runs the final source-side
+  verifier successfully.
 - focused comparative evidence check confirms `approval_mode: accept-edits` is
   serialized into JSON and the markdown runbook.
 - comparative artifact:
@@ -64,9 +81,14 @@ verification before the source-side companion edit landed when the model emitted
 a normal dry-run preview under a paired-test steer. The follow-up fix marks
 paired-test-steer previews with `defer_verify_on_approval`, so
 `accept-edits` can auto-apply the test half without running the verifier until
-the source edit lands. This reduces the sharpest failure mode, but batch or
-multi-action approval remains the stronger M2 lever.
+the source edit lands.
+
+The next slice adds the stronger M2 lever without opening arbitrary writable
+batching. When the resident already knows both exact edits, it can emit one
+paired write batch and avoid the test-steer round trip. Safety stays narrow:
+mixed read/write batches and unpaired writes are rejected, both writes are
+preview-only, and application still flows through approval / approve-all.
 
 Next M2 evidence should compare a real small write-heavy task using
-`accept-edits` against a fresh CLI run and record whether the result moves from
-`fresh_cli_preferred` toward `equivalent`.
+`accept-edits` plus paired write batch against a fresh CLI run and record
+whether the result moves from `fresh_cli_preferred` toward `equivalent`.

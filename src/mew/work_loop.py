@@ -424,13 +424,19 @@ def _work_action_schema_text():
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
-        '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log", '
+        '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
         '"path": "required for read_file/glob/search_text", '
         '"query": "required for search_text; literal fixed-string, so use batch for OR searches", '
         '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
         '"line_start": "optional 1-based read_file starting line from search_text results", '
-        '"line_count": "optional read_file line count"}],\n'
+        '"line_count": "optional read_file line count", '
+        '"content": "write_file content", '
+        '"old": "edit_file old text", '
+        '"new": "edit_file new text", '
+        '"create": false, '
+        '"replace_all": false, '
+        '"dry_run": true}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text literal fixed-string query",\n'
         '    "pattern": "glob pattern",\n'
@@ -500,6 +506,7 @@ def build_work_think_prompt(context):
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
+        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with exactly those two write/edit tools; mew will force both to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, read the smallest relevant file window first. Once a prior line-window read contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -550,6 +557,8 @@ def normalize_work_model_action(action_plan, verify_command=""):
     if action_type == "batch":
         raw_tools = action.get("tools") or action.get("actions") or []
         normalized_tools = []
+        saw_write_tool = False
+        saw_non_write_tool = False
         dropped_tool_count = 0
         for item in raw_tools:
             if not isinstance(item, dict):
@@ -561,13 +570,36 @@ def normalize_work_model_action(action_plan, verify_command=""):
             else:
                 sub_actions = [sub_action]
             for candidate in sub_actions:
-                if candidate.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(candidate):
+                if candidate.get("type") in WRITE_WORK_TOOLS:
+                    saw_write_tool = True
                     if len(normalized_tools) >= 5:
                         dropped_tool_count += 1
                         continue
                     normalized_tools.append(candidate)
+                    continue
+                if candidate.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(candidate):
+                    saw_non_write_tool = True
+                    if len(normalized_tools) >= 5:
+                        dropped_tool_count += 1
+                        continue
+                    normalized_tools.append(candidate)
+                else:
+                    saw_non_write_tool = True
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
+        if saw_write_tool:
+            if saw_non_write_tool:
+                return {
+                    "type": "wait",
+                    "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
+                }
+            paired_tools = normalize_paired_write_batch_tools(normalized_tools)
+            if not paired_tools:
+                return {
+                    "type": "wait",
+                    "reason": "write batch is limited to exactly one tests/** write/edit and one src/mew/** write/edit",
+                }
+            normalized_tools = paired_tools
         normalized = {"type": "batch", "tools": normalized_tools}
         if action.get("reason") is not None:
             normalized["reason"] = action.get("reason")
@@ -700,6 +732,57 @@ def valid_batch_sub_action(action):
     if action_type == "glob":
         return bool(action.get("pattern"))
     return action_type in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)
+
+
+def _normalized_work_path(path):
+    return str(path or "").replace("\\", "/").lstrip("./")
+
+
+def _work_batch_path_is_tests(path):
+    normalized = _normalized_work_path(path)
+    return normalized == "tests" or normalized.startswith("tests/")
+
+
+def _work_batch_path_is_mew_source(path):
+    normalized = _normalized_work_path(path)
+    return normalized.startswith("src/mew/") and normalized.endswith(".py")
+
+
+def valid_paired_write_batch_sub_action(action):
+    action_type = (action or {}).get("type")
+    if action_type == "write_file":
+        return bool(action.get("path")) and isinstance(action.get("content"), str)
+    if action_type == "edit_file":
+        return (
+            bool(action.get("path"))
+            and isinstance(action.get("old"), str)
+            and action.get("old") != ""
+            and isinstance(action.get("new"), str)
+        )
+    return False
+
+
+def normalize_paired_write_batch_tools(tools):
+    write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
+    if len(write_tools) != 2:
+        return []
+    if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
+        return []
+    tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
+    source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
+    if len(tests_tools) != 1 or len(source_tools) != 1:
+        return []
+    source_path = source_tools[0].get("path")
+    normalized = []
+    for index, raw_tool in enumerate((tests_tools[0], source_tools[0])):
+        tool = dict(raw_tool)
+        tool["apply"] = False
+        tool["dry_run"] = True
+        if index == 0:
+            tool["defer_verify_on_approval"] = True
+            tool["paired_test_source_path"] = source_path
+        normalized.append(tool)
+    return normalized
 
 
 def work_tool_parameters_from_action(

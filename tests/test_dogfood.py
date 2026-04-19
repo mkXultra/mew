@@ -500,6 +500,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("work_ai_paired_test_approval_auto_defers_verification", text)
             self.assertIn("work_ai_accept_edits_auto_applies_preview", text)
             self.assertIn("work_ai_accept_edits_defers_paired_test_first_verification", text)
+            self.assertIn("work_ai_accept_edits_auto_approves_paired_write_batch", text)
             self.assertIn("work_approve_tool_can_defer_verification", text)
             self.assertIn("work_unpaired_source_approval_requires_override", text)
             command = report["scenarios"][0]["commands"][0]
