@@ -135,3 +135,54 @@ Resolved UI note: the compact follow stop output originally did not surface the
 deferred-verification control as clearly as `mew work --session --resume` and
 `mew work --cells` did. Compact `Next CLI controls` now keep
 `apply tool #... and defer verification` when pending approvals exist.
+
+## Evidence Pipeline Dogfood
+
+Task: turn the M2 comparative protocol from a hand-filled runbook into a paired
+evidence artifact. This adds two executable inputs:
+
+- `--mew-session-id <id>`: prefill the mew side from an actual work session
+  with wall/active time, approvals, verification, resume command, and
+  continuity.
+- `--m2-comparison-report <fresh-cli-report.json>`: merge the fresh CLI side
+  from an external agent or human report.
+
+### mew
+
+- Entry: `mew self-improve --start-session ...`, then
+  `mew work 246 --follow ...`
+- Task/session: task `#246`, work session `#238`
+- Result: no additional code change justified on the just-built
+  `--mew-session-id` surface
+- Summary: mew inspected the builder, formatter, and paired tests, then
+  finished with the conclusion that the current surface already covered the
+  observer tip, comparison scaffold, and mew-run evidence formatting.
+
+### fresh_cli
+
+- Entry: `codex-ultra` read-only fresh CLI assessment
+- Report: `/tmp/mew-fresh-cli-real-report.json`
+- Verification: `uv run pytest -q tests/test_dogfood.py -k m2_comparative`
+  passed with `3 passed, 48 deselected`
+- Result: no additional code blocker found before running a real paired
+  comparison
+
+### Combined Artifact
+
+Command:
+
+```bash
+./mew dogfood --scenario m2-comparative \
+  --workspace /tmp/mew-m2-real-pair \
+  --mew-session-id 238 \
+  --m2-comparison-report /tmp/mew-fresh-cli-real-report.json \
+  --json
+```
+
+Result: pass. The generated protocol contained both mew-side work-session
+evidence and fresh CLI report evidence. Status remained `inconclusive` because
+this was a readiness assessment, not a write-heavy paired coding task.
+
+Next useful M2 move: run one real paired coding task through this evidence
+pipeline and decide resident preference from that artifact instead of adding
+more comparison-surface polish.
