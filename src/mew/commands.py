@@ -108,7 +108,7 @@ from .programmer import (
 )
 from .question_view import format_question_context
 from .repair import repair_incomplete_runtime_effects
-from .self_improve import create_self_improve_task, ensure_self_improve_plan
+from .self_improve import DEFAULT_SELF_IMPROVE_TITLE, create_self_improve_task, ensure_self_improve_plan
 from .self_memory import (
     build_self_memory_view_model,
     format_self_memory_view,
@@ -4859,6 +4859,9 @@ def cmd_work_start_session(args):
             return 1
         session, created = create_work_session(state, task)
         remember_work_session_default_options(session, args)
+        if is_self_improve_task(task):
+            seed_native_self_improve_session_defaults(session, task)
+            seed_native_self_improve_reentry_note(session, task)
         save_state(state)
     if args.json:
         print(json.dumps({"created": created, "work_session": session}, ensure_ascii=False, indent=2))
@@ -9194,6 +9197,14 @@ def seed_native_self_improve_session_defaults(session, task):
     defaults["allow_read"] = allow_read
     defaults["compact_live"] = True
     session["updated_at"] = now_iso()
+
+
+def is_self_improve_task(task):
+    if not task:
+        return False
+    if (task.get("title") or "").strip() == DEFAULT_SELF_IMPROVE_TITLE:
+        return True
+    return "Created by mew self-improve" in (task.get("notes") or "")
 
 
 NATIVE_SELF_IMPROVE_REENTRY_NOTE_PREFIX = "Native self-improve reentry prepared."

@@ -305,6 +305,12 @@ class SelfImproveTests(unittest.TestCase):
                 defaults = start_data["work_session"]["default_options"]
                 self.assertEqual(defaults["allow_read"], ["."])
                 self.assertTrue(defaults["compact_live"])
+                notes = start_data["work_session"]["notes"]
+                self.assertEqual(len(notes), 1)
+                self.assertEqual(notes[0]["source"], "system")
+                self.assertIn("Native self-improve reentry prepared.", notes[0]["text"])
+                self.assertIn("mew work 1 --live", notes[0]["text"])
+                self.assertIn("--allow-read . --compact-live --max-steps 1", notes[0]["text"])
             finally:
                 os.chdir(old_cwd)
 
