@@ -42,6 +42,7 @@ from .commands import (
     cmd_log,
     cmd_memory,
     cmd_message,
+    cmd_metrics,
     cmd_mood,
     cmd_morning_paper,
     cmd_next,
@@ -570,6 +571,12 @@ def build_parser():
     activity_parser.add_argument("--kind", choices=TASK_KINDS, help="scope activity to tasks of this kind")
     activity_parser.add_argument("--json", action="store_true", help="print structured JSON")
     activity_parser.set_defaults(func=cmd_activity)
+
+    metrics_parser = subparsers.add_parser("metrics", help="show observation-first reliability and latency metrics")
+    metrics_parser.add_argument("--kind", choices=TASK_KINDS, help="scope metrics to tasks of this kind")
+    metrics_parser.add_argument("--limit", type=int, help="maximum recent work sessions to include")
+    metrics_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    metrics_parser.set_defaults(func=cmd_metrics)
 
     context_parser = subparsers.add_parser("context", help="show resident prompt context diagnostics")
     context_parser.add_argument(

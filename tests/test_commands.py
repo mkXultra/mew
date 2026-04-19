@@ -4320,6 +4320,61 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_metrics_command_prints_observation_metrics(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append({"id": 1, "title": "Measure", "kind": "coding", "status": "ready"})
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "closed",
+                            "created_at": "2026-04-19T00:00:00Z",
+                            "updated_at": "2026-04-19T00:00:10Z",
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "status": "completed",
+                                    "tool_call_id": 1,
+                                    "started_at": "2026-04-19T00:00:01Z",
+                                    "finished_at": "2026-04-19T00:00:02Z",
+                                }
+                            ],
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "tool": "read_file",
+                                    "status": "completed",
+                                    "started_at": "2026-04-19T00:00:03Z",
+                                    "finished_at": "2026-04-19T00:00:04Z",
+                                    "result": {},
+                                }
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["metrics", "--kind", "coding"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Mew observation metrics", text)
+                self.assertIn("sessions: total=1", text)
+                self.assertIn("first_tool_start_seconds: count=1 avg=3.0", text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["metrics", "--kind", "coding", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["sessions"]["total"], 1)
+                self.assertEqual(data["latency"]["first_tool_start_seconds"]["avg"], 3.0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_snapshot_command_refreshes_project_snapshot(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -3386,6 +3386,7 @@ def run_work_session_scenario(workspace, env=None):
     writes_ledger_result = run(["writes", "--json"])
     timeline_result = run(["work", "1", "--session", "--timeline", "--json"])
     cells_result = run(["work", "1", "--cells", "--json"])
+    metrics_result = run_command(_scenario_command("metrics", "--kind", "coding"), workspace, timeout=30, env=env)
     chat_result = run(
         ["chat", "--no-brief", "--no-unread", "--timeout", "5"],
         timeout=15,
@@ -4685,6 +4686,16 @@ raise SystemExit(0 if passed else 1)
         and any((item or {}).get("source") == "work_session" for item in writes_ledger_data),
         observed={"verification": verification_ledger_data[:3], "writes": writes_ledger_data[:3]},
         expected="mew verification/writes include native work-session tool calls",
+    )
+    _scenario_check(
+        checks,
+        "metrics_surface_work_session_observations",
+        metrics_result.get("exit_code") == 0
+        and "Mew observation metrics" in (metrics_result.get("stdout") or "")
+        and "sessions: total=" in (metrics_result.get("stdout") or "")
+        and "tool_calls: total=" in (metrics_result.get("stdout") or "")
+        and "first_tool_start_seconds: count=" in (metrics_result.get("stdout") or ""),
+        expected="metrics --kind coding reports work-session reliability and latency observations",
     )
     _scenario_check(
         checks,

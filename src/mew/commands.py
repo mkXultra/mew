@@ -62,6 +62,7 @@ from .journal import (
     write_journal_report,
 )
 from .memory import add_deep_memory, compact_memory, recall_memory
+from .metrics import build_observation_metrics, format_observation_metrics
 from .model_backends import (
     load_model_auth,
     model_backend_default_base_url,
@@ -8112,6 +8113,20 @@ def cmd_focus(args):
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
     print(format_focus(data))
+    return 0
+
+
+def cmd_metrics(args):
+    state = load_state()
+    data = build_observation_metrics(
+        state,
+        kind=getattr(args, "kind", None) or None,
+        limit=getattr(args, "limit", None),
+    )
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(format_observation_metrics(data))
     return 0
 
 def cmd_passive_bundle(args):
