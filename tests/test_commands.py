@@ -5653,6 +5653,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(state["tasks"][0]["status"], "ready")
                 self.assertEqual(state["tasks"][0]["plans"], [])
                 self.assertEqual(state["work_sessions"][0]["task_id"], 1)
+                self.assertEqual(state["work_sessions"][0]["status"], "active")
                 defaults = state["work_sessions"][0]["default_options"]
                 self.assertEqual(defaults["allow_read"], ["."])
                 self.assertTrue(defaults["compact_live"])
