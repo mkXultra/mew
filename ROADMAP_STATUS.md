@@ -269,6 +269,10 @@ Milestone 2 Done-when checklist:
   work-session/cockpit errors now include
   `mew task update <id> --status ready`, reducing reentry friction when a user
   points the cockpit at completed work.
+  Task `#285` then aligned the desk surface with the same anti-drift gate:
+  `mew desk --kind coding` now uses the shared coding self-improve focus, so an
+  empty mew coding queue points at the M2 cockpit-parity gap instead of the old
+  generic "pick the next small improvement" fallback.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.

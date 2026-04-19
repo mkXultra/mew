@@ -294,7 +294,7 @@ class DeskTests(unittest.TestCase):
                 "self-improve",
                 "--start-session",
                 "--focus",
-                "Pick the next small mew improvement",
+                "Close the remaining M2 continuous coding cockpit parity gap",
             ),
         )
 

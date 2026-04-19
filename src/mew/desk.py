@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .brief import coding_self_improve_focus_from_friction
 from .cli_command import mew_command
 from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
 from .state import open_questions as canonical_open_questions
@@ -436,7 +437,8 @@ def attention_action_item(item: dict[str, Any], current_time: str | None = None)
     )
 
 
-def native_self_improve_action_item() -> dict[str, Any]:
+def native_self_improve_action_item(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    focus = coding_self_improve_focus_from_friction(state or {}, kind="coding")
     return attach_action_metadata(
         {
             "kind": "start_self_improve",
@@ -445,7 +447,7 @@ def native_self_improve_action_item() -> dict[str, Any]:
                 "self-improve",
                 "--start-session",
                 "--focus",
-                "Pick the next small mew improvement",
+                focus,
             ),
         },
         "coding queue is empty in the mew project",
@@ -576,7 +578,7 @@ def build_desk_view_model(
     attention = filter_items_by_task_kind(open_attention_for_desk(state), task_ids, kind_filter)
     actions = desk_actions_for_desk(questions, tasks, sessions, attention, current_time=current_time)
     if not actions and kind_filter == "coding" and current_project_looks_like_mew():
-        actions.append(native_self_improve_action_item())
+        actions.append(native_self_improve_action_item(state))
     primary_action = actions[0] if actions else None
     view_model = {
         "date": day,
