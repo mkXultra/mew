@@ -239,6 +239,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "memory-search")
             self.assertIn("context_checkpoint_surfaces_in_focus", text)
             self.assertIn("context_checkpoint_surfaces_in_brief", text)
+            self.assertIn("context_checkpoint_surfaces_in_desk_json", text)
 
     def test_run_dogfood_interrupted_focus_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
