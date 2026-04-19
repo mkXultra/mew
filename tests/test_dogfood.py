@@ -314,7 +314,9 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "self-improve-controls")
             self.assertIn("self_improve_start_session_json_surfaces_controls", text)
+            self.assertIn("self_improve_start_session_seeds_reentry_note", text)
             self.assertIn("self_improve_status_refresh_command_is_executable", text)
+            self.assertIn("self_improve_reused_session_refreshes_reentry_note", text)
 
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

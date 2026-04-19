@@ -9196,6 +9196,9 @@ def seed_native_self_improve_session_defaults(session, task):
     session["updated_at"] = now_iso()
 
 
+NATIVE_SELF_IMPROVE_REENTRY_NOTE_PREFIX = "Native self-improve reentry prepared."
+
+
 def _native_self_improve_control_args(read_root, *, quiet=False):
     return SimpleNamespace(
         live=False,
@@ -9241,6 +9244,28 @@ def native_self_improve_controls(task, *, include_start_hint=False, session=None
             "--compact-live",
         )
     return controls
+
+
+def seed_native_self_improve_reentry_note(session, task):
+    if not session:
+        return None
+    controls = native_self_improve_controls(task, session=session)
+    notes = session.get("notes") or []
+    session["notes"] = [
+        note
+        for note in notes
+        if not (
+            note.get("source") == "system"
+            and str(note.get("text") or "").startswith(NATIVE_SELF_IMPROVE_REENTRY_NOTE_PREFIX)
+        )
+    ]
+    text = (
+        f"{NATIVE_SELF_IMPROVE_REENTRY_NOTE_PREFIX} "
+        f"Next: run `{controls['continue']}`. "
+        f"Inspect: `{controls['resume']}`. "
+        f"Status: `{controls['status']}`."
+    )
+    return add_work_session_note(session, text, source="system")
 
 
 def print_native_self_improve_controls(task, *, include_start_hint=False, session=None):
@@ -9329,6 +9354,7 @@ def cmd_self_improve(args):
         if getattr(args, "start_session", False):
             session, session_created = create_work_session(state, task)
             seed_native_self_improve_session_defaults(session, task)
+            seed_native_self_improve_reentry_note(session, task)
         save_state(state)
 
     if getattr(args, "json", False):
@@ -13038,6 +13064,7 @@ def chat_self_improve(rest):
         if start_session:
             session, session_created = create_work_session(state, task)
             seed_native_self_improve_session_defaults(session, task)
+            seed_native_self_improve_reentry_note(session, task)
         save_state(state)
 
     print(("created " if created else "reused ") + format_task(task))

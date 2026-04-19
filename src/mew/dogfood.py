@@ -1273,6 +1273,7 @@ def run_self_improve_controls_scenario(workspace, env=None):
     controls = start_data.get("controls") or {}
     task = start_data.get("task") or {}
     work_session = start_data.get("work_session") or {}
+    start_notes = work_session.get("notes") or []
     task_id = task.get("id")
 
     status_absent_result = run_control(controls.get("status"), timeout=15)
@@ -1323,7 +1324,9 @@ def run_self_improve_controls_scenario(workspace, env=None):
     )
     reused_data = _json_stdout(reused_result)
     reused_controls = reused_data.get("controls") or {}
-    reused_defaults = ((reused_data.get("work_session") or {}).get("default_options") or {})
+    reused_session = reused_data.get("work_session") or {}
+    reused_defaults = reused_session.get("default_options") or {}
+    reused_notes = reused_session.get("notes") or []
 
     _scenario_check(
         checks,
@@ -1339,6 +1342,18 @@ def run_self_improve_controls_scenario(workspace, env=None):
             "controls": controls,
         },
         expected="self-improve --start-session --json returns native work controls",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_start_session_seeds_reentry_note",
+        any(
+            str(note.get("text") or "").startswith("Native self-improve reentry prepared.")
+            and (controls.get("continue") or "") in str(note.get("text") or "")
+            and (controls.get("resume") or "") in str(note.get("text") or "")
+            for note in start_notes
+        ),
+        observed={"notes": start_notes, "controls": controls},
+        expected="native self-improve sessions carry a durable reentry note",
     )
     _scenario_check(
         checks,
@@ -1391,6 +1406,22 @@ def run_self_improve_controls_scenario(workspace, env=None):
             "controls": reused_controls,
         },
         expected="reused native self-improve session preserves and extends cached work defaults",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_reused_session_refreshes_reentry_note",
+        sum(
+            1
+            for note in reused_notes
+            if str(note.get("text") or "").startswith("Native self-improve reentry prepared.")
+        )
+        == 1
+        and (reused_controls.get("continue") or "") in str(reused_notes[-1].get("text") if reused_notes else ""),
+        observed={
+            "notes": reused_notes,
+            "controls": reused_controls,
+        },
+        expected="reused native self-improve session keeps one current reentry note",
     )
     return _scenario_report("self-improve-controls", workspace, commands, checks)
 

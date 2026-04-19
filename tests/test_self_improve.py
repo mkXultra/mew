@@ -465,6 +465,12 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(data["work_session"]["task_id"], 1)
                 self.assertEqual(data["work_session"]["default_options"]["allow_read"], ["."])
                 self.assertTrue(data["work_session"]["default_options"]["compact_live"])
+                notes = data["work_session"]["notes"]
+                self.assertEqual(len(notes), 1)
+                self.assertEqual(notes[0]["source"], "system")
+                self.assertIn("Native self-improve reentry prepared.", notes[0]["text"])
+                self.assertIn("mew work 1 --live --allow-read . --compact-live --max-steps 1", notes[0]["text"])
+                self.assertIn("mew work 1 --session --resume --allow-read .", notes[0]["text"])
                 self.assertEqual(data["controls"]["work_cwd"], str(Path(tmp).resolve()))
                 self.assertEqual(
                     data["controls"]["continue"],
@@ -558,6 +564,16 @@ class SelfImproveTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(state["work_sessions"][0]["default_options"]["allow_read"], ["README.md", "."])
                 self.assertTrue(state["work_sessions"][0]["default_options"]["compact_live"])
+                notes = state["work_sessions"][0]["notes"]
+                self.assertEqual(
+                    1,
+                    sum(
+                        1
+                        for note in notes
+                        if note["text"].startswith("Native self-improve reentry prepared.")
+                    ),
+                )
+                self.assertIn("--auth auth.json --model-backend codex", notes[-1]["text"])
             finally:
                 os.chdir(old_cwd)
 

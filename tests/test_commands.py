@@ -6041,6 +6041,11 @@ class CommandTests(unittest.TestCase):
                 defaults = state["work_sessions"][0]["default_options"]
                 self.assertEqual(defaults["allow_read"], ["."])
                 self.assertTrue(defaults["compact_live"])
+                notes = state["work_sessions"][0]["notes"]
+                self.assertEqual(len(notes), 1)
+                self.assertEqual(notes[0]["source"], "system")
+                self.assertIn("Native self-improve reentry prepared.", notes[0]["text"])
+                self.assertIn("mew work 1 --live --allow-read . --compact-live --max-steps 1", notes[0]["text"])
             finally:
                 os.chdir(old_cwd)
 
