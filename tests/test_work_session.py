@@ -7232,6 +7232,115 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_resume_auto_recovers_multiple_safe_read_tools(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("first safe read\n", encoding="utf-8")
+                Path("NOTES.md").write_text("second safe read\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Auto recover multiple reads.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 2,
+                            "last_model_turn_id": 2,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                                {
+                                    "id": 2,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "NOTES.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                            ],
+                            "model_turns": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "interrupted",
+                                    "decision_plan": {},
+                                    "action_plan": {},
+                                    "action": {"type": "read_file", "path": "README.md"},
+                                    "tool_call_id": 1,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                                {
+                                    "id": 2,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "status": "interrupted",
+                                    "decision_plan": {},
+                                    "action_plan": {},
+                                    "action": {"type": "read_file", "path": "NOTES.md"},
+                                    "tool_call_id": 2,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--resume", "--allow-read", ".", "--auto-recover-safe", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                auto_recovery = payload["auto_recovery"]
+                self.assertEqual(auto_recovery["recovery"]["action"], "retry_tool_batch")
+                self.assertEqual(auto_recovery["recovery"]["count"], 2)
+                self.assertEqual(len(auto_recovery["recoveries"]), 2)
+                self.assertEqual(payload["resume"]["phase"], "idle")
+
+                session = load_state()["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertEqual(calls[1]["recovery_status"], "superseded")
+                self.assertEqual(calls[2]["recovery_status"], "superseded")
+                recovered_text = "\n".join(
+                    ((call.get("result") or {}).get("text") or "")
+                    for call in session["tool_calls"]
+                    if call.get("parameters", {}).get("recovered_from_tool_call_id")
+                )
+                self.assertIn("first safe read", recovered_text)
+                self.assertIn("second safe read", recovered_text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_resume_auto_recovery_requires_read_gate(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

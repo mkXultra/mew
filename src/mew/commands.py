@@ -4967,7 +4967,7 @@ def cmd_work_show_session(args):
         auto_recovery = None
         auto_recovery_code = 0
         if getattr(args, "auto_recover_safe", False):
-            auto_recovery_code, auto_recovery = _work_recover_session_once(args, safe_only=True)
+            auto_recovery_code, auto_recovery = _work_recover_safe_session(args)
             state = load_state()
             if getattr(args, "task_id", None):
                 task = find_task(state, args.task_id)
@@ -6528,7 +6528,67 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
     return (0 if tool_call.get("status") == "completed" else 1), report
 
 
+def _work_has_safe_recovery_candidate(args):
+    with state_lock():
+        state = load_state()
+        session = _select_active_work_session_for_args(state, args)
+        source_call = latest_recoverable_interrupted_call(session) if session else None
+    if not source_call:
+        return False
+    return source_call.get("tool") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)
+
+
+def _work_recover_safe_session(args, max_recoveries=5):
+    reports = []
+    code = 0
+    for _ in range(max(1, int(max_recoveries or 1))):
+        code, report = _work_recover_session_once(args, safe_only=True)
+        reports.append(report)
+        recovery = (report or {}).get("recovery") or {}
+        tool_call = (report or {}).get("tool_call") or {}
+        if (
+            code != 0
+            or recovery.get("action") != "retry_tool"
+            or tool_call.get("status") != "completed"
+            or not _work_has_safe_recovery_candidate(args)
+        ):
+            break
+    if len(reports) == 1:
+        return code, reports[0]
+    recoveries = [
+        report
+        for report in reports
+        if ((report or {}).get("recovery") or {}).get("action") == "retry_tool"
+    ]
+    aggregate = {
+        "recovery": {
+            "action": "retry_tool_batch",
+            "status": "completed" if code == 0 else "failed",
+            "count": len(recoveries),
+            "source_tool_call_ids": [
+                ((report or {}).get("recovery") or {}).get("source_tool_call_id")
+                for report in recoveries
+            ],
+            "tool_call_ids": [
+                ((report or {}).get("tool_call") or {}).get("id")
+                for report in recoveries
+            ],
+        },
+        "recoveries": reports,
+    }
+    if recoveries:
+        aggregate["tool_call"] = recoveries[-1].get("tool_call")
+    return code, aggregate
+
+
 def print_work_recovery_report(report):
+    recoveries = (report or {}).get("recoveries") or []
+    if recoveries:
+        recovery = (report or {}).get("recovery") or {}
+        print(f"auto-recovered {recovery.get('count') or len(recoveries)} safe work tools")
+        for child in recoveries:
+            print_work_recovery_report(child)
+        return
     recovery = (report or {}).get("recovery") or {}
     action = recovery.get("action")
     if action == "none":
@@ -11614,7 +11674,7 @@ def chat_work_session(rest, chat_state=None):
                 progress=False,
                 json=False,
             )
-            _, auto_recovery = _work_recover_session_once(recover_args, safe_only=True)
+            _, auto_recovery = _work_recover_safe_session(recover_args)
             state = load_state()
             session = active_work_session_for_kind(state, scope_kind)
             if task_id:
