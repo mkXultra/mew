@@ -8499,7 +8499,7 @@ def context_load_current_state():
             timeout=2,
         )
         if status.returncode == 0:
-            status_text = (status.stdout or "").strip()
+            status_text = (status.stdout or "").rstrip("\n")
             data["git_status_short"] = status_text
             data["git_status"] = "dirty" if status_text else "clean"
     except (OSError, subprocess.TimeoutExpired):

@@ -171,6 +171,8 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                subprocess.run(["git", "init"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                Path("dirty.txt").write_text("dirty\n", encoding="utf-8")
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["step", "--max-steps", "0", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
@@ -4325,6 +4327,8 @@ class CommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                subprocess.run(["git", "init"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                Path("dirty.txt").write_text("dirty\n", encoding="utf-8")
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
                         main(
@@ -4367,12 +4371,14 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["brief", "--kind", "coding"]), 0)
                 brief = stdout.getvalue()
                 self.assertIn("context_checkpoint: Dogfood context save", brief)
+                self.assertIn("context_checkpoint_git: dirty", brief)
                 self.assertIn("context_checkpoint_note: Long session checkpoint", brief)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["focus", "--kind", "coding"]), 0)
                 focus = stdout.getvalue()
                 self.assertIn("Checkpoint: Dogfood context save", focus)
+                self.assertIn("Checkpoint git: dirty", focus)
                 self.assertIn("Checkpoint note: Long session checkpoint", focus)
             finally:
                 os.chdir(old_cwd)

@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
@@ -47,6 +48,42 @@ def latest_context_checkpoint(query=CONTEXT_CHECKPOINT_QUERY):
     item = entry_to_dict(entries[0])
     item["reentry_note"] = _context_checkpoint_note(item.get("text"))
     return item
+
+
+def current_git_reentry_state():
+    data = {"head": "", "status": "unknown", "status_short": "", "dirty_paths": []}
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if head.returncode == 0:
+            data["head"] = (head.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if status.returncode == 0:
+            status_text = (status.stdout or "").rstrip("\n")
+            data["status_short"] = status_text
+            data["status"] = "dirty" if status_text else "clean"
+            data["dirty_paths"] = [
+                line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+                for line in status_text.splitlines()
+                if len(line) > 2
+            ]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return data
 
 
 def current_project_looks_like_mew():
@@ -628,6 +665,7 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
             "latest_context_checkpoint": latest_context_checkpoint()
             if include_context_checkpoint
             else {},
+            "current_git": current_git_reentry_state() if include_context_checkpoint else {},
         },
         "recent_activity": activity,
         "thought_journal": [_thought_item(thought) for thought in thoughts],
@@ -721,6 +759,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
         "latest_context_checkpoint": latest_context_checkpoint()
         if include_context_checkpoint
         else {},
+        "current_git": current_git_reentry_state() if include_context_checkpoint else {},
         "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "active_work_sessions": active_work_session_items(
@@ -873,10 +912,18 @@ def format_focus(data):
         lines.append(f"Routine info: {routine_unread} clear with `{mew_command('ack', '--routine')}`")
     checkpoint = data.get("latest_context_checkpoint") or {}
     if checkpoint:
+        current_git = data.get("current_git") or {}
         note = " ".join(str(checkpoint.get("reentry_note") or "").split())
         if len(note) > 280:
             note = note[:277].rstrip() + "..."
         lines.append(f"Checkpoint: {checkpoint.get('name') or checkpoint.get('key')} ({checkpoint.get('created_at')})")
+        if current_git.get("status") != "unknown":
+            dirty_paths = current_git.get("dirty_paths") or []
+            path_suffix = f" paths={', '.join(dirty_paths[:5])}" if dirty_paths else ""
+            lines.append(
+                f"Checkpoint git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
+                f"{path_suffix}"
+            )
         if note:
             lines.append(f"Checkpoint note: {note}")
         lines.append(f"Checkpoint load: {mew_command('context', '--load', '--limit', '1')}")
@@ -1124,6 +1171,7 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     activity = [] if kind else recent_activity(state, limit=limit)
     recent_unread = list(reversed(unread[-limit:]))
     context_checkpoint = latest_context_checkpoint() if include_context_checkpoint else {}
+    current_git = current_git_reentry_state() if include_context_checkpoint else {}
     if kind:
         task_ids = {str(task.get("id")) for task in tasks}
         running_runs = [run for run in running_runs if str(run.get("task_id")) in task_ids]
@@ -1154,6 +1202,14 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
             f"at={context_checkpoint.get('created_at')} "
             f"load={mew_command('context', '--load', '--limit', '1')}",
         )
+        if current_git.get("status") != "unknown":
+            dirty_paths = current_git.get("dirty_paths") or []
+            path_suffix = f" paths={', '.join(dirty_paths[:5])}" if dirty_paths else ""
+            lines.insert(
+                -1,
+                f"context_checkpoint_git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
+                f"{path_suffix}",
+            )
         if note:
             lines.insert(-1, f"context_checkpoint_note: {note}")
     skip_recovery = runtime.get("last_native_work_skip_recovery") or {}
