@@ -4545,6 +4545,7 @@ report = json.loads(output)
 session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == task_id)
 tool_call = (session.get("tool_calls") or [{}])[-1]
 result = tool_call.get("result") or {}
+initial_coerced_dry_run_reason = (session.get("model_turns") or [{}])[-1].get("coerced_dry_run_reason")
 test_file_exists_before_approval = Path("tests/test_dogfood_ai_pairing.py").exists()
 approval_code, approval_output = run_main(
     [
@@ -4563,6 +4564,62 @@ approval_code, approval_output = run_main(
 approval = json.loads(approval_output) if approval_output.strip() else {}
 approval_tool_call = approval.get("tool_call") or {}
 approval_result = approval_tool_call.get("result") or {}
+source_retry_model_output = {
+    "summary": "retry source edit after paired test approval",
+    "action": {
+        "type": "edit_file",
+        "path": "src/mew/dogfood_ai_pairing.py",
+        "old": "old",
+        "new": "new",
+    },
+}
+with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+    with patch("mew.work_loop.call_model_json_with_retries", return_value=source_retry_model_output):
+        source_retry_code, source_retry_output = run_main(
+            [
+                "work",
+                task_id,
+                "--ai",
+                "--auth",
+                "auth.json",
+                "--allow-read",
+                ".",
+                "--allow-write",
+                ".",
+                "--allow-verify",
+                "--verify-command",
+                verify_command,
+                "--max-steps",
+                "1",
+                "--act-mode",
+                "deterministic",
+                "--json",
+            ]
+        )
+source_retry_report = json.loads(source_retry_output) if source_retry_output.strip() else {}
+session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == task_id)
+source_call = (session.get("tool_calls") or [{}])[-1]
+good_verify_command = (
+    f"{sys.executable} -c \\"from pathlib import Path; "
+    "assert 'new' in Path('src/mew/dogfood_ai_pairing.py').read_text(); "
+    "assert Path('tests/test_dogfood_ai_pairing.py').exists()\\""
+)
+source_approval_code, source_approval_output = run_main(
+    [
+        "work",
+        task_id,
+        "--approve-tool",
+        str(source_call.get("id")),
+        "--allow-write",
+        ".",
+        "--allow-verify",
+        "--verify-command",
+        good_verify_command,
+        "--json",
+    ]
+)
+source_approval = json.loads(source_approval_output) if source_approval_output.strip() else {}
+source_approval_result = ((source_approval.get("tool_call") or {}).get("result") or {})
 observed = {
     "exit_code": code,
     "stop_reason": report.get("stop_reason"),
@@ -4575,10 +4632,16 @@ observed = {
     "defer_verify_on_approval": (tool_call.get("parameters") or {}).get("defer_verify_on_approval"),
     "paired_test_source_path": (tool_call.get("parameters") or {}).get("paired_test_source_path"),
     "verification_exit_code": result.get("verification_exit_code"),
-    "coerced_dry_run_reason": (session.get("model_turns") or [{}])[-1].get("coerced_dry_run_reason"),
+    "coerced_dry_run_reason": initial_coerced_dry_run_reason,
     "approval_exit_code": approval_code,
     "approval_verification_deferred": approval_result.get("verification_deferred"),
     "approval_verification_exit_code": approval_result.get("verification_exit_code"),
+    "source_retry_exit_code": source_retry_code,
+    "source_retry_stop_reason": source_retry_report.get("stop_reason"),
+    "source_retry_path": (source_call.get("parameters") or {}).get("path"),
+    "source_approval_exit_code": source_approval_code,
+    "source_verification_exit_code": source_approval_result.get("verification_exit_code"),
+    "source_after": "new" in Path("src/mew/dogfood_ai_pairing.py").read_text(encoding="utf-8"),
 }
 passed = (
     code == 0
@@ -4596,6 +4659,12 @@ passed = (
     and observed["approval_exit_code"] == 0
     and observed["approval_verification_deferred"] is True
     and observed["approval_verification_exit_code"] is None
+    and observed["source_retry_exit_code"] == 0
+    and observed["source_retry_stop_reason"] == "pending_approval"
+    and observed["source_retry_path"] == "src/mew/dogfood_ai_pairing.py"
+    and observed["source_approval_exit_code"] == 0
+    and observed["source_verification_exit_code"] == 0
+    and observed["source_after"] is True
 )
 
 Path("src/mew/dogfood_batch.py").write_text("VALUE = 'before'\\n", encoding="utf-8")

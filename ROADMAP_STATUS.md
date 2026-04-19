@@ -39,10 +39,18 @@ Milestone 2 Done-when checklist:
   created from `paired_test_steer` as approval-time auto-defer candidates: their
   resume/cell primary approve hint uses `--defer-verify`, approval records a
   system note, and a failing verifier is not run until the matching source edit
-  arrives. `./mew dogfood --scenario work-session --workspace
-  /tmp/mew-m2-auto-defer-dogfood --json` passed with
-  `work_ai_paired_test_approval_auto_defers_verification`, proving this exact
-  flow. The compact follow stop surface now preserves the
+  arrives; the same dogfood now retries the source edit and records a passing
+  approval verifier after the deferred test approval. `./mew dogfood --scenario
+  work-session --workspace /tmp/mew-m2-auto-defer-full-dogfood --json` passed
+  with `work_ai_paired_test_approval_auto_defers_verification`, proving this
+  exact flow. The mew-side M2 comparative artifact at
+  `/tmp/mew-m2-auto-defer-full-comparative/.mew/dogfood/m2-comparative-protocol.json`
+  prefills this run with two applied approvals and a passing verifier. The
+  merged fresh `codex-ultra` comparison at
+  `/tmp/mew-m2-auto-defer-full-combined/.mew/dogfood/m2-comparative-protocol.json`
+  still marks `fresh_cli_preferred` for this no-edit artifact verification task;
+  the outcome is documented in
+  `docs/M2_AUTO_DEFER_COMPARATIVE_DOGFOOD_2026-04-20.md`. The compact follow stop surface now preserves the
   `apply tool #... and defer verification` control, matching the resume/cell
   surfaces. The M2 comparative dogfood can now prefill mew-side evidence from a
   real work session via `--mew-session-id`, so future parity checks carry actual
@@ -119,9 +127,9 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are re-running a process-stop or paired source/test M2
-comparative task after the auto-defer change, running a matching interrupted
-fresh-CLI comparison, or a targeted latency/friction slice chosen from
+Useful next choices are running a true interruption-shaped process-stop or
+paired source/test M2 comparative task after the auto-defer change, running a
+matching interrupted fresh-CLI comparison, or a targeted latency/friction slice chosen from
 `mew metrics --kind coding`. Polish, side projects, and later-milestone
 architecture are deferred unless they directly unblock this active criterion.
 The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
