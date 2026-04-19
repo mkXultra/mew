@@ -7942,6 +7942,94 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_all_rolls_back_deferred_writes_when_final_verify_fails(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("a.txt").write_text("old a\n", encoding="utf-8")
+                Path("b.txt").write_text("old b\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "a.txt",
+                                "--old",
+                                "old a",
+                                "--new",
+                                "bad a",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "b.txt",
+                                "--old",
+                                "old b",
+                                "--new",
+                                "good b",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert Path('a.txt').read_text() == 'good a\\n'; "
+                    "assert Path('b.txt').read_text() == 'good b\\n'\""
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-all",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+
+                self.assertEqual(Path("a.txt").read_text(encoding="utf-8"), "old a\n")
+                self.assertEqual(Path("b.txt").read_text(encoding="utf-8"), "old b\n")
+                session = load_state()["work_sessions"][0]
+                first_apply = session["tool_calls"][2]
+                second_apply = session["tool_calls"][3]
+                self.assertEqual(first_apply["status"], "failed")
+                self.assertTrue(first_apply["result"]["rolled_back"])
+                self.assertIn("batch verification failed", first_apply["result"]["batch_rollback_reason"])
+                self.assertEqual(second_apply["status"], "failed")
+                self.assertTrue(second_apply["result"]["rolled_back"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approval_blocks_unpaired_source_edit_by_default(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -14791,6 +14879,102 @@ class WorkSessionTests(unittest.TestCase):
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve_all")
                 self.assertEqual(snapshot["last_step"]["applied"][0]["count"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_approve_all_rolls_back_deferred_writes_when_final_verify_fails(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("a.txt").write_text("old a\n", encoding="utf-8")
+                Path("b.txt").write_text("old b\n", encoding="utf-8")
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert Path('a.txt').read_text() == 'good a\\n'; "
+                    "assert Path('b.txt').read_text() == 'good b\\n'\""
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "a.txt",
+                                "--old",
+                                "old a",
+                                "--new",
+                                "bad a",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "b.txt",
+                                "--old",
+                                "old b",
+                                "--new",
+                                "good b",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "approve_all", "allow_write": "."}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+
+                self.assertEqual(Path("a.txt").read_text(encoding="utf-8"), "old a\n")
+                self.assertEqual(Path("b.txt").read_text(encoding="utf-8"), "old b\n")
+                session = load_state()["work_sessions"][0]
+                self.assertTrue(session["tool_calls"][2]["result"]["rolled_back"])
+                self.assertTrue(session["tool_calls"][3]["result"]["rolled_back"])
             finally:
                 os.chdir(old_cwd)
 

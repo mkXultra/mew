@@ -168,7 +168,7 @@ from .thoughts import format_thought_entry
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .validation import format_validation_issues, validate_state, validation_errors
-from .write_tools import edit_file, summarize_write_result, write_file
+from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path, summarize_write_result, write_file
 from .work_session import (
     active_work_session,
     active_work_sessions,
@@ -4363,6 +4363,19 @@ def _approval_parameters_from_call(call, args):
     return {key: value for key, value in parameters.items() if value is not None}
 
 
+def _deferred_approval_rollback_snapshot(source_call, parameters):
+    if not parameters.get("apply") or not parameters.get("defer_verify"):
+        return None
+    try:
+        return snapshot_write_path(
+            parameters.get("path") or "",
+            parameters.get("allowed_write_roots") or [],
+            create=source_call.get("tool") == "write_file" and bool(parameters.get("create")),
+        )
+    except (OSError, ValueError):
+        return None
+
+
 WORK_TOOL_RESULT_STALE_ERROR = "work tool result could not be recorded; work session changed during tool execution"
 
 
@@ -4508,6 +4521,7 @@ def _apply_work_approval(args, approve_tool_id):
                 args.verify_command = inferred_verify_command
                 args.allow_verify = True
         parameters = _approval_parameters_from_call(source_call, args)
+        rollback_snapshot = _deferred_approval_rollback_snapshot(source_call, parameters)
         tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)
         source_call["approval_status"] = "applying"
         source_call["approved_by_tool_call_id"] = tool_call.get("id")
@@ -4583,6 +4597,7 @@ def _apply_work_approval(args, approve_tool_id):
     return 0 if tool_call.get("status") == "completed" else 1, {
         "approved_tool_call": source_call,
         "tool_call": tool_call,
+        "rollback_snapshot": rollback_snapshot,
     }
 
 
@@ -4645,6 +4660,57 @@ def _deferred_verify_approval_ids_for_batch(_session, approve_ids):
     return set(approve_ids[:-1])
 
 
+def _rollback_deferred_approval_batch(approved, reason):
+    rolled_back = []
+    for approval in reversed(approved or []):
+        tool_call = (approval or {}).get("tool_call") or {}
+        result = tool_call.get("result") or {}
+        if not result.get("verification_deferred"):
+            continue
+        snapshot = (approval or {}).get("rollback_snapshot")
+        if not snapshot:
+            continue
+        rollback = None
+        error = ""
+        try:
+            rollback = restore_write_snapshot(snapshot)
+        except (OSError, ValueError) as exc:
+            error = str(exc)
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, tool_call.get("session_id"))
+            stored_call = find_work_tool_call(session, tool_call.get("id"))
+            if stored_call:
+                stored_result = stored_call.setdefault("result", {})
+                stored_result["batch_rollback_reason"] = reason
+                if rollback:
+                    stored_result["rollback"] = rollback
+                    stored_result["rolled_back"] = True
+                    stored_call["status"] = "failed"
+                    stored_call["error"] = reason
+                    stored_call["summary"] = f"{stored_call.get('tool')} rolled back after batch verification failed"
+                else:
+                    stored_result["rollback_error"] = error or "rollback snapshot unavailable"
+                    stored_result["rolled_back"] = False
+                    stored_call["status"] = "failed"
+                    stored_call["error"] = stored_result["rollback_error"]
+            for source_call in (session or {}).get("tool_calls") or []:
+                if source_call.get("approved_by_tool_call_id") != tool_call.get("id"):
+                    continue
+                source_call["approval_status"] = "failed"
+                source_call["approval_error"] = reason if rollback else error or "rollback snapshot unavailable"
+            save_state(state)
+        rolled_back.append(
+            {
+                "tool_call_id": tool_call.get("id"),
+                "rolled_back": bool(rollback),
+                "rollback": rollback,
+                "error": error,
+            }
+        )
+    return rolled_back
+
+
 def cmd_work_approve_all(args):
     with state_lock():
         state = load_state()
@@ -4683,6 +4749,8 @@ def cmd_work_approve_all(args):
                 print(f"approved work tool #{approve_id} -> #{tool_call['id']} [{tool_call['status']}]")
                 print(tool_call.get("summary") or tool_call.get("error") or "")
         if code != 0:
+            rollback_reason = f"batch verification failed after approving tool #{approve_id}"
+            _rollback_deferred_approval_batch(approved, rollback_reason)
             exit_code = code
             break
     if args.json:
@@ -5678,6 +5746,7 @@ def _reply_approval_args(args, session, source_call, action):
 
 def _apply_work_reply_approval_action(args, session_id, action, expected_updated_at=None):
     approved = []
+    approval_records = []
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -5713,6 +5782,7 @@ def _apply_work_reply_approval_action(args, session_id, action, expected_updated
             approval_args.expected_session_updated_at = expected_updated_at
         code, data = _apply_work_approval(approval_args, approve_id)
         if data is not None:
+            approval_records.append(data)
             tool_call = data["tool_call"]
             approved.append(
                 {
@@ -5724,6 +5794,9 @@ def _apply_work_reply_approval_action(args, session_id, action, expected_updated
                 }
             )
         if code != 0:
+            if action["type"] == "approve_all":
+                rollback_reason = f"batch verification failed after approving tool #{approve_id}"
+                _rollback_deferred_approval_batch(approval_records, rollback_reason)
             return code, approved
         with state_lock():
             state = load_state()
