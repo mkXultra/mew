@@ -3788,7 +3788,7 @@ class CommandTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("active_work_sessions: 1", output)
                 self.assertIn(
-                    "active_work_session: #3 task=#1 phase=awaiting_approval pending_approvals=1",
+                    "active_work_session: #3 task=#1 phase=awaiting_approval pending_approvals=1 producer=working alive=True",
                     output,
                 )
                 self.assertIn("status=mew work 1 --follow-status --json", output)

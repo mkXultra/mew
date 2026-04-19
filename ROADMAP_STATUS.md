@@ -254,6 +254,10 @@ Milestone 2 Done-when checklist:
   assertion failure by re-reading the formatter/test windows and retargeting to
   the shared non-absent formatter path; the focused no-testmon follow-status
   tests and the full `tests/test_work_session.py` suite passed.
+  Task `#281` then hardened the sibling active-work status surface: the source
+  already exposed `producer=working alive=True` in the human-readable
+  `active_work_session` line, and the focused command test now locks that in so
+  cockpit observers keep seeing producer/alive context without opening JSON.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.
