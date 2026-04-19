@@ -44,14 +44,15 @@ uv run mew next --kind coding
 Developer loop:
 
 ```sh
-uv run pytest --testmon -q
 uv run pytest -q
+uv run pytest --no-testmon -q
 uv run ruff check .
 ```
 
-`pytest --testmon` runs the affected-test subset for fast iteration; keep the
-plain full pytest command as the final verification before committing broad
-changes.
+This repository enables `pytest-testmon` by default through `pyproject.toml`, so
+plain `uv run pytest -q` runs the affected-test subset for fast iteration. Use
+`uv run pytest --no-testmon -q` as the final full-suite verification before
+committing broad changes.
 
 `focus` and `daily` are the quiet daily views: they show the current next move,
 open questions, and the top tasks without the full operational brief. Tasks can
