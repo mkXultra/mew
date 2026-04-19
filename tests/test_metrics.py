@@ -335,6 +335,92 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["diagnostics"]["slow_first_tools"], [])
         self.assertNotIn("slow_first_tool", {signal["id"] for signal in metrics["signals"]})
 
+    def test_observation_metrics_retire_historical_friction_after_later_success(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Retire old friction", "kind": "coding", "status": "done"})
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "rejected",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "tests/test_metrics.py", "reason": "Needs paired source."},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "tests/test_metrics.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_metrics.py",
+                                "stdout": "FAILED tests/test_metrics.py::MetricsTests::old",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+        state["work_sessions"].append(
+            {
+                "id": 2,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:02:00Z",
+                "updated_at": "2026-04-19T00:02:10Z",
+                "model_turns": [],
+                "tool_calls": [
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:02:01Z",
+                        "finished_at": "2026-04-19T00:02:02Z",
+                        "parameters": {"command": "uv run pytest -q tests/test_metrics.py"},
+                        "result": {
+                            "command": "uv run pytest -q tests/test_metrics.py",
+                            "exit_code": 0,
+                            "finished_at": "2026-04-19T00:02:02Z",
+                        },
+                    }
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertIsNone(metrics["reliability"]["rates"]["approval_rejection"])
+        self.assertEqual(metrics["reliability"]["rates"]["verification_failure"], 0.0)
+        self.assertEqual(metrics["diagnostics"]["approval_friction"], [])
+        self.assertEqual(metrics["diagnostics"]["verification_failures"], [])
+        self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
+        self.assertNotIn("approval_friction", {signal["id"] for signal in metrics["signals"]})
+        self.assertNotIn("verification_friction", {signal["id"] for signal in metrics["signals"]})
+
     def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
         state = default_state()
         state["tasks"].append({"id": 1, "title": "Observe approval waits", "kind": "coding", "status": "ready"})

@@ -1,3 +1,6 @@
+import shlex
+from pathlib import Path
+
 from .tasks import find_task, task_kind
 from .timeutil import parse_time
 
@@ -72,13 +75,15 @@ def _status_counts(items):
     return counts
 
 
-def _approval_counts(tool_calls):
+def _approval_counts(tool_calls, *, successful_verifications=None):
     counts = {"total": 0, "pending": 0, "applied": 0, "rejected": 0, "failed": 0, "indeterminate": 0}
     for call in tool_calls or []:
         if not isinstance(call, dict) or call.get("tool") not in WORK_WRITE_TOOLS:
             continue
         result = call.get("result") or {}
         if not result.get("dry_run"):
+            continue
+        if _call_retired_by_later_success(call, successful_verifications or []):
             continue
         counts["total"] += 1
         status = call.get("approval_status") or "pending"
@@ -87,13 +92,15 @@ def _approval_counts(tool_calls):
     return counts
 
 
-def _verification_counts(tool_calls):
+def _verification_counts(tool_calls, *, successful_verifications=None):
     counts = {"total": 0, "passed": 0, "failed": 0, "rolled_back": 0}
     for call in tool_calls or []:
         if not isinstance(call, dict):
             continue
         exit_code = _verification_exit_code(call)
         if exit_code is None:
+            continue
+        if exit_code != 0 and _call_retired_by_later_success(call, successful_verifications or []):
             continue
         result = call.get("result") or {}
         counts["total"] += 1
@@ -424,6 +431,8 @@ def _verification_exit_code(call):
     exit_code = result.get("verification_exit_code")
     if exit_code is None:
         exit_code = verification.get("exit_code")
+    if exit_code is None and call.get("tool") == "run_tests":
+        exit_code = result.get("exit_code")
     if exit_code is None:
         return None
     try:
@@ -436,6 +445,133 @@ def _call_path(call):
     parameters = call.get("parameters") or {}
     result = call.get("result") or {}
     return parameters.get("path") or result.get("path") or ""
+
+
+def _verification_command(call):
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    parameters = call.get("parameters") or {}
+    return verification.get("command") or result.get("verification_command") or result.get("command") or parameters.get("command") or ""
+
+
+def _call_finished_at(call):
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    return verification.get("finished_at") or result.get("finished_at") or call.get("finished_at") or ""
+
+
+def _command_tokens(command):
+    try:
+        return shlex.split(str(command or ""))
+    except ValueError:
+        return str(command or "").split()
+
+
+def _normalize_test_ref(token):
+    text = str(token or "").strip().strip("'\"")
+    if not text:
+        return ""
+    if "::" in text:
+        text = text.split("::", 1)[0]
+    if text.startswith("tests.") and "/" not in text:
+        return text.replace(".", "/") + ".py"
+    if text.startswith("tests/") and ".py" in text:
+        return text.split(".py", 1)[0] + ".py"
+    return ""
+
+
+def _command_test_paths(command):
+    paths = set()
+    for token in _command_tokens(command):
+        path = _normalize_test_ref(token)
+        if path:
+            paths.add(path)
+    return paths
+
+
+def _path_related_to_test_path(path, test_path):
+    if not path or not test_path:
+        return False
+    normalized = str(path).strip()
+    test_normalized = str(test_path).strip()
+    if normalized == test_normalized:
+        return True
+    stem = Path(normalized).stem
+    test_stem = Path(test_normalized).stem
+    return bool(stem and test_stem and (test_stem == stem or test_stem == f"test_{stem}"))
+
+
+def _success_covers_call(success, call):
+    command = _verification_command(call)
+    success_command = success.get("command") or ""
+    if command and command == success_command:
+        return True
+    command_paths = _command_test_paths(command)
+    success_paths = set(success.get("test_paths") or [])
+    if command_paths and success_paths and command_paths & success_paths:
+        return True
+    path = _call_path(call)
+    return any(_path_related_to_test_path(path, test_path) for test_path in success_paths)
+
+
+def _successful_verifications(state):
+    successes = []
+    for session in state.get("work_sessions") or []:
+        if not isinstance(session, dict):
+            continue
+        for call in session.get("tool_calls") or []:
+            if not isinstance(call, dict) or _verification_exit_code(call) != 0:
+                continue
+            command = _verification_command(call)
+            successes.append(
+                {
+                    "finished_at": _call_finished_at(call),
+                    "finished": parse_time(_call_finished_at(call)),
+                    "command": command,
+                    "test_paths": _command_test_paths(command),
+                    "task_id": session.get("task_id"),
+                    "session_id": session.get("id"),
+                }
+            )
+    for run in state.get("verification_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        try:
+            exit_code = int(run.get("exit_code"))
+        except (TypeError, ValueError):
+            continue
+        if exit_code != 0:
+            continue
+        command = run.get("command") or ""
+        successes.append(
+            {
+                "finished_at": run.get("finished_at") or "",
+                "finished": parse_time(run.get("finished_at")),
+                "command": command,
+                "test_paths": _command_test_paths(command),
+                "task_id": run.get("task_id"),
+                "session_id": run.get("work_session_id"),
+            }
+        )
+    return successes
+
+
+def _call_retired_by_later_success(call, successful_verifications):
+    finished = parse_time(_call_finished_at(call))
+    if not finished:
+        return False
+    for success in successful_verifications or []:
+        success_finished = success.get("finished")
+        if not success_finished:
+            continue
+        try:
+            if success_finished <= finished:
+                continue
+        except TypeError:
+            continue
+        if _success_covers_call(success, call):
+            return True
+    return False
 
 
 def _sample_task(state, task_id):
@@ -539,11 +675,13 @@ def _approval_sample(state, session, call):
     return sample
 
 
-def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
+def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successful_verifications=None):
     limit = max(0, int(limit or 0))
     samples = {
         "verification_failures": [],
         "approval_friction": [],
+        "retired_verification_failures": [],
+        "retired_approval_friction": [],
         "slow_first_tools": [],
         "slow_model_resumes": [],
         "approval_bound_waits": [],
@@ -556,6 +694,7 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
     slow_first_tools = []
     approval_bound_waits = []
     high_idle_sessions = []
+    successful_verifications = successful_verifications or []
     for session in sessions:
         tool_calls = [call for call in session.get("tool_calls") or [] if isinstance(call, dict)]
         model_turns = [turn for turn in session.get("model_turns") or [] if isinstance(turn, dict)]
@@ -572,17 +711,27 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
             key=lambda item: item.get("finished_at") or item.get("started_at") or "",
             reverse=True,
         ):
-            if len(samples["verification_failures"]) < limit and _verification_exit_code(call) not in (None, 0):
-                samples["verification_failures"].append(_verification_sample(state, session, call))
+            retired = _call_retired_by_later_success(call, successful_verifications)
+            if _verification_exit_code(call) not in (None, 0):
+                sample = _verification_sample(state, session, call)
+                if retired:
+                    if len(samples["retired_verification_failures"]) < limit:
+                        samples["retired_verification_failures"].append(sample)
+                elif len(samples["verification_failures"]) < limit:
+                    samples["verification_failures"].append(sample)
             result = call.get("result") or {}
             approval_status = call.get("approval_status") or "pending"
             if (
-                len(samples["approval_friction"]) < limit
-                and call.get("tool") in WORK_WRITE_TOOLS
+                call.get("tool") in WORK_WRITE_TOOLS
                 and result.get("dry_run")
                 and approval_status in ("rejected", "failed")
             ):
-                samples["approval_friction"].append(_approval_sample(state, session, call))
+                sample = _approval_sample(state, session, call)
+                if retired:
+                    if len(samples["retired_approval_friction"]) < limit:
+                        samples["retired_approval_friction"].append(sample)
+                elif len(samples["approval_friction"]) < limit:
+                    samples["approval_friction"].append(sample)
     samples["slow_first_tools"] = sorted(
         slow_first_tools,
         key=lambda item: item.get("first_tool_start_seconds") or 0,
@@ -743,6 +892,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     model_resume_waits = []
     approval_bound_waits = []
     idle_ratios = []
+    successful_verifications = _successful_verifications(state)
 
     for session in sessions:
         status = session.get("status")
@@ -762,8 +912,14 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         model_turns = [turn for turn in session.get("model_turns") or [] if isinstance(turn, dict)]
         _merge_counts(tool_counts, _status_counts(tool_calls))
         _merge_counts(turn_counts, _status_counts(model_turns))
-        _merge_counts(approval_counts, _approval_counts(tool_calls))
-        _merge_counts(verification_counts, _verification_counts(tool_calls))
+        _merge_counts(
+            approval_counts,
+            _approval_counts(tool_calls, successful_verifications=successful_verifications),
+        )
+        _merge_counts(
+            verification_counts,
+            _verification_counts(tool_calls, successful_verifications=successful_verifications),
+        )
         first_tool_starts.append(_first_tool_start_seconds(session, model_turns, tool_calls))
         model_to_tool_waits.extend(_model_to_tool_waits(model_turns, tool_calls))
         wait_records = _tool_to_next_model_wait_records(session, model_turns, tool_calls)
@@ -829,7 +985,12 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "reliability": reliability,
         "latency": latency,
         "signals": _build_signals(session_counts, reliability, latency),
-        "diagnostics": _diagnostic_samples(state, sessions, limit=sample_limit),
+        "diagnostics": _diagnostic_samples(
+            state,
+            sessions,
+            limit=sample_limit,
+            successful_verifications=successful_verifications,
+        ),
     }
 
 

@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 22:31 JST.
+Last assessed: 2026-04-19 23:17 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -65,6 +65,14 @@ Milestone 2 Done-when checklist:
   improvement needs a code change. When coding focus is otherwise idle, the
   next native self-improve command now uses recent metrics signals to target the
   focus string, avoiding a generic "pick anything" self-improvement loop.
+  Historical approval and verification friction is now retired from active
+  metrics when later successful verification covers the same command, test
+  path, or source/test surface. After recording fresh mew-native verification
+  for the old `tests/test_dogfood.py` and `tests/test_work_session.py` failures,
+  `./mew metrics --kind coding --limit 20` reports
+  `approval_rejection=None`, `verification_failure=0.0`, and
+  `verification_rollback=0.0`; the remaining active signal is idle time rather
+  than stale approval/verification history.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this
