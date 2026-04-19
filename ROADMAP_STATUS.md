@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, a scoped M3 reentry gate, and fresh-restart comparator assets for that gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -1155,6 +1155,15 @@ Evidence:
   section when a fresh-CLI report is merged. This makes future reentry-vs-fresh
   comparison artifacts easier to interpret after context compression, but it
   should not be counted as closing M3 by itself.
+- The M3 reentry gate now produces its own fresh-restart comparator assets:
+  `m3-fresh-cli-report-template.json` and `m3-fresh-cli-restart-prompt.md`.
+  The artifacts preserve mew-side resume evidence such as continuity score,
+  resume size, pending approval count, unresolved verifier failure, next step,
+  and verifier command, so a detached Claude Code or Codex CLI run can compare
+  reconstruction cost without relying on hidden chat context. The focused test
+  passed and `/tmp/mew-m3-reentry-fresh-comparator-assets` passed with
+  `continuity_score=9/9`, one pending approval, and the failed verifier risk
+  preserved in the artifact.
 
 Missing proof:
 
@@ -1166,6 +1175,9 @@ Missing proof:
   short resident-loop, native-work-start, and real API native-work-advance
   proofs, and short resident-loop JSON now carries explicit cadence counts, but
   there is still no long-running cadence proof across several hours or days.
+- The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
+  prompt/template, but the paired fresh restart has not been executed and merged
+  yet.
 
 Next action:
 

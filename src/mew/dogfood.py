@@ -3522,6 +3522,67 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
     post_resume_data = _json_stdout(post_resume_json_result)
     post_resume = post_resume_data.get("resume") or {}
     post_commands = post_resume.get("commands") or []
+    artifacts_dir = Path(workspace) / STATE_DIR / "dogfood"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    fresh_cli_template_path = artifacts_dir / "m3-fresh-cli-report-template.json"
+    fresh_cli_prompt_path = artifacts_dir / "m3-fresh-cli-restart-prompt.md"
+    mew_resume_evidence = {
+        "task_id": task_id,
+        "work_session_id": session_id,
+        "continuity_status": continuity.get("status"),
+        "continuity_score": continuity.get("score"),
+        "resume_chars": len(resume_text),
+        "pending_approval_count": len(pending_approvals),
+        "unresolved_failure_tool": unresolved_failure.get("tool"),
+        "unresolved_failure_exit_code": unresolved_failure.get("exit_code"),
+        "working_memory_next_step": (resume.get("working_memory") or {}).get("next_step"),
+        "verification_command": verify_command,
+    }
+    write_json_file(
+        fresh_cli_template_path,
+        {
+            "status": "unknown",
+            "context_mode": "true_restart",
+            "manual_rebrief_needed": None,
+            "fresh_cli_summary": "",
+            "reconstruction_steps": [],
+            "verification_result": "",
+            "would_prefer": "unknown",
+            "preference_reason": "",
+            "mew_evidence": mew_resume_evidence,
+        },
+    )
+    fresh_cli_prompt_path.write_text(
+        "\n".join(
+            [
+                "# M3 Fresh CLI Reentry Comparator",
+                "",
+                "Start from a brand-new Claude Code or Codex CLI session.",
+                "Do not use the mew work-session resume unless you explicitly record that as manual rebrief.",
+                "",
+                "Goal: compare a fresh CLI restart against mew's M3 reentry bundle for the same interrupted task.",
+                "",
+                "Mew-side evidence:",
+                f"- task_id: {task_id}",
+                f"- work_session_id: {session_id}",
+                f"- continuity_status: {continuity.get('status')}",
+                f"- resume_chars: {len(resume_text)}",
+                f"- pending_approval_count: {len(pending_approvals)}",
+                f"- unresolved_failure: {unresolved_failure.get('tool')} exit={unresolved_failure.get('exit_code')}",
+                f"- next_step: {(resume.get('working_memory') or {}).get('next_step')}",
+                f"- verifier: `{verify_command}`",
+                "",
+                "Fresh restart task:",
+                "1. Reconstruct what changed, what is risky, and the next action from repository files alone.",
+                "2. Complete the equivalent README.md recovery so the verifier passes.",
+                "3. Record how many reconstruction steps were needed and whether manual rebrief was needed.",
+                "",
+                f"Write the completed JSON report to `{fresh_cli_template_path}` or another explicit path.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     _scenario_check(
         checks,
@@ -3588,7 +3649,28 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
         },
         expected="after resume, the resident can apply the known change and run verification successfully",
     )
-    return _scenario_report("m3-reentry-gate", workspace, commands, checks)
+    _scenario_check(
+        checks,
+        "m3_reentry_gate_writes_fresh_cli_comparison_assets",
+        fresh_cli_template_path.exists()
+        and fresh_cli_prompt_path.exists()
+        and "manual_rebrief_needed" in fresh_cli_template_path.read_text(encoding="utf-8")
+        and "M3 Fresh CLI Reentry Comparator" in fresh_cli_prompt_path.read_text(encoding="utf-8")
+        and "M3 gate complete" in fresh_cli_prompt_path.read_text(encoding="utf-8"),
+        observed={
+            "template": str(fresh_cli_template_path),
+            "prompt": str(fresh_cli_prompt_path),
+            "mew_evidence": mew_resume_evidence,
+        },
+        expected="fresh CLI comparator prompt and report template preserve mew-side reentry evidence",
+    )
+    report = _scenario_report("m3-reentry-gate", workspace, commands, checks)
+    report["artifacts"] = {
+        "fresh_cli_report_template": str(fresh_cli_template_path),
+        "fresh_cli_restart_prompt": str(fresh_cli_prompt_path),
+        "mew_resume_evidence": mew_resume_evidence,
+    }
+    return report
 
 
 def run_chat_cockpit_scenario(workspace, env=None):
