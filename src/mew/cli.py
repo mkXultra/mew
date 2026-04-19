@@ -1195,7 +1195,7 @@ def build_parser():
             "    returns controls.continue, controls.follow, controls.status, controls.resume, controls.cells, controls.active_memory, controls.chat\n"
             "  # Or copy one of the printed controls and continue manually:\n"
             "  mew work <task-id> --live --allow-read . --compact-live --max-steps 1\n"
-            "  mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10\n\n"
+            "  mew work <task-id> --follow --allow-read . --compact-live --quiet --max-steps 10\n\n"
             "  mew work <task-id> --session --resume --allow-read .\n"
             "  mew work <task-id> --cells\n"
             "  mew memory --active --task-id <task-id>\n"

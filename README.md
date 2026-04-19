@@ -788,7 +788,7 @@ Turn an idea into a native self-improvement work session:
 
 ```sh
 uv run mew self-improve --start-session --focus "Make the coding cockpit calmer"
-uv run mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10
+uv run mew work <task-id> --follow --allow-read . --compact-live --quiet --max-steps 10
 uv run mew work <task-id> --follow-status --json
 ```
 

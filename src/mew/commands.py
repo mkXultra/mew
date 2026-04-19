@@ -9149,24 +9149,37 @@ def seed_native_self_improve_session_defaults(session, task):
     session["updated_at"] = now_iso()
 
 
-def native_self_improve_controls(task, *, include_start_hint=False):
+def _native_self_improve_control_args(read_root, *, quiet=False):
+    return SimpleNamespace(
+        live=False,
+        follow=False,
+        auth=None,
+        model_backend=None,
+        model=None,
+        base_url=None,
+        allow_read=[read_root],
+        allow_write=[],
+        allow_shell=False,
+        allow_verify=False,
+        verify_command="",
+        act_mode=None,
+        compact_live=True,
+        quiet=quiet,
+        prompt_approval=False,
+        no_prompt_approval=False,
+    )
+
+
+def native_self_improve_controls(task, *, include_start_hint=False, session=None):
     read_root = native_self_improve_read_root(task)
+    continue_args = _native_self_improve_control_args(read_root)
+    follow_args = _native_self_improve_control_args(read_root, quiet=True)
     controls = {
         "work_cwd": resolved_task_cwd_text(task),
-        "continue": mew_command("work", task["id"], "--live", "--allow-read", read_root, "--compact-live", "--max-steps", "1"),
-        "follow": mew_command(
-            "work",
-            task["id"],
-            "--follow",
-            "--quiet",
-            "--allow-read",
-            read_root,
-            "--compact-live",
-            "--max-steps",
-            "10",
-        ),
+        "continue": _work_live_continue_command(continue_args, task["id"], session=session, max_steps=1),
+        "follow": _work_live_continue_command(follow_args, task["id"], session=session, max_steps=10, follow=True),
         "status": mew_command("work", task["id"], "--follow-status", "--json"),
-        "resume": mew_command("work", task["id"], "--session", "--resume", "--allow-read", read_root),
+        "resume": _work_resume_command(continue_args, task["id"], session=session),
         "cells": mew_command("work", task["id"], "--cells"),
         "active_memory": mew_command("memory", "--active", "--task-id", task["id"]),
         "chat": mew_command("chat"),
@@ -9183,8 +9196,8 @@ def native_self_improve_controls(task, *, include_start_hint=False):
     return controls
 
 
-def print_native_self_improve_controls(task, *, include_start_hint=False):
-    controls = native_self_improve_controls(task, include_start_hint=include_start_hint)
+def print_native_self_improve_controls(task, *, include_start_hint=False, session=None):
+    controls = native_self_improve_controls(task, include_start_hint=include_start_hint, session=session)
     if include_start_hint:
         print(f"start session: {controls['start_session']}")
     print(f"work cwd: {controls['work_cwd']}")
@@ -9284,6 +9297,7 @@ def cmd_self_improve(args):
             "controls": native_self_improve_controls(
                 task,
                 include_start_hint=native and not getattr(args, "start_session", False),
+                session=session,
             )
             if native
             else {},
@@ -9305,6 +9319,7 @@ def cmd_self_improve(args):
         print_native_self_improve_controls(
             task,
             include_start_hint=not getattr(args, "start_session", False),
+            session=session,
         )
     if args.prompt:
         if not plan:
@@ -12984,7 +12999,7 @@ def chat_self_improve(rest):
     if native:
         if session:
             print(("started " if session_created else "reused ") + f"work session #{session['id']}")
-        print_native_self_improve_controls(task, include_start_hint=not start_session)
+        print_native_self_improve_controls(task, include_start_hint=not start_session, session=session)
     if show_prompt:
         if not plan:
             print("No programmer plan was created for native self-improvement.")

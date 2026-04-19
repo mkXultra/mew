@@ -165,7 +165,7 @@ class SelfImproveTests(unittest.TestCase):
             output,
         )
         self.assertIn("mew work <task-id> --live --allow-read . --compact-live --max-steps 1", output)
-        self.assertIn("mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10", output)
+        self.assertIn("mew work <task-id> --follow --allow-read . --compact-live --quiet --max-steps 10", output)
         self.assertIn("mew work <task-id> --session --resume --allow-read .", output)
         self.assertIn("mew work <task-id> --cells", output)
         self.assertIn("mew memory --active --task-id <task-id>", output)
@@ -284,7 +284,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("start session: mew work 1 --start-session --allow-read . --compact-live", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --compact-live --max-steps 1", output)
-                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
+                self.assertIn("follow: mew work 1 --follow --allow-read . --compact-live --quiet --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
                 self.assertIn("cells: mew work 1 --cells", output)
@@ -429,7 +429,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertNotIn("start session: mew work 1 --start-session", output)
                 self.assertIn(f"work cwd: {Path(tmp).resolve()}", output)
                 self.assertIn("continue: mew work 1 --live --allow-read . --compact-live --max-steps 1", output)
-                self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
+                self.assertIn("follow: mew work 1 --follow --allow-read . --compact-live --quiet --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
                 self.assertIn("cells: mew work 1 --cells", output)
@@ -472,7 +472,7 @@ class SelfImproveTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     data["controls"]["follow"],
-                    "mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10",
+                    "mew work 1 --follow --allow-read . --compact-live --quiet --max-steps 10",
                 )
                 self.assertEqual(data["controls"]["status"], "mew work 1 --follow-status --json")
                 self.assertEqual(data["controls"]["resume"], "mew work 1 --session --resume --allow-read .")
@@ -517,8 +517,15 @@ class SelfImproveTests(unittest.TestCase):
 
                 state = load_state()
                 state["work_sessions"][0]["default_options"] = {
+                    "auth": "auth.json",
+                    "model_backend": "codex",
                     "allow_read": ["README.md"],
+                    "allow_write": ["src/mew", "tests"],
+                    "allow_verify": True,
+                    "verify_command": "uv run pytest -q",
+                    "act_mode": "deterministic",
                     "compact_live": False,
+                    "quiet": True,
                 }
                 save_state(state)
 
@@ -531,6 +538,23 @@ class SelfImproveTests(unittest.TestCase):
                 defaults = data["work_session"]["default_options"]
                 self.assertEqual(defaults["allow_read"], ["README.md", "."])
                 self.assertTrue(defaults["compact_live"])
+                self.assertEqual(
+                    data["controls"]["continue"],
+                    (
+                        "mew work 1 --live --auth auth.json --model-backend codex "
+                        "--allow-read README.md --allow-read . --allow-write src/mew --allow-write tests "
+                        "--allow-verify --verify-command 'uv run pytest -q' --act-mode deterministic "
+                        "--compact-live --quiet --max-steps 1"
+                    ),
+                )
+                self.assertEqual(
+                    data["controls"]["follow"],
+                    data["controls"]["continue"].replace("--live", "--follow").replace("--max-steps 1", "--max-steps 10"),
+                )
+                self.assertEqual(
+                    data["controls"]["resume"],
+                    "mew work 1 --session --resume --allow-read README.md --allow-read .",
+                )
                 state = load_state()
                 self.assertEqual(state["work_sessions"][0]["default_options"]["allow_read"], ["README.md", "."])
                 self.assertTrue(state["work_sessions"][0]["default_options"]["compact_live"])
@@ -559,7 +583,7 @@ class SelfImproveTests(unittest.TestCase):
                 resolved = str(Path(workdir).resolve())
                 self.assertIn(f"work cwd: {resolved}", output)
                 self.assertIn(f"continue: mew work 1 --live --allow-read {resolved} --compact-live --max-steps 1", output)
-                self.assertIn(f"follow: mew work 1 --follow --quiet --allow-read {resolved} --compact-live --max-steps 10", output)
+                self.assertIn(f"follow: mew work 1 --follow --allow-read {resolved} --compact-live --quiet --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn(f"resume: mew work 1 --session --resume --allow-read {resolved}", output)
                 self.assertIn("cells: mew work 1 --cells", output)
