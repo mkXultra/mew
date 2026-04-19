@@ -6637,6 +6637,16 @@ def _m2_preference_choice_from_signal(signal):
     return ""
 
 
+def _m2_comparison_status_from_preference_choice(choice):
+    if choice == "mew":
+        return "mew_preferred"
+    if choice == "fresh_cli":
+        return "fresh_cli_preferred"
+    if choice == "inconclusive":
+        return "inconclusive"
+    return ""
+
+
 def _m2_apply_comparison_report(protocol, report, source_path=""):
     if source_path:
         protocol["comparison_report"] = {
@@ -6647,20 +6657,16 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
         return protocol
 
     comparison = protocol.setdefault("comparison_result", {})
-    if isinstance(report.get("comparison_result"), dict):
-        _m2_merge_mapping(comparison, report.get("comparison_result") or {})
+    report_comparison = report.get("comparison_result")
+    explicit_comparison_status = False
+    if isinstance(report_comparison, dict):
+        explicit_comparison_status = "status" in report_comparison
+        _m2_merge_mapping(comparison, report_comparison or {})
     allowed_comparison_statuses = set(comparison.get("allowed_statuses") or [])
+    explicit_top_level_status = False
     if report.get("status") in allowed_comparison_statuses or report.get("status") == "unknown":
         comparison["status"] = report.get("status")
-    elif comparison.get("status") == "unknown":
-        resident_choice = str((report.get("resident_preference") or {}).get("choice") or "").strip()
-        derived_status = {
-            "mew": "mew_preferred",
-            "fresh_cli": "fresh_cli_preferred",
-            "inconclusive": "inconclusive",
-        }.get(resident_choice)
-        if derived_status in allowed_comparison_statuses:
-            comparison["status"] = derived_status
+        explicit_top_level_status = True
     for key in ("next_blocker", "notes"):
         if key in report:
             comparison[key] = report.get(key)
@@ -6679,11 +6685,23 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
         if isinstance(report.get(key), dict):
             _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
     preference_signal = str(report.get("preference_signal") or "").strip()
+    explicit_preference_signal_status = False
     if preference_signal in allowed_comparison_statuses:
         comparison["status"] = preference_signal
+        explicit_preference_signal_status = True
     preference_choice = _m2_preference_choice_from_signal(preference_signal)
     if preference_choice:
         protocol.setdefault("resident_preference", {})["choice"] = preference_choice
+    preference_choice_status = _m2_comparison_status_from_preference_choice(
+        str((protocol.get("resident_preference") or {}).get("choice") or "").strip()
+    )
+    if (
+        preference_choice_status in allowed_comparison_statuses
+        and not explicit_comparison_status
+        and not explicit_top_level_status
+        and not explicit_preference_signal_status
+    ):
+        comparison["status"] = preference_choice_status
     for key in ("task_shape", "interruption_resume_gate"):
         if isinstance(report.get(key), dict):
             _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})

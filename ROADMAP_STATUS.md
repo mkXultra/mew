@@ -96,7 +96,15 @@ Milestone 2 Done-when checklist:
   records `resident_preference.choice=fresh_cli` for this narrow write-heavy
   edit/test loop: paired batch reduces mew ceremony, but direct fresh CLI is
   still lower overhead when no pause, handoff, or resident memory advantage is
-  exercised.
+  exercised. A follow-up status-fallback task then exercised the intended
+  interruption shape on both sides: mew task `#261` / session `#252` was
+  Ctrl-C interrupted, resumed from the work-session bundle without rebrief,
+  used a guarded paired write batch, and verified successfully; a resumed
+  `codex-ultra` fresh worktree completed the matching task from its handoff
+  note. The combined artifact at `/tmp/mew-m2-status-fallback-combined` has
+  both `interruption_resume_gate.mew.status=proved` and
+  `interruption_resume_gate.fresh_cli.status=proved`, but still records
+  `comparison_result.status=fresh_cli_preferred`.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
@@ -168,11 +176,11 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are running a true interruption-shaped paired source/test
-M2 comparative task and a matching interrupted fresh-CLI comparison, or a
-targeted latency/friction slice chosen from `mew metrics --kind coding`.
-Polish, side projects, and later-milestone architecture are deferred unless
-they directly unblock this active criterion.
+Useful next choices are now targeted M2 friction slices that explain why the
+proved interruption comparison still preferred fresh CLI, or a latency slice
+chosen from `mew metrics --kind coding` if it becomes active again. Polish,
+side projects, and later-milestone architecture are deferred unless they
+directly unblock this active criterion.
 The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
 a milestone switch: after it is green, return to M2 by running or preparing a
 paired interruption-shaped comparative dogfood task.
