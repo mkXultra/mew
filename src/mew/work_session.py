@@ -2493,7 +2493,75 @@ def _continuity_next_action_runnable(resume):
                 return True
         return bool(recovery.get("next_action"))
     runnable_markers = ("mew ", "/continue", "/work-session", "approve", "reject", "retry", "inspect")
-    return any(marker in next_action for marker in runnable_markers) or bool(next_action)
+    waiting_phases = {"running_tool", "planning", "stop_requested"}
+    if (resume or {}).get("phase") in waiting_phases and "wait" in next_action:
+        return True
+    return any(marker in next_action for marker in runnable_markers)
+
+
+def _continuity_failure_visible(failure):
+    if not failure or failure.get("tool_call_id") is None:
+        return False
+    return bool(
+        failure.get("error")
+        or failure.get("summary")
+        or failure.get("exit_code") is not None
+        or failure.get("suggested_safe_reobserve")
+    )
+
+
+def _continuity_recovery_item_visible(item):
+    if not item:
+        return False
+    has_id = item.get("tool_call_id") is not None or item.get("model_turn_id") is not None
+    return has_id and bool(item.get("action")) and bool(item.get("reason") or item.get("source_error") or item.get("source_summary"))
+
+
+def _continuity_recovery_item_has_control(item):
+    if not item:
+        return False
+    return bool(
+        item.get("hint")
+        or item.get("auto_hint")
+        or item.get("chat_auto_hint")
+        or item.get("review_hint")
+        or item.get("command")
+        or item.get("review_steps")
+    )
+
+
+def _continuity_verification_visible(confidence):
+    if not confidence:
+        return False
+    return bool(confidence.get("status")) and bool(
+        confidence.get("reason")
+        or confidence.get("command")
+        or confidence.get("expected_command")
+        or confidence.get("source_paths")
+        or confidence.get("pending_source_paths")
+    )
+
+
+def _continuity_same_surface_visible(audit):
+    if not audit:
+        return False
+    return bool(audit.get("status")) and bool(audit.get("reason") or audit.get("prompt") or audit.get("paths"))
+
+
+def _continuity_recurring_failures_visible(items):
+    if not items:
+        return False
+    return all(item.get("tool") and item.get("count") for item in items)
+
+
+def _continuity_pivot_text(resume):
+    pending = (resume or {}).get("pending_steer") or {}
+    queued = (resume or {}).get("queued_followups") or []
+    texts = []
+    if str(pending.get("text") or "").strip():
+        texts.append(str(pending.get("text")).strip())
+    texts.extend(str(item.get("text")).strip() for item in queued if str(item.get("text") or "").strip())
+    return texts
 
 
 def build_work_continuity_score(resume):
@@ -2510,6 +2578,9 @@ def build_work_continuity_score(resume):
     decisions = resume.get("recent_decisions") or []
     compressed_prior = resume.get("compressed_prior_think") or {}
     notes = resume.get("notes") or []
+    same_surface_audit = resume.get("same_surface_audit") or {}
+    recurring_failures = resume.get("recurring_failures") or []
+    pivot_texts = _continuity_pivot_text(resume)
 
     memory_ok = bool(memory.get("hypothesis") or memory.get("next_step") or memory.get("last_verified_state"))
     risky = bool(
@@ -2518,24 +2589,31 @@ def build_work_continuity_score(resume):
         or recovery_plan
         or pending_approvals
         or (verification_confidence and verification_confidence.get("status") != "verified")
-        or resume.get("same_surface_audit")
-        or resume.get("recurring_failures")
+        or same_surface_audit
+        or recurring_failures
     )
-    risks_ok = not risky or bool(
-        unresolved_failure
-        or failures
-        or recovery_plan
-        or pending_approvals
-        or verification_confidence
-        or resume.get("same_surface_audit")
-        or resume.get("recurring_failures")
-    )
+    risk_checks = []
+    if pending_approvals:
+        risk_checks.append(all(_approval_has_visible_control(approval) for approval in pending_approvals))
+    if unresolved_failure or failures:
+        visible_failures = [unresolved_failure] if unresolved_failure else []
+        visible_failures.extend(failures)
+        risk_checks.append(any(_continuity_failure_visible(failure) for failure in visible_failures))
+    if recovery_plan:
+        risk_checks.append(any(_continuity_recovery_item_visible(item) for item in recovery_plan.get("items") or []))
+    if verification_confidence and verification_confidence.get("status") != "verified":
+        risk_checks.append(_continuity_verification_visible(verification_confidence))
+    if same_surface_audit:
+        risk_checks.append(_continuity_same_surface_visible(same_surface_audit))
+    if recurring_failures:
+        risk_checks.append(_continuity_recurring_failures_visible(recurring_failures))
+    risks_ok = all(risk_checks) if risk_checks else not risky
     approvals_ok = not pending_approvals or all(_approval_has_visible_control(approval) for approval in pending_approvals)
     needs_recovery = bool(recovery_plan or unresolved_failure or failures or resume.get("phase") in ("interrupted", "failed"))
     recovery_ok = not needs_recovery or bool(
-        (recovery_plan.get("items") if isinstance(recovery_plan, dict) else [])
+        any(_continuity_recovery_item_has_control(item) for item in recovery_plan.get("items") or [])
         or resume.get("suggested_safe_reobserve")
-        or resume.get("next_action")
+        or any((failure or {}).get("suggested_safe_reobserve") for failure in [unresolved_failure, *failures])
     )
     verification_needed = bool(
         pending_approvals
@@ -2547,6 +2625,7 @@ def build_work_continuity_score(resume):
     context_pressure = context.get("pressure") or "unknown"
     context_ok = context_pressure in ("low", "medium") or context.get("total_session_chars") is None
     decisions_ok = bool(decisions or compressed_prior.get("items") or notes or memory)
+    pivot_ok = not pivot_texts or bool(pivot_texts)
 
     axes = [
         _continuity_axis(
@@ -2602,6 +2681,12 @@ def build_work_continuity_score(resume):
             if decisions_ok
             else "no decisions, compressed prior think, notes, or memory are visible",
             ["recent_decisions", "compressed_prior_think", "notes", "working_memory"],
+        ),
+        _continuity_axis(
+            "user_pivot_preserved",
+            pivot_ok,
+            "pending steer or queued follow-up is visible" if pivot_texts else "no user pivot is pending",
+            ["pending_steer", "queued_followups"],
         ),
     ]
     passed = sum(1 for axis in axes if axis.get("ok"))

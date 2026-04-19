@@ -27,6 +27,12 @@ status survive an interruption-style pivot. `compressed_prior_think` also keeps
 older model turns visible after the recent decision window would otherwise drop
 them. Keep one day-scale scenario for time-decay failures, but choose next work
 from continuity friction first.
+Codex-ultra review then tightened that contract: continuity scoring now requires
+concrete risk/recovery controls instead of counting any non-empty next-action
+text, includes a `user_pivot_preserved` axis for pending steer / queued
+follow-up state, and `mew focus` surfaces that pivot cue. The local fresh-CLI
+reference symlinks are also guarded by pytest `testpaths = ["tests"]`, so
+default `uv run pytest` no longer recurses into external reference checkouts.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

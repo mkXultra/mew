@@ -746,6 +746,9 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "continuity": resume.get("continuity") or {},
                 "compressed_prior_think": resume.get("compressed_prior_think") or {},
                 "working_memory": resume.get("working_memory") or {},
+                "pending_steer": resume.get("pending_steer") or {},
+                "queued_followups": resume.get("queued_followups") or [],
+                "queued_followups_total": resume.get("queued_followups_total") or 0,
                 "resume_command": resume_command,
                 "continue_command": continue_command,
                 "follow_command": follow_command,
@@ -888,6 +891,15 @@ def format_focus(data):
                 lines.append(f"  memory_stale: {stale_memory}")
             elif memory.get("next_step"):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
+            pending_steer = session.get("pending_steer") or {}
+            if pending_steer.get("text"):
+                lines.append(f"  pending_steer: {pending_steer.get('text')}")
+            queued_followups = session.get("queued_followups") or []
+            if queued_followups:
+                first = queued_followups[0]
+                total = session.get("queued_followups_total") or len(queued_followups)
+                suffix = f" ({len(queued_followups)}/{total})" if total != len(queued_followups) else ""
+                lines.append(f"  queued_followup{suffix}: {first.get('text')}")
             compressed_prior = session.get("compressed_prior_think") or {}
             if compressed_prior.get("items"):
                 item = (compressed_prior.get("items") or [])[-1]

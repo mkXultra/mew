@@ -2715,12 +2715,13 @@ def run_continuity_scenario(workspace, env=None):
         and note_result.get("exit_code") == 0
         and queue_result.get("exit_code") == 0
         and resume_json_result.get("exit_code") == 0
-        and continuity.get("score") == "8/8"
+        and continuity.get("score") == "9/9"
         and continuity.get("status") == "strong"
         and axes.get("working_memory_survived", {}).get("ok") is True
         and axes.get("risks_preserved", {}).get("ok") is True
         and axes.get("approvals_visible", {}).get("ok") is True
-        and axes.get("verifier_confidence_kept", {}).get("ok") is True,
+        and axes.get("verifier_confidence_kept", {}).get("ok") is True
+        and axes.get("user_pivot_preserved", {}).get("ok") is True,
         observed={
             "continuity": continuity,
             "pending_approvals": pending_approvals,
@@ -2733,7 +2734,7 @@ def run_continuity_scenario(workspace, env=None):
         checks,
         "continuity_text_surfaces_score_and_controls",
         resume_text_result.get("exit_code") == 0
-        and "continuity: 8/8 status=strong" in resume_text
+        and "continuity: 9/9 status=strong" in resume_text
         and "Pending approvals" in resume_text
         and "continuity verifier failed" in resume_text
         and "Working memory" in resume_text
@@ -2745,8 +2746,10 @@ def run_continuity_scenario(workspace, env=None):
         checks,
         "continuity_focus_surfaces_score",
         focus_text_result.get("exit_code") == 0
-        and "continuity: 8/8 status=strong" in focus_text
+        and "continuity: 9/9 status=strong" in focus_text
         and "Continuity is viable" in focus_text
+        and "queued_followup" in focus_text
+        and "After the pivot, inspect the failed verifier" in focus_text
         and "risk: run_tests#" in focus_text,
         observed=command_result_tail(focus_text_result),
         expected="focus preserves continuity score and reentry cues after user pivot",
@@ -2756,9 +2759,9 @@ def run_continuity_scenario(workspace, env=None):
         "continuity_follow_snapshot_and_status_surface_score",
         follow_snapshot_result.get("exit_code") == 0
         and follow_status_result.get("exit_code") == 0
-        and (follow_snapshot_file_data.get("resume") or {}).get("continuity", {}).get("score") == "8/8"
-        and follow_snapshot_file_data.get("continuity", {}).get("score") == "8/8"
-        and follow_status_data.get("continuity", {}).get("score") == "8/8",
+        and (follow_snapshot_file_data.get("resume") or {}).get("continuity", {}).get("score") == "9/9"
+        and follow_snapshot_file_data.get("continuity", {}).get("score") == "9/9"
+        and follow_status_data.get("continuity", {}).get("score") == "9/9",
         observed={
             "snapshot_continuity": follow_snapshot_file_data.get("continuity"),
             "status_continuity": follow_status_data.get("continuity"),

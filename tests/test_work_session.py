@@ -30,6 +30,7 @@ from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
     DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
     append_work_tool_running_output,
+    build_work_continuity_score,
     build_work_session_effort,
     build_work_session_resume,
     create_work_session,
@@ -317,11 +318,43 @@ class WorkSessionTests(unittest.TestCase):
         continuity = resume["continuity"]
         text = format_work_session_resume(resume)
 
-        self.assertEqual(continuity["score"], "8/8")
+        self.assertEqual(continuity["score"], "9/9")
         self.assertEqual(continuity["status"], "strong")
         self.assertEqual(continuity["missing"], [])
-        self.assertIn("continuity: 8/8 status=strong", text)
+        self.assertIn("continuity: 9/9 status=strong", text)
         self.assertTrue(all(axis["ok"] for axis in continuity["axes"]))
+
+    def test_work_continuity_score_requires_concrete_reentry_artifacts(self):
+        resume = {
+            "phase": "failed",
+            "next_action": "think about what happened later",
+            "failures": [{"tool_call_id": 7}],
+            "context": {"pressure": "low"},
+        }
+
+        continuity = build_work_continuity_score(resume)
+
+        self.assertIn("working_memory_survived", continuity["missing"])
+        self.assertIn("risks_preserved", continuity["missing"])
+        self.assertIn("next_action_runnable", continuity["missing"])
+        self.assertIn("recovery_path_visible", continuity["missing"])
+        self.assertIn("recent_decisions_preserved", continuity["missing"])
+
+    def test_work_continuity_score_counts_user_pivot_when_visible(self):
+        resume = {
+            "phase": "idle",
+            "next_action": "continue the work session with /continue",
+            "working_memory": {"hypothesis": "Pivot should survive.", "next_step": "Handle queued feedback."},
+            "queued_followups": [{"id": 1, "text": "User changed priority."}],
+            "recent_decisions": [{"model_turn_id": 1, "action": "finish"}],
+            "context": {"pressure": "low"},
+        }
+
+        continuity = build_work_continuity_score(resume)
+        axis = {item["key"]: item for item in continuity["axes"]}["user_pivot_preserved"]
+
+        self.assertTrue(axis["ok"])
+        self.assertEqual(axis["reason"], "pending steer or queued follow-up is visible")
 
     def test_work_session_resume_compresses_prior_think(self):
         task = {"id": 1, "title": "Compressed think", "status": "ready", "kind": "coding", "notes": ""}
