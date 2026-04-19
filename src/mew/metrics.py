@@ -23,14 +23,28 @@ def _round(value):
 
 
 def _summary(values):
-    values = [float(value) for value in values if value is not None]
+    values = sorted(float(value) for value in values if value is not None)
     if not values:
-        return {"count": 0, "avg": None, "max": None}
+        return {"count": 0, "avg": None, "median": None, "p95": None, "max": None}
     return {
         "count": len(values),
         "avg": _round(sum(values) / len(values)),
+        "median": _round(_percentile(values, 0.5)),
+        "p95": _round(_percentile(values, 0.95)),
         "max": _round(max(values)),
     }
+
+
+def _percentile(sorted_values, percentile):
+    if not sorted_values:
+        return None
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = (len(sorted_values) - 1) * percentile
+    low = int(rank)
+    high = min(low + 1, len(sorted_values) - 1)
+    weight = rank - low
+    return sorted_values[low] * (1.0 - weight) + sorted_values[high] * weight
 
 
 def _status_counts(items):
@@ -305,6 +319,7 @@ def format_observation_metrics(data):
     ):
         summary = latency.get(key) or {}
         lines.append(
-            f"{label}: count={summary.get('count', 0)} avg={summary.get('avg')} max={summary.get('max')}"
+            f"{label}: count={summary.get('count', 0)} avg={summary.get('avg')} "
+            f"median={summary.get('median')} p95={summary.get('p95')} max={summary.get('max')}"
         )
     return "\n".join(lines)

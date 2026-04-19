@@ -81,6 +81,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["reliability"]["verification"]["failed"], 1)
         self.assertEqual(metrics["reliability"]["verification"]["rolled_back"], 1)
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 4.0)
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["median"], 4.0)
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["p95"], 4.0)
         self.assertEqual(metrics["latency"]["model_to_tool_wait_seconds"]["avg"], 1.0)
         self.assertEqual(metrics["latency"]["tool_to_next_model_wait_seconds"]["avg"], 3.0)
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["avg"], 0.65)
@@ -88,7 +90,7 @@ class MetricsTests(unittest.TestCase):
         text = format_observation_metrics(metrics)
         self.assertIn("Mew observation metrics", text)
         self.assertIn("interventions=3", text)
-        self.assertIn("perceived_idle_ratio: count=1 avg=0.65", text)
+        self.assertIn("perceived_idle_ratio: count=1 avg=0.65 median=0.65 p95=0.65 max=0.65", text)
 
 
 if __name__ == "__main__":
