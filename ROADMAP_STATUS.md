@@ -839,6 +839,15 @@ Next action:
   focused status test, `tests.test_commands` (`171 tests`, pass), full
   `uv run python -m unittest` (`1005 tests`, pass), and
   `./mew dogfood --all --cleanup --json` (pass).
+- The same dogfood thread then fixed two front-door reentry papercuts:
+  `e0d0317` makes natural `mew help` print the top-level help instead of an
+  argparse invalid-choice error, and `407fd1a` keeps a `Coding:` reentry line
+  visible in global `mew focus` / `mew next` even when old non-coding questions
+  remain the primary next move. Validation included ruff on changed files,
+  focused help/focus tests, `tests.test_brief` (`42 tests`, pass),
+  `tests.test_commands` (`172 tests`, pass), full `uv run python -m unittest`
+  (`1007 tests`, pass), direct `./mew help`, `./mew focus`, and `./mew next`
+  checks, and `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
@@ -1737,11 +1746,12 @@ Milestone 2: Interactive Parity.
 
 Fresh implementation should continue dogfooding real coding changes through
 `mew code <task-id>`. The front-door route and core mid-loop control lanes are
-now coherent; the remaining Milestone 2 work is making the active coding loop
-itself feel as fast and calm as Claude Code or Codex CLI while preserving mew's
-persistent memory and audit trail. Same-surface audit and verification
-confidence are now visible cockpit/checkpoint artifacts rather than only
-prompt guidance. The next useful slice is a longer real live/follow coding
-dogfood session that measures whether these checkpoints reduce finish/approval
-mistakes without making the cockpit feel slower than a fresh Claude Code or
-Codex CLI session.
+now coherent, and global `focus` / `next` keep the coding reentry visible even
+when stale non-coding questions still need a user answer; the remaining
+Milestone 2 work is making the active coding loop itself feel as fast and calm
+as Claude Code or Codex CLI while preserving mew's persistent memory and audit
+trail. Same-surface audit and verification confidence are now visible
+cockpit/checkpoint artifacts rather than only prompt guidance. The next useful
+slice is a longer real live/follow coding dogfood session that measures whether
+these checkpoints reduce finish/approval mistakes without making the cockpit
+feel slower than a fresh Claude Code or Codex CLI session.
