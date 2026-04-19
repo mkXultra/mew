@@ -828,6 +828,17 @@ Next action:
   pairing regression test, `tests.test_work_session` (`340 tests`, pass), full
   `uv run python -m unittest` (`1004 tests`, pass), and
   `./mew dogfood --all --cleanup --json` (pass).
+- Read-only `codex-ultra` human-role dogfood then judged mew usable as a
+  supervised coding buddy but not yet as a primary shell/body, with the top
+  blocker that `mew status` could say the runtime was stopped while a native
+  `mew work --live` producer was still running. Task #202 / `ff63f60` adds
+  active native work visibility to `mew status`: JSON now includes
+  `active_work_sessions` with phase, pending approvals, follow-status command,
+  and follow snapshot producer health, while text status prints compact
+  `active_work_session` lines. Validation included ruff on changed files, the
+  focused status test, `tests.test_commands` (`171 tests`, pass), full
+  `uv run python -m unittest` (`1005 tests`, pass), and
+  `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
