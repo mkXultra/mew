@@ -1771,6 +1771,49 @@ def build_recurring_work_failures(calls, limit=3):
     return repeated[-limit:]
 
 
+def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
+    groups = {}
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        matches = result.get("matches")
+        if matches is None:
+            continue
+        path = result.get("path") or (call.get("parameters") or {}).get("path") or ""
+        pattern = result.get("pattern") or (call.get("parameters") or {}).get("pattern") or ""
+        key = (path, pattern)
+        if matches:
+            groups.pop(key, None)
+            continue
+        item = groups.setdefault(
+            key,
+            {
+                "tool": "search_text",
+                "path": path,
+                "pattern": pattern,
+                "count": 0,
+                "queries": [],
+                "tool_call_ids": [],
+                "last_tool_call_id": None,
+                "reason": "repeated search_text calls on this path returned zero matches",
+                "suggested_next": "stop searching this same surface; use a targeted read, broaden the path once, edit from known context, or finish with a concrete replan",
+            },
+        )
+        item["count"] += 1
+        query = result.get("query") or (call.get("parameters") or {}).get("query") or ""
+        if query and query not in item["queries"]:
+            item["queries"].append(query)
+        item["tool_call_ids"].append(call.get("id"))
+        item["last_tool_call_id"] = call.get("id")
+    warnings = [item for item in groups.values() if item.get("count", 0) >= threshold]
+    warnings.sort(key=lambda item: item.get("last_tool_call_id") or 0)
+    for item in warnings:
+        item["queries"] = item["queries"][-5:]
+        item["tool_call_ids"] = item["tool_call_ids"][-10:]
+    return warnings[-limit:]
+
+
 def latest_work_verify_command(calls, task=None):
     command = (task or {}).get("command") or ""
     for call in calls:
@@ -3675,6 +3718,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "failures": failures[-limit:],
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
+        "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -3941,6 +3985,22 @@ def format_work_session_resume(resume):
                 f"- {item.get('tool')}{target} failed {item.get('count')}x "
                 f"(same error: {item.get('error')}); last_tool=#{item.get('last_tool_call_id')}"
             )
+
+    low_yield = resume.get("low_yield_observations") or []
+    if low_yield:
+        lines.extend(["", "Low-yield observations"])
+        for item in low_yield:
+            target = f" {item.get('path')}" if item.get("path") else ""
+            pattern = f" pattern={item.get('pattern')}" if item.get("pattern") else ""
+            queries = ", ".join(str(query) for query in (item.get("queries") or [])[:5])
+            lines.append(
+                f"- {item.get('tool')}{target}{pattern} returned zero matches "
+                f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}"
+            )
+            if queries:
+                lines.append(f"  queries: {queries}")
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
 
     lines.extend(["", "Work notes"])
     notes = resume.get("notes") or []

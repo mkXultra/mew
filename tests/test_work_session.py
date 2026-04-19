@@ -3015,6 +3015,96 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Recurring failures", text)
         self.assertIn("run_tests uv run pytest -q failed 2x", text)
 
+    def test_work_session_resume_detects_low_yield_search_traps(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search loop",
+            "goal": "Avoid repeated empty searches.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "zero collected"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "zero collected", "matches": []},
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "no tests ran"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "no tests ran", "matches": []},
+                },
+                {
+                    "id": 3,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "exit_code 5"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "exit_code 5", "matches": []},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        warning = resume["low_yield_observations"][0]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(warning["path"], "src/mew/dogfood.py")
+        self.assertEqual(warning["count"], 3)
+        self.assertEqual(warning["last_tool_call_id"], 3)
+        self.assertIn("no tests ran", warning["queries"])
+        self.assertIn("Low-yield observations", text)
+        self.assertIn("search_text src/mew/dogfood.py returned zero matches 3x", text)
+        self.assertIn("suggested_next: stop searching this same surface", text)
+
+    def test_work_session_low_yield_search_traps_reset_after_matches(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search loop",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "missing one"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "missing one", "matches": []},
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "missing two"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "missing two", "matches": []},
+                },
+                {
+                    "id": 3,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "found"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "found", "matches": [{"line": 1}]},
+                },
+                {
+                    "id": 4,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "query": "missing three"},
+                    "result": {"path": "src/mew/dogfood.py", "query": "missing three", "matches": []},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["low_yield_observations"], [])
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -12032,6 +12122,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Use work_session.effort as operational pressure", prompt)
         self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
+        self.assertIn("work_session.resume.low_yield_observations", prompt)
+        self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)
         self.assertIn("treat continuity.recommendation as the first repair queue", prompt)
         self.assertIn("missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state", prompt)

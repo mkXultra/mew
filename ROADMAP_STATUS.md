@@ -166,7 +166,15 @@ Milestone 2 Done-when checklist:
   work-session dogfood passed at
   `/tmp/mew-zero-test-selector-dogfood-coverage`, and
   `/tmp/mew-m2-zero-test-dogfood-coverage-evidence/.mew/dogfood/m2-comparative-protocol.json`
-  records the completed task-chain verifier as passed.
+  records the completed task-chain verifier as passed. Task `#275` then
+  addressed the repeated-search behavior exposed by resident session `#261`:
+  work-session resumes now include `low_yield_observations` when repeated
+  `search_text` calls on the same path/pattern return zero matches, the
+  formatted resume surfaces a "Low-yield observations" section with query
+  history and a suggested next move, and the THINK prompt tells the resident to
+  switch away from that same search surface. The full `tests/test_work_session.py`
+  suite passed and the work-session dogfood passed at
+  `/tmp/mew-low-yield-observations-dogfood`.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
