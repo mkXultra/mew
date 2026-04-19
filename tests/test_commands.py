@@ -4176,7 +4176,7 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
-    def test_next_json_routes_weak_work_continuity_to_resume(self):
+    def test_next_json_routes_broken_work_continuity_to_live(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
@@ -4217,7 +4217,15 @@ class CommandTests(unittest.TestCase):
                             "goal": "No working memory yet.",
                             "created_at": "now",
                             "updated_at": "now",
-                            "tool_calls": [],
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "tool": "edit_file",
+                                    "status": "completed",
+                                    "parameters": {"path": "README.md"},
+                                    "result": {"dry_run": True, "changed": True, "path": "README.md"},
+                                }
+                            ],
                             "model_turns": [],
                         }
                     )
@@ -4228,7 +4236,7 @@ class CommandTests(unittest.TestCase):
                 payload = json.loads(stdout.getvalue())
 
                 self.assertIn("repair continuity for active work session #3", payload["next_move"])
-                self.assertEqual(payload["command"], "mew work 1 --session --resume")
+                self.assertEqual(payload["command"], "mew work 1 --live --max-steps 1")
             finally:
                 os.chdir(old_cwd)
 

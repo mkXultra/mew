@@ -48,8 +48,9 @@ action checks, rejects waiting/pending next-action prose outside active waiting
 phases, and requires recovery hints to contain a real mew/chat control or an
 explicit command/review step.
 The same repair signal now reaches `mew next`: when an active work session has
-weak continuity, the top-level next move points at the continuity repair action
-and resume command instead of blindly entering the coding cockpit.
+weak or broken continuity, the top-level next move points at a live continuity
+repair action instead of blindly entering the coding cockpit, while usable
+sessions still route to the normal cockpit.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

@@ -936,6 +936,8 @@ def format_focus(data):
 def continuity_repair_summary(continuity):
     if not continuity or not (continuity.get("missing") or []):
         return ""
+    if continuity.get("status") not in {"weak", "broken"}:
+        return ""
     recommendation = continuity.get("recommendation") or {}
     return str(recommendation.get("summary") or "").strip()
 
@@ -996,9 +998,10 @@ def next_move(state, kind=None):
         session = active_work[0]
         continuity_summary = continuity_repair_summary(session.get("continuity") or {})
         if continuity_summary:
+            command = session.get("continue_command") or session.get("resume_command")
             return (
                 f"repair continuity for active work session #{session.get('id')}: "
-                f"{continuity_summary} via `{session.get('resume_command')}`"
+                f"{continuity_summary} via `{command}`"
             )
         task = next((task for task in tasks if str(task.get("id")) == str(session.get("task_id"))), {})
         if task_kind(task) == "coding" and session.get("task_id") is not None:

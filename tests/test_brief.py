@@ -650,15 +650,15 @@ class BriefTests(unittest.TestCase):
         self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
         self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
 
-    def test_next_move_repairs_weak_active_work_continuity(self):
+    def test_next_move_keeps_usable_active_work_continuity_on_cockpit(self):
         state = default_state()
-        add_task(state, task_id=7, title="Recover continuity", kind="coding")
+        add_task(state, task_id=7, title="Usable continuity", kind="coding")
         state["work_sessions"].append(
             {
                 "id": 3,
                 "task_id": 7,
                 "status": "active",
-                "title": "Recover continuity",
+                "title": "Usable continuity",
                 "goal": "Make reentry obvious.",
                 "created_at": "then",
                 "updated_at": "now",
@@ -670,11 +670,45 @@ class BriefTests(unittest.TestCase):
         data = build_focus_data(state, limit=3, kind="coding")
         focus = format_focus(data)
 
+        self.assertEqual(data["active_work_sessions"][0]["continuity"]["status"], "usable")
         self.assertEqual(
             data["next_move"],
-            "repair continuity for active work session #3: refresh working memory with a hypothesis, next step, or verified state via `./mew work 7 --session --resume`",
+            "enter coding cockpit for active work session #3 task #7 with `./mew code 7`",
         )
         self.assertIn("continuity_next: refresh working memory", focus)
+
+    def test_next_move_repairs_broken_active_work_continuity_with_live_step(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Recover continuity", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Recover continuity",
+                "goal": "Make reentry obvious.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": "README.md"},
+                        "result": {"dry_run": True, "changed": True, "path": "README.md"},
+                    }
+                ],
+                "model_turns": [],
+            }
+        )
+
+        data = build_focus_data(state, limit=3, kind="coding")
+
+        self.assertEqual(data["active_work_sessions"][0]["continuity"]["status"], "broken")
+        self.assertEqual(
+            data["next_move"],
+            "repair continuity for active work session #3: refresh working memory with a hypothesis, next step, or verified state via `./mew work 7 --live --max-steps 1`",
+        )
 
     def test_focus_surfaces_active_work_session_unresolved_risk(self):
         state = default_state()
