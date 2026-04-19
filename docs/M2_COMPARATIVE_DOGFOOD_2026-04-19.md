@@ -244,3 +244,37 @@ Follow-up: for small localized changes, mew still has too much observer
 overhead versus a fresh CLI. The next useful paired task should either be
 write-heavy enough for mew's persistent context to matter, or should reduce the
 supervision overhead for small local changes.
+
+## Interruption-Resume Gate Protocol
+
+After the scoped M3 reentry gate was added, the M2 comparative artifact was
+extended with an explicit `interruption_resume_gate` section. This keeps the
+next paired task from drifting into another generic speed comparison.
+
+The protocol now records:
+
+- `task_shape.recommended_next=interruption_resume`
+- required mew evidence: changed/pending work, preserved risk or interruption,
+  runnable next action, usable continuity, and passing verification after
+  reentry
+- required fresh CLI evidence: whether manual rebrief was needed, whether
+  files/risks/next action had to be reconstructed, and whether verification
+  completed with less supervision
+- per-run `interruption_resume_gate.mew` and `.fresh_cli` fields, so external
+  model reports can be merged into the same JSON artifact
+
+Validation:
+
+- `uv run python -m py_compile src/mew/dogfood.py tests/test_dogfood.py`
+- `uv run pytest --testmon -q tests/test_dogfood.py -k "m2_comparative or m3_reentry_gate"`
+- `uv run ruff check src/mew/dogfood.py tests/test_dogfood.py`
+- `./mew dogfood --scenario m2-comparative --workspace /tmp/mew-m2-interruption-protocol --json`
+
+Next useful M2 move: run a real interruption-shaped paired coding task, then
+merge both sides with:
+
+```bash
+mew dogfood --scenario m2-comparative \
+  --mew-session-id <id> \
+  --m2-comparison-report <fresh-cli-report.json>
+```

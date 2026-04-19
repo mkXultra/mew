@@ -513,6 +513,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m2_comparative_protocol_records_resident_preference", text)
             self.assertIn("m2_comparative_protocol_maps_to_m2_done_when", text)
             self.assertIn("m2_comparative_protocol_has_fillable_comparison_result", text)
+            self.assertIn("m2_comparative_protocol_tracks_interruption_resume_gate", text)
             self.assertTrue(protocol["generated_at"])
             self.assertEqual(
                 protocol["observer_tip"],
@@ -525,9 +526,15 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["comparison_result"]["status"], "unknown")
             self.assertEqual(protocol["comparison_result"]["next_blocker"], "")
             self.assertEqual(protocol["comparison_result"]["notes"], "")
+            self.assertEqual(protocol["task_shape"]["recommended_next"], "interruption_resume")
+            self.assertIn("interruption_resume", protocol["task_shape"]["allowed_values"])
+            self.assertEqual(protocol["interruption_resume_gate"]["status"], "unknown")
+            self.assertIn("proved", protocol["interruption_resume_gate"]["allowed_statuses"])
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
             self.assertIn("fresh_cli", protocol["comparison_result"]["run_summaries"])
+            self.assertIn("## Task Shape", runbook)
             self.assertIn("## Observer Tip", runbook)
+            self.assertIn("## Interruption Resume Gate", runbook)
             self.assertIn("apply it with deferred verification", runbook)
             self.assertIn("## Comparison Result", runbook)
             self.assertIn("- next_blocker:", runbook)
@@ -642,6 +649,9 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["mew_run_evidence"]["work_session_id"], 7)
             self.assertEqual(protocol["mew_run_evidence"]["verification"]["status"], "passed")
             self.assertEqual(protocol["mew_run_evidence"]["approval_counts"]["applied"], 1)
+            self.assertEqual(protocol["mew_run_evidence"]["resume_gate"]["status"], "not_proved")
+            self.assertTrue(protocol["mew_run_evidence"]["resume_gate"]["changed_or_pending_work"])
+            self.assertEqual(protocol["interruption_resume_gate"]["mew"]["status"], "not_proved")
             self.assertIn("session #7 task #3", mew_summary["summary"])
             self.assertIn("passed exit=0 command=pytest -q", mew_summary["verification_result"])
             self.assertIn("mew work 3 --session --resume --allow-read .", mew_summary["preference_signal"])
@@ -650,6 +660,7 @@ class DogfoodTests(unittest.TestCase):
                 "mew work 3 --session --resume --allow-read .",
             )
             self.assertIn("## Mew Run Evidence", runbook)
+            self.assertIn("## Interruption Resume Gate", runbook)
             self.assertIn("- work_session_id: 7", runbook)
             self.assertIn("`pytest -q`", runbook)
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
@@ -681,6 +692,16 @@ class DogfoodTests(unittest.TestCase):
                             "reason": "fresh CLI was faster, mew preserved better continuity",
                             "blocking_gap": "need a write-heavy paired task",
                         },
+                        "task_shape": {
+                            "selected": "interruption_resume",
+                        },
+                        "interruption_resume_gate": {
+                            "fresh_cli": {
+                                "status": "not_proved",
+                                "manual_rebrief_needed": True,
+                                "evidence_gap": ["fresh CLI was not interrupted in this run"],
+                            }
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -709,7 +730,11 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("two tool calls", fresh_cli["summary"])
             self.assertEqual(protocol["friction_counts"]["manual_status_probes"], 1)
             self.assertEqual(protocol["resident_preference"]["choice"], "inconclusive")
+            self.assertEqual(protocol["task_shape"]["selected"], "interruption_resume")
+            self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "not_proved")
+            self.assertTrue(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
             self.assertIn("## Comparison Report", runbook)
+            self.assertIn("manual_rebrief_needed", runbook)
             self.assertIn(str(report_path), runbook)
 
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):

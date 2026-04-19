@@ -5586,6 +5586,72 @@ def _m2_latest_verification(calls):
     return {"status": "unknown", "exit_code": None, "command": "", "tool_call_id": None, "source": "", "finished_at": ""}
 
 
+def _m2_call_has_failure_or_interruption(call):
+    if not isinstance(call, dict):
+        return False
+    if call.get("status") in {"failed", "interrupted"}:
+        return True
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    exit_values = [
+        result.get("exit_code"),
+        result.get("verification_exit_code"),
+        verification.get("exit_code"),
+    ]
+    return any(value not in (None, 0) for value in exit_values)
+
+
+def _m2_resume_gate_status(gate):
+    if not gate:
+        return "unknown"
+    required = (
+        gate.get("changed_or_pending_work"),
+        gate.get("risk_or_interruption_preserved"),
+        gate.get("runnable_next_action"),
+        gate.get("continuity_usable"),
+        gate.get("verification_after_resume_candidate"),
+    )
+    if all(required):
+        return "proved"
+    if any(value is True for value in required):
+        return "not_proved"
+    return "unknown"
+
+
+def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resume_command):
+    resume = resume or {}
+    continuity = resume.get("continuity") or {}
+    calls = list(calls or [])
+    approval_counts = approval_counts or {}
+    verification = verification or {}
+    gate = {
+        "status": "unknown",
+        "resume_command": resume_command or "",
+        "continuity_score": continuity.get("score") or "",
+        "continuity_status": continuity.get("status") or "",
+        "changed_or_pending_work": bool(resume.get("files_touched") or (approval_counts.get("total") or 0) > 0),
+        "risk_or_interruption_preserved": bool(
+            resume.get("unresolved_failure")
+            or resume.get("failures")
+            or any(_m2_call_has_failure_or_interruption(call) for call in calls)
+        ),
+        "runnable_next_action": bool(str(resume.get("next_action") or "").strip()),
+        "continuity_usable": continuity.get("status") in {"strong", "usable"},
+        "verification_after_resume_candidate": verification.get("status") == "passed",
+        "evidence_gap": [],
+    }
+    gap_labels = {
+        "changed_or_pending_work": "resume did not expose changed or pending work",
+        "risk_or_interruption_preserved": "resume did not preserve an interruption, failure, or recovery risk",
+        "runnable_next_action": "resume did not expose a runnable next action",
+        "continuity_usable": "continuity was not strong or usable",
+        "verification_after_resume_candidate": "no passing verification candidate was recorded",
+    }
+    gate["evidence_gap"] = [label for key, label in gap_labels.items() if not gate.get(key)]
+    gate["status"] = _m2_resume_gate_status(gate)
+    return gate
+
+
 def build_m2_mew_run_evidence(state, session_id):
     session_id_text = _m2_session_id_text(session_id)
     if not session_id_text:
@@ -5635,6 +5701,13 @@ def build_m2_mew_run_evidence(state, session_id):
         "approval_counts": approval_counts,
         "verification": verification,
         "resume_command": resume_command,
+        "resume_gate": _m2_resume_gate_evidence(
+            resume,
+            calls,
+            approval_counts,
+            verification,
+            resume_command,
+        ),
         "continuity": {
             "score": continuity.get("score") or "",
             "status": continuity.get("status") or "",
@@ -5708,6 +5781,10 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
         continuity.get("status") in {"strong", "usable"} if continuity.get("status") else None
     )
     resume_behavior["risky_or_missing_context"] = continuity.get("missing") or []
+    resume_gate = evidence.get("resume_gate") or {}
+    if resume_gate:
+        gate = protocol.setdefault("interruption_resume_gate", {})
+        gate["mew"] = resume_gate
     friction_counts = protocol.setdefault("friction_counts", {})
     friction_counts["approval_confusions"] = approvals.get("rejected", 0) + approvals.get("failed", 0)
     friction_counts["verification_confusions"] = 1 if verification.get("status") == "failed" else 0
@@ -5751,6 +5828,9 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
     for key in ("friction_counts", "resume_behavior", "resident_preference"):
         if isinstance(report.get(key), dict):
             _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
+    for key in ("task_shape", "interruption_resume_gate"):
+        if isinstance(report.get(key), dict):
+            _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
     return protocol
 
 
@@ -5769,6 +5849,16 @@ def build_m2_comparative_protocol(mew_run_evidence=None, comparison_report=None,
             "apply it with deferred verification and run the verifier after "
             "the companion change lands."
         ),
+        "task_shape": {
+            "selected": "standard",
+            "recommended_next": "interruption_resume",
+            "allowed_values": ["standard", "interruption_resume", "write_heavy"],
+            "why": (
+                "M2 cannot be closed until an interruption-shaped task proves "
+                "that the resident can resume without user rebrief and still "
+                "prefer mew over a fresh CLI."
+            ),
+        },
         "required_runs": [
             {
                 "id": "mew",
@@ -5831,6 +5921,24 @@ def build_m2_comparative_protocol(mew_run_evidence=None, comparison_report=None,
             "could_resume_without_user_rebrief": None,
             "risky_or_missing_context": [],
         },
+        "interruption_resume_gate": {
+            "status": "unknown",
+            "allowed_statuses": ["proved", "not_proved", "unknown", "blocked"],
+            "required_mew_evidence": [
+                "resume brief includes changed or pending work",
+                "resume brief preserves interruption, failure, or recovery risk",
+                "resume brief exposes a runnable next action",
+                "continuity is strong or usable",
+                "the resident can advance to passing verification after reentry",
+            ],
+            "required_fresh_cli_evidence": [
+                "whether manual rebrief was needed after interruption",
+                "whether files/risks/next action had to be reconstructed from scratch",
+                "whether the fresh CLI completed verification faster or with less supervision",
+            ],
+            "mew": {"status": "unknown", "evidence_gap": []},
+            "fresh_cli": {"status": "unknown", "evidence_gap": []},
+        },
         "resident_preference": {
             "choice": "unknown",
             "allowed_values": ["mew", "fresh_cli", "inconclusive"],
@@ -5863,16 +5971,31 @@ def format_m2_comparative_protocol(protocol):
         "",
         protocol.get("purpose") or "",
         "",
-        "## Observer Tip",
-        protocol.get("observer_tip") or "",
-        "",
-        "## Comparison Result",
-        f"- status: {comparison.get('status', 'unknown')}",
-        f"- allowed_statuses: {', '.join(comparison.get('allowed_statuses') or [])}",
-        f"- next_blocker: {comparison.get('next_blocker', '')}",
-        f"- notes: {comparison.get('notes', '')}",
-        "- run_summaries:",
+        "## Task Shape",
     ]
+    task_shape = protocol.get("task_shape") or {}
+    lines.extend(
+        [
+            f"- selected: {task_shape.get('selected', '')}",
+            f"- recommended_next: {task_shape.get('recommended_next', '')}",
+            f"- allowed_values: {', '.join(task_shape.get('allowed_values') or [])}",
+            f"- why: {task_shape.get('why', '')}",
+            "",
+        ]
+    )
+    lines.extend(
+        [
+            "## Observer Tip",
+            protocol.get("observer_tip") or "",
+            "",
+            "## Comparison Result",
+            f"- status: {comparison.get('status', 'unknown')}",
+            f"- allowed_statuses: {', '.join(comparison.get('allowed_statuses') or [])}",
+            f"- next_blocker: {comparison.get('next_blocker', '')}",
+            f"- notes: {comparison.get('notes', '')}",
+            "- run_summaries:",
+        ]
+    )
     for run_id in ("mew", "fresh_cli"):
         summary = run_summaries.get(run_id) or {}
         lines.extend(
@@ -5963,6 +6086,33 @@ def format_m2_comparative_protocol(protocol):
             f"- could_resume_without_user_rebrief: {resume_text}",
             f"- risky_or_missing_context: {resume_behavior.get('risky_or_missing_context') or []}",
             "",
+            "## Interruption Resume Gate",
+        ]
+    )
+    gate = protocol.get("interruption_resume_gate") or {}
+    lines.extend(
+        [
+            f"- status: {gate.get('status', 'unknown')}",
+            f"- allowed_statuses: {', '.join(gate.get('allowed_statuses') or [])}",
+            "- mew:",
+        ]
+    )
+    for key, value in (gate.get("mew") or {}).items():
+        lines.append(f"  - {key}: {value}")
+    lines.append("- fresh_cli:")
+    for key, value in (gate.get("fresh_cli") or {}).items():
+        lines.append(f"  - {key}: {value}")
+    required_mew = gate.get("required_mew_evidence") or []
+    if required_mew:
+        lines.append("- required_mew_evidence:")
+        lines.extend(f"  - {item}" for item in required_mew)
+    required_fresh = gate.get("required_fresh_cli_evidence") or []
+    if required_fresh:
+        lines.append("- required_fresh_cli_evidence:")
+        lines.extend(f"  - {item}" for item in required_fresh)
+    lines.extend(
+        [
+            "",
             "## Resident Preference",
             f"- choice: {preference.get('choice', 'unknown')}",
             f"- reason: {preference.get('reason', '')}",
@@ -6015,6 +6165,8 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None, compar
     loaded_comparison_report = loaded.get("comparison_report") or {}
     allowed_comparison_statuses = set(comparison.get("allowed_statuses") or [])
     comparison_status = comparison.get("status")
+    task_shape = loaded.get("task_shape") or {}
+    interruption_gate = loaded.get("interruption_resume_gate") or {}
 
     _scenario_check(
         checks,
@@ -6102,6 +6254,22 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None, compar
             "resume_behavior": loaded.get("resume_behavior"),
         },
         expected="friction counts include waits/context/recovery and resume behavior gate",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_tracks_interruption_resume_gate",
+        task_shape.get("recommended_next") == "interruption_resume"
+        and "interruption_resume" in (task_shape.get("allowed_values") or [])
+        and "proved" in (interruption_gate.get("allowed_statuses") or [])
+        and "not_proved" in (interruption_gate.get("allowed_statuses") or [])
+        and {"mew", "fresh_cli"}.issubset(interruption_gate.keys())
+        and len(interruption_gate.get("required_mew_evidence") or []) >= 4
+        and len(interruption_gate.get("required_fresh_cli_evidence") or []) >= 2,
+        observed={
+            "task_shape": task_shape,
+            "interruption_resume_gate": interruption_gate,
+        },
+        expected="protocol captures the M2 interruption-resume gate and evidence requirements for both runs",
     )
     _scenario_check(
         checks,

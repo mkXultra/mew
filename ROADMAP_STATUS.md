@@ -96,7 +96,10 @@ Milestone 2 Done-when checklist:
   verification successfully. This is supporting evidence, not full parity: the
   next comparative run still needs an interruption-shaped mew task paired
   against a fresh Claude Code or Codex CLI session, with the resident-preference
-  result recorded.
+  result recorded. The M2 comparative protocol now includes an explicit
+  `interruption_resume_gate` section so that this next paired run records
+  changed/pending work, preserved risk, runnable next action, usable continuity,
+  post-reentry verification, and fresh-CLI rebrief evidence in one artifact.
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
