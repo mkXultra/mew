@@ -3485,6 +3485,100 @@ passed = (
     and observed["verification_exit_code"] is None
     and observed["coerced_dry_run_reason"] == "paired_test_steer"
 )
+
+Path("src/mew/dogfood_batch.py").write_text("VALUE = 'before'\\n", encoding="utf-8")
+Path("tests/test_dogfood_batch.py").write_text(
+    "import unittest\\n"
+    "from pathlib import Path\\n\\n"
+    "class DogfoodBatchTests(unittest.TestCase):\\n"
+    "    def test_value(self):\\n"
+    "        self.assertIn('before', Path('src/mew/dogfood_batch.py').read_text())\\n",
+    encoding="utf-8",
+)
+code, output = run_main(["task", "add", "Dogfood paired approve-all task", "--kind", "coding", "--json"])
+batch_task_id = str(json.loads(output)["task"]["id"])
+stale_command = f"{sys.executable} -c \\"print('stale verifier')\\""
+run_main(
+    [
+        "work",
+        batch_task_id,
+        "--start-session",
+        "--allow-write",
+        ".",
+        "--allow-verify",
+        "--verify-command",
+        stale_command,
+    ]
+)
+code, output = run_main(
+    [
+        "work",
+        batch_task_id,
+        "--tool",
+        "edit_file",
+        "--path",
+        "src/mew/dogfood_batch.py",
+        "--old",
+        "before",
+        "--new",
+        "after",
+        "--allow-write",
+        ".",
+        "--json",
+    ]
+)
+source_dry_run = json.loads(output)["tool_call"]
+code, output = run_main(
+    [
+        "work",
+        batch_task_id,
+        "--tool",
+        "edit_file",
+        "--path",
+        "tests/test_dogfood_batch.py",
+        "--old",
+        "before",
+        "--new",
+        "after",
+        "--allow-write",
+        ".",
+        "--json",
+    ]
+)
+test_dry_run = json.loads(output)["tool_call"]
+code, output = run_main(["work", batch_task_id, "--approve-all", "--allow-write", ".", "--json"])
+approve_all = json.loads(output)
+batch_session = next(
+    candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == batch_task_id
+)
+applied = [
+    call
+    for call in batch_session.get("tool_calls", [])
+    if (call.get("parameters") or {}).get("approved_from_tool_call_id")
+    in {source_dry_run.get("id"), test_dry_run.get("id")}
+]
+batch_observed = {
+    "exit_code": code,
+    "approved_count": approve_all.get("count"),
+    "source_after": "after" in Path("src/mew/dogfood_batch.py").read_text(encoding="utf-8"),
+    "test_after": "after" in Path("tests/test_dogfood_batch.py").read_text(encoding="utf-8"),
+    "deferred_count": sum(1 for call in applied if (call.get("result") or {}).get("verification_deferred")),
+    "verification_exit_codes": [
+        (call.get("result") or {}).get("verification_exit_code")
+        for call in applied
+        if (call.get("result") or {}).get("verification_exit_code") is not None
+    ],
+}
+batch_passed = (
+    code == 0
+    and batch_observed["approved_count"] == 2
+    and batch_observed["source_after"]
+    and batch_observed["test_after"]
+    and batch_observed["deferred_count"] == 1
+    and batch_observed["verification_exit_codes"] == [0]
+)
+observed["approve_all_batch"] = batch_observed
+passed = passed and batch_passed
 print(json.dumps({"passed": passed, "observed": observed}, ensure_ascii=False))
 raise SystemExit(0 if passed else 1)
 """.lstrip(),
