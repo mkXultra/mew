@@ -102,6 +102,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["p95"], 4.0)
         self.assertEqual(metrics["latency"]["model_to_tool_wait_seconds"]["avg"], 1.0)
         self.assertEqual(metrics["latency"]["tool_to_next_model_wait_seconds"]["avg"], 3.0)
+        self.assertEqual(metrics["latency"]["model_resume_wait_seconds"]["avg"], 3.0)
+        self.assertEqual(metrics["latency"]["approval_bound_wait_seconds"]["count"], 0)
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["avg"], 0.65)
         signal_ids = {signal["id"] for signal in metrics["signals"]}
         self.assertIn("approval_friction", signal_ids)
@@ -172,6 +174,7 @@ class MetricsTests(unittest.TestCase):
         metrics = build_observation_metrics(state, kind="coding")
 
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["count"], 1)
+        self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["model_resume_wait_seconds"], 41.0)
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["wait_seconds"], 41.0)
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["next_model_turn_id"], 2)
         self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["session_id"], 7)
@@ -179,9 +182,66 @@ class MetricsTests(unittest.TestCase):
 
         text = format_observation_metrics(metrics)
         self.assertIn("slow_model_resumes:", text)
-        self.assertIn("wait=41.0s", text)
+        self.assertIn("model_wait=41.0s raw_wait=41.0s", text)
         self.assertIn("high_idle_sessions:", text)
         self.assertIn("idle_ratio=0.975", text)
+
+    def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Observe approval waits", "kind": "coding", "status": "ready"})
+        state["work_sessions"].append(
+            {
+                "id": 11,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "tool_call_id": 1,
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    },
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:45Z",
+                        "finished_at": "2026-04-19T00:00:46Z",
+                    },
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "applied",
+                        "approved_at": "2026-04-19T00:00:50Z",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/metrics.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    }
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertEqual(metrics["latency"]["tool_to_next_model_wait_seconds"]["avg"], 41.0)
+        self.assertEqual(metrics["latency"]["model_resume_wait_seconds"]["count"], 0)
+        self.assertEqual(metrics["latency"]["approval_bound_wait_seconds"]["avg"], 41.0)
+        self.assertEqual(metrics["diagnostics"]["slow_model_resumes"], [])
+        self.assertEqual(metrics["diagnostics"]["approval_bound_waits"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["approval_bound_waits"][0]["approval_bound_wait_seconds"], 41.0)
+        signal_ids = {signal["id"] for signal in metrics["signals"]}
+        self.assertNotIn("slow_model_resume", signal_ids)
+
+        text = format_observation_metrics(metrics)
+        self.assertIn("approval_bound_wait_seconds: count=1 avg=41.0", text)
+        self.assertIn("approval_bound_waits:", text)
+        self.assertIn("approval_wait=41.0s raw_wait=41.0s", text)
 
 
 if __name__ == "__main__":

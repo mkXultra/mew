@@ -156,39 +156,46 @@ def _model_to_tool_waits(model_turns, tool_calls):
 
 
 def _tool_to_next_model_waits(model_turns, tool_calls):
-    turn_starts = sorted(
-        parse_time(turn.get("started_at"))
-        for turn in model_turns or []
-        if isinstance(turn, dict) and parse_time(turn.get("started_at"))
-    )
-    waits = []
-    for call in tool_calls or []:
-        if not isinstance(call, dict):
-            continue
-        finished = parse_time(call.get("finished_at"))
-        if not finished:
-            continue
-        next_start = None
-        for turn_start in turn_starts:
-            try:
-                if turn_start >= finished:
-                    next_start = turn_start
-                    break
-            except TypeError:
-                continue
-        if next_start is None:
-            continue
-        waits.append(max(0.0, (next_start - finished).total_seconds()))
-    return waits
+    return [record["wait_seconds"] for record in _tool_to_next_model_wait_records({}, model_turns, tool_calls)]
 
 
-def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
+def _approval_decision_time(call):
+    times = []
+    for key in ("approved_at", "rejected_at"):
+        value = parse_time(call.get(key))
+        if value:
+            times.append(value)
+    if not times:
+        return None
+    return min(times)
+
+
+def _approval_bound_wait_seconds(call, finished, next_start):
+    result = call.get("result") or {}
+    if call.get("tool") not in WORK_WRITE_TOOLS or not result.get("dry_run"):
+        return 0.0
+    decision_time = _approval_decision_time(call)
+    boundary = next_start
+    if decision_time:
+        try:
+            boundary = min(next_start, decision_time)
+        except TypeError:
+            boundary = next_start
+    try:
+        if boundary <= finished:
+            return 0.0
+        return max(0.0, (boundary - finished).total_seconds())
+    except TypeError:
+        return 0.0
+
+
+def _tool_to_next_model_wait_records(session, model_turns, tool_calls):
     turn_starts = sorted(
         (parse_time(turn.get("started_at")), turn)
         for turn in model_turns or []
         if isinstance(turn, dict) and parse_time(turn.get("started_at"))
     )
-    samples = []
+    records = []
     for call in tool_calls or []:
         if not isinstance(call, dict):
             continue
@@ -208,17 +215,54 @@ def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
         if next_start is None:
             continue
         wait_seconds = max(0.0, (next_start - finished).total_seconds())
-        if wait_seconds <= SLOW_MODEL_RESUME_SECONDS:
+        approval_bound_seconds = min(wait_seconds, _approval_bound_wait_seconds(call, finished, next_start))
+        model_resume_seconds = max(0.0, wait_seconds - approval_bound_seconds)
+        if approval_bound_seconds > 0 and model_resume_seconds <= 0:
+            model_resume_seconds = None
+        wait_context = "model_resume"
+        if approval_bound_seconds > 0:
+            wait_context = "approval_bound" if model_resume_seconds is None else "mixed_approval_bound"
+        records.append(
+            {
+                "session_id": session.get("id"),
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "approval_status": call.get("approval_status") or "",
+                "path": _call_path(call),
+                "wait_seconds": _round(wait_seconds),
+                "model_resume_wait_seconds": _round(model_resume_seconds),
+                "approval_bound_wait_seconds": _round(approval_bound_seconds) if approval_bound_seconds > 0 else None,
+                "wait_context": wait_context,
+                "finished_at": call.get("finished_at") or "",
+                "next_model_turn_id": next_turn.get("id") if next_turn else None,
+                "next_model_started_at": next_turn.get("started_at") if next_turn else "",
+            }
+        )
+    return records
+
+
+def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
+    samples = []
+    for record in _tool_to_next_model_wait_records(session, model_turns, tool_calls):
+        if (record.get("model_resume_wait_seconds") or 0) <= SLOW_MODEL_RESUME_SECONDS:
             continue
         sample = {
             "session_id": session.get("id"),
-            "tool_call_id": call.get("id"),
-            "tool": call.get("tool") or "",
-            "path": _call_path(call),
-            "wait_seconds": _round(wait_seconds),
-            "finished_at": call.get("finished_at") or "",
-            "next_model_turn_id": next_turn.get("id") if next_turn else None,
-            "next_model_started_at": next_turn.get("started_at") if next_turn else "",
+            **record,
+        }
+        sample.update(_sample_task(state, session.get("task_id")))
+        samples.append(sample)
+    return samples
+
+
+def _approval_bound_wait_samples(state, session, model_turns, tool_calls):
+    samples = []
+    for record in _tool_to_next_model_wait_records(session, model_turns, tool_calls):
+        if (record.get("approval_bound_wait_seconds") or 0) <= SLOW_MODEL_RESUME_SECONDS:
+            continue
+        sample = {
+            "session_id": session.get("id"),
+            **record,
         }
         sample.update(_sample_task(state, session.get("task_id")))
         samples.append(sample)
@@ -352,17 +396,20 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
         "verification_failures": [],
         "approval_friction": [],
         "slow_model_resumes": [],
+        "approval_bound_waits": [],
         "high_idle_sessions": [],
     }
     if limit <= 0:
         return samples
 
     slow_model_resumes = []
+    approval_bound_waits = []
     high_idle_sessions = []
     for session in sessions:
         tool_calls = [call for call in session.get("tool_calls") or [] if isinstance(call, dict)]
         model_turns = [turn for turn in session.get("model_turns") or [] if isinstance(turn, dict)]
         slow_model_resumes.extend(_tool_to_next_model_wait_samples(state, session, model_turns, tool_calls))
+        approval_bound_waits.extend(_approval_bound_wait_samples(state, session, model_turns, tool_calls))
         idle_sample = _high_idle_session_sample(state, session, model_turns, tool_calls)
         if idle_sample:
             high_idle_sessions.append(idle_sample)
@@ -384,7 +431,12 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
                 samples["approval_friction"].append(_approval_sample(state, session, call))
     samples["slow_model_resumes"] = sorted(
         slow_model_resumes,
-        key=lambda item: item.get("wait_seconds") or 0,
+        key=lambda item: item.get("model_resume_wait_seconds") or 0,
+        reverse=True,
+    )[:limit]
+    samples["approval_bound_waits"] = sorted(
+        approval_bound_waits,
+        key=lambda item: item.get("approval_bound_wait_seconds") or 0,
         reverse=True,
     )[:limit]
     samples["high_idle_sessions"] = sorted(
@@ -477,14 +529,14 @@ def _build_signals(sessions, reliability, latency):
             threshold="<=60s",
         )
 
-    tool_to_next_model_p95 = (latency.get("tool_to_next_model_wait_seconds") or {}).get("p95")
-    if tool_to_next_model_p95 is not None and tool_to_next_model_p95 > 30:
+    model_resume_p95 = (latency.get("model_resume_wait_seconds") or {}).get("p95")
+    if model_resume_p95 is not None and model_resume_p95 > 30:
         _add_signal(
             signals,
             "slow_model_resume",
             "warn",
             "model resume after tool completion is slow at p95",
-            value=tool_to_next_model_p95,
+            value=model_resume_p95,
             threshold="<=30s",
         )
 
@@ -529,6 +581,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     first_tool_starts = []
     model_to_tool_waits = []
     tool_to_next_model_waits = []
+    model_resume_waits = []
+    approval_bound_waits = []
     idle_ratios = []
 
     for session in sessions:
@@ -553,7 +607,18 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         _merge_counts(verification_counts, _verification_counts(tool_calls))
         first_tool_starts.append(_first_tool_start_seconds(session, tool_calls))
         model_to_tool_waits.extend(_model_to_tool_waits(model_turns, tool_calls))
-        tool_to_next_model_waits.extend(_tool_to_next_model_waits(model_turns, tool_calls))
+        wait_records = _tool_to_next_model_wait_records(session, model_turns, tool_calls)
+        tool_to_next_model_waits.extend(record.get("wait_seconds") for record in wait_records)
+        model_resume_waits.extend(
+            record.get("model_resume_wait_seconds")
+            for record in wait_records
+            if record.get("model_resume_wait_seconds") is not None
+        )
+        approval_bound_waits.extend(
+            record.get("approval_bound_wait_seconds")
+            for record in wait_records
+            if record.get("approval_bound_wait_seconds") is not None
+        )
         idle_ratios.append(_session_idle_ratio(session, model_turns, tool_calls))
 
     intervention_count = (
@@ -593,6 +658,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "first_tool_start_seconds": _summary(first_tool_starts),
         "model_to_tool_wait_seconds": _summary(model_to_tool_waits),
         "tool_to_next_model_wait_seconds": _summary(tool_to_next_model_waits),
+        "model_resume_wait_seconds": _summary(model_resume_waits),
+        "approval_bound_wait_seconds": _summary(approval_bound_waits),
         "perceived_idle_ratio": _summary(idle_ratios),
     }
     return {
@@ -642,6 +709,8 @@ def format_observation_metrics(data):
         ("first_tool_start_seconds", "first_tool_start_seconds"),
         ("model_to_tool_wait_seconds", "model_to_tool_wait_seconds"),
         ("tool_to_next_model_wait_seconds", "tool_to_next_model_wait_seconds"),
+        ("model_resume_wait_seconds", "model_resume_wait_seconds"),
+        ("approval_bound_wait_seconds", "approval_bound_wait_seconds"),
         ("perceived_idle_ratio", "perceived_idle_ratio"),
     ):
         summary = latency.get(key) or {}
@@ -666,8 +735,9 @@ def format_observation_metrics(data):
     verification_failures = diagnostics.get("verification_failures") or []
     approval_friction = diagnostics.get("approval_friction") or []
     slow_model_resumes = diagnostics.get("slow_model_resumes") or []
+    approval_bound_waits = diagnostics.get("approval_bound_waits") or []
     high_idle_sessions = diagnostics.get("high_idle_sessions") or []
-    if verification_failures or approval_friction or slow_model_resumes or high_idle_sessions:
+    if verification_failures or approval_friction or slow_model_resumes or approval_bound_waits or high_idle_sessions:
         lines.append("diagnostics:")
     if verification_failures:
         lines.append("verification_failures:")
@@ -705,8 +775,19 @@ def format_observation_metrics(data):
             path = f" path={sample.get('path')}" if sample.get("path") else ""
             lines.append(
                 f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
-                f"{task} tool={sample.get('tool')} wait={sample.get('wait_seconds')}s"
-                f" next_turn=#{sample.get('next_model_turn_id')}{path}"
+                f"{task} tool={sample.get('tool')} model_wait={sample.get('model_resume_wait_seconds')}s"
+                f" raw_wait={sample.get('wait_seconds')}s next_turn=#{sample.get('next_model_turn_id')}{path}"
+            )
+    if approval_bound_waits:
+        lines.append("approval_bound_waits:")
+        for sample in approval_bound_waits:
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            path = f" path={sample.get('path')}" if sample.get("path") else ""
+            approval = f" approval={sample.get('approval_status')}" if sample.get("approval_status") else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
+                f"{task} tool={sample.get('tool')}{approval} approval_wait={sample.get('approval_bound_wait_seconds')}s"
+                f" raw_wait={sample.get('wait_seconds')}s next_turn=#{sample.get('next_model_turn_id')}{path}"
             )
     if high_idle_sessions:
         lines.append("high_idle_sessions:")
