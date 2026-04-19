@@ -3274,6 +3274,22 @@ def run_work_session_scenario(workspace, env=None):
         state.setdefault("memory", {}).setdefault("deep", {}).setdefault("preferences", []).append(
             "Prefer compact dogfood reentry."
         )
+        FileMemoryBackend(workspace).write(
+            "User prefers typed active dogfood recall during native work.",
+            scope="private",
+            memory_type="user",
+            name="Dogfood active recall preference",
+            description="Typed user memory should enter resident startup context.",
+            created_at="2026-04-19T00:00:00Z",
+        )
+        FileMemoryBackend(workspace).write(
+            "Native hands work should surface active typed memory recall.",
+            scope="private",
+            memory_type="project",
+            name="Dogfood active recall project note",
+            description="Native work resume should include relevant project memory.",
+            created_at="2026-04-19T00:00:01Z",
+        )
         memory_session.setdefault("model_turns", []).append(
             {
                 "id": turn_id,
@@ -4031,6 +4047,7 @@ raise SystemExit(0 if passed else 1)
     ]
     working_memory = (resume_data.get("resume") or {}).get("working_memory") or {}
     user_preferences = (resume_data.get("resume") or {}).get("user_preferences") or {}
+    active_memory = (resume_data.get("resume") or {}).get("active_memory") or {}
     same_surface_audit = (resume_data.get("resume") or {}).get("same_surface_audit") or {}
     source_verification_confidence = (resume_data.get("resume") or {}).get("verification_confidence") or {}
     running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
@@ -4522,6 +4539,33 @@ raise SystemExit(0 if passed else 1)
             "follow_snapshot": running_output_preferences,
         },
         expected="resume and follow snapshots include durable user preferences",
+    )
+    _scenario_check(
+        checks,
+        "work_resume_surfaces_active_typed_memory",
+        resume_result.get("exit_code") == 0
+        and any(
+            item.get("memory_type") == "user"
+            and item.get("name") == "Dogfood active recall preference"
+            for item in active_memory.get("items") or []
+        )
+        and any(
+            item.get("memory_type") == "project"
+            and item.get("name") == "Dogfood active recall project note"
+            for item in active_memory.get("items") or []
+        ),
+        observed={
+            "total": active_memory.get("total"),
+            "items": [
+                {
+                    "name": item.get("name"),
+                    "memory_type": item.get("memory_type"),
+                    "reason": item.get("reason"),
+                }
+                for item in (active_memory.get("items") or [])
+            ],
+        },
+        expected="resume includes typed user memory and task-relevant project memory",
     )
     _scenario_check(
         checks,

@@ -18,6 +18,7 @@ from .state import next_id
 from .tasks import clip_output, find_task
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
+from .typed_memory import FileMemoryBackend, entry_to_dict
 from .write_tools import (
     edit_file,
     restore_write_snapshot,
@@ -85,6 +86,8 @@ DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS = 500
 DEFAULT_RUNNING_OUTPUT_MAX_CHARS = 4_000
 DEFAULT_RESUME_USER_PREFERENCES_LIMIT = 5
 DEFAULT_RESUME_USER_PREFERENCE_MAX_CHARS = 300
+DEFAULT_ACTIVE_MEMORY_LIMIT = 6
+DEFAULT_ACTIVE_MEMORY_TEXT_MAX_CHARS = 700
 WORK_REPEAT_CONSECUTIVE_LIMIT = 2
 WORK_REPEAT_TOTAL_LIMIT = 4
 WORK_SESSION_STEP_BUDGET = 30
@@ -119,6 +122,26 @@ WORK_ACTION_DISPLAY_FIELDS = (
     "staged",
     "stat",
 )
+ACTIVE_MEMORY_ALWAYS_TYPES = {"user"}
+ACTIVE_MEMORY_RELEVANT_TYPES = {"feedback", "project", "reference", "unknown"}
+ACTIVE_MEMORY_STOP_WORDS = {
+    "about",
+    "after",
+    "before",
+    "build",
+    "coding",
+    "exercise",
+    "from",
+    "have",
+    "into",
+    "session",
+    "should",
+    "task",
+    "that",
+    "this",
+    "with",
+    "work",
+}
 
 
 def diff_line_counts(diff):
@@ -211,6 +234,83 @@ def build_work_user_preferences(state, limit=DEFAULT_RESUME_USER_PREFERENCES_LIM
         "total": total,
         "truncated": total > len(visible),
     }
+
+
+def active_memory_terms(session=None, task=None):
+    parts = []
+    for source in (task or {}, session or {}):
+        if not isinstance(source, dict):
+            continue
+        for key in ("title", "description", "kind", "goal"):
+            value = source.get(key)
+            if value:
+                parts.append(str(value))
+    text = " ".join(parts).casefold()
+    terms = []
+    for term in re.findall(r"[a-z0-9_][a-z0-9_-]{2,}", text):
+        if term in ACTIVE_MEMORY_STOP_WORDS or term in terms:
+            continue
+        terms.append(term)
+    return terms[:20]
+
+
+def active_memory_match(entry, terms):
+    haystack = " ".join(
+        [
+            entry.name,
+            entry.description,
+            entry.body,
+            entry.memory_type,
+            entry.scope,
+        ]
+    ).casefold()
+    matched_terms = [term for term in terms if term in haystack]
+    if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES:
+        score = 100 + len(matched_terms)
+    elif entry.memory_type in ACTIVE_MEMORY_RELEVANT_TYPES and matched_terms:
+        score = 10 + len(matched_terms)
+    else:
+        return None
+    reason = "always_include_user_memory" if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES else "matched_task_terms"
+    return {
+        "score": score,
+        "reason": reason,
+        "matched_terms": matched_terms[:8],
+    }
+
+
+def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMORY_LIMIT, base_dir="."):
+    limit = max(0, int(limit or 0))
+    terms = active_memory_terms(session=session, task=task)
+    result = {
+        "source": ".mew/memory",
+        "terms": terms,
+        "items": [],
+        "total": 0,
+        "truncated": False,
+    }
+    if limit <= 0:
+        return result
+    try:
+        entries = FileMemoryBackend(base_dir).entries()
+    except OSError:
+        entries = []
+    scored = []
+    for entry in entries:
+        match = active_memory_match(entry, terms)
+        if not match:
+            continue
+        item = entry_to_dict(entry)
+        item["score"] = match["score"]
+        item["reason"] = match["reason"]
+        item["matched_terms"] = match["matched_terms"]
+        item["text"] = clip_output(item.get("text") or "", DEFAULT_ACTIVE_MEMORY_TEXT_MAX_CHARS)
+        scored.append(item)
+    scored.sort(key=lambda item: (item.get("score") or 0, item.get("created_at") or ""), reverse=True)
+    result["total"] = len(scored)
+    result["items"] = scored[:limit]
+    result["truncated"] = len(scored) > len(result["items"])
+    return result
 
 
 def active_work_session(state):
@@ -3339,6 +3439,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         pending_approvals,
     )
     user_preferences = build_work_user_preferences(state, limit=limit)
+    active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
     verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
@@ -3376,6 +3477,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "compressed_prior_think": compressed_prior_think,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
+        "active_memory": active_memory,
         "same_surface_audit": same_surface_audit,
         "effort": effort,
         "context": build_work_context_metrics(calls, turns),
@@ -3681,6 +3783,18 @@ def format_work_session_resume(resume):
             lines.append(f"- {preference}")
         if preferences.get("truncated"):
             lines.append(f"... {preferences.get('total')} total preferences; older items omitted")
+
+    active_memory = resume.get("active_memory") or {}
+    active_memory_items = active_memory.get("items") or []
+    if active_memory_items:
+        lines.extend(["", "Active memory"])
+        for item in active_memory_items:
+            label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
+            name = item.get("name") or item.get("key") or "memory"
+            reason = item.get("reason") or "recalled"
+            lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({reason})")
+        if active_memory.get("truncated"):
+            lines.append(f"... {active_memory.get('total')} total active memories; older items omitted")
 
     effort = resume.get("effort") or {}
     if effort:

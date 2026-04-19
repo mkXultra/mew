@@ -5094,6 +5094,89 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_context_and_resume_surface_active_typed_memory(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.work_loop import build_work_model_context, build_work_think_prompt
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "User prefers narrow verification before broad pytest.",
+                                "--type",
+                                "user",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Verification preference",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Native hands work should surface active typed memory recall during startup.",
+                                "--type",
+                                "project",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Native hands recall",
+                                "--description",
+                                "Typed recall belongs in resident startup context.",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                task = state["tasks"][0]
+                context = build_work_model_context(state, session, task, "now")
+                active_memory = context["work_session"]["resume"]["active_memory"]
+                self.assertEqual(active_memory["source"], ".mew/memory")
+                self.assertGreaterEqual(active_memory["total"], 2)
+                self.assertTrue(
+                    any(item["memory_type"] == "user" for item in active_memory["items"]),
+                    active_memory,
+                )
+                self.assertTrue(
+                    any(item["memory_type"] == "project" for item in active_memory["items"]),
+                    active_memory,
+                )
+                prompt = build_work_think_prompt(context)
+                self.assertIn("work_session.resume.active_memory", prompt)
+                self.assertIn("User prefers narrow verification", prompt)
+                self.assertIn("Typed recall belongs in resident startup context.", prompt)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                self.assertTrue(resume["active_memory"]["items"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Active memory", text)
+                self.assertIn("Verification preference", text)
+                self.assertIn("Native hands recall", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
         from mew.work_session import (
             build_work_session_resume,
@@ -10486,6 +10569,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("guidance_snapshot", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
+        self.assertIn("work_session.resume.active_memory", prompt)
+        self.assertIn("durable typed recall", prompt)
         self.assertIn("Use work_session.effort as operational pressure", prompt)
         self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)

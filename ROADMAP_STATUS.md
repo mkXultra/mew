@@ -75,7 +75,10 @@ The 5.12 MVP now exists: file-backed typed/scoped memories can be written under
 `.mew/memory/{private,team}/{user,feedback,project,reference,unknown}/`,
 searched through `mew memory --search ... --type ... --scope ...`, and listed
 from `mew memory --deep`, while existing state memory remains legacy
-`unknown` instead of being migrated.
+`unknown` instead of being migrated. Native work resume now also exposes a
+bounded `active_memory` bundle from that store, and the same bundle flows into
+the resident THINK prompt so user/project/reference memory can influence the
+next step without a manual search.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
@@ -613,6 +616,13 @@ Evidence:
   shallow/deep state memory is still searchable as `unknown`, and
   `dogfood --scenario memory-search` verifies private user memory can be
   recalled separately from legacy state memory.
+- Active typed recall now enters resident startup context. Work-session resume
+  includes an `active_memory` bundle from `.mew/memory`, user memories are
+  carried as always-relevant recall, project/reference/feedback memories are
+  selected by current task/session terms, and the THINK prompt explicitly tells
+  the resident to use that typed recall while still verifying project facts
+  before code changes. `dogfood --scenario work-session` verifies typed user
+  and project memories appear in resume.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -692,9 +702,9 @@ Missing proof:
 
 Next action:
 
-- Extend the 5.12 MVP into behavior: feed typed/scoped recall into native work
-  turn startup or a small `mew memory recall` surface so user/project/reference
-  memory can affect resident decisions without the model manually searching.
+- Dogfood active typed recall in a real API native-work loop, then decide
+  whether 5.12 needs a dedicated `mew memory recall` command or whether the
+  resident-startup bundle is enough for now.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer the
