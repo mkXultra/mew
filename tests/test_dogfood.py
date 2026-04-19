@@ -300,6 +300,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "native-work")
             self.assertIn("native_work_session_created_for_ready_coding_task", text)
 
+    def test_run_dogfood_self_improve_controls_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="self-improve-controls",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "self-improve-controls")
+            self.assertIn("self_improve_start_session_json_surfaces_controls", text)
+            self.assertIn("self_improve_status_refresh_command_is_executable", text)
+
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

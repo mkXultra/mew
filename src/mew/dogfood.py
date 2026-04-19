@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -43,6 +44,7 @@ DOGFOOD_SCENARIOS = (
     "runtime-focus",
     "resident-loop",
     "native-work",
+    "self-improve-controls",
     "native-advance",
     "passive-recovery-loop",
     "passive-auto-recovery",
@@ -1231,6 +1233,166 @@ def run_native_work_scenario(workspace, env=None):
         expected="native work dogfood keeps external agent runs disabled",
     )
     return _scenario_report("native-work", workspace, commands, checks)
+
+
+def run_self_improve_controls_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    def run_control(control, timeout=30):
+        parts = shlex.split(str(control or ""))
+        if parts and Path(parts[0]).name == "mew":
+            parts = parts[1:]
+        if not parts:
+            result = {
+                "command": [],
+                "exit_code": None,
+                "stdout": "",
+                "stderr": "empty control command",
+            }
+            commands.append(result)
+            return result
+        return run(parts, timeout=timeout)
+
+    start_result = run(
+        [
+            "self-improve",
+            "--start-session",
+            "--focus",
+            "Dogfood native self-improve controls",
+            "--json",
+        ],
+        timeout=15,
+    )
+    start_data = _json_stdout(start_result)
+    controls = start_data.get("controls") or {}
+    task = start_data.get("task") or {}
+    work_session = start_data.get("work_session") or {}
+    task_id = task.get("id")
+
+    status_absent_result = run_control(controls.get("status"), timeout=15)
+    status_absent_data = _json_stdout(status_absent_result)
+    refresh_command = (status_absent_data.get("suggested_recovery") or {}).get("command") or ""
+    refresh_result = run_control(refresh_command, timeout=15)
+    status_fresh_result = run_control(controls.get("status"), timeout=15)
+    status_fresh_data = _json_stdout(status_fresh_result)
+    resume_result = run_control(controls.get("resume"), timeout=15)
+    cells_result = run_control(controls.get("cells"), timeout=15)
+    active_memory_result = run_control(controls.get("active_memory"), timeout=15)
+
+    state_path = workspace / STATE_FILE
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    session = next(
+        (
+            candidate
+            for candidate in state.get("work_sessions", [])
+            if str(candidate.get("task_id")) == str(task_id)
+        ),
+        None,
+    )
+    if session:
+        session["default_options"] = {
+            "auth": "auth.json",
+            "model_backend": "codex",
+            "allow_read": ["README.md"],
+            "allow_write": ["src/mew", "tests"],
+            "allow_verify": True,
+            "verify_command": f"{sys.executable} -V",
+            "act_mode": "deterministic",
+            "compact_live": False,
+            "quiet": True,
+        }
+        session["updated_at"] = now_iso()
+        write_json_file(state_path, state)
+
+    reused_result = run(
+        [
+            "self-improve",
+            "--start-session",
+            "--focus",
+            "Dogfood native self-improve controls reused",
+            "--json",
+        ],
+        timeout=15,
+    )
+    reused_data = _json_stdout(reused_result)
+    reused_controls = reused_data.get("controls") or {}
+    reused_defaults = ((reused_data.get("work_session") or {}).get("default_options") or {})
+
+    _scenario_check(
+        checks,
+        "self_improve_start_session_json_surfaces_controls",
+        start_result.get("exit_code") == 0
+        and start_data.get("native") is True
+        and bool(task_id)
+        and work_session.get("task_id") == task_id
+        and all(key in controls for key in ("continue", "follow", "status", "resume", "cells", "active_memory", "chat")),
+        observed={
+            "task_id": task_id,
+            "session_id": work_session.get("id"),
+            "controls": controls,
+        },
+        expected="self-improve --start-session --json returns native work controls",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_status_reports_absent_snapshot_with_refresh",
+        status_absent_result.get("exit_code") == 1
+        and status_absent_data.get("status") == "absent"
+        and (status_absent_data.get("suggested_recovery") or {}).get("kind") == "refresh_snapshot"
+        and " --follow " in f" {refresh_command} ",
+        observed=status_absent_data,
+        expected="status control is usable and points to a follow snapshot refresh",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_status_refresh_command_is_executable",
+        refresh_result.get("exit_code") == 0
+        and status_fresh_result.get("exit_code") == 0
+        and status_fresh_data.get("status") == "fresh"
+        and status_fresh_data.get("stop_reason") == "snapshot_refresh",
+        observed={
+            "refresh": command_result_tail(refresh_result),
+            "status": status_fresh_data,
+        },
+        expected="suggested follow refresh command writes a fresh snapshot",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_resume_cells_and_active_memory_controls_run",
+        resume_result.get("exit_code") == 0
+        and cells_result.get("exit_code") == 0
+        and active_memory_result.get("exit_code") == 0,
+        observed={
+            "resume": command_result_tail(resume_result),
+            "cells": command_result_tail(cells_result),
+            "active_memory": command_result_tail(active_memory_result),
+        },
+        expected="resume, cells, and active-memory controls are executable",
+    )
+    _scenario_check(
+        checks,
+        "self_improve_reused_session_preserves_defaults",
+        reused_result.get("exit_code") == 0
+        and reused_data.get("session_created") is False
+        and reused_defaults.get("allow_read") == ["README.md", "."]
+        and reused_defaults.get("compact_live") is True
+        and "--allow-read README.md --allow-read ." in (reused_controls.get("continue") or "")
+        and "--allow-write src/mew --allow-write tests" in (reused_controls.get("continue") or "")
+        and "--allow-verify" in (reused_controls.get("continue") or ""),
+        observed={
+            "defaults": reused_defaults,
+            "controls": reused_controls,
+        },
+        expected="reused native self-improve session preserves and extends cached work defaults",
+    )
+    return _scenario_report("self-improve-controls", workspace, commands, checks)
 
 
 def write_fake_mew_executable(path):
@@ -4937,6 +5099,8 @@ def run_dogfood_scenario(args):
             reports.append(run_resident_loop_scenario(scenario_workspace, env=env))
         elif name == "native-work":
             reports.append(run_native_work_scenario(scenario_workspace, env=env))
+        elif name == "self-improve-controls":
+            reports.append(run_self_improve_controls_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
@@ -5005,8 +5169,8 @@ def compact_command_result(result, limit=4):
     summary = {
         "command": result.get("command", []),
         "exit_code": result.get("exit_code"),
-        "stdout_tail": tail_lines(result.get("stdout"), limit=limit, max_line_chars=160),
-        "stderr_tail": tail_lines(result.get("stderr"), limit=limit, max_line_chars=160),
+        "stdout_tail": tail_lines(result.get("stdout"), limit=limit, max_line_chars=100),
+        "stderr_tail": tail_lines(result.get("stderr"), limit=limit, max_line_chars=100),
     }
     summary["stdout_chars"] = len(result.get("stdout") or "")
     summary["stderr_chars"] = len(result.get("stderr") or "")
