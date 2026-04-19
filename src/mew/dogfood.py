@@ -6652,6 +6652,15 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
     allowed_comparison_statuses = set(comparison.get("allowed_statuses") or [])
     if report.get("status") in allowed_comparison_statuses or report.get("status") == "unknown":
         comparison["status"] = report.get("status")
+    elif comparison.get("status") == "unknown":
+        resident_choice = str((report.get("resident_preference") or {}).get("choice") or "").strip()
+        derived_status = {
+            "mew": "mew_preferred",
+            "fresh_cli": "fresh_cli_preferred",
+            "inconclusive": "inconclusive",
+        }.get(resident_choice)
+        if derived_status in allowed_comparison_statuses:
+            comparison["status"] = derived_status
     for key in ("next_blocker", "notes"):
         if key in report:
             comparison[key] = report.get(key)

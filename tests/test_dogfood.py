@@ -950,7 +950,6 @@ class DogfoodTests(unittest.TestCase):
             report_path.write_text(
                 json.dumps(
                     {
-                        "status": "completed",
                         "task_summary": "fresh CLI completed the approval_pairing task shape",
                         "verification": [
                             {
@@ -962,7 +961,10 @@ class DogfoodTests(unittest.TestCase):
                         "manual_rebrief_needed": False,
                         "interruption_resume_gate": "unknown",
                         "friction_summary": "no material friction",
-                        "preference_signal": "inconclusive",
+                        "resident_preference": {
+                            "choice": "fresh_cli",
+                            "reason": "fresh CLI completed the task faster",
+                        },
                         "notes": "Fresh CLI was not interrupted.",
                     }
                 ),
@@ -982,11 +984,11 @@ class DogfoodTests(unittest.TestCase):
             fresh_cli = protocol["comparison_result"]["run_summaries"]["fresh_cli"]
 
             self.assertEqual(report["status"], "pass")
-            self.assertEqual(protocol["comparison_result"]["status"], "inconclusive")
+            self.assertEqual(protocol["comparison_result"]["status"], "fresh_cli_preferred")
             self.assertIn("approval_pairing", fresh_cli["summary"])
             self.assertIn("exit=0", fresh_cli["verification_result"])
             self.assertEqual(fresh_cli["friction_summary"], "no material friction")
-            self.assertEqual(protocol["resident_preference"]["choice"], "inconclusive")
+            self.assertEqual(protocol["resident_preference"]["choice"], "fresh_cli")
             self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "unknown")
             self.assertFalse(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
 
