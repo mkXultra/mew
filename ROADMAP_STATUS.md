@@ -1160,10 +1160,18 @@ Evidence:
   The artifacts preserve mew-side resume evidence such as continuity score,
   resume size, pending approval count, unresolved verifier failure, next step,
   and verifier command, so a detached Claude Code or Codex CLI run can compare
-  reconstruction cost without relying on hidden chat context. The focused test
-  passed and `/tmp/mew-m3-reentry-fresh-comparator-assets` passed with
+  reconstruction cost without relying on hidden chat context. A fairness review
+  by `codex-ultra` found the first prompt leaked the mew-side answer and reused
+  a completed workspace, so the artifact now also creates a separate pending
+  fresh workspace, keeps the concrete mew next step out of the prompt, and
+  tracks `repository_only_compliance`, inspected files, commands, and
+  comparison result fields in the report template. The focused test passed and
+  `/tmp/mew-m3-reentry-fresh-comparator-assets-v2` passed with
   `continuity_score=9/9`, one pending approval, and the failed verifier risk
-  preserved in the artifact.
+  preserved in the artifact. A fresh `codex-ultra` comparator then ran in the
+  generated workspace and completed the README recovery with
+  `manual_rebrief_needed=false`, `repository_only_compliance=true`, five
+  reconstruction steps, verifier exit code 0, and `comparison_result.choice=parity`.
 
 Missing proof:
 
@@ -1176,8 +1184,9 @@ Missing proof:
   proofs, and short resident-loop JSON now carries explicit cadence counts, but
   there is still no long-running cadence proof across several hours or days.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
-  prompt/template, but the paired fresh restart has not been executed and merged
-  yet.
+  prompt/template and one fresh `codex-ultra` leg has run to parity, but that
+  comparison is still a tiny synthetic README task rather than a long-running
+  resident cadence proof.
 
 Next action:
 

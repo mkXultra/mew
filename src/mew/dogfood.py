@@ -3524,6 +3524,14 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
     post_commands = post_resume.get("commands") or []
     artifacts_dir = Path(workspace) / STATE_DIR / "dogfood"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    fresh_cli_workspace = Path(workspace) / "m3-fresh-cli-restart-workspace"
+    fresh_cli_workspace.mkdir(parents=True, exist_ok=True)
+    (fresh_cli_workspace / "README.md").write_text(
+        "# M3 Reentry Gate Dogfood\n\n"
+        "M3 gate pending: the interrupted resident has not applied the recovery edit yet.\n",
+        encoding="utf-8",
+    )
+    (fresh_cli_workspace / "VERIFY_COMMAND.txt").write_text(verify_command + "\n", encoding="utf-8")
     fresh_cli_template_path = artifacts_dir / "m3-fresh-cli-report-template.json"
     fresh_cli_prompt_path = artifacts_dir / "m3-fresh-cli-restart-prompt.md"
     mew_resume_evidence = {
@@ -3543,12 +3551,28 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
         {
             "status": "unknown",
             "context_mode": "true_restart",
+            "fresh_cli_tool": "",
+            "fresh_model": "",
             "manual_rebrief_needed": None,
+            "fresh_elapsed_seconds": None,
+            "active_reconstruction_seconds": None,
             "fresh_cli_summary": "",
+            "files_inspected": [],
+            "commands_run": [],
+            "mew_artifacts_inspected": [],
+            "prompt_mew_evidence_used": [],
+            "repository_only_compliance": None,
             "reconstruction_steps": [],
+            "change_summary": "",
+            "verification_command_used": "",
+            "verification_exit_code": None,
             "verification_result": "",
-            "would_prefer": "unknown",
-            "preference_reason": "",
+            "unfairness_notes": [],
+            "comparison_result": {
+                "choice": "unknown",
+                "allowed_values": ["mew_preferred", "fresh_cli_preferred", "parity", "inconclusive", "blocked"],
+                "reason": "",
+            },
             "mew_evidence": mew_resume_evidence,
         },
     )
@@ -3562,21 +3586,18 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
                 "",
                 "Goal: compare a fresh CLI restart against mew's M3 reentry bundle for the same interrupted task.",
                 "",
-                "Mew-side evidence:",
-                f"- task_id: {task_id}",
-                f"- work_session_id: {session_id}",
-                f"- continuity_status: {continuity.get('status')}",
-                f"- resume_chars: {len(resume_text)}",
-                f"- pending_approval_count: {len(pending_approvals)}",
-                f"- unresolved_failure: {unresolved_failure.get('tool')} exit={unresolved_failure.get('exit_code')}",
-                f"- next_step: {(resume.get('working_memory') or {}).get('next_step')}",
-                f"- verifier: `{verify_command}`",
+                f"Fresh restart workspace: `{fresh_cli_workspace}`",
+                "Do not inspect the parent `.mew` directory or the report template's `mew_evidence` before your independent attempt.",
+                "If you inspect either before solving, set `manual_rebrief_needed=true` and record the inspected source.",
+                "",
+                f"Acceptance command from the fresh workspace: `{verify_command}`",
                 "",
                 "Fresh restart task:",
                 "1. Reconstruct what changed, what is risky, and the next action from repository files alone.",
                 "2. Complete the equivalent README.md recovery so the verifier passes.",
                 "3. Record how many reconstruction steps were needed and whether manual rebrief was needed.",
                 "",
+                f"After your independent attempt, compare against the `mew_evidence` in `{fresh_cli_template_path}`.",
                 f"Write the completed JSON report to `{fresh_cli_template_path}` or another explicit path.",
             ]
         )
@@ -3654,6 +3675,8 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
         "m3_reentry_gate_writes_fresh_cli_comparison_assets",
         fresh_cli_template_path.exists()
         and fresh_cli_prompt_path.exists()
+        and fresh_cli_workspace.exists()
+        and "M3 gate pending" in (fresh_cli_workspace / "README.md").read_text(encoding="utf-8")
         and "manual_rebrief_needed" in fresh_cli_template_path.read_text(encoding="utf-8")
         and "M3 Fresh CLI Reentry Comparator" in fresh_cli_prompt_path.read_text(encoding="utf-8")
         and "M3 gate complete" in fresh_cli_prompt_path.read_text(encoding="utf-8"),
@@ -3666,6 +3689,7 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
     )
     report = _scenario_report("m3-reentry-gate", workspace, commands, checks)
     report["artifacts"] = {
+        "fresh_cli_workspace": str(fresh_cli_workspace),
         "fresh_cli_report_template": str(fresh_cli_template_path),
         "fresh_cli_restart_prompt": str(fresh_cli_prompt_path),
         "mew_resume_evidence": mew_resume_evidence,

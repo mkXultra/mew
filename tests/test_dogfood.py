@@ -471,6 +471,7 @@ class DogfoodTests(unittest.TestCase):
             text = format_dogfood_scenario_report(report)
             scenario = report["scenarios"][0]
             artifacts = scenario["artifacts"]
+            fresh_cli_workspace = Path(artifacts["fresh_cli_workspace"])
             fresh_cli_template_path = Path(artifacts["fresh_cli_report_template"])
             fresh_cli_prompt_path = Path(artifacts["fresh_cli_restart_prompt"])
             fresh_cli_template = json.loads(fresh_cli_template_path.read_text(encoding="utf-8"))
@@ -481,11 +482,16 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m3_reentry_gate_resume_brief_has_change_risk_next_action", text)
             self.assertIn("m3_reentry_gate_can_advance_to_verification_after_reentry", text)
             self.assertIn("m3_reentry_gate_writes_fresh_cli_comparison_assets", text)
+            self.assertIn("M3 gate pending", (fresh_cli_workspace / "README.md").read_text(encoding="utf-8"))
             self.assertEqual(fresh_cli_template["context_mode"], "true_restart")
             self.assertIn("manual_rebrief_needed", fresh_cli_template)
+            self.assertIn("repository_only_compliance", fresh_cli_template)
+            self.assertEqual(fresh_cli_template["comparison_result"]["choice"], "unknown")
             self.assertEqual(fresh_cli_template["mew_evidence"]["continuity_status"], "strong")
             self.assertIn("M3 Fresh CLI Reentry Comparator", fresh_cli_prompt)
+            self.assertIn(str(fresh_cli_workspace), fresh_cli_prompt)
             self.assertIn("M3 gate complete", fresh_cli_prompt)
+            self.assertNotIn("Approve the README.md dry-run edit", fresh_cli_prompt)
 
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
