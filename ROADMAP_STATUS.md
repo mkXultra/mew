@@ -67,6 +67,10 @@ Milestone 2 Done-when checklist:
   and `mew code` defaults: dry-run write/edit previews are applied
   automatically only when this mode is requested, while write roots,
   paired-test source-edit guards, and approval-time verification still apply.
+  The deterministic work-session dogfood now includes
+  `work_ai_accept_edits_auto_applies_preview`, and
+  `docs/M2_ACCEPT_EDITS_DOGFOOD_2026-04-20.md` records the focused validation
+  and passing `/tmp/mew-accept-edits-work-session-dogfood` run.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

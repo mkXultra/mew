@@ -1000,6 +1000,10 @@ def format_work_ai_report(report, compact=False):
             line += f" error={step.get('error')}"
         if step.get("inline_approval"):
             line += f" inline_approval={step.get('inline_approval')}"
+        if step.get("inline_approval_tool_call_id"):
+            line += f" approval_tool_call=#{step.get('inline_approval_tool_call_id')}"
+        if step.get("inline_approval_status"):
+            line += f" approval_status={step.get('inline_approval_status')}"
         lines.append(line)
         if tool_call:
             summary = _format_live_tool_summary(tool_call) if compact else compact_work_tool_summary(tool_call)
@@ -4238,8 +4242,12 @@ def cmd_work_ai(args):
                     defer_verify=False,
                     allow_unpaired_source_edit=False,
                 )
-                approval_code = cmd_work_approve_tool(approve_args)
+                approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
                 report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_data:
+                    applied_tool = approval_data.get("tool_call") or {}
+                    report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
+                    report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
                 if approval_code != 0:
                     report["stop_reason"] = "tool_failed"
                     break

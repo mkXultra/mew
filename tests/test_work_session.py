@@ -11239,7 +11239,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 output = stdout.getvalue()
                 self.assertIn("inline_approval=auto_applied", output)
-                self.assertIn("approved work tool #1", output)
+                self.assertIn("approval_status=completed", output)
                 self.assertIn("stop=max_steps", output)
                 self.assertEqual(call_model.call_count, 1)
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
@@ -11247,6 +11247,66 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["tool_calls"][0]["approval_status"], "applied")
                 self.assertFalse(session["tool_calls"][1]["result"]["dry_run"])
                 self.assertEqual(session["tool_calls"][1]["result"]["verification_exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_accept_edits_mode_keeps_stdout_parseable(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "old text",
+                        "new": "new text",
+                    },
+                }
+                verify_command = f"{sys.executable} -c \"print('verify ok')\""
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        verify_command,
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["inline_approval"], "auto_applied")
+                self.assertEqual(step["inline_approval_status"], "completed")
+                self.assertEqual(report["stop_reason"], "max_steps")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
             finally:
                 os.chdir(old_cwd)
 

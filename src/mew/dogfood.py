@@ -4770,6 +4770,109 @@ raise SystemExit(0 if passed else 1)
     if paired_steer_ai_result.get("exit_code") != 0 or not paired_steer_ai_data.get("passed"):
         commands.append(paired_steer_ai_result)
 
+    accept_edits_ai_script = workspace / "accept_edits_ai_check.py"
+    accept_edits_ai_script.write_text(
+        """
+import json
+import sys
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+from mew.cli import main
+from mew.state import load_state
+
+
+def run_main(args):
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        code = main(args)
+    return code, stdout.getvalue()
+
+
+Path("accept-edits.md").write_text("old text\\n", encoding="utf-8")
+code, output = run_main(["task", "add", "Dogfood accept-edits task", "--kind", "coding", "--json"])
+task_id = str(json.loads(output)["task"]["id"])
+model_output = {
+    "summary": "preview and accept one edit",
+    "action": {
+        "type": "edit_file",
+        "path": "accept-edits.md",
+        "old": "old text",
+        "new": "new text",
+    },
+}
+verify_command = (
+    f"{sys.executable} -c \\"from pathlib import Path; "
+    "assert Path('accept-edits.md').read_text() == 'new text\\\\n'\\""
+)
+with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+        code, output = run_main(
+            [
+                "work",
+                task_id,
+                "--ai",
+                "--json",
+                "--auth",
+                "auth.json",
+                "--allow-read",
+                ".",
+                "--allow-write",
+                ".",
+                "--allow-verify",
+                "--verify-command",
+                verify_command,
+                "--approval-mode",
+                "accept-edits",
+                "--max-steps",
+                "1",
+                "--act-mode",
+                "deterministic",
+            ]
+        )
+
+report = json.loads(output)
+session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == task_id)
+tool_calls = session.get("tool_calls") or []
+preview_call = tool_calls[0] if tool_calls else {}
+apply_call = tool_calls[1] if len(tool_calls) > 1 else {}
+apply_result = apply_call.get("result") or {}
+observed = {
+    "exit_code": code,
+    "stdout_parseable_json": isinstance(report, dict),
+    "stop_reason": report.get("stop_reason"),
+    "inline_approval": ((report.get("steps") or [{}])[0]).get("inline_approval"),
+    "inline_approval_status": ((report.get("steps") or [{}])[0]).get("inline_approval_status"),
+    "preview_approval_status": preview_call.get("approval_status"),
+    "apply_tool_status": apply_call.get("status"),
+    "apply_dry_run": apply_result.get("dry_run"),
+    "verification_exit_code": apply_result.get("verification_exit_code"),
+    "content": Path("accept-edits.md").read_text(encoding="utf-8"),
+}
+passed = (
+    code == 0
+    and observed["stdout_parseable_json"] is True
+    and observed["stop_reason"] == "max_steps"
+    and observed["inline_approval"] == "auto_applied"
+    and observed["inline_approval_status"] == "completed"
+    and observed["preview_approval_status"] == "applied"
+    and observed["apply_tool_status"] == "completed"
+    and observed["apply_dry_run"] is False
+    and observed["verification_exit_code"] == 0
+    and observed["content"] == "new text\\n"
+)
+print(json.dumps({"passed": passed, "observed": observed}, ensure_ascii=False))
+raise SystemExit(0 if passed else 1)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    accept_edits_ai_result = run_command([sys.executable, str(accept_edits_ai_script)], workspace, timeout=30, env=env)
+    accept_edits_ai_data = _json_stdout(accept_edits_ai_result)
+    if accept_edits_ai_result.get("exit_code") != 0 or not accept_edits_ai_data.get("passed"):
+        commands.append(accept_edits_ai_result)
+
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
     task_show_json_data = _json_stdout(task_show_json_result)
@@ -5122,6 +5225,22 @@ raise SystemExit(0 if passed else 1)
         observed=paired_approval_observed or command_result_tail(paired_steer_ai_result, limit=5),
         expected=(
             "approving a paired-test-steer dry-run defaults to deferred verification until the source edit arrives"
+        ),
+    )
+    accept_edits_observed = accept_edits_ai_data.get("observed") or {}
+    _scenario_check(
+        checks,
+        "work_ai_accept_edits_auto_applies_preview",
+        accept_edits_ai_result.get("exit_code") == 0
+        and accept_edits_ai_data.get("passed") is True
+        and accept_edits_observed.get("stdout_parseable_json") is True
+        and accept_edits_observed.get("inline_approval") == "auto_applied"
+        and accept_edits_observed.get("preview_approval_status") == "applied"
+        and accept_edits_observed.get("verification_exit_code") == 0,
+        observed=accept_edits_observed or command_result_tail(accept_edits_ai_result, limit=5),
+        expected=(
+            "approval-mode accept-edits applies one dry-run write/edit preview automatically "
+            "and keeps JSON work-loop output parseable"
         ),
     )
     _scenario_check(
