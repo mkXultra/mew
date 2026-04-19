@@ -518,6 +518,113 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("- next_blocker:", runbook)
             self.assertIn("  - fresh_cli:", runbook)
             self.assertIn("mew", protocol["resident_preference"]["allowed_values"])
+
+    def test_run_dogfood_m2_comparative_prefills_mew_session_evidence(self):
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            state_dir = root / STATE_DIR
+            state_dir.mkdir(parents=True)
+            state = default_state()
+            state["tasks"].append(
+                {
+                    "id": 3,
+                    "title": "M2 evidence task",
+                    "status": "done",
+                    "priority": "medium",
+                    "kind": "coding",
+                    "notes": "Synthetic M2 dogfood evidence.",
+                }
+            )
+            state["work_sessions"].append(
+                {
+                    "id": 7,
+                    "task_id": 3,
+                    "status": "closed",
+                    "phase": "done",
+                    "created_at": "2026-04-19T10:00:00Z",
+                    "updated_at": "2026-04-19T10:05:00Z",
+                    "default_options": {"verify_command": "pytest -q"},
+                    "working_memory": {
+                        "current_goal": "prefill M2 evidence",
+                        "next_action": "Run the matching fresh CLI comparison.",
+                    },
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:00:00Z",
+                            "finished_at": "2026-04-19T10:00:20Z",
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": 11,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "approval_status": "applied",
+                            "started_at": "2026-04-19T10:01:00Z",
+                            "finished_at": "2026-04-19T10:02:00Z",
+                            "parameters": {"path": "src/mew/dogfood.py"},
+                            "result": {
+                                "dry_run": True,
+                                "changed": True,
+                                "verification": {"command": "pytest -q", "exit_code": 0},
+                                "verification_exit_code": 0,
+                            },
+                        },
+                        {
+                            "id": 12,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:03:00Z",
+                            "finished_at": "2026-04-19T10:04:00Z",
+                            "parameters": {"command": "pytest -q"},
+                            "result": {"command": "pytest -q", "exit_code": 0, "stdout": "ok\n"},
+                        },
+                    ],
+                }
+            )
+            (root / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+            try:
+                os.chdir(root)
+                args = SimpleNamespace(
+                    workspace=str(root / "dog"),
+                    scenario="m2-comparative",
+                    cleanup=False,
+                    mew_session_id="7",
+                )
+
+                report = run_dogfood_scenario(args)
+            finally:
+                os.chdir(previous_cwd)
+
+            text = format_dogfood_scenario_report(report)
+            summary = summarize_dogfood_scenario_json(report)
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            runbook_path = Path(scenario["artifacts"]["markdown"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            runbook = runbook_path.read_text(encoding="utf-8")
+            mew_summary = protocol["comparison_result"]["run_summaries"]["mew"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertIn("m2_comparative_protocol_prefills_mew_run_evidence", text)
+            self.assertEqual(protocol["mew_run_evidence"]["status"], "found")
+            self.assertEqual(protocol["mew_run_evidence"]["work_session_id"], 7)
+            self.assertEqual(protocol["mew_run_evidence"]["verification"]["status"], "passed")
+            self.assertEqual(protocol["mew_run_evidence"]["approval_counts"]["applied"], 1)
+            self.assertIn("session #7 task #3", mew_summary["summary"])
+            self.assertIn("passed exit=0 command=pytest -q", mew_summary["verification_result"])
+            self.assertIn("mew work 3 --session --resume --allow-read .", mew_summary["preference_signal"])
+            self.assertEqual(
+                protocol["resume_behavior"]["mew_resume_command"],
+                "mew work 3 --session --resume --allow-read .",
+            )
+            self.assertIn("## Mew Run Evidence", runbook)
+            self.assertIn("- work_session_id: 7", runbook)
+            self.assertIn("`pytest -q`", runbook)
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])

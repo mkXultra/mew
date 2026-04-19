@@ -17,9 +17,11 @@ from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import default_state, migrate_state, next_id, reconcile_next_ids
+from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
 from .typed_memory import FileMemoryBackend
+from .work_session import build_work_session_effort, build_work_session_resume, find_work_session
 
 
 DOGFOOD_SKIP_DIR_NAMES = {
@@ -5188,8 +5190,228 @@ raise SystemExit(0 if passed else 1)
     return _scenario_report("work-session", workspace, commands, checks)
 
 
-def build_m2_comparative_protocol():
+def _m2_session_id_text(value):
+    if value is None:
+        return ""
+    return str(value).strip().removeprefix("#")
+
+
+def _m2_latest_work_session(state):
+    sessions = [session for session in state.get("work_sessions") or [] if isinstance(session, dict)]
+    if not sessions:
+        return None
+    return sessions[-1]
+
+
+def _m2_find_work_session(state, session_id):
+    session_id_text = _m2_session_id_text(session_id)
+    if not session_id_text:
+        return None
+    if session_id_text in {"latest", "last"}:
+        return _m2_latest_work_session(state)
+    return find_work_session(state, session_id_text)
+
+
+def _m2_command_records(calls, limit=8):
+    records = []
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        tool = call.get("tool")
+        result = call.get("result") or {}
+        parameters = call.get("parameters") or {}
+        if tool not in {"run_command", "run_tests"} and "verification_exit_code" not in result:
+            continue
+        verification = result.get("verification") or {}
+        command = result.get("command") or parameters.get("command") or verification.get("command")
+        if not command:
+            continue
+        records.append(
+            {
+                "tool_call_id": call.get("id"),
+                "tool": tool,
+                "command": command,
+                "exit_code": result.get("exit_code"),
+                "verification_exit_code": result.get("verification_exit_code"),
+                "status": call.get("status") or "",
+            }
+        )
+    return records[-limit:]
+
+
+def _m2_approval_counts(calls):
+    counts = {"total": 0, "pending": 0, "applied": 0, "rejected": 0, "failed": 0, "indeterminate": 0}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        result = call.get("result") or {}
+        status = call.get("approval_status")
+        if not status and not result.get("dry_run"):
+            continue
+        counts["total"] += 1
+        normalized = status or "pending"
+        if normalized in counts:
+            counts[normalized] += 1
+        else:
+            counts["indeterminate"] += 1
+    return counts
+
+
+def _m2_latest_verification(calls):
+    for call in reversed(calls or []):
+        if not isinstance(call, dict):
+            continue
+        result = call.get("result") or {}
+        verification = result.get("verification") or {}
+        exit_code = None
+        command = ""
+        source = ""
+        if "verification_exit_code" in result:
+            exit_code = result.get("verification_exit_code")
+            command = verification.get("command") or result.get("command") or (call.get("parameters") or {}).get("command") or ""
+            source = "approval_verification"
+        elif call.get("tool") in {"run_tests", "run_command"} and result.get("exit_code") is not None:
+            exit_code = result.get("exit_code")
+            command = result.get("command") or (call.get("parameters") or {}).get("command") or ""
+            source = call.get("tool") or "command"
+        else:
+            continue
+        status = "passed" if exit_code == 0 else "failed"
+        return {
+            "status": status,
+            "exit_code": exit_code,
+            "command": command,
+            "tool_call_id": call.get("id"),
+            "source": source,
+            "finished_at": call.get("finished_at") or "",
+        }
+    return {"status": "unknown", "exit_code": None, "command": "", "tool_call_id": None, "source": "", "finished_at": ""}
+
+
+def build_m2_mew_run_evidence(state, session_id):
+    session_id_text = _m2_session_id_text(session_id)
+    if not session_id_text:
+        return None
+    session = _m2_find_work_session(state, session_id_text)
+    if not session:
+        return {
+            "status": "missing",
+            "requested_session_id": session_id_text,
+            "source_state": str(STATE_FILE),
+        }
+
+    task = find_task(state, session.get("task_id"))
+    calls = list(session.get("tool_calls") or [])
+    turns = list(session.get("model_turns") or [])
+    resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
+    effort = build_work_session_effort(session) or {}
+    approval_counts = _m2_approval_counts(calls)
+    verification = _m2_latest_verification(calls)
+    continuity = resume.get("continuity") or {}
+    task_id = session.get("task_id") or (task or {}).get("id")
+    resume_command = (
+        f"mew work {task_id} --session --resume --allow-read ."
+        if task_id
+        else "mew work --session --resume --allow-read ."
+    )
     return {
+        "status": "found",
+        "source_state": str(STATE_FILE),
+        "work_session_id": session.get("id"),
+        "task_id": task_id,
+        "task_title": (task or {}).get("title") or session.get("title") or "",
+        "session_status": session.get("status") or "",
+        "phase": session.get("phase") or "",
+        "created_at": session.get("created_at") or "",
+        "updated_at": session.get("updated_at") or "",
+        "model_turns": len(turns),
+        "tool_calls": len(calls),
+        "effort": {
+            "wall_elapsed_seconds": effort.get("wall_elapsed_seconds"),
+            "observed_active_seconds": effort.get("observed_active_seconds"),
+            "tool_seconds": effort.get("tool_seconds"),
+            "model_seconds": effort.get("model_seconds"),
+            "pressure": effort.get("pressure") or "",
+        },
+        "commands_or_tests_run": _m2_command_records(calls),
+        "approval_counts": approval_counts,
+        "verification": verification,
+        "resume_command": resume_command,
+        "continuity": {
+            "score": continuity.get("score") or "",
+            "status": continuity.get("status") or "",
+            "missing": continuity.get("missing") or [],
+            "recommendation": (continuity.get("recommendation") or {}).get("summary") or "",
+        },
+    }
+
+
+def _m2_apply_mew_run_evidence(protocol, evidence):
+    if not evidence:
+        return protocol
+    protocol["mew_run_evidence"] = evidence
+    comparison = protocol.setdefault("comparison_result", {})
+    run_summaries = comparison.setdefault("run_summaries", {})
+    mew_summary = run_summaries.setdefault("mew", {})
+    if evidence.get("status") != "found":
+        mew_summary.update(
+            {
+                "summary": f"requested mew work session {evidence.get('requested_session_id')} was not found",
+                "verification_result": "unknown",
+                "friction_summary": "no mew-side evidence loaded",
+                "preference_signal": "blocked until a valid mew work session id is provided",
+            }
+        )
+        comparison["next_blocker"] = "Provide a valid mew work session id and rerun the M2 comparative dogfood."
+        return protocol
+
+    effort = evidence.get("effort") or {}
+    approvals = evidence.get("approval_counts") or {}
+    verification = evidence.get("verification") or {}
+    continuity = evidence.get("continuity") or {}
+    wall = effort.get("wall_elapsed_seconds")
+    active = effort.get("observed_active_seconds")
+    mew_summary.update(
+        {
+            "summary": (
+                f"session #{evidence.get('work_session_id')} task #{evidence.get('task_id')} "
+                f"status={evidence.get('session_status')} phase={evidence.get('phase')} "
+                f"turns={evidence.get('model_turns')} tools={evidence.get('tool_calls')} "
+                f"wall={wall}s active={active}s"
+            ),
+            "verification_result": (
+                f"{verification.get('status')} exit={verification.get('exit_code')} "
+                f"command={verification.get('command') or '-'}"
+            ),
+            "friction_summary": (
+                f"approvals total={approvals.get('total', 0)} applied={approvals.get('applied', 0)} "
+                f"rejected={approvals.get('rejected', 0)} failed={approvals.get('failed', 0)}; "
+                f"effort_pressure={effort.get('pressure') or 'unknown'}"
+            ),
+            "preference_signal": (
+                f"continuity={continuity.get('score') or '-'} {continuity.get('status') or 'unknown'}; "
+                f"resume=`{evidence.get('resume_command')}`"
+            ),
+        }
+    )
+    comparison["next_blocker"] = comparison.get("next_blocker") or "Run the matching fresh_cli task and fill its run summary."
+    comparison["notes"] = comparison.get("notes") or (
+        f"Mew-side evidence was prefilled from work session #{evidence.get('work_session_id')}."
+    )
+    resume_behavior = protocol.setdefault("resume_behavior", {})
+    resume_behavior["mew_resume_command"] = evidence.get("resume_command") or resume_behavior.get("mew_resume_command", "")
+    resume_behavior["could_resume_without_user_rebrief"] = (
+        continuity.get("status") in {"strong", "usable"} if continuity.get("status") else None
+    )
+    resume_behavior["risky_or_missing_context"] = continuity.get("missing") or []
+    friction_counts = protocol.setdefault("friction_counts", {})
+    friction_counts["approval_confusions"] = approvals.get("rejected", 0) + approvals.get("failed", 0)
+    friction_counts["verification_confusions"] = 1 if verification.get("status") == "failed" else 0
+    return protocol
+
+
+def build_m2_comparative_protocol(mew_run_evidence=None):
+    protocol = {
         "name": "m2-comparative",
         "generated_at": now_iso(),
         "roadmap_milestone": "M2 Interactive Parity",
@@ -5277,6 +5499,7 @@ def build_m2_comparative_protocol():
             "an interrupted resident can resume inside mew without user re-briefing",
         ],
     }
+    return _m2_apply_mew_run_evidence(protocol, mew_run_evidence)
 
 
 def format_m2_comparative_protocol(protocol):
@@ -5312,6 +5535,44 @@ def format_m2_comparative_protocol(protocol):
                 f"    preference_signal: {summary.get('preference_signal', '')}",
             ]
         )
+    evidence = protocol.get("mew_run_evidence") or {}
+    if evidence:
+        effort = evidence.get("effort") or {}
+        verification = evidence.get("verification") or {}
+        approvals = evidence.get("approval_counts") or {}
+        continuity = evidence.get("continuity") or {}
+        lines.extend(
+            [
+                "",
+                "## Mew Run Evidence",
+                f"- status: {evidence.get('status')}",
+                f"- source_state: `{evidence.get('source_state', '')}`",
+                f"- work_session_id: {evidence.get('work_session_id', evidence.get('requested_session_id', ''))}",
+                f"- task_id: {evidence.get('task_id', '')}",
+                f"- task_title: {evidence.get('task_title', '')}",
+                f"- session_status: {evidence.get('session_status', '')}",
+                f"- phase: {evidence.get('phase', '')}",
+                f"- elapsed: wall={effort.get('wall_elapsed_seconds')}s active={effort.get('observed_active_seconds')}s",
+                (
+                    f"- verification: {verification.get('status')} exit={verification.get('exit_code')} "
+                    f"command=`{verification.get('command') or ''}`"
+                ),
+                (
+                    f"- approvals: total={approvals.get('total', 0)} applied={approvals.get('applied', 0)} "
+                    f"rejected={approvals.get('rejected', 0)} failed={approvals.get('failed', 0)}"
+                ),
+                f"- resume_command: `{evidence.get('resume_command', '')}`",
+                f"- continuity: {continuity.get('score') or '-'} {continuity.get('status') or 'unknown'}",
+            ]
+        )
+        commands = evidence.get("commands_or_tests_run") or []
+        if commands:
+            lines.append("- commands_or_tests_run:")
+            for command in commands:
+                lines.append(
+                    f"  - #{command.get('tool_call_id')} {command.get('tool')}: "
+                    f"`{command.get('command')}` exit={command.get('exit_code')}"
+                )
     lines.extend(
         [
             "",
@@ -5352,11 +5613,15 @@ def format_m2_comparative_protocol(protocol):
     return "\n".join(lines) + "\n"
 
 
-def run_m2_comparative_scenario(workspace, env=None):
+def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None):
     del env
     commands = []
     checks = []
-    protocol = build_m2_comparative_protocol()
+    mew_run_evidence = None
+    if mew_session_id:
+        current_state = reconcile_next_ids(migrate_state(read_json_file(STATE_FILE, default_state())))
+        mew_run_evidence = build_m2_mew_run_evidence(current_state, mew_session_id)
+    protocol = build_m2_comparative_protocol(mew_run_evidence=mew_run_evidence)
     output_dir = Path(workspace) / STATE_DIR / "dogfood"
     json_path = output_dir / "m2-comparative-protocol.json"
     md_path = output_dir / "m2-comparative-protocol.md"
@@ -5371,6 +5636,7 @@ def run_m2_comparative_scenario(workspace, env=None):
     done_when = loaded.get("done_when_mapping") or []
     comparison = loaded.get("comparison_result") or {}
     comparison_run_summaries = comparison.get("run_summaries") or {}
+    loaded_evidence = loaded.get("mew_run_evidence") or {}
 
     _scenario_check(
         checks,
@@ -5395,6 +5661,21 @@ def run_m2_comparative_scenario(workspace, env=None):
         observed={"path": str(md_path), "chars": len(markdown)},
         expected="Markdown runbook exists with comparison result and resident preference sections",
     )
+    if mew_session_id:
+        _scenario_check(
+            checks,
+            "m2_comparative_protocol_prefills_mew_run_evidence",
+            loaded_evidence.get("status") == "found"
+            and bool((comparison_run_summaries.get("mew") or {}).get("summary"))
+            and "## Mew Run Evidence" in markdown
+            and bool((loaded.get("resume_behavior") or {}).get("mew_resume_command")),
+            observed={
+                "requested_session_id": _m2_session_id_text(mew_session_id),
+                "evidence": loaded_evidence,
+                "mew_summary": comparison_run_summaries.get("mew"),
+            },
+            expected="m2-comparative can prefill mew-side evidence from a real work session",
+        )
     _scenario_check(
         checks,
         "m2_comparative_protocol_has_fillable_comparison_result",
@@ -5496,7 +5777,13 @@ def run_dogfood_scenario(args):
         elif name == "work-session":
             reports.append(run_work_session_scenario(scenario_workspace, env=env))
         elif name == "m2-comparative":
-            reports.append(run_m2_comparative_scenario(scenario_workspace, env=env))
+            reports.append(
+                run_m2_comparative_scenario(
+                    scenario_workspace,
+                    env=env,
+                    mew_session_id=getattr(args, "mew_session_id", None),
+                )
+            )
         else:
             raise ValueError(f"unknown dogfood scenario: {name}")
 
