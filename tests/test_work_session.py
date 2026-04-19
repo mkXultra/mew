@@ -7859,6 +7859,89 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_all_verifies_after_entire_batch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "one.md",
+                                "--content",
+                                "one\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "two.md",
+                                "--content",
+                                "two\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert Path('one.md').read_text() == 'one\\n'; "
+                    "assert Path('two.md').read_text() == 'two\\n'\""
+                )
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-all",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                verify_command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(data["count"], 2)
+                first_apply = data["approved"][0]["tool_call"]
+                second_apply = data["approved"][1]["tool_call"]
+                self.assertTrue(first_apply["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", first_apply["result"])
+                self.assertEqual(second_apply["result"]["verification_exit_code"], 0)
+                self.assertEqual(Path("one.md").read_text(encoding="utf-8"), "one\n")
+                self.assertEqual(Path("two.md").read_text(encoding="utf-8"), "two\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approval_blocks_unpaired_source_edit_by_default(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -14610,7 +14693,11 @@ class WorkSessionTests(unittest.TestCase):
             try:
                 Path("a.txt").write_text("old a\n", encoding="utf-8")
                 Path("b.txt").write_text("old b\n", encoding="utf-8")
-                verify_command = f"{sys.executable} -c \"import sys; sys.exit(0)\""
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert Path('a.txt').read_text() == 'new a\\n'; "
+                    "assert Path('b.txt').read_text() == 'new b\\n'\""
+                )
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
@@ -14698,6 +14785,9 @@ class WorkSessionTests(unittest.TestCase):
 
                 session = load_state()["work_sessions"][0]
                 self.assertEqual([call.get("approval_status") for call in session["tool_calls"][:2]], ["applied", "applied"])
+                self.assertTrue(session["tool_calls"][2]["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", session["tool_calls"][2]["result"])
+                self.assertEqual(session["tool_calls"][3]["result"]["verification_exit_code"], 0)
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve_all")
                 self.assertEqual(snapshot["last_step"]["applied"][0]["count"], 2)
