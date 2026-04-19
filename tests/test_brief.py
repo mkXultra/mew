@@ -665,7 +665,8 @@ class BriefTests(unittest.TestCase):
         focus = format_focus(data)
 
         self.assertEqual(data["recent_friction"]["rates"]["approval_rejection"], 1.0)
-        self.assertIn("Recent friction", focus)
+        self.assertEqual(data["recent_friction"]["active_blocker_count"], 0)
+        self.assertIn("Recent friction (historical; no active blockers)", focus)
         self.assertIn("approval_rejection=1.0", focus)
         self.assertIn("verification_failure=1.0", focus)
         self.assertIn("rejected edit_file#1 task=#7 path=tests/test_brief.py: Add paired test first.", focus)

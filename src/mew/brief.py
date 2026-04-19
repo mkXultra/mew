@@ -753,7 +753,10 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
         return {}
     rates = ((metrics.get("reliability") or {}).get("rates") or {})
     latency = metrics.get("latency") or {}
+    sessions = metrics.get("sessions") or {}
+    active_blocker_count = int(sessions.get("awaiting_approval") or 0) + int(sessions.get("stale_active") or 0)
     return {
+        "active_blocker_count": active_blocker_count,
         "rates": {
             "approval_rejection": rates.get("approval_rejection"),
             "verification_failure": rates.get("verification_failure"),
@@ -909,7 +912,10 @@ def _append_focus_recent_friction(lines, friction):
     if not friction:
         return
     lines.append("")
-    lines.append("Recent friction")
+    heading = "Recent friction"
+    if friction.get("active_blocker_count") == 0:
+        heading += " (historical; no active blockers)"
+    lines.append(heading)
     summary = _format_focus_friction_summary(friction)
     if summary:
         lines.append(f"- {summary}")
