@@ -1957,6 +1957,31 @@ class WorkSessionTests(unittest.TestCase):
         ]
         self.assertEqual([], plain_approves)
 
+    def test_compact_cockpit_controls_surface_cells_help_without_bulk_sections(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Compact cockpit",
+            "tool_calls": [],
+            "model_turns": [],
+            "default_options": {"allow_read": ["."], "compact_live": True},
+        }
+
+        controls = format_work_cockpit_controls(
+            state={"work_sessions": [session], "tasks": []},
+            session=session,
+            continue_options="--allow-read src --max-steps 1",
+            compact=True,
+        )
+
+        self.assertIn("Inspect", controls)
+        self.assertIn("- /work-session resume --allow-read src", controls)
+        self.assertIn("/help work for diffs, tests, commands, cells, manage, and advanced controls", controls)
+        self.assertNotIn("- /work-session cells", controls)
+        self.assertNotIn("Manage", controls)
+        self.assertNotIn("Advanced", controls)
+
     def test_successful_run_tests_does_not_replace_existing_default_verify_command(self):
         session = {
             "default_options": {
