@@ -429,6 +429,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("continuity_resume_scores_reentry_artifacts", text)
             self.assertIn("continuity_follow_snapshot_and_status_surface_score", text)
 
+    def test_run_dogfood_m3_reentry_gate_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m3-reentry-gate",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m3-reentry-gate")
+            self.assertIn("m3_reentry_gate_resume_brief_has_change_risk_next_action", text)
+            self.assertIn("m3_reentry_gate_can_advance_to_verification_after_reentry", text)
+
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

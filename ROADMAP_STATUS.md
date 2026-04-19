@@ -10,13 +10,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 23:17 JST.
+Last assessed: 2026-04-19 23:51 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -88,8 +88,15 @@ Milestone 2 Done-when checklist:
   hidden metrics signal.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
-  CLI: partial. M1-level resume and M3 continuity foundations exist, but this
-  has not yet been proven as part of the M2 comparative coding flow.
+  CLI: partial. M1-level resume and M3 continuity foundations exist. A scoped
+  `mew dogfood --scenario m3-reentry-gate` proof now exercises the narrow
+  interruption/context-compression gate that M2 needs: an interrupted coding
+  task resumes with the pending change, failed verifier risk, live world state,
+  and next action visible, then advances by applying the known edit and running
+  verification successfully. This is supporting evidence, not full parity: the
+  next comparative run still needs an interruption-shaped mew task paired
+  against a fresh Claude Code or Codex CLI session, with the resident-preference
+  result recorded.
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
@@ -99,6 +106,9 @@ Useful next choices are either running a real paired comparative task with
 latency/friction slice chosen from `mew metrics --kind coding`. Polish, side
 projects, and later-milestone architecture are deferred unless they directly
 unblock this active criterion.
+The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
+a milestone switch: after it is green, return to M2 by running or preparing a
+paired interruption-shaped comparative dogfood task.
 `docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
 §0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
 levers chosen only when a measured active-milestone signal justifies them.
