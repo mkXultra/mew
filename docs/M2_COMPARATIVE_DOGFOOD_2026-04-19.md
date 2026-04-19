@@ -190,3 +190,57 @@ activity timestamp, with a regression test covering out-of-order sessions.
 Next useful M2 move: run one real paired coding task through this evidence
 pipeline and decide resident preference from that artifact instead of adding
 more comparison-surface polish.
+
+## Paired Coding Task: High-Idle Metrics Refactor
+
+Task: deduplicate the high-idle metric calculation so high-idle diagnostic
+samples reuse the same wall/active/idle-ratio formula as
+`perceived_idle_ratio`.
+
+### mew
+
+- Entry: `mew self-improve --start-session ...`, then
+  `mew work 253 --follow ...`
+- Task/session: task `#253`, work session `#246`
+- Result: completed with supervisor follow-through after mew produced the
+  correct reentry checkpoint and small-change recommendation
+- Verification:
+  - `uv run pytest --testmon -q tests/test_metrics.py -k 'high_idle or latency or retire_historical_friction'`
+  - full `uv run pytest -q`
+- Summary: mew found the right metrics/test surface, inspected the relevant
+  windows, and recorded a durable recommendation. The implementation was then
+  applied with that context. Continuity was strong (`9/9`) and the work session
+  produced a usable resume command, but the task still required supervisor
+  execution rather than being completed end-to-end inside the cockpit.
+
+### fresh_cli
+
+- Entry: `codex-ultra` in detached worktree `/tmp/mew-fresh-high-idle`
+- Report: `/tmp/mew-fresh-cli-high-idle-comparison.json`
+- Verification:
+  - `uv run pytest -q tests/test_metrics.py` (`6 passed`)
+  - `uv run ruff check src/mew/metrics.py tests/test_metrics.py`
+- Summary: fresh CLI completed the same localized refactor directly with
+  minimal friction. Its only minor issue was using `uv run python` after
+  `python` was not on PATH for report validation.
+
+### Combined Artifact
+
+Command:
+
+```bash
+./mew dogfood --scenario m2-comparative \
+  --workspace /tmp/mew-m2-session-246-paired \
+  --mew-session-id 246 \
+  --m2-comparison-report /tmp/mew-fresh-cli-high-idle-comparison.json \
+  --json
+```
+
+Result: pass. The generated protocol merged both mew-side work-session
+evidence and the fresh CLI report. The comparison status was
+`fresh_cli_preferred`.
+
+Follow-up: for small localized changes, mew still has too much observer
+overhead versus a fresh CLI. The next useful paired task should either be
+write-heavy enough for mew's persistent context to matter, or should reduce the
+supervision overhead for small local changes.

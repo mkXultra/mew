@@ -42,8 +42,12 @@ Milestone 2 Done-when checklist:
   wall/active time, approval, verification, resume, and continuity evidence
   instead of only a protocol template. It can also merge a paired fresh-CLI JSON
   report via `--m2-comparison-report`, making the comparison executable without
-  hand-editing the protocol markdown. Parity is still not claimed until a real
-  paired comparison confirms lower friction end to end.
+  hand-editing the protocol markdown. A real paired high-idle metrics refactor
+  then flowed through this evidence pipeline with mew session `#246` and a
+  fresh `codex-ultra` worktree report; the combined artifact passed and marked
+  `fresh_cli_preferred`. Parity is still not claimed: for small localized
+  changes, mew's persistent context is useful but the observer/supervision
+  overhead remains higher than a fresh CLI.
 - The model does not lose momentum while waiting for tool feedback: unmet.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
