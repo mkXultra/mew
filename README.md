@@ -424,7 +424,9 @@ continue, so short autonomous runs are discoverable without hiding the safer
 single-step path. Multi-step work stops at pending dry-run write approvals
 instead of continuing past a human review boundary. Add `--prompt-approval` to a
 live run when you want mew to ask inline before applying or rejecting a dry-run
-write.
+write, or `--approval-mode accept-edits` when you want an explicit opt-in mode
+that applies write/edit previews automatically under the existing write,
+paired-test, and verification gates.
 `mew work --live` prints the selected action before execution, a compact result
 pane after each step, and a resume after each completed tool step. The thinking
 pane includes `step/max`, session, task id, phase, and elapsed time, so a longer
@@ -561,8 +563,10 @@ uv run mew code 1 --read-only --no-verify
 uv run mew code 1 --quiet --timeout 0
 uv run mew do 1 --work-guidance "make the smallest verified fix"
 uv run mew do 1 --no-prompt-approval --work-guidance "leave write approvals in the resume bundle"
+uv run mew do 1 --approval-mode accept-edits --work-guidance "apply safe previews automatically"
 uv run mew work 1 --live --auth auth.json --allow-read . --act-mode deterministic --max-steps 1
 uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --max-steps 3
+uv run mew work 1 --live --auth auth.json --allow-read . --allow-write . --allow-verify --verify-command "uv run pytest -q" --approval-mode accept-edits --max-steps 3
 uv run mew work 1 --follow --auth auth.json --allow-read .
 uv run mew work 1 --follow --quiet --auth auth.json --allow-read . --max-steps 3
 uv run mew work 1 --live --stream-model --auth auth.json --allow-read . --max-steps 1
@@ -594,6 +598,9 @@ unless `--auth` is explicitly supplied. In an interactive terminal, `mew do`
 and `mew work --live` prompt inline before applying dry-run writes; use
 `--prompt-approval` to force that behavior in non-TTY runs, or
 `--no-prompt-approval` to leave approvals in the resume bundle. Use
+`--approval-mode accept-edits` to skip the prompt and apply changed write/edit
+previews automatically while preserving the configured write roots, paired-test
+guard, and approval-time verification. Use
 `--read-only` / `--no-verify` to remove the default write and verification gates.
 Live runs print a compact `thinking` pane before each action, so the selected
 step is visible before any tool runs.

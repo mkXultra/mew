@@ -73,6 +73,8 @@ class CommandTests(unittest.TestCase):
                                 "--max-steps",
                                 "4",
                                 "--compact-live",
+                                "--approval-mode",
+                                "accept-edits",
                             ]
                         )
             finally:
@@ -93,6 +95,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(args.verify_command, "uv run pytest -q")
         self.assertEqual(args.work_guidance, "ship the small fix")
         self.assertTrue(args.compact_live)
+        self.assertEqual(args.approval_mode, "accept-edits")
         self.assertFalse(args.no_prompt_approval)
 
     def test_do_can_disable_interactive_prompt_approval(self):

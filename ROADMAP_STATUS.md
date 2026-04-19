@@ -62,7 +62,11 @@ Milestone 2 Done-when checklist:
   fresh `codex-ultra` worktree report; the combined artifact passed and marked
   `fresh_cli_preferred`. Parity is still not claimed: for small localized
   changes, mew's persistent context is useful but the observer/supervision
-  overhead remains higher than a fresh CLI.
+  overhead remains higher than a fresh CLI. A small permission-mode slice now
+  adds explicit `--approval-mode accept-edits` for `mew do`, `mew work --live`,
+  and `mew code` defaults: dry-run write/edit previews are applied
+  automatically only when this mode is requested, while write roots,
+  paired-test source-edit guards, and approval-time verification still apply.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

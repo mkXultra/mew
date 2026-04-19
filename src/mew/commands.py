@@ -252,6 +252,8 @@ RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
 MAX_OUTBOX_TEXT_CHARS = 2000
 RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
+APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
+APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
 
 def task_json_data(task):
@@ -1407,6 +1409,7 @@ def _work_control_options(args, session=None):
         "allow_shell": bool(option("allow_shell", False)),
         "allow_verify": bool(option("allow_verify", False)),
         "verify_command": option("verify_command", ""),
+        "approval_mode": option("approval_mode", ""),
         "act_mode": option("act_mode"),
         "compact_live": bool(option("compact_live", False)),
         "prompt_approval": bool(option("prompt_approval", False)),
@@ -1492,6 +1495,7 @@ def remember_work_session_default_options(session, args):
             options.get("allow_shell"),
             options.get("allow_verify"),
             options.get("verify_command"),
+            options.get("approval_mode"),
             options.get("model"),
             options.get("base_url"),
             options.get("act_mode") and options.get("act_mode") != "model",
@@ -1546,6 +1550,7 @@ def remember_work_session_default_options(session, args):
         "allow_verify": False if clear_verify_defaults else bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": "" if clear_verify_defaults else merged_scalar("verify_command"),
         "verify_disabled": verify_disabled,
+        "approval_mode": merged_scalar("approval_mode"),
         "act_mode": merged_scalar("act_mode"),
         "compact_live": bool(current.get("compact_live") or options.get("compact_live")),
         "quiet": bool(current.get("quiet") or options.get("quiet")),
@@ -1678,6 +1683,8 @@ def work_chat_continue_options(session):
         parts.append("--allow-verify")
     if options.get("verify_command"):
         parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("approval_mode"):
+        parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
     if options.get("compact_live"):
@@ -1716,6 +1723,8 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow
         parts.append("--allow-verify")
     if options.get("verify_command"):
         parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("approval_mode"):
+        parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
     if options.get("compact_live"):
@@ -2204,6 +2213,10 @@ def live_approval_prompt_enabled(args):
         getattr(args, "prompt_approval", False)
         or (getattr(args, "live", False) and not getattr(args, "json", False) and sys.stdin.isatty())
     )
+
+
+def work_auto_approve_edits_enabled(args):
+    return getattr(args, "approval_mode", "") == APPROVAL_MODE_ACCEPT_EDITS
 
 
 def resolved_work_act_mode(args):
@@ -2807,6 +2820,7 @@ def cmd_do(args):
         compact_live=bool(getattr(args, "compact_live", False)),
         prompt_approval=bool(getattr(args, "prompt_approval", False)),
         no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
+        approval_mode=getattr(args, "approval_mode", None) or "",
         allow_read=getattr(args, "allow_read", None) or ["."],
         allow_write=[] if getattr(args, "read_only", False) else (getattr(args, "allow_write", None) or ["."]),
         allow_shell=False,
@@ -2842,6 +2856,7 @@ def code_args_request_default_update(args):
         or getattr(args, "compact_live", False)
         or getattr(args, "prompt_approval", False)
         or getattr(args, "no_prompt_approval", False)
+        or getattr(args, "approval_mode", None)
     )
 
 
@@ -2866,6 +2881,7 @@ def code_default_update_args(args, session):
         compact_live=bool(getattr(args, "compact_live", False)),
         prompt_approval=bool(getattr(args, "prompt_approval", False)),
         no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
+        approval_mode=getattr(args, "approval_mode", None) or "",
         read_only=bool(getattr(args, "read_only", False)),
         no_verify=bool(getattr(args, "no_verify", False)),
     )
@@ -2903,6 +2919,7 @@ def cmd_code(args):
             compact_live=bool(getattr(args, "compact_live", False)),
             prompt_approval=bool(getattr(args, "prompt_approval", False)),
             no_prompt_approval=bool(getattr(args, "no_prompt_approval", False)),
+            approval_mode=getattr(args, "approval_mode", None) or "",
             read_only=bool(getattr(args, "read_only", False)),
             no_verify=bool(getattr(args, "no_verify", False)),
         )
@@ -4207,6 +4224,26 @@ def cmd_work_ai(args):
                 print(f"Work live step #{index} resume")
                 print(format_work_session_resume(resume))
         if pending_approval:
+            if work_auto_approve_edits_enabled(effective_args):
+                approve_args = SimpleNamespace(
+                    task_id=task_id,
+                    approve_tool=tool_call.get("id"),
+                    allow_write=effective_args.allow_write or [],
+                    allow_verify=effective_args.allow_verify,
+                    verify_command=effective_args.verify_command or "",
+                    verify_cwd=args.verify_cwd,
+                    verify_timeout=effective_args.verify_timeout,
+                    progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                    json=False,
+                    defer_verify=False,
+                    allow_unpaired_source_edit=False,
+                )
+                approval_code = cmd_work_approve_tool(approve_args)
+                report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_code != 0:
+                    report["stop_reason"] = "tool_failed"
+                    break
+                continue
             if live_approval_prompt_enabled(effective_args):
                 with state_lock():
                     state = load_state()

@@ -4,6 +4,7 @@ import os
 
 from .dogfood import DOGFOOD_SCENARIOS, M2_COMPARATIVE_TASK_SHAPES
 from .commands import (
+    APPROVAL_MODES,
     CHAT_HELP,
     cmd_attach,
     cmd_ack,
@@ -881,6 +882,11 @@ def build_parser():
         action="store_true",
         help="disable the default inline approval prompt in interactive live mode",
     )
+    do_parser.add_argument(
+        "--approval-mode",
+        choices=APPROVAL_MODES,
+        help="approval policy for work-loop dry-run writes; accept-edits applies write/edit previews automatically",
+    )
     do_parser.add_argument("--allow-read", action="append", default=[], help="read root; defaults to .")
     do_parser.add_argument("--allow-write", action="append", default=[], help="write root; defaults to .")
     do_parser.add_argument("--read-only", action="store_true", help="do not grant write roots")
@@ -922,6 +928,11 @@ def build_parser():
     code_parser.add_argument("--compact-live", action="store_true", help="cache compact live output for /continue")
     code_parser.add_argument("--prompt-approval", action="store_true", help="cache forced inline approval prompts")
     code_parser.add_argument("--no-prompt-approval", action="store_true", help="cache disabled inline approval prompts")
+    code_parser.add_argument(
+        "--approval-mode",
+        choices=APPROVAL_MODES,
+        help="cache approval policy for work-loop writes; accept-edits applies write/edit previews automatically",
+    )
     code_parser.add_argument(
         "--poll-interval",
         type=float,
@@ -980,6 +991,11 @@ def build_parser():
         "--no-prompt-approval",
         action="store_true",
         help="disable the default inline approval prompt in interactive --live mode",
+    )
+    work_parser.add_argument(
+        "--approval-mode",
+        choices=APPROVAL_MODES,
+        help="approval policy for work-loop dry-run writes; accept-edits applies write/edit previews automatically",
     )
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
     work_parser.add_argument("--session", action="store_true", help="show the active native work session")
