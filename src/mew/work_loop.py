@@ -506,7 +506,7 @@ def build_work_think_prompt(context):
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with exactly those two write/edit tools; mew will force both to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, read the smallest relevant file window first. Once a prior line-window read contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -597,7 +597,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
             if not paired_tools:
                 return {
                     "type": "wait",
-                    "reason": "write batch is limited to exactly one tests/** write/edit and one src/mew/** write/edit",
+                    "reason": "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each",
                 }
             normalized_tools = paired_tools
         normalized = {"type": "batch", "tools": normalized_tools}
@@ -764,21 +764,21 @@ def valid_paired_write_batch_sub_action(action):
 
 def normalize_paired_write_batch_tools(tools):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
-    if len(write_tools) != 2:
+    if len(write_tools) < 2:
         return []
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
         return []
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
-    if len(tests_tools) != 1 or len(source_tools) != 1:
+    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
         return []
     source_path = source_tools[0].get("path")
     normalized = []
-    for index, raw_tool in enumerate((tests_tools[0], source_tools[0])):
+    for raw_tool in [*tests_tools, *source_tools]:
         tool = dict(raw_tool)
         tool["apply"] = False
         tool["dry_run"] = True
-        if index == 0:
+        if raw_tool in tests_tools:
             tool["defer_verify_on_approval"] = True
             tool["paired_test_source_path"] = source_path
         normalized.append(tool)

@@ -12028,6 +12028,60 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("dropped 2 additional tool", action["reason"])
         self.assertIn("collect context", action["reason"])
 
+    def test_work_model_batch_allows_multiple_paired_source_and_test_writes(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "summary": "preview multi-edit paired batch",
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/alpha.py",
+                            "old": "OLD_ALPHA",
+                            "new": "NEW_ALPHA",
+                            "dry_run": False,
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "tests/test_alpha.py",
+                            "old": "OLD_ALPHA",
+                            "new": "NEW_ALPHA",
+                            "dry_run": False,
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/beta.py",
+                            "old": "OLD_BETA",
+                            "new": "NEW_BETA",
+                            "dry_run": False,
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "tests/test_beta.py",
+                            "old": "OLD_BETA",
+                            "new": "NEW_BETA",
+                            "dry_run": False,
+                        },
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(
+            [tool["path"] for tool in action["tools"]],
+            ["tests/test_alpha.py", "tests/test_beta.py", "src/mew/alpha.py", "src/mew/beta.py"],
+        )
+        self.assertTrue(all(tool["dry_run"] for tool in action["tools"]))
+        self.assertTrue(all(not tool["apply"] for tool in action["tools"]))
+        self.assertTrue(all(tool.get("defer_verify_on_approval") for tool in action["tools"][:2]))
+        self.assertTrue(all("defer_verify_on_approval" not in tool for tool in action["tools"][2:]))
+        self.assertEqual(action["tools"][0]["paired_test_source_path"], "src/mew/alpha.py")
+        self.assertEqual(action["tools"][1]["paired_test_source_path"], "src/mew/alpha.py")
+
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result
 
