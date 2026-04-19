@@ -3106,7 +3106,11 @@ def run_work_session_scenario(workspace, env=None):
             ".",
             "--allow-verify",
             "--verify-command",
-            "true",
+            (
+                f"{sys.executable} -c \"from pathlib import Path; "
+                "assert Path('batch-one.md').read_text() == 'batch one\\n'; "
+                "assert Path('batch-two.md').read_text() == 'batch two\\n'\""
+            ),
             "--json",
         ]
     )
@@ -3621,6 +3625,11 @@ raise SystemExit(0 if passed else 1)
     approve_all_first_data = _json_stdout(approve_all_first_result)
     approve_all_second_data = _json_stdout(approve_all_second_result)
     approve_all_data = _json_stdout(approve_all_result)
+    approve_all_applied = approve_all_data.get("approved") or []
+    approve_all_first_apply = ((approve_all_applied[0] if approve_all_applied else {}).get("tool_call") or {})
+    approve_all_second_apply = (
+        (approve_all_applied[1] if len(approve_all_applied) > 1 else {}).get("tool_call") or {}
+    )
     reply_file_data = _json_stdout(reply_file_result)
     interrupt_submit_data = _json_stdout(interrupt_submit_result)
     interrupt_resume_data = _json_stdout(interrupt_resume_result)
@@ -3911,6 +3920,9 @@ raise SystemExit(0 if passed else 1)
         and ((approve_all_first_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
         and ((approve_all_second_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
         and approve_all_data.get("count") == 2
+        and (approve_all_first_apply.get("result") or {}).get("verification_deferred") is True
+        and "verification_exit_code" not in (approve_all_first_apply.get("result") or {})
+        and (approve_all_second_apply.get("result") or {}).get("verification_exit_code") == 0
         and (workspace / "batch-one.md").read_text(encoding="utf-8") == "batch one\n"
         and (workspace / "batch-two.md").read_text(encoding="utf-8") == "batch two\n",
         observed={
