@@ -623,6 +623,11 @@ Evidence:
   the resident to use that typed recall while still verifying project facts
   before code changes. `dogfood --scenario work-session` verifies typed user
   and project memories appear in resume.
+- Real Codex Web API dogfood in a temporary workspace proved the active recall
+  can affect a resident turn. A typed project memory told the resident to
+  inspect `README.md` first for the "Active Memory API Proof" task; the model
+  selected `read_file README.md` and its decision summary explicitly cited the
+  active project memory as the route.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -702,9 +707,9 @@ Missing proof:
 
 Next action:
 
-- Dogfood active typed recall in a real API native-work loop, then decide
-  whether 5.12 needs a dedicated `mew memory recall` command or whether the
-  resident-startup bundle is enough for now.
+- Tighten active recall quality from dogfood: improve ranking/stop-words,
+  decide whether `mew memory recall` is needed as a human/debug surface, and
+  then move back to the broader cockpit/recovery roadmap.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer the
