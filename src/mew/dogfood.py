@@ -64,6 +64,7 @@ M2_COMPARATIVE_TASK_SHAPES = (
     "interruption_resume",
     "test_discovery",
     "approval_pairing",
+    "process_stop",
     "write_heavy",
 )
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
@@ -5601,6 +5602,24 @@ def _m2_find_work_session(state, session_id):
     return find_work_session(state, session_id_text)
 
 
+def _m2_work_sessions_for_task(state, task_id):
+    task_id_text = _m2_session_id_text(task_id)
+    sessions = []
+    for session in state.get("work_sessions") or []:
+        if not isinstance(session, dict):
+            continue
+        if str(session.get("task_id") or "") == task_id_text:
+            sessions.append(session)
+    return sorted(
+        sessions,
+        key=lambda session: (
+            session.get("created_at") or "",
+            session.get("updated_at") or "",
+            str(session.get("id") or ""),
+        ),
+    )
+
+
 def _m2_command_records(calls, limit=8):
     records = []
     for call in calls or []:
@@ -5692,6 +5711,12 @@ def _m2_call_has_failure_or_interruption(call):
     return any(value not in (None, 0) for value in exit_values)
 
 
+def _m2_turn_has_failure_or_interruption(turn):
+    if not isinstance(turn, dict):
+        return False
+    return bool(turn.get("status") in {"failed", "interrupted"} or turn.get("error"))
+
+
 def _m2_resume_gate_status(gate):
     if not gate:
         return "unknown"
@@ -5709,10 +5734,11 @@ def _m2_resume_gate_status(gate):
     return "unknown"
 
 
-def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resume_command):
+def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resume_command, turns=None):
     resume = resume or {}
     continuity = resume.get("continuity") or {}
     calls = list(calls or [])
+    turns = list(turns or [])
     approval_counts = approval_counts or {}
     verification = verification or {}
     gate = {
@@ -5725,6 +5751,7 @@ def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resum
             resume.get("unresolved_failure")
             or resume.get("failures")
             or any(_m2_call_has_failure_or_interruption(call) for call in calls)
+            or any(_m2_turn_has_failure_or_interruption(turn) for turn in turns)
         ),
         "runnable_next_action": bool(str(resume.get("next_action") or "").strip()),
         "continuity_usable": continuity.get("status") in {"strong", "usable"},
@@ -5743,10 +5770,154 @@ def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resum
     return gate
 
 
+def _m2_session_risk_preserved(resume, calls, turns):
+    resume = resume or {}
+    return bool(
+        resume.get("unresolved_failure")
+        or resume.get("failures")
+        or any(_m2_call_has_failure_or_interruption(call) for call in calls or [])
+        or any(_m2_turn_has_failure_or_interruption(turn) for turn in turns or [])
+    )
+
+
+def _m2_task_chain_resume_gate_evidence(session_infos, resume_command):
+    session_infos = list(session_infos or [])
+    if not session_infos:
+        return {
+            "status": "unknown",
+            "resume_command": resume_command or "",
+            "evidence_gap": ["no work sessions were found for the task"],
+        }
+    latest = session_infos[-1]
+    latest_resume = latest.get("resume") or {}
+    continuity = latest_resume.get("continuity") or {}
+    risk_indices = [index for index, info in enumerate(session_infos) if info.get("risk_preserved")]
+    passed_indices = [
+        index
+        for index, info in enumerate(session_infos)
+        if (info.get("verification") or {}).get("status") == "passed"
+    ]
+    verification_after_resume = any(
+        passed_index >= risk_index for risk_index in risk_indices for passed_index in passed_indices
+    )
+    approval_total = sum((info.get("approval_counts") or {}).get("total", 0) for info in session_infos)
+    gate = {
+        "status": "unknown",
+        "resume_command": resume_command or "",
+        "continuity_score": continuity.get("score") or "",
+        "continuity_status": continuity.get("status") or "",
+        "changed_or_pending_work": bool(
+            approval_total
+            or any((info.get("resume") or {}).get("files_touched") for info in session_infos)
+        ),
+        "risk_or_interruption_preserved": bool(risk_indices),
+        "runnable_next_action": bool(str(latest_resume.get("next_action") or "").strip() or passed_indices),
+        "continuity_usable": continuity.get("status") in {"strong", "usable"},
+        "verification_after_resume_candidate": verification_after_resume,
+        "evidence_mode": "task_chain",
+        "risk_session_ids": [session_infos[index].get("session_id") for index in risk_indices],
+        "verification_session_ids": [session_infos[index].get("session_id") for index in passed_indices],
+        "evidence_gap": [],
+    }
+    gap_labels = {
+        "changed_or_pending_work": "task chain did not expose changed or pending work",
+        "risk_or_interruption_preserved": "task chain did not preserve an interruption, failure, or recovery risk",
+        "runnable_next_action": "task chain did not expose a runnable next action",
+        "continuity_usable": "latest continuity was not strong or usable",
+        "verification_after_resume_candidate": "no passing verification was recorded after a risk session",
+    }
+    gate["evidence_gap"] = [label for key, label in gap_labels.items() if not gate.get(key)]
+    gate["status"] = _m2_resume_gate_status(gate)
+    return gate
+
+
+def build_m2_mew_task_chain_evidence(state, task_id):
+    task_id_text = _m2_session_id_text(task_id)
+    task = find_task(state, task_id_text)
+    sessions = _m2_work_sessions_for_task(state, task_id_text)
+    if not sessions:
+        return {
+            "status": "missing",
+            "requested_session_id": f"task:{task_id_text}",
+            "source_state": str(STATE_FILE),
+        }
+
+    session_infos = []
+    combined_calls = []
+    combined_turns = []
+    for session in sessions:
+        calls = list(session.get("tool_calls") or [])
+        turns = list(session.get("model_turns") or [])
+        resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
+        approval_counts = _m2_approval_counts(calls)
+        verification = _m2_latest_verification(calls)
+        session_infos.append(
+            {
+                "session_id": session.get("id"),
+                "resume": resume,
+                "calls": calls,
+                "turns": turns,
+                "approval_counts": approval_counts,
+                "verification": verification,
+                "risk_preserved": _m2_session_risk_preserved(resume, calls, turns),
+            }
+        )
+        combined_calls.extend(calls)
+        combined_turns.extend(turns)
+
+    latest_session = sessions[-1]
+    latest_resume = session_infos[-1].get("resume") or {}
+    latest_effort = build_work_session_effort(latest_session) or {}
+    continuity = latest_resume.get("continuity") or {}
+    approval_counts = {
+        key: sum((info.get("approval_counts") or {}).get(key, 0) for info in session_infos)
+        for key in ("total", "pending", "applied", "rejected", "failed", "indeterminate")
+    }
+    verification = _m2_latest_verification(combined_calls)
+    task_id_value = latest_session.get("task_id") or (task or {}).get("id") or task_id_text
+    resume_command = f"mew work {task_id_value} --session --resume --allow-read ."
+    return {
+        "status": "found",
+        "evidence_mode": "task_chain",
+        "source_state": str(STATE_FILE),
+        "requested_session_id": f"task:{task_id_text}",
+        "work_session_id": latest_session.get("id"),
+        "work_session_ids": [session.get("id") for session in sessions],
+        "task_id": task_id_value,
+        "task_title": (task or {}).get("title") or latest_session.get("title") or "",
+        "session_status": latest_session.get("status") or "",
+        "phase": latest_session.get("phase") or "",
+        "created_at": sessions[0].get("created_at") or "",
+        "updated_at": latest_session.get("updated_at") or "",
+        "model_turns": len(combined_turns),
+        "tool_calls": len(combined_calls),
+        "effort": {
+            "wall_elapsed_seconds": latest_effort.get("wall_elapsed_seconds"),
+            "observed_active_seconds": latest_effort.get("observed_active_seconds"),
+            "tool_seconds": latest_effort.get("tool_seconds"),
+            "model_seconds": latest_effort.get("model_seconds"),
+            "pressure": latest_effort.get("pressure") or "",
+        },
+        "commands_or_tests_run": _m2_command_records(combined_calls),
+        "approval_counts": approval_counts,
+        "verification": verification,
+        "resume_command": resume_command,
+        "resume_gate": _m2_task_chain_resume_gate_evidence(session_infos, resume_command),
+        "continuity": {
+            "score": continuity.get("score") or "",
+            "status": continuity.get("status") or "",
+            "missing": continuity.get("missing") or [],
+            "recommendation": (continuity.get("recommendation") or {}).get("summary") or "",
+        },
+    }
+
+
 def build_m2_mew_run_evidence(state, session_id):
     session_id_text = _m2_session_id_text(session_id)
     if not session_id_text:
         return None
+    if session_id_text.startswith("task:"):
+        return build_m2_mew_task_chain_evidence(state, session_id_text.removeprefix("task:"))
     session = _m2_find_work_session(state, session_id_text)
     if not session:
         return {
@@ -5798,6 +5969,7 @@ def build_m2_mew_run_evidence(state, session_id):
             approval_counts,
             verification,
             resume_command,
+            turns=turns,
         ),
         "continuity": {
             "score": continuity.get("score") or "",
@@ -5833,10 +6005,16 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
     continuity = evidence.get("continuity") or {}
     wall = effort.get("wall_elapsed_seconds")
     active = effort.get("observed_active_seconds")
+    session_ids = evidence.get("work_session_ids") or []
+    session_label = (
+        f"task-chain sessions {','.join(f'#{session_id}' for session_id in session_ids)}"
+        if session_ids
+        else f"session #{evidence.get('work_session_id')}"
+    )
     mew_summary.update(
         {
             "summary": (
-                f"session #{evidence.get('work_session_id')} task #{evidence.get('task_id')} "
+                f"{session_label} task #{evidence.get('task_id')} "
                 f"status={evidence.get('session_status')} phase={evidence.get('phase')} "
                 f"turns={evidence.get('model_turns')} tools={evidence.get('tool_calls')} "
                 f"wall={wall}s active={active}s"
@@ -5864,7 +6042,7 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
             else "Run the matching fresh_cli task and fill its run summary."
         )
     comparison["notes"] = comparison.get("notes") or (
-        f"Mew-side evidence was prefilled from work session #{evidence.get('work_session_id')}."
+        f"Mew-side evidence was prefilled from {session_label}."
     )
     resume_behavior = protocol.setdefault("resume_behavior", {})
     resume_behavior["mew_resume_command"] = evidence.get("resume_command") or resume_behavior.get("mew_resume_command", "")
@@ -6207,8 +6385,10 @@ def format_m2_comparative_protocol(protocol):
                 "",
                 "## Mew Run Evidence",
                 f"- status: {evidence.get('status')}",
+                f"- evidence_mode: {evidence.get('evidence_mode', 'single_session')}",
                 f"- source_state: `{evidence.get('source_state', '')}`",
                 f"- work_session_id: {evidence.get('work_session_id', evidence.get('requested_session_id', ''))}",
+                f"- work_session_ids: {evidence.get('work_session_ids') or []}",
                 f"- task_id: {evidence.get('task_id', '')}",
                 f"- task_title: {evidence.get('task_title', '')}",
                 f"- session_status: {evidence.get('session_status', '')}",

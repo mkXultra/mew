@@ -73,7 +73,7 @@ class DogfoodTests(unittest.TestCase):
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
 
-        for shape in ("test_discovery", "approval_pairing"):
+        for shape in ("test_discovery", "approval_pairing", "process_stop"):
             with self.subTest(shape=shape):
                 args = parser.parse_args(
                     [
@@ -548,6 +548,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("interruption_resume", protocol["task_shape"]["allowed_values"])
             self.assertIn("test_discovery", protocol["task_shape"]["allowed_values"])
             self.assertIn("approval_pairing", protocol["task_shape"]["allowed_values"])
+            self.assertIn("process_stop", protocol["task_shape"]["allowed_values"])
             self.assertEqual(protocol["interruption_resume_gate"]["status"], "unknown")
             self.assertIn("proved", protocol["interruption_resume_gate"]["allowed_statuses"])
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
@@ -687,8 +688,130 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
 
+    def test_run_dogfood_m2_comparative_prefills_task_chain_evidence(self):
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            state_dir = root / STATE_DIR
+            state_dir.mkdir(parents=True)
+            state = default_state()
+            state["tasks"].append(
+                {
+                    "id": 3,
+                    "title": "M2 process stop evidence task",
+                    "status": "todo",
+                    "priority": "high",
+                    "kind": "coding",
+                    "notes": "Continue from the interrupted first session.",
+                }
+            )
+            state["work_sessions"].append(
+                {
+                    "id": 7,
+                    "task_id": 3,
+                    "status": "closed",
+                    "phase": "interrupted",
+                    "created_at": "2026-04-19T10:00:00Z",
+                    "updated_at": "2026-04-19T10:02:00Z",
+                    "working_memory": {
+                        "hypothesis": "first session was interrupted",
+                        "next_step": "start a new session and continue",
+                    },
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "interrupted",
+                            "started_at": "2026-04-19T10:00:00Z",
+                            "finished_at": "2026-04-19T10:00:30Z",
+                            "error": "Interrupted by user during follow.",
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": 11,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "approval_status": "applied",
+                            "started_at": "2026-04-19T10:01:00Z",
+                            "finished_at": "2026-04-19T10:02:00Z",
+                            "parameters": {"path": "tests/test_dogfood.py"},
+                            "result": {"dry_run": True, "changed": True},
+                        }
+                    ],
+                }
+            )
+            state["work_sessions"].append(
+                {
+                    "id": 8,
+                    "task_id": 3,
+                    "status": "closed",
+                    "phase": "done",
+                    "created_at": "2026-04-19T10:03:00Z",
+                    "updated_at": "2026-04-19T10:06:00Z",
+                    "working_memory": {
+                        "hypothesis": "second session completed the interrupted task",
+                        "next_step": "review and commit the verified change",
+                        "last_verified_state": "pytest passed",
+                    },
+                    "model_turns": [
+                        {
+                            "id": 2,
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:03:00Z",
+                            "finished_at": "2026-04-19T10:04:00Z",
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": 12,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:05:00Z",
+                            "finished_at": "2026-04-19T10:06:00Z",
+                            "parameters": {"command": "pytest -q"},
+                            "result": {"command": "pytest -q", "exit_code": 0, "stdout": "ok\n"},
+                        }
+                    ],
+                }
+            )
+            (root / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+            try:
+                os.chdir(root)
+                args = SimpleNamespace(
+                    workspace=str(root / "dog"),
+                    scenario="m2-comparative",
+                    cleanup=False,
+                    mew_session_id="task:3",
+                )
+
+                report = run_dogfood_scenario(args)
+            finally:
+                os.chdir(previous_cwd)
+
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            runbook_path = Path(scenario["artifacts"]["markdown"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            runbook = runbook_path.read_text(encoding="utf-8")
+            evidence = protocol["mew_run_evidence"]
+            gate = protocol["interruption_resume_gate"]["mew"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(evidence["evidence_mode"], "task_chain")
+            self.assertEqual(evidence["work_session_ids"], [7, 8])
+            self.assertEqual(gate["status"], "proved")
+            self.assertEqual(gate["evidence_mode"], "task_chain")
+            self.assertEqual(gate["risk_session_ids"], [7])
+            self.assertEqual(gate["verification_session_ids"], [8])
+            self.assertIn(
+                "task-chain sessions #7,#8",
+                protocol["comparison_result"]["run_summaries"]["mew"]["summary"],
+            )
+            self.assertIn("- evidence_mode: task_chain", runbook)
+
     def test_run_dogfood_m2_task_shape_sets_selected_from_cli(self):
-        for shape in ("test_discovery", "approval_pairing"):
+        for shape in ("test_discovery", "approval_pairing", "process_stop"):
             with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:
                 args = SimpleNamespace(
                     workspace=str(Path(tmp) / "dog"),

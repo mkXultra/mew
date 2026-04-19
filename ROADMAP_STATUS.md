@@ -9,7 +9,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, and a first proved mew-side interruption-resume comparative gate; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, and proved mew-side interruption/process-stop comparative gates; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
@@ -100,16 +100,21 @@ Milestone 2 Done-when checklist:
   `docs/M2_INTERRUPT_COMPARATIVE_DOGFOOD_2026-04-20.md` proved the mew-side
   interruption-resume gate on a controlled failed-tool recovery task: changed
   work, preserved recovery risk, runnable next action, strong continuity, and
-  post-reentry verification were all present. The combined resident preference
-  remains `inconclusive` because the matching fresh CLI leg was not interrupted.
+  post-reentry verification were all present. A stricter Ctrl-C process-stop
+  run is recorded in `docs/M2_PROCESS_STOP_COMPARATIVE_DOGFOOD_2026-04-20.md`;
+  its actual interruption and final verification landed in separate work
+  sessions, so M2 comparative dogfood now supports `--mew-session-id task:<id>`
+  task-chain evidence. That task-chain gate is also `proved`. The combined
+  resident preference remains `inconclusive` because the matching fresh CLI leg
+  was not interrupted.
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are either running a stricter paired comparative task with
-an actual process stop or Ctrl-C boundary, or a targeted latency/friction slice
-chosen from `mew metrics --kind coding`. Polish, side projects, and
-later-milestone architecture are deferred unless they directly unblock this
-active criterion.
+Useful next choices are reducing the paired approval / deferred verification
+ceremony found during process-stop dogfood, running a matching interrupted
+fresh-CLI comparison, or a targeted latency/friction slice chosen from
+`mew metrics --kind coding`. Polish, side projects, and later-milestone
+architecture are deferred unless they directly unblock this active criterion.
 The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
 a milestone switch: after it is green, return to M2 by running or preparing a
 paired interruption-shaped comparative dogfood task.
@@ -716,6 +721,17 @@ Evidence:
   natural flat fresh-CLI report shape with `task_summary`, `verification`,
   `friction_summary`, `preference_signal`, and a top-level
   `interruption_resume_gate`, in addition to the nested `fresh_cli` shape.
+- The process-stop follow-up comparative dogfood is recorded in
+  `docs/M2_PROCESS_STOP_COMPARATIVE_DOGFOOD_2026-04-20.md`. In a disposable
+  worktree, `mew work --follow` was interrupted with Ctrl-C and recorded
+  `stop=user_interrupt`; the task then completed in a second work session with
+  passing focused and broad verification. Because interruption evidence and
+  verification evidence were split across sessions, the M2 protocol now accepts
+  `--mew-session-id task:<id>` and evaluates task-chain evidence. The resulting
+  mew-side gate is `proved` with `risk_session_ids=[1]` and
+  `verification_session_ids=[2]`. The matching fresh `codex-ultra` run
+  completed the narrow task, but was not interrupted, so the combined resident
+  preference remains `inconclusive`.
 
 Missing proof:
 
@@ -725,17 +741,17 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- The first interruption-shaped comparative run proved the mew-side gate for a
-  controlled failed-tool recovery, but it did not yet prove a stricter
-  process-level stop/Ctrl-C interruption or a resident preference over a
-  matching interrupted fresh CLI run.
+- The first process-stop comparative run proved the mew-side task-chain gate,
+  but it did not yet prove a resident preference over a matching interrupted
+  fresh CLI run. It also exposed remaining approval/deferred-verification
+  ceremony in multi-edit test-first flows.
 - TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 
-- Either run a stricter process-stop M2 comparative task, or fix the measured
-  cockpit latency / approval ceremony that still makes small fresh-CLI runs
-  feel lighter.
+- Reduce the paired approval / deferred-verification ceremony found during the
+  process-stop run, or run a matching interrupted fresh-CLI comparison. The
+  broader cockpit latency slice remains the other active M2 option.
 
 ## Milestone 3: Persistent Advantage
 
