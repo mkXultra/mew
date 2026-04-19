@@ -507,7 +507,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)
             self.assertNotIn("stdout", command)
-            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 135_000)
+            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 140_000)
 
     def test_run_dogfood_m2_comparative_scenario_writes_protocol(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -608,6 +608,8 @@ class DogfoodTests(unittest.TestCase):
                         {
                             "id": 1,
                             "status": "completed",
+                            "action": {"type": "batch"},
+                            "tool_call_ids": [11, 12],
                             "started_at": "2026-04-19T10:00:00Z",
                             "finished_at": "2026-04-19T10:00:20Z",
                         }
@@ -620,6 +622,19 @@ class DogfoodTests(unittest.TestCase):
                             "approval_status": "applied",
                             "started_at": "2026-04-19T10:01:00Z",
                             "finished_at": "2026-04-19T10:02:00Z",
+                            "parameters": {"path": "tests/test_dogfood.py"},
+                            "result": {
+                                "dry_run": True,
+                                "changed": True,
+                            },
+                        },
+                        {
+                            "id": 12,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "approval_status": "applied",
+                            "started_at": "2026-04-19T10:02:00Z",
+                            "finished_at": "2026-04-19T10:03:00Z",
                             "parameters": {"path": "src/mew/dogfood.py"},
                             "result": {
                                 "dry_run": True,
@@ -629,7 +644,7 @@ class DogfoodTests(unittest.TestCase):
                             },
                         },
                         {
-                            "id": 12,
+                            "id": 13,
                             "tool": "run_tests",
                             "status": "completed",
                             "started_at": "2026-04-19T10:03:00Z",
@@ -692,7 +707,11 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertIn("- approval_mode: accept-edits", runbook)
             self.assertIn("- default_permission_posture:", runbook)
-            self.assertEqual(protocol["mew_run_evidence"]["approval_counts"]["applied"], 1)
+            self.assertIn("- paired_write_batch: proved", runbook)
+            self.assertEqual(protocol["mew_run_evidence"]["approval_counts"]["applied"], 2)
+            self.assertEqual(protocol["mew_run_evidence"]["paired_write_batch"]["status"], "proved")
+            self.assertEqual(protocol["mew_run_evidence"]["paired_write_batch"]["tool_call_ids"], [11, 12])
+            self.assertEqual(protocol["mew_run_evidence"]["paired_write_batch"]["applied_count"], 2)
             self.assertEqual(protocol["mew_run_evidence"]["resume_gate"]["status"], "not_proved")
             self.assertTrue(protocol["mew_run_evidence"]["resume_gate"]["changed_or_pending_work"])
             self.assertEqual(protocol["interruption_resume_gate"]["mew"]["status"], "not_proved")

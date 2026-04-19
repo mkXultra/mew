@@ -6223,6 +6223,63 @@ def _m2_session_risk_preserved(resume, calls, turns):
     )
 
 
+def _m2_normalized_work_path(path):
+    return str(path or "").replace("\\", "/").lstrip("./")
+
+
+def _m2_call_path(call):
+    parameters = (call or {}).get("parameters") or {}
+    result = (call or {}).get("result") or {}
+    return parameters.get("path") or result.get("path") or ""
+
+
+def _m2_path_is_tests(path):
+    normalized = _m2_normalized_work_path(path)
+    return normalized == "tests" or normalized.startswith("tests/") or "/tests/" in normalized
+
+
+def _m2_path_is_mew_source(path):
+    normalized = _m2_normalized_work_path(path)
+    return normalized.startswith("src/mew/") or "/src/mew/" in normalized
+
+
+def _m2_paired_write_batch_evidence(turns, calls):
+    calls_by_id = {call.get("id"): call for call in calls or []}
+    for turn in turns or []:
+        action = turn.get("action") or ((turn.get("action_plan") or {}).get("action") or {})
+        if (action.get("type") or action.get("tool")) != "batch":
+            continue
+        tool_call_ids = [tool_id for tool_id in turn.get("tool_call_ids") or [] if tool_id in calls_by_id]
+        write_calls = [
+            calls_by_id[tool_id]
+            for tool_id in tool_call_ids
+            if (calls_by_id[tool_id].get("tool") or "") in ("write_file", "edit_file")
+        ]
+        if len(write_calls) < 2:
+            continue
+        source_paths = []
+        test_paths = []
+        for call in write_calls:
+            path = _m2_call_path(call)
+            if _m2_path_is_mew_source(path) and path not in source_paths:
+                source_paths.append(path)
+            if _m2_path_is_tests(path) and path not in test_paths:
+                test_paths.append(path)
+        if not source_paths or not test_paths:
+            continue
+        return {
+            "status": "proved",
+            "turn_id": turn.get("id"),
+            "tool_call_ids": [call.get("id") for call in write_calls],
+            "source_paths": source_paths[:DOGFOOD_OBSERVED_LIST_LIMIT],
+            "test_paths": test_paths[:DOGFOOD_OBSERVED_LIST_LIMIT],
+            "preview_count": len(write_calls),
+            "applied_count": sum(1 for call in write_calls if call.get("approval_status") == "applied"),
+            "forced_preview": all(((call.get("result") or {}).get("dry_run") is True) for call in write_calls),
+        }
+    return {"status": "not_observed"}
+
+
 def _m2_task_chain_resume_gate_evidence(session_infos, resume_command):
     session_infos = list(session_infos or [])
     if not session_infos:
@@ -6317,6 +6374,7 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         for key in ("total", "pending", "applied", "rejected", "failed", "indeterminate")
     }
     verification = _m2_latest_verification(combined_calls)
+    paired_write_batch = _m2_paired_write_batch_evidence(combined_turns, combined_calls)
     task_id_value = latest_session.get("task_id") or (task or {}).get("id") or task_id_text
     resume_command = f"mew work {task_id_value} --session --resume --allow-read ."
     return {
@@ -6343,6 +6401,7 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         },
         "commands_or_tests_run": _m2_command_records(combined_calls),
         "approval_counts": approval_counts,
+        "paired_write_batch": paired_write_batch,
         "verification": verification,
         "resume_command": resume_command,
         "resume_gate": _m2_task_chain_resume_gate_evidence(session_infos, resume_command),
@@ -6378,6 +6437,7 @@ def build_m2_mew_run_evidence(state, session_id):
     approval_counts = _m2_approval_counts(calls)
     verification = _m2_latest_verification(calls)
     continuity = resume.get("continuity") or {}
+    paired_write_batch = _m2_paired_write_batch_evidence(turns, calls)
     task_id = session.get("task_id") or (task or {}).get("id")
     resume_command = (
         f"mew work {task_id} --session --resume --allow-read ."
@@ -6412,6 +6472,7 @@ def build_m2_mew_run_evidence(state, session_id):
         },
         "commands_or_tests_run": _m2_command_records(calls),
         "approval_counts": approval_counts,
+        "paired_write_batch": paired_write_batch,
         "verification": verification,
         "resume_command": resume_command,
         "resume_gate": _m2_resume_gate_evidence(
@@ -6831,6 +6892,7 @@ def format_m2_comparative_protocol(protocol):
         verification = evidence.get("verification") or {}
         approvals = evidence.get("approval_counts") or {}
         continuity = evidence.get("continuity") or {}
+        paired_write_batch = evidence.get("paired_write_batch") or {}
         lines.extend(
             [
                 "",
@@ -6846,6 +6908,7 @@ def format_m2_comparative_protocol(protocol):
                 f"- phase: {evidence.get('phase', '')}",
                 f"- approval_mode: {evidence.get('approval_mode', 'default')}",
                 f"- default_permission_posture: {evidence.get('default_permission_posture') or {}}",
+                f"- paired_write_batch: {paired_write_batch.get('status', 'unknown')}",
                 f"- elapsed: wall={effort.get('wall_elapsed_seconds')}s active={effort.get('observed_active_seconds')}s",
                 (
                     f"- verification: {verification.get('status')} exit={verification.get('exit_code')} "

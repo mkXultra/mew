@@ -86,7 +86,12 @@ Milestone 2 Done-when checklist:
   `--approval-mode accept-edits`, the new pending previews are auto-approved as
   one group: the test approval defers verification and the source approval runs
   the final verifier. `/tmp/mew-paired-write-batch-dogfood` proves
-  `work_ai_accept_edits_auto_approves_paired_write_batch`.
+  `work_ai_accept_edits_auto_approves_paired_write_batch`. Real dogfood task
+  `#260` then used this path in session `#251`: the resident emitted one paired
+  write batch for `tests/test_dogfood.py` plus `src/mew/dogfood.py`,
+  `accept-edits` auto-approved both previews, full pytest and the focused M2
+  comparative test passed, and `/tmp/mew-m2-paired-batch-evidence` records
+  `paired_write_batch.status=proved` in the comparative protocol.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

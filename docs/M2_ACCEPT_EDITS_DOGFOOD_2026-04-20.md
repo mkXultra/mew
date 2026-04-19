@@ -30,6 +30,9 @@ approval-time verification.
 - M2 comparative dogfood now records the mew-side session's `approval_mode` and
   default permission posture, so future comparison artifacts can tell whether a
   run used the low-friction mode.
+- M2 comparative evidence now records `paired_write_batch` from real work
+  session model turns, so a session that used a guarded paired write batch can
+  carry that fact into the fresh-CLI comparison artifact.
 
 ## Validation
 
@@ -48,6 +51,10 @@ uv run pytest --no-testmon -q \
   --workspace /tmp/mew-m2-approval-mode-evidence \
   --mew-session-id 250 \
   --json
+./mew dogfood --scenario m2-comparative \
+  --workspace /tmp/mew-m2-paired-batch-evidence \
+  --mew-session-id 251 \
+  --json
 ```
 
 Observed:
@@ -63,6 +70,13 @@ Observed:
   is previewed test-first, auto-approved as one guarded group under
   `accept-edits`, defers the test verification, and runs the final source-side
   verifier successfully.
+- Real mew dogfood task `#260` used the new paired write batch in work session
+  `#251`: step `#3` emitted one batch containing the `tests/test_dogfood.py`
+  and `src/mew/dogfood.py` edits, `accept-edits` auto-approved both previews,
+  full pytest passed, and the focused M2 comparative test passed.
+- `/tmp/mew-m2-paired-batch-evidence/.mew/dogfood/m2-comparative-protocol.json`
+  records `paired_write_batch.status: proved`, `tool_call_ids: [1530, 1531]`,
+  `applied_count: 2`, and `forced_preview: true` for session `#251`.
 - focused comparative evidence check confirms `approval_mode: accept-edits` is
   serialized into JSON and the markdown runbook.
 - comparative artifact:
@@ -88,6 +102,8 @@ batching. When the resident already knows both exact edits, it can emit one
 paired write batch and avoid the test-steer round trip. Safety stays narrow:
 mixed read/write batches and unpaired writes are rejected, both writes are
 preview-only, and application still flows through approval / approve-all.
+The M2 comparative artifact now preserves whether this path was used, which
+makes the next fresh-CLI comparison less hand-wavy.
 
 Next M2 evidence should compare a real small write-heavy task using
 `accept-edits` plus paired write batch against a fresh CLI run and record
