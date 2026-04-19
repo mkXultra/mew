@@ -386,24 +386,32 @@ def _session_activity_seconds(model_turns, tool_calls):
     return _union_seconds(_intervals(model_turns) + _intervals(tool_calls))
 
 
-def _session_idle_ratio(session, model_turns, tool_calls):
+def _session_idle_details(session, model_turns, tool_calls):
     wall_seconds = _session_wall_seconds(session, model_turns=model_turns, tool_calls=tool_calls)
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
     if active_seconds <= 0:
         return None
-    return max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
+    return {
+        "idle_ratio": max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds)),
+        "wall_seconds": wall_seconds,
+        "active_seconds": active_seconds,
+    }
+
+
+def _session_idle_ratio(session, model_turns, tool_calls):
+    details = _session_idle_details(session, model_turns, tool_calls)
+    if not details:
+        return None
+    return details["idle_ratio"]
 
 
 def _high_idle_session_sample(state, session, model_turns, tool_calls):
-    wall_seconds = _session_wall_seconds(session, model_turns=model_turns, tool_calls=tool_calls)
-    if not wall_seconds:
+    idle = _session_idle_details(session, model_turns, tool_calls)
+    if not idle:
         return None
-    active_seconds = _session_activity_seconds(model_turns, tool_calls)
-    if active_seconds <= 0:
-        return None
-    idle_ratio = max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
+    idle_ratio = idle["idle_ratio"]
     if idle_ratio <= HIGH_IDLE_RATIO:
         return None
     notes = [note for note in session.get("notes") or [] if isinstance(note, dict)]
@@ -412,8 +420,8 @@ def _high_idle_session_sample(state, session, model_turns, tool_calls):
         "session_id": session.get("id"),
         "status": session.get("status") or "",
         "idle_ratio": _round(idle_ratio),
-        "wall_seconds": _round(wall_seconds),
-        "active_seconds": _round(active_seconds),
+        "wall_seconds": _round(idle["wall_seconds"]),
+        "active_seconds": _round(idle["active_seconds"]),
         "tool_call_count": len(tool_calls or []),
         "model_turn_count": len(model_turns or []),
         "note_count": len(notes),
