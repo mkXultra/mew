@@ -871,12 +871,17 @@ Next action:
   reply-file approve-all by deferring verification for every batch item except
   the last, so multi-file batches verify against final state instead of partial
   state. `f556a67` then preserves that behavior in the recurring work-session
-  dogfood scenario. Validation included ruff on changed files, focused
-  approve-all tests, `tests.test_work_session` (`341 tests`, pass),
+  dogfood scenario. `codex-ultra` review session
+  `019da3ad-34c5-7810-8a0e-9f94f6a735d1` found the important failure path:
+  if final verification failed, earlier deferred writes could remain applied.
+  Task #210 / `3698f94` closes that by capturing rollback snapshots for
+  deferred approvals and rolling them back when the batch verifier fails, for
+  both CLI and reply-file approve-all. Validation included ruff on changed
+  files, focused approve-all tests, `tests.test_work_session` (`343 tests`, pass),
   `tests.test_commands` (`174 tests`, pass), full `uv run python -m unittest`
-  (`1010 tests`, pass), `./mew dogfood --scenario work-session --cleanup --json`
-  (pass), and `./mew dogfood --all --cleanup --json` (pass after the dogfood
-  assertion tightening).
+  (`1013 tests`, pass), `./mew dogfood --scenario work-session --cleanup --json`
+  (pass), and `./mew dogfood --all --cleanup --json` (pass after the rollback
+  fix).
 - Task #209 / `4e72011` adds a safer recovery front door: `mew repair
   --dry-run` now computes predicted repairs and validation without saving state,
   includes `dry_run` in JSON output, and the chat cockpit accepts
