@@ -1918,6 +1918,14 @@ def work_cli_control_items(session, args, task=None):
         return [{"label": "start a work session", "command": f"{mew_executable()} work <task-id> --start-session"}]
     task_id = session.get("task_id")
     if session.get("status") != "active":
+        resume = build_work_session_resume(session)
+        verification_confidence = resume.get("verification_confidence") or {}
+        has_unresolved_state = bool(
+            resume.get("pending_approvals")
+            or resume.get("unresolved_failure")
+            or resume.get("failures")
+            or (verification_confidence and not verification_confidence.get("finish_ready"))
+        )
         controls = [
             {"label": "review closed session", "command": _work_resume_command(args, task_id, session=session)},
         ]
@@ -1929,7 +1937,7 @@ def work_cli_control_items(session, args, task=None):
                 }
             )
         else:
-            if task_id is not None:
+            if task_id is not None and not has_unresolved_state:
                 controls.append(
                     {
                         "label": "mark task done",

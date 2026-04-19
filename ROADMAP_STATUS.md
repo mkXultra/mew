@@ -2356,6 +2356,12 @@ Next action:
   has moved on after the producer wrote its final snapshot, the text/JSON
   status marks `session_state_newer` and points recovery at the current resume
   instead of silently trusting stale pending-approval data.
+- The first final-gate mew leg (task `#290`, session `#273`) proved
+  interrupt/repair/resume can recover a killed planning turn, then exposed a
+  concrete cockpit bug: failed closed sessions with pending approvals still
+  showed `mark task done`. Closed-session controls now suppress that command
+  whenever resume state has pending approvals, unresolved failures, or
+  non-finish-ready verification confidence.
 - Latest validation for the 2026-04-19 recovery/control slice:
   `uv run pytest -q` passed with 1044 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,

@@ -13413,6 +13413,43 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_closed_session_with_pending_approval_does_not_suggest_mark_done(self):
+        from mew.commands import work_cli_control_items
+
+        session = {
+            "id": 9,
+            "task_id": 15,
+            "status": "closed",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py"},
+                    "result": {
+                        "path": "src/mew/dogfood.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- a/src/mew/dogfood.py\n+++ b/src/mew/dogfood.py\n@@\n-old\n+new\n",
+                        "diff_stats": {"added": 1, "removed": 1},
+                    },
+                }
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "action": {"type": "finish", "reason": "paused with pending approval"},
+                }
+            ],
+        }
+
+        labels = [item["label"] for item in work_cli_control_items(session, SimpleNamespace(), task={"id": 15, "status": "ready"})]
+
+        self.assertIn("review closed session", labels)
+        self.assertNotIn("mark task done", labels)
+        self.assertIn("start a new session", labels)
+
     def test_work_ai_resumes_existing_session_across_invocations(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
