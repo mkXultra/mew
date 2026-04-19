@@ -43,6 +43,7 @@ from .brief import (
 from .codex_api import load_codex_oauth
 from .config import CHAT_TRANSCRIPT_FILE, DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
+from .context_checkpoint import context_load_current_state, load_context_checkpoints
 from .desk import build_desk_view_model, format_desk_view, write_desk_view
 from .dogfood import (
     format_dogfood_loop_report,
@@ -76,7 +77,7 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
-from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
+from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
     build_morning_paper_view_model,
     format_morning_paper_view,
@@ -8474,62 +8475,6 @@ def build_context_save_text(context, current_time, note):
         "- ./mew memory --search 'next safe action context compression long session' --type project --json",
     ]
     return "\n".join(lines)
-
-
-def context_load_current_state():
-    data = {"git_head": "", "git_status": "unknown", "git_status_short": ""}
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if head.returncode == 0:
-            data["git_head"] = (head.stdout or "").strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    try:
-        status = subprocess.run(
-            ["git", "status", "--short"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if status.returncode == 0:
-            status_text = (status.stdout or "").rstrip("\n")
-            data["git_status_short"] = status_text
-            data["git_status"] = "dirty" if status_text else "clean"
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return data
-
-
-def extract_context_save_note(text):
-    for line in str(text or "").splitlines():
-        if line.startswith("Note:"):
-            return line.removeprefix("Note:").strip()
-    return ""
-
-
-def load_context_checkpoints(query, limit):
-    limit = max(0, int(limit or 0))
-    entries = [
-        entry
-        for entry in FileMemoryBackend(".").entries()
-        if entry.memory_type == "project" and memory_entry_matches(entry, query)
-    ]
-    entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
-    matches = []
-    for index, entry in enumerate(entries[:limit]):
-        item = entry_to_dict(entry)
-        item["recommended"] = index == 0
-        item["reentry_note"] = extract_context_save_note(item.get("text"))
-        item["diagnostics_are_historical"] = True
-        matches.append(item)
-    return matches
 
 
 def format_context_load_report(data):

@@ -1,0 +1,93 @@
+import subprocess
+
+from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
+
+
+CONTEXT_CHECKPOINT_QUERY = "Context save next safe action context compression long session"
+
+
+def current_git_reentry_state():
+    data = {"head": "", "status": "unknown", "status_short": "", "dirty_paths": []}
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if head.returncode == 0:
+            data["head"] = (head.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if status.returncode == 0:
+            status_text = (status.stdout or "").rstrip("\n")
+            data["status_short"] = status_text
+            data["status"] = "dirty" if status_text else "clean"
+            data["dirty_paths"] = [
+                line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+                for line in status_text.splitlines()
+                if len(line) > 2
+            ]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return data
+
+
+def context_load_current_state():
+    git = current_git_reentry_state()
+    return {
+        "git_head": git.get("head") or "",
+        "git_status": git.get("status") or "unknown",
+        "git_status_short": git.get("status_short") or "",
+        "dirty_paths": git.get("dirty_paths") or [],
+    }
+
+
+def extract_context_save_note(text):
+    for line in str(text or "").splitlines():
+        if line.startswith("Note:"):
+            return line.removeprefix("Note:").strip()
+    return ""
+
+
+def matching_context_checkpoints(query=CONTEXT_CHECKPOINT_QUERY, *, base_dir="."):
+    entries = [
+        entry
+        for entry in FileMemoryBackend(base_dir).entries()
+        if entry.memory_type == "project" and memory_entry_matches(entry, query)
+    ]
+    entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
+    return entries
+
+
+def context_checkpoint_to_dict(entry, *, recommended=False):
+    item = entry_to_dict(entry)
+    item["recommended"] = bool(recommended)
+    item["reentry_note"] = extract_context_save_note(item.get("text"))
+    item["diagnostics_are_historical"] = True
+    return item
+
+
+def latest_context_checkpoint(query=CONTEXT_CHECKPOINT_QUERY, *, base_dir="."):
+    entries = matching_context_checkpoints(query, base_dir=base_dir)
+    if not entries:
+        return {}
+    return context_checkpoint_to_dict(entries[0], recommended=True)
+
+
+def load_context_checkpoints(query=CONTEXT_CHECKPOINT_QUERY, limit=3, *, base_dir="."):
+    limit = max(0, int(limit or 0))
+    entries = matching_context_checkpoints(query, base_dir=base_dir)
+    return [
+        context_checkpoint_to_dict(entry, recommended=index == 0)
+        for index, entry in enumerate(entries[:limit])
+    ]

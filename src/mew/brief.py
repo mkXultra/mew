@@ -1,14 +1,13 @@
 from pathlib import Path
-import subprocess
 
 from .cli_command import mew_command
+from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .question_view import format_question_context, format_waiting_hours, question_view_metadata
 from .state import is_routine_outbox_message
 from .tasks import find_task, open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import elapsed_hours, now_iso
-from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
 from .work_session import (
     build_work_session_resume,
     format_work_continuity_inline,
@@ -19,71 +18,11 @@ from .work_session import (
 )
 
 
-CONTEXT_CHECKPOINT_QUERY = "Context save next safe action context compression long session"
-
-
 def _first_nonempty(*values):
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
-
-
-def _context_checkpoint_note(text):
-    for line in str(text or "").splitlines():
-        if line.startswith("Note:"):
-            return line.removeprefix("Note:").strip()
-    return ""
-
-
-def latest_context_checkpoint(query=CONTEXT_CHECKPOINT_QUERY):
-    entries = [
-        entry
-        for entry in FileMemoryBackend(".").entries()
-        if entry.memory_type == "project" and memory_entry_matches(entry, query)
-    ]
-    if not entries:
-        return {}
-    entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
-    item = entry_to_dict(entries[0])
-    item["reentry_note"] = _context_checkpoint_note(item.get("text"))
-    return item
-
-
-def current_git_reentry_state():
-    data = {"head": "", "status": "unknown", "status_short": "", "dirty_paths": []}
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if head.returncode == 0:
-            data["head"] = (head.stdout or "").strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    try:
-        status = subprocess.run(
-            ["git", "status", "--short"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if status.returncode == 0:
-            status_text = (status.stdout or "").rstrip("\n")
-            data["status_short"] = status_text
-            data["status"] = "dirty" if status_text else "clean"
-            data["dirty_paths"] = [
-                line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
-                for line in status_text.splitlines()
-                if len(line) > 2
-            ]
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return data
 
 
 def current_project_looks_like_mew():
