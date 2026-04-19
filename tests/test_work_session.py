@@ -5747,6 +5747,19 @@ class WorkSessionTests(unittest.TestCase):
                         ".",
                         "--json",
                     ],
+                    [
+                        "work",
+                        "1",
+                        "--tool",
+                        "search_text",
+                        "--query",
+                        "hello",
+                        "--path",
+                        ".",
+                        "--allow-read",
+                        ".",
+                        "--json",
+                    ],
                 ]
                 for command in commands:
                     with self.subTest(command=command):
@@ -5758,6 +5771,10 @@ class WorkSessionTests(unittest.TestCase):
                         self.assertEqual(data["message"], "No active work session.")
                         self.assertEqual(data["task_id"], "1")
                         self.assertIn("mew work 1 --start-session", data["start_commands"])
+                        if "read_file" in command:
+                            self.assertIn("mew tool read README.md --root .", data["one_shot_commands"])
+                        if "search_text" in command:
+                            self.assertIn("mew tool search hello . --root .", data["one_shot_commands"])
             finally:
                 os.chdir(old_cwd)
 

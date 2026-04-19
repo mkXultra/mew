@@ -4786,6 +4786,23 @@ def format_no_active_work_session(state, limit=5, kind=None):
     return "\n".join(lines)
 
 
+def no_active_work_session_one_shot_tool_commands(args=None):
+    tool = getattr(args, "tool", None) if args is not None else None
+    if not tool:
+        return []
+    read_root = ((getattr(args, "allow_read", None) or ["."])[0]) or "."
+    path = getattr(args, "path", None) or "."
+    if tool == "inspect_dir":
+        return [mew_command("tool", "list", path, "--root", read_root)]
+    if tool == "read_file" and getattr(args, "path", None):
+        return [mew_command("tool", "read", path, "--root", read_root)]
+    if tool == "search_text" and getattr(args, "query", None):
+        return [mew_command("tool", "search", getattr(args, "query"), path, "--root", read_root)]
+    if tool == "glob" and getattr(args, "pattern", None):
+        return [mew_command("tool", "glob", getattr(args, "pattern"), path, "--root", read_root)]
+    return []
+
+
 def no_active_work_session_json(state, args=None, limit=5, kind=None):
     task_id = getattr(args, "task_id", None) if args is not None else None
     payload = {
@@ -4793,6 +4810,9 @@ def no_active_work_session_json(state, args=None, limit=5, kind=None):
         "error": "no_active_work_session",
         "message": f"No active {kind} work session." if kind else "No active work session.",
     }
+    one_shot_commands = no_active_work_session_one_shot_tool_commands(args)
+    if one_shot_commands:
+        payload["one_shot_commands"] = one_shot_commands
     if task_id is not None:
         payload["task_id"] = str(task_id)
         payload["start_commands"] = [
