@@ -6436,6 +6436,7 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         "source_state": str(STATE_FILE),
         "requested_session_id": f"task:{task_id_text}",
         "session_argument": f"task:{task_id_text}",
+        "mew_session_argument": f"task:{task_id_text}",
         "work_session_id": latest_session.get("id"),
         "work_session_ids": [session.get("id") for session in sessions],
         "task_id": task_id_value,
@@ -6510,6 +6511,7 @@ def build_m2_mew_run_evidence(state, session_id):
         "source_state": str(STATE_FILE),
         "requested_session_id": session_id_text,
         "session_argument": session_id_text,
+        "mew_session_argument": session_id_text,
         "work_session_id": session.get("id"),
         "task_id": task_id,
         "task_title": (task or {}).get("title") or session.get("title") or "",
@@ -7289,9 +7291,10 @@ def format_m2_fresh_cli_restart_prompt(protocol, report_template_path="m2-fresh-
             )
         lines.append("")
     merge_command = "./mew dogfood --scenario m2-comparative"
-    mew_session_id = (protocol.get("mew_run_evidence") or {}).get("session_argument")
+    mew_run_evidence = protocol.get("mew_run_evidence") or {}
+    mew_session_id = mew_run_evidence.get("mew_session_argument") or mew_run_evidence.get("session_argument")
     if mew_session_id:
-        merge_command += f" --mew-session-id {mew_session_id}"
+        merge_command += f" --mew-session-id {shlex.quote(str(mew_session_id))}"
     merge_command += " --m2-comparison-report <report.json>"
     lines.extend(
         [

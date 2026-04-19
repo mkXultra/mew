@@ -23,6 +23,7 @@ from mew.dogfood import (
     format_dogfood_loop_report,
     format_dogfood_report,
     format_dogfood_scenario_report,
+    format_m2_fresh_cli_restart_prompt,
     injected_message_status,
     prepopulate_project_snapshot,
     prepare_dogfood_workspace,
@@ -718,6 +719,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertIn("m2_comparative_protocol_prefills_mew_run_evidence", text)
             self.assertEqual(protocol["mew_run_evidence"]["status"], "found")
+            self.assertEqual(protocol["mew_run_evidence"]["session_argument"], "latest")
+            self.assertEqual(protocol["mew_run_evidence"]["mew_session_argument"], "latest")
             self.assertEqual(protocol["mew_run_evidence"]["work_session_id"], 7)
             self.assertEqual(protocol["mew_run_evidence"]["verification"]["status"], "passed")
             self.assertEqual(protocol["mew_run_evidence"]["approval_mode"], "accept-edits")
@@ -880,6 +883,8 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(evidence["evidence_mode"], "task_chain")
+            self.assertEqual(evidence["session_argument"], "task:3")
+            self.assertEqual(evidence["mew_session_argument"], "task:3")
             self.assertEqual(evidence["work_session_ids"], [7, 8])
             self.assertEqual(gate["status"], "proved")
             self.assertEqual(gate["evidence_mode"], "task_chain")
@@ -890,6 +895,22 @@ class DogfoodTests(unittest.TestCase):
                 protocol["comparison_result"]["run_summaries"]["mew"]["summary"],
             )
             self.assertIn("- evidence_mode: task_chain", runbook)
+
+    def test_format_m2_fresh_cli_restart_prompt_falls_back_to_session_argument(self):
+        prompt = format_m2_fresh_cli_restart_prompt(
+            {
+                "mew_run_evidence": {
+                    "session_argument": "task:3",
+                    "task_title": "Fallback task",
+                    "verification": {"command": "pytest -q"},
+                }
+            }
+        )
+
+        self.assertIn(
+            "./mew dogfood --scenario m2-comparative --mew-session-id task:3 --m2-comparison-report <report.json>",
+            prompt,
+        )
 
     def test_run_dogfood_m2_comparative_uses_task_level_verification_for_task_chain(self):
         previous_cwd = Path.cwd()
