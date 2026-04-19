@@ -8962,6 +8962,7 @@ def native_self_improve_controls(task, *, include_start_hint=False):
         ),
         "status": mew_command("work", task["id"], "--follow-status", "--json"),
         "resume": mew_command("work", task["id"], "--session", "--resume", "--allow-read", read_root),
+        "active_memory": mew_command("memory", "--active", "--task-id", task["id"]),
         "chat": mew_command("chat"),
     }
     if include_start_hint:
@@ -8985,6 +8986,7 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
     print(f"follow: {controls['follow']}")
     print(f"status: {controls['status']}")
     print(f"resume: {controls['resume']}")
+    print(f"active memory: {controls['active_memory']}")
     print(f"chat: {controls['chat']}")
 
 
