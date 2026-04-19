@@ -4432,7 +4432,19 @@ def run_work_session_scenario(workspace, env=None):
         ]
     )
     running_output_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
-    run(["work", str(running_output_task_id), "--close-session", "--json"])
+    running_output_close_result = run(["work", str(running_output_task_id), "--close-session", "--json"])
+    running_output_closed_resume_result = run(
+        ["work", str(running_output_task_id), "--session", "--resume", "--json"]
+    )
+    state = migrate_state(read_json_file(state_path, default_state()))
+    reconcile_next_ids(state)
+    stale_follow_current_updated_at = "2999-01-01T00:00:00Z"
+    for candidate in state.get("work_sessions", []):
+        if str(candidate.get("id")) == str(running_output_session_id):
+            candidate["updated_at"] = stale_follow_current_updated_at
+            break
+    write_json_file(state_path, state)
+    stale_follow_status_result = run(["work", str(running_output_task_id), "--follow-status", "--json"])
 
     discovery_task_result = run(
         ["task", "add", "Existing paired-test discovery task", "--kind", "coding", "--json"]
@@ -5124,6 +5136,9 @@ raise SystemExit(0 if passed else 1)
     unpaired_edit_data = _json_stdout(unpaired_edit_result)
     unpaired_override_data = _json_stdout(unpaired_override_result)
     running_output_task_data = _json_stdout(running_output_task_result)
+    running_output_close_data = _json_stdout(running_output_close_result)
+    running_output_closed_resume_data = _json_stdout(running_output_closed_resume_result)
+    stale_follow_status_data = _json_stdout(stale_follow_status_result)
     write_data = _json_stdout(write_result)
     stop_data = _json_stdout(stop_result)
     note_data = _json_stdout(note_result)
@@ -5266,6 +5281,8 @@ raise SystemExit(0 if passed else 1)
         for tail in running_output_cell.get("tail") or []
         for line in tail.get("lines") or []
     )
+    mark_done_controls = running_output_closed_resume_data.get("next_cli_controls") or []
+    stale_follow_recovery = stale_follow_status_data.get("suggested_recovery") or {}
 
     _scenario_check(
         checks,
@@ -5702,6 +5719,24 @@ raise SystemExit(0 if passed else 1)
             },
         },
         expected="zero-step follow snapshots include bounded output for running command/test cells",
+    )
+    _scenario_check(
+        checks,
+        "closed_session_follow_status_surfaces_mark_task_done",
+        running_output_close_result.get("exit_code") == 0
+        and running_output_closed_resume_result.get("exit_code") == 0
+        and (running_output_close_data.get("work_session") or {}).get("status") == "closed"
+        and any(f"task update {running_output_task_id} --status done" in control for control in mark_done_controls),
+        expected="closed clean sessions expose mark-done control",
+    )
+    _scenario_check(
+        checks,
+        "stale_follow_snapshot_surfaces_session_state_newer",
+        stale_follow_status_result.get("exit_code") == 0
+        and stale_follow_status_data.get("session_state_newer") is True
+        and stale_follow_status_data.get("current_session_updated_at") == stale_follow_current_updated_at
+        and stale_follow_recovery.get("kind") == "inspect_resume",
+        expected="follow-status detects stale snapshots",
     )
     _scenario_check(
         checks,

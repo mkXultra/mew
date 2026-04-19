@@ -503,6 +503,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("work_ai_accept_edits_defers_paired_test_first_verification", text)
             self.assertIn("work_ai_accept_edits_auto_approves_paired_write_batch", text)
             self.assertIn("work_approve_tool_can_defer_verification", text)
+            self.assertIn("closed_session_follow_status_surfaces_mark_task_done", text)
+            self.assertIn("stale_follow_snapshot_surfaces_session_state_newer", text)
             self.assertIn("work_unpaired_source_approval_requires_override", text)
             self.assertIn("work_zero_test_pytest_invalid_verifier_confidence", text)
             self.assertIn("work_low_yield_search_trap_surfaces_in_resume", text)
@@ -510,7 +512,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)
             self.assertNotIn("stdout", command)
-            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 140_000)
+            self.assertLess(len(json.dumps(report, ensure_ascii=False)), 145_000)
 
     def test_run_dogfood_m2_comparative_scenario_writes_protocol(self):
         with tempfile.TemporaryDirectory() as tmp:

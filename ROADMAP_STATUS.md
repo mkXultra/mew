@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 06:25 JST.
+Last assessed: 2026-04-20 06:45 JST.
 
 Active milestone: Milestone 2, Interactive Parity, narrowed to a final evidence gate.
 
@@ -2362,13 +2362,20 @@ Next action:
   showed `mark task done`. Closed-session controls now suppress that command
   whenever resume state has pending approvals, unresolved failures, or
   non-finish-ready verification confidence.
-- Latest validation for the 2026-04-19 recovery/control slice:
-  `uv run pytest -q` passed with 1044 tests and 30 subtests,
-  `./mew dogfood --all --cleanup --json` passed all scenarios,
-  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check` passed on
-  changed files, `git diff --check` passed, and codex-ultra re-review of the
-  runtime recovery batch reported no findings in session
-  `019da47e-e8b1-7a91-9d7c-d20f33557ffb`.
+- Supervisor recovery then completed task `#290` by moving both control gaps
+  into the deterministic work-session dogfood scenario:
+  `closed_session_follow_status_surfaces_mark_task_done` proves clean closed
+  sessions expose an explicit task-close command, and
+  `stale_follow_snapshot_surfaces_session_state_newer` proves stale snapshots
+  point observers back to current resume state. This makes the #290 resident
+  failure a tracked M2 blocker instead of a one-off repair.
+- Latest validation for the 2026-04-20 final-gate control coverage slice:
+  focused `tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`
+  passed, full `tests/test_dogfood.py` passed with 59 tests and 6 subtests,
+  `./mew dogfood --scenario work-session --workspace
+  /tmp/mew-final-gate-dogfood-coverage --json` passed, `ruff` passed for
+  touched files, `uv run pytest -q` passed with 383 tests, 58 deselected, and
+  16 subtests, and `git diff --check` passed.
 
 ## Current Roadmap Focus
 
