@@ -4248,7 +4248,10 @@ def _select_work_tool_session_for_args(state, args):
 def format_no_work_tool_session(state, args):
     task_id = getattr(args, "task_id", None)
     if not task_id:
-        return "mew: no active work session; run `mew work <task-id> --start-session`"
+        lines = ["mew: no active work session; run `mew work <task-id> --start-session`"]
+        for command in no_active_work_session_one_shot_tool_commands(args):
+            lines.append(f"one-shot: {command}")
+        return "\n".join(lines)
     task = find_task(state, task_id)
     if not task:
         return f"mew: task not found: {task_id}"
