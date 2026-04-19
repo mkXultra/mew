@@ -1816,13 +1816,16 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(len(session["tool_calls"]), 3)
                 recovery = state["runtime_status"]["last_native_work_recovery"]
                 self.assertEqual(recovery["action"], "ask_user_seeded_question")
-                self.assertTrue(
-                    [
-                        question
-                        for question in state.get("questions") or []
-                        if str(question.get("related_task_id")) == "1"
-                    ]
-                )
+                self.assertEqual(recovery["failed_runtime_recovery_tool_call_id"], 3)
+                self.assertEqual(recovery["failed_runtime_recovery_tool"], "run_tests")
+                recovery_questions = [
+                    question
+                    for question in state.get("questions") or []
+                    if str(question.get("related_task_id")) == "1"
+                ]
+                self.assertTrue(recovery_questions)
+                self.assertIn("Previous automatic recovery tool #3 (run_tests) failed", recovery_questions[0]["text"])
+                self.assertNotIn("Recovery plan suggests safe read/git recovery", recovery_questions[0]["text"])
             finally:
                 os.chdir(old_cwd)
 

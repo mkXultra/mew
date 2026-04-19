@@ -384,6 +384,12 @@ def native_work_session_activity_after_failure(session, failed_at, *, ignore_run
 
 
 def native_work_session_failed_runtime_recovery_after_failure(session, failed_at):
+    return bool(latest_failed_runtime_recovery_after_failure(session, failed_at))
+
+
+def latest_failed_runtime_recovery_after_failure(session, failed_at):
+    latest_call = None
+    latest_timestamp = None
     for call in session.get("tool_calls") or []:
         parameters = call.get("parameters") or {}
         if parameters.get("recovery_owner") != "runtime" or call.get("status") == "completed":
@@ -391,8 +397,10 @@ def native_work_session_failed_runtime_recovery_after_failure(session, failed_at
         for key in ("started_at", "finished_at", "updated_at"):
             timestamp = parse_time(call.get(key))
             if timestamp and timestamp > failed_at:
-                return True
-    return False
+                if latest_timestamp is None or timestamp >= latest_timestamp:
+                    latest_call = call
+                    latest_timestamp = timestamp
+    return latest_call or {}
 
 
 def recover_previous_native_work_step_failure(state, *, event_id=None, current_time=None):
@@ -411,7 +419,15 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
     resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
     retry_command = mew_command("work", task_id, "--live", "--allow-read", ".", "--max-steps", "1")
     recovery_plan = build_work_session_resume(session, task=task, state=state).get("recovery_plan") or {}
-    recovery_suggestion = native_work_recovery_suggestion_from_plan(recovery_plan, task_id=task_id)
+    failed_at = parse_time(last_step.get("finished_at"))
+    failed_runtime_recovery = (
+        latest_failed_runtime_recovery_after_failure(session, failed_at) if failed_at else {}
+    )
+    recovery_suggestion = (
+        {}
+        if failed_runtime_recovery
+        else native_work_recovery_suggestion_from_plan(recovery_plan, task_id=task_id)
+    )
     exit_part = ""
     if last_step.get("timed_out"):
         exit_part = "timed out"
@@ -422,7 +438,14 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
         f"Passive native work session #{session_id} for task #{task_id} failed{reason}. "
         f"Inspect with `{resume_command}`. "
     )
-    if recovery_suggestion:
+    if failed_runtime_recovery:
+        failed_tool = failed_runtime_recovery.get("tool") or "tool"
+        failed_id = failed_runtime_recovery.get("id")
+        text += (
+            f"Previous automatic recovery tool #{failed_id} ({failed_tool}) failed; "
+            "inspect that result before retrying more recovery. "
+        )
+    elif recovery_suggestion:
         effect_part = ""
         if recovery_suggestion.get("effect_classification"):
             effect_part = f" (effect={recovery_suggestion.get('effect_classification')})"
@@ -466,6 +489,13 @@ def recover_previous_native_work_step_failure(state, *, event_id=None, current_t
         recovery["recovery_plan_command"] = recovery_suggestion.get("command")
         recovery["recovery_plan_reason"] = recovery_suggestion.get("reason")
         recovery["recovery_effect_classification"] = recovery_suggestion.get("effect_classification")
+    if failed_runtime_recovery:
+        recovery["failed_runtime_recovery_tool_call_id"] = failed_runtime_recovery.get("id")
+        recovery["failed_runtime_recovery_tool"] = failed_runtime_recovery.get("tool")
+        recovery["failed_runtime_recovery_status"] = failed_runtime_recovery.get("status")
+        recovery["failed_runtime_recovery_error"] = failed_runtime_recovery.get("error") or (
+            (failed_runtime_recovery.get("result") or {}).get("stderr") or ""
+        )
     runtime_status["last_native_work_recovery"] = recovery
     runtime_status["last_action"] = f"asked for native work recovery session #{session_id}"
     return recovery
