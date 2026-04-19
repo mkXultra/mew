@@ -290,6 +290,24 @@ def _normalize_search_patterns(pattern):
     return patterns[:10]
 
 
+def _strip_wrapping_search_quotes(query):
+    text = str(query or "").strip()
+    quote_pairs = {
+        '"': '"',
+        "'": "'",
+        "`": "`",
+        "“": "”",
+        "‘": "’",
+    }
+    if len(text) < 2:
+        return text
+    closing = quote_pairs.get(text[0])
+    if closing != text[-1]:
+        return text
+    inner = text[1:-1].strip()
+    return inner or text
+
+
 def search_text(
     query,
     path,
@@ -305,28 +323,30 @@ def search_text(
         context_lines = DEFAULT_SEARCH_CONTEXT_LINES
     if not query or not str(query).strip():
         raise ValueError("search query is empty")
+    original_query = str(query).strip()
 
     resolved = resolve_allowed_path(path or ".", allowed_roots)
     ensure_not_sensitive(resolved, verb="search")
-    command = [
-        "rg",
-        "--json",
-        "--line-number",
-        "--fixed-strings",
-        "--no-heading",
-        "--color",
-        "never",
-    ]
     include_patterns = _normalize_search_patterns(pattern)
-    for include_pattern in include_patterns:
-        command.extend(["--glob", include_pattern])
-    for exclude_pattern in SEARCH_EXCLUDE_GLOBS:
-        command.extend(["--glob", exclude_pattern])
-    command.extend(["--", str(query), str(resolved)])
     env = os.environ.copy()
     env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
-    try:
-        result = subprocess.run(
+
+    def run_search(search_query):
+        command = [
+            "rg",
+            "--json",
+            "--line-number",
+            "--fixed-strings",
+            "--no-heading",
+            "--color",
+            "never",
+        ]
+        for include_pattern in include_patterns:
+            command.extend(["--glob", include_pattern])
+        for exclude_pattern in SEARCH_EXCLUDE_GLOBS:
+            command.extend(["--glob", exclude_pattern])
+        command.extend(["--", search_query, str(resolved)])
+        return subprocess.run(
             command,
             text=True,
             capture_output=True,
@@ -334,10 +354,22 @@ def search_text(
             timeout=15,
             env=env,
         )
+
+    search_query = original_query
+    try:
+        result = run_search(search_query)
     except FileNotFoundError as exc:
         raise ValueError("rg is required for search_text but was not found") from exc
     except subprocess.TimeoutExpired as exc:
         raise ValueError("search timed out") from exc
+
+    stripped_query = _strip_wrapping_search_quotes(original_query)
+    if result.returncode == 1 and stripped_query != original_query:
+        search_query = stripped_query
+        try:
+            result = run_search(search_query)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("search timed out") from exc
 
     if result.returncode not in (0, 1):
         detail = (result.stderr or result.stdout).strip()
@@ -371,9 +403,9 @@ def search_text(
         if snippet:
             snippets.append(snippet)
 
-    return {
+    payload = {
         "path": str(resolved),
-        "query": str(query),
+        "query": search_query,
         "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
         "patterns": include_patterns,
         "matches": matches,
@@ -382,6 +414,9 @@ def search_text(
         "truncated": total_matches > max_matches,
         "skipped_sensitive": skipped_sensitive,
     }
+    if search_query != original_query:
+        payload["original_query"] = original_query
+    return payload
 
 
 def _split_top_level_commas(text):

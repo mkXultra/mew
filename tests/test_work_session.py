@@ -10124,6 +10124,20 @@ class WorkSessionTests(unittest.TestCase):
             self.assertEqual(len(result["matches"]), 1)
             self.assertIn("--status pending", result["matches"][0])
 
+    def test_search_text_retries_wrapped_quoted_query(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "controls.txt").write_text("continue: mew work 1 --live\n", encoding="utf-8")
+
+            result = search_text('"continue:"', str(root), [str(root)], max_matches=5, context_lines=0)
+
+            self.assertEqual(result["query"], "continue:")
+            self.assertEqual(result["original_query"], '"continue:"')
+            self.assertEqual(len(result["matches"]), 1)
+            self.assertIn("continue: mew work", result["matches"][0])
+
     def test_search_text_include_pattern_does_not_reinclude_sensitive_paths(self):
         from mew.read_tools import search_text
 
