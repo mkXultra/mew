@@ -75,7 +75,7 @@ def _status_counts(items):
     return counts
 
 
-def _approval_counts(tool_calls, *, successful_verifications=None):
+def _approval_counts(tool_calls, *, successful_verifications=None, task_id=None):
     counts = {"total": 0, "pending": 0, "applied": 0, "rejected": 0, "failed": 0, "indeterminate": 0}
     for call in tool_calls or []:
         if not isinstance(call, dict) or call.get("tool") not in WORK_WRITE_TOOLS:
@@ -83,7 +83,7 @@ def _approval_counts(tool_calls, *, successful_verifications=None):
         result = call.get("result") or {}
         if not result.get("dry_run"):
             continue
-        if _call_retired_by_later_success(call, successful_verifications or []):
+        if _call_retired_by_later_success(call, successful_verifications or [], task_id=task_id):
             continue
         counts["total"] += 1
         status = call.get("approval_status") or "pending"
@@ -92,7 +92,7 @@ def _approval_counts(tool_calls, *, successful_verifications=None):
     return counts
 
 
-def _verification_counts(tool_calls, *, successful_verifications=None):
+def _verification_counts(tool_calls, *, successful_verifications=None, task_id=None):
     counts = {"total": 0, "passed": 0, "failed": 0, "rolled_back": 0}
     for call in tool_calls or []:
         if not isinstance(call, dict):
@@ -100,7 +100,7 @@ def _verification_counts(tool_calls, *, successful_verifications=None):
         exit_code = _verification_exit_code(call)
         if exit_code is None:
             continue
-        if exit_code != 0 and _call_retired_by_later_success(call, successful_verifications or []):
+        if exit_code != 0 and _call_retired_by_later_success(call, successful_verifications or [], task_id=task_id):
             continue
         result = call.get("result") or {}
         counts["total"] += 1
@@ -253,7 +253,11 @@ def _tool_to_next_model_wait_records(session, model_turns, tool_calls, *, succes
             continue
         wait_seconds = max(0.0, (next_start - finished).total_seconds())
         approval_bound_seconds = min(wait_seconds, _approval_bound_wait_seconds(call, finished, next_start))
-        if approval_bound_seconds > 0 and _call_retired_by_later_success(call, successful_verifications or []):
+        if approval_bound_seconds > 0 and _call_retired_by_later_success(
+            call,
+            successful_verifications or [],
+            task_id=session.get("task_id"),
+        ):
             continue
         model_resume_seconds = max(0.0, wait_seconds - approval_bound_seconds)
         if approval_bound_seconds > 0 and model_resume_seconds <= 0:
@@ -532,7 +536,9 @@ def _path_related_to_test_path(path, test_path):
     return bool(stem and test_stem and (test_stem == stem or test_stem == f"test_{stem}"))
 
 
-def _success_covers_call(success, call):
+def _success_covers_call(success, call, *, task_id=None):
+    if success.get("user_reported_task_verification") and task_id is not None:
+        return str(success.get("task_id")) == str(task_id)
     command = _verification_command(call)
     success_command = success.get("command") or ""
     if command and command == success_command:
@@ -562,6 +568,7 @@ def _successful_verifications(state):
                     "test_paths": _command_test_paths(command),
                     "task_id": session.get("task_id"),
                     "session_id": session.get("id"),
+                    "user_reported_task_verification": False,
                 }
             )
     for run in state.get("verification_runs") or []:
@@ -582,12 +589,13 @@ def _successful_verifications(state):
                 "test_paths": _command_test_paths(command),
                 "task_id": run.get("task_id"),
                 "session_id": run.get("work_session_id"),
+                "user_reported_task_verification": run.get("reason") == "user-reported completion verification",
             }
         )
     return successes
 
 
-def _call_retired_by_later_success(call, successful_verifications):
+def _call_retired_by_later_success(call, successful_verifications, *, task_id=None):
     finished = parse_time(_call_finished_at(call))
     if not finished:
         return False
@@ -600,7 +608,7 @@ def _call_retired_by_later_success(call, successful_verifications):
                 continue
         except TypeError:
             continue
-        if _success_covers_call(success, call):
+        if _success_covers_call(success, call, task_id=task_id):
             return True
     return False
 
@@ -758,7 +766,11 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
             key=lambda item: item.get("finished_at") or item.get("started_at") or "",
             reverse=True,
         ):
-            retired = _call_retired_by_later_success(call, successful_verifications)
+            retired = _call_retired_by_later_success(
+                call,
+                successful_verifications,
+                task_id=session.get("task_id"),
+            )
             if _verification_exit_code(call) not in (None, 0):
                 sample = _verification_sample(state, session, call)
                 if retired:
@@ -961,11 +973,19 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         _merge_counts(turn_counts, _status_counts(model_turns))
         _merge_counts(
             approval_counts,
-            _approval_counts(tool_calls, successful_verifications=successful_verifications),
+            _approval_counts(
+                tool_calls,
+                successful_verifications=successful_verifications,
+                task_id=session.get("task_id"),
+            ),
         )
         _merge_counts(
             verification_counts,
-            _verification_counts(tool_calls, successful_verifications=successful_verifications),
+            _verification_counts(
+                tool_calls,
+                successful_verifications=successful_verifications,
+                task_id=session.get("task_id"),
+            ),
         )
         first_tool_starts.append(_first_tool_start_seconds(session, model_turns, tool_calls))
         model_to_tool_waits.extend(_model_to_tool_waits(model_turns, tool_calls))

@@ -433,6 +433,82 @@ class MetricsTests(unittest.TestCase):
         self.assertNotIn("approval_friction", {signal["id"] for signal in metrics["signals"]})
         self.assertNotIn("verification_friction", {signal["id"] for signal in metrics["signals"]})
 
+    def test_observation_metrics_retire_same_task_user_reported_completion_verification(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Manual recovery", "kind": "coding", "status": "done"})
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    },
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:30Z",
+                        "finished_at": "2026-04-19T00:00:31Z",
+                    },
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "failed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_dogfood.py -k m2_comparative",
+                                "stdout": "FAILED tests/test_dogfood.py::DogfoodTests::old",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+        state["verification_runs"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "reason": "user-reported completion verification",
+                "command": "user-reported",
+                "exit_code": 0,
+                "stdout": "Ran focused pytest and unittest; both passed.",
+                "finished_at": "2026-04-19T00:02:00Z",
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertIsNone(metrics["reliability"]["rates"]["approval_rejection"])
+        self.assertIsNone(metrics["reliability"]["rates"]["verification_failure"])
+        self.assertEqual(metrics["diagnostics"]["approval_friction"], [])
+        self.assertEqual(metrics["diagnostics"]["verification_failures"], [])
+        self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
+
     def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
         state = default_state()
         state["tasks"].append({"id": 1, "title": "Observe approval waits", "kind": "coding", "status": "ready"})

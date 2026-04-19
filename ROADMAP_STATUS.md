@@ -137,6 +137,9 @@ Milestone 2 Done-when checklist:
   `approval_rejection=None`, `verification_failure=0.0`, and
   `verification_rollback=0.0`; the remaining active signal is idle time rather
   than stale approval/verification history.
+  Passing user-reported completion verification now also retires older
+  approval/verification friction from the same task, so manually recovered
+  work-session failures do not keep driving `mew focus` after the task is done.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.
