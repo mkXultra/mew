@@ -6,3 +6,4 @@ __pycache__/
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code
 references/fresh-cli/codex
+references/fresh-cli/openclaw

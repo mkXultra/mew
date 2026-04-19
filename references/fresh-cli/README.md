@@ -9,6 +9,7 @@ checkout paths:
 
 - `claude-code` -> `/Users/mk/dev/tech_check/claude-code`
 - `codex` -> `/Users/mk/dev/tech_check/codex`
+- `openclaw` -> `/Users/mk/dev/tech_check/openclaw`
 
 Do not vendor code from these projects into mew. Prefer extracting product and
 architecture lessons, then implement mew-native behavior in `src/`.
