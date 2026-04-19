@@ -2317,6 +2317,19 @@ def _is_test_path(path):
     return normalized == "tests" or normalized.startswith("tests/") or "/tests/" in normalized
 
 
+def work_approval_default_defer_reason(call):
+    parameters = (call or {}).get("parameters") or {}
+    if not parameters.get("defer_verify_on_approval"):
+        return ""
+    path = work_call_path(call)
+    if not _is_test_path(path):
+        return ""
+    source_path = str(parameters.get("paired_test_source_path") or "").strip()
+    if source_path:
+        return f"paired test for {source_path} should wait for its source edit before verification"
+    return "paired test approval should wait for its source edit before verification"
+
+
 def _work_call_changed_write(call):
     result = (call or {}).get("result") or {}
     return (call or {}).get("tool") in WRITE_WORK_TOOLS and bool(result.get("changed"))
@@ -3442,6 +3455,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 ),
                 "cli_reject_hint": work_task_command("--reject-tool", tool_call_id, "--reject-reason", "<reason>"),
             }
+            auto_defer_reason = work_approval_default_defer_reason(call)
+            if auto_defer_reason:
+                approval["auto_defer_verify_reason"] = auto_defer_reason
+                approval["verify_now_hint"] = approval["approve_hint"]
+                approval["cli_verify_now_hint"] = approval["cli_approve_hint"]
+                approval["approve_hint"] = approval["defer_verify_hint"]
+                approval["cli_approve_hint"] = approval["cli_defer_verify_hint"]
             if pairing_status:
                 approval["pairing_status"] = pairing_status
                 if pairing_status.get("status") == "missing_test_edit":

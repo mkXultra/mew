@@ -25,7 +25,7 @@ from mew.commands import (
 )
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
-from mew.work_cells import build_work_session_cells, format_work_session_cells
+from mew.work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
     DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
@@ -10773,6 +10773,116 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertNotIn("verification_exit_code", call["result"])
                 self.assertEqual(session["model_turns"][2]["coerced_dry_run_reason"], "paired_test_steer")
                 self.assertNotIn("pending_steer", session)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_paired_test_steer_approval_auto_defers_verification_until_source_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview source edit first",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "src/mew/pairing.py",
+                            "old": "old",
+                            "new": "new",
+                        },
+                    },
+                    {
+                        "summary": "add paired test first",
+                        "action": {
+                            "type": "write_file",
+                            "path": "tests/test_pairing.py",
+                            "content": "def test_pairing():\n    assert True\n",
+                            "create": True,
+                            "dry_run": False,
+                        },
+                    },
+                ]
+                failing_verify = f"{sys.executable} -c \"raise SystemExit(99)\""
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        failing_verify,
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                session = load_state()["work_sessions"][0]
+                pending_call = session["tool_calls"][0]
+                self.assertTrue(pending_call["parameters"]["defer_verify_on_approval"])
+                self.assertEqual(pending_call["parameters"]["paired_test_source_path"], "src/mew/pairing.py")
+                resume = build_work_session_resume(session)
+                approval = resume["pending_approvals"][0]
+                self.assertIn("wait for its source edit", approval["auto_defer_verify_reason"])
+                self.assertIn("--defer-verify", approval["cli_approve_hint"])
+                cells = build_work_session_cells(session)
+                approval_cell = [cell for cell in cells if cell["kind"] == "approval"][0]
+                self.assertIn("--defer-verify", approval_cell["actions"]["approve_once"])
+                self.assertIn("auto_defer_verify", format_work_cells(cells))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                failing_verify,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(Path("tests/test_pairing.py").read_text(encoding="utf-8"), "def test_pairing():\n    assert True\n")
+                self.assertEqual(Path("src/mew/pairing.py").read_text(encoding="utf-8"), "VALUE = 'old'\n")
+                self.assertTrue(approved["tool_call"]["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", approved["tool_call"]["result"])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "applied")
+                self.assertTrue(
+                    any(
+                        "auto-deferred verification for approval #1" in note["text"]
+                        for note in session["notes"]
+                    )
+                )
             finally:
                 os.chdir(old_cwd)
 

@@ -4545,27 +4545,57 @@ report = json.loads(output)
 session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == task_id)
 tool_call = (session.get("tool_calls") or [{}])[-1]
 result = tool_call.get("result") or {}
+test_file_exists_before_approval = Path("tests/test_dogfood_ai_pairing.py").exists()
+approval_code, approval_output = run_main(
+    [
+        "work",
+        task_id,
+        "--approve-tool",
+        str(tool_call.get("id")),
+        "--allow-write",
+        ".",
+        "--allow-verify",
+        "--verify-command",
+        verify_command,
+        "--json",
+    ]
+)
+approval = json.loads(approval_output) if approval_output.strip() else {}
+approval_tool_call = approval.get("tool_call") or {}
+approval_result = approval_tool_call.get("result") or {}
 observed = {
     "exit_code": code,
     "stop_reason": report.get("stop_reason"),
-    "test_file_exists": Path("tests/test_dogfood_ai_pairing.py").exists(),
+    "test_file_exists_before_approval": test_file_exists_before_approval,
+    "test_file_exists_after_approval": Path("tests/test_dogfood_ai_pairing.py").exists(),
     "tool": tool_call.get("tool"),
     "path": (tool_call.get("parameters") or {}).get("path"),
     "apply": (tool_call.get("parameters") or {}).get("apply"),
     "dry_run": result.get("dry_run"),
+    "defer_verify_on_approval": (tool_call.get("parameters") or {}).get("defer_verify_on_approval"),
+    "paired_test_source_path": (tool_call.get("parameters") or {}).get("paired_test_source_path"),
     "verification_exit_code": result.get("verification_exit_code"),
     "coerced_dry_run_reason": (session.get("model_turns") or [{}])[-1].get("coerced_dry_run_reason"),
+    "approval_exit_code": approval_code,
+    "approval_verification_deferred": approval_result.get("verification_deferred"),
+    "approval_verification_exit_code": approval_result.get("verification_exit_code"),
 }
 passed = (
     code == 0
     and observed["stop_reason"] == "pending_approval"
-    and observed["test_file_exists"] is False
+    and observed["test_file_exists_before_approval"] is False
+    and observed["test_file_exists_after_approval"] is True
     and observed["tool"] == "write_file"
     and observed["path"] == "tests/test_dogfood_ai_pairing.py"
     and observed["apply"] is False
     and observed["dry_run"] is True
+    and observed["defer_verify_on_approval"] is True
+    and observed["paired_test_source_path"] == "src/mew/dogfood_ai_pairing.py"
     and observed["verification_exit_code"] is None
     and observed["coerced_dry_run_reason"] == "paired_test_steer"
+    and observed["approval_exit_code"] == 0
+    and observed["approval_verification_deferred"] is True
+    and observed["approval_verification_exit_code"] is None
 )
 
 Path("src/mew/dogfood_batch.py").write_text("VALUE = 'before'\\n", encoding="utf-8")
@@ -5009,6 +5039,21 @@ raise SystemExit(0 if passed else 1)
         paired_steer_ai_result.get("exit_code") == 0 and bool(paired_steer_ai_data.get("passed")),
         observed=paired_steer_ai_data.get("observed") or command_result_tail(paired_steer_ai_result, limit=5),
         expected="paired-test steer coerces model-suggested tests/** apply writes into dry-run pending approval",
+    )
+    paired_approval_observed = paired_steer_ai_data.get("observed") or {}
+    _scenario_check(
+        checks,
+        "work_ai_paired_test_approval_auto_defers_verification",
+        paired_steer_ai_result.get("exit_code") == 0
+        and paired_approval_observed.get("defer_verify_on_approval") is True
+        and paired_approval_observed.get("approval_exit_code") == 0
+        and paired_approval_observed.get("approval_verification_deferred") is True
+        and paired_approval_observed.get("approval_verification_exit_code") is None
+        and paired_approval_observed.get("test_file_exists_after_approval") is True,
+        observed=paired_approval_observed or command_result_tail(paired_steer_ai_result, limit=5),
+        expected=(
+            "approving a paired-test-steer dry-run defaults to deferred verification until the source edit arrives"
+        ),
     )
     _scenario_check(
         checks,

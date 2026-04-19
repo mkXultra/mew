@@ -226,6 +226,7 @@ from .work_session import (
     suggested_verify_command_for_call_path,
     update_work_model_turn_plan,
     verification_command_covers_suggestion,
+    work_approval_default_defer_reason,
     work_tool_repeat_guard,
     GIT_WORK_TOOLS,
     NON_PENDING_APPROVAL_STATUSES,
@@ -1862,18 +1863,22 @@ def _work_cli_approval_items(session, resume):
             if approval_status == "failed"
             else f"approve tool #{tool_call_id}"
         )
+        if approval.get("auto_defer_verify_reason"):
+            approve_label = f"approve tool #{tool_call_id} and wait for paired source"
         items.append(
             {
                 "label": approve_label,
-                "command": _work_cli_approve_command(session, tool_call_id, approval.get("path") or "."),
+                "command": approval.get("cli_approve_hint")
+                or _work_cli_approve_command(session, tool_call_id, approval.get("path") or "."),
             }
         )
-        items.append(
-            {
-                "label": f"apply tool #{tool_call_id} and defer verification",
-                "command": _work_cli_defer_verify_approve_command(session, tool_call_id, approval.get("path") or "."),
-            }
-        )
+        if not approval.get("auto_defer_verify_reason"):
+            items.append(
+                {
+                    "label": f"apply tool #{tool_call_id} and defer verification",
+                    "command": _work_cli_defer_verify_approve_command(session, tool_call_id, approval.get("path") or "."),
+                }
+            )
         items.append(
             {
                 "label": f"reject tool #{tool_call_id}",
@@ -2955,12 +2960,14 @@ def work_ai_step_guidance(args, index, max_steps):
     return guidance
 
 
-def queue_work_session_steer(session, text, source="user"):
+def queue_work_session_steer(session, text, source="user", metadata=None):
     text = str(text or "").strip()
     if not session or not text:
         return None
     current_time = now_iso()
     steer = {"text": text, "source": source, "created_at": current_time}
+    if isinstance(metadata, dict) and metadata:
+        steer["metadata"] = dict(metadata)
     session["pending_steer"] = steer
     session["updated_at"] = current_time
     return steer
@@ -3094,10 +3101,17 @@ def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parame
     if not (parameters or {}).get("apply"):
         return False
     parameters["apply"] = False
+    parameters["defer_verify_on_approval"] = True
+    metadata = pending_steer.get("metadata") or {}
+    if metadata.get("source_path"):
+        parameters["paired_test_source_path"] = metadata.get("source_path")
     if isinstance(action, dict):
         action["apply"] = False
         action["dry_run"] = True
         action["coerced_dry_run_reason"] = "paired_test_steer"
+        action["defer_verify_on_approval"] = True
+        if metadata.get("source_path"):
+            action["paired_test_source_path"] = metadata.get("source_path")
     return True
 
 
@@ -3972,7 +3986,12 @@ def cmd_work_ai(args):
                     planned.get("action_plan") or {},
                     steer_action,
                 )
-                steer = queue_work_session_steer(session, steer_text, source="paired_test_steer")
+                steer = queue_work_session_steer(
+                    session,
+                    steer_text,
+                    source="paired_test_steer",
+                    metadata=pairing_status,
+                )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 if turn is not None:
                     turn["paired_test_steer"] = pairing_status
@@ -4585,6 +4604,17 @@ def _apply_work_approval(args, approve_tool_id):
             if inferred_verify_command:
                 args.verify_command = inferred_verify_command
                 args.allow_verify = True
+        auto_defer_reason = work_approval_default_defer_reason(source_call)
+        if auto_defer_reason and not getattr(args, "defer_verify", False):
+            args.defer_verify = True
+            add_work_session_note(
+                session,
+                (
+                    "auto-deferred verification for approval "
+                    f"#{source_call.get('id')}: {auto_defer_reason}"
+                ),
+                source="system",
+            )
         parameters = _approval_parameters_from_call(source_call, args)
         rollback_snapshot = _deferred_approval_rollback_snapshot(source_call, parameters)
         tool_call = start_work_tool_call(state, session, source_call.get("tool"), parameters)

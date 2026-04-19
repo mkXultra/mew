@@ -11,6 +11,7 @@ from .work_session import (
     diff_line_counts,
     format_diff_preview,
     latest_work_verify_command,
+    work_approval_default_defer_reason,
     work_write_pairing_status,
 )
 
@@ -409,6 +410,9 @@ def approval_cell(session, call):
         f"mew work {task_ref} --approve-tool {call.get('id')} "
         f"--allow-write {write_root} --defer-verify"
     )
+    auto_defer_reason = work_approval_default_defer_reason(call)
+    if auto_defer_reason:
+        approve_command = defer_verify_approve_command
     override_approve_command = f"{approve_command} --allow-unpaired-source-edit"
     reject_command = f"mew work {task_ref} --reject-tool {call.get('id')}"
     reject_feedback_command = f"{reject_command} --reject-reason <feedback>"
@@ -421,6 +425,8 @@ def approval_cell(session, call):
     pairing_status = work_write_pairing_status(session, call)
     if pairing_status.get("status") == "missing_test_edit":
         preview_prefix += "; paired test missing"
+    elif auto_defer_reason:
+        preview_prefix += "; verify waits for paired source"
     preview = f"{preview_prefix} for {call.get('tool')} #{call.get('id')} {path}".strip()
     cell = _cell_base(
         session,
@@ -464,6 +470,7 @@ def approval_cell(session, call):
             f"pairing_required: {pairing_status.get('required')}" if pairing_status else "",
             f"pairing_reason: {pairing_status.get('reason')}" if pairing_status.get("reason") else "",
             f"suggested_test_path: {pairing_status.get('suggested_test_path')}" if pairing_status.get("suggested_test_path") else "",
+            f"auto_defer_verify: {auto_defer_reason}" if auto_defer_reason else "",
             (
                 f"paired_test: #{pairing_status.get('paired_tool_call_id')} {pairing_status.get('paired_path')}"
                 if pairing_status.get("paired_tool_call_id") is not None

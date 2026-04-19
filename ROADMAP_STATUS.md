@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-19
+Last updated: 2026-04-20
 
 This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conservative.
 
@@ -9,14 +9,14 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, and proved mew-side interruption/process-stop comparative gates; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, and proved mew-side interruption/process-stop comparative gates; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 23:51 JST.
+Last assessed: 2026-04-20 01:39 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -35,8 +35,15 @@ Milestone 2 Done-when checklist:
   source/test approval loop. A first mitigation now exposes explicit
   single-approval `--defer-verify` controls for test-first or paired-change
   flows, and a follow-up mew-led implementation task used that control to avoid
-  the rollback loop and finish. The compact follow stop surface now preserves
-  the `apply tool #... and defer verification` control, matching the resume/cell
+  the rollback loop and finish. A second mitigation now tags tests/** dry-runs
+  created from `paired_test_steer` as approval-time auto-defer candidates: their
+  resume/cell primary approve hint uses `--defer-verify`, approval records a
+  system note, and a failing verifier is not run until the matching source edit
+  arrives. `./mew dogfood --scenario work-session --workspace
+  /tmp/mew-m2-auto-defer-dogfood --json` passed with
+  `work_ai_paired_test_approval_auto_defers_verification`, proving this exact
+  flow. The compact follow stop surface now preserves the
+  `apply tool #... and defer verification` control, matching the resume/cell
   surfaces. The M2 comparative dogfood can now prefill mew-side evidence from a
   real work session via `--mew-session-id`, so future parity checks carry actual
   wall/active time, approval, verification, resume, and continuity evidence
@@ -85,7 +92,9 @@ Milestone 2 Done-when checklist:
   `perceived_idle_ratio`, `high_idle_sessions`, and concrete high-idle session
   samples when idle-time friction drives the next M2 task. This keeps the
   suggested next self-improve loop grounded in visible evidence instead of a
-  hidden metrics signal.
+  hidden metrics signal. The paired-test approval auto-defer slice also reduces
+  approval/verification ceremony for the B1 rollback-loop blocker without
+  claiming that idle latency is solved.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist. A scoped
@@ -110,8 +119,8 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are reducing the paired approval / deferred verification
-ceremony found during process-stop dogfood, running a matching interrupted
+Useful next choices are re-running a process-stop or paired source/test M2
+comparative task after the auto-defer change, running a matching interrupted
 fresh-CLI comparison, or a targeted latency/friction slice chosen from
 `mew metrics --kind coding`. Polish, side projects, and later-milestone
 architecture are deferred unless they directly unblock this active criterion.
