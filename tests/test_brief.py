@@ -151,6 +151,22 @@ class BriefTests(unittest.TestCase):
         )
         self.assertIn("Coding: enter coding cockpit for task #2", focus)
 
+    def test_focus_global_surfaces_mew_self_improve_when_research_blocks(self):
+        state = default_state()
+        add_task(state, task_id=1, title="Research grants", kind="research")
+        add_question(state, "Which city?", related_task_id=1)
+
+        with patch("mew.brief.current_project_looks_like_mew", return_value=True):
+            data = build_focus_data(state, limit=3)
+        focus = format_focus(data)
+
+        self.assertIn("mew reply", data["next_move"])
+        self.assertEqual(
+            data["coding_next_move"],
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+        )
+        self.assertIn("Coding: start a native self-improvement session", focus)
+
     def test_brief_kind_filter_scopes_tasks_questions_and_messages(self):
         state = default_state()
         add_task(state, task_id=1, title="Research grants", kind="research")
