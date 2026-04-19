@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
 
@@ -79,6 +79,11 @@ from `mew memory --deep`, while existing state memory remains legacy
 bounded `active_memory` bundle from that store, and the same bundle flows into
 the resident THINK prompt so user/project/reference memory can influence the
 next step without a manual search.
+Follow-up dogfood proved the active recall route with the real Codex Web API,
+added `mew memory --active --task-id ...` as the debug surface, exposed that
+command from native self-improve controls, tightened term extraction so
+self-improve boilerplate and recent commit hashes do not dominate recall, and
+now prints score plus matched terms in text output.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
@@ -634,6 +639,9 @@ Evidence:
 - Native self-improve controls now include that same active-memory command, so
   the standard continue/follow/status/resume/chat handoff also exposes the
   resident recall bundle before work starts.
+- Active recall debug output now surfaces `score=` and `matched=` in text mode,
+  and task-term extraction filters self-improve boilerplate, constraints, and
+  recent commit hashes before matching typed memories.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -713,9 +721,9 @@ Missing proof:
 
 Next action:
 
-- Continue tuning active recall quality from dogfood, then move back to the
-  broader cockpit/recovery roadmap unless daily use shows the memory surface is
-  still too opaque.
+- Move back to the broader cockpit/recovery roadmap, while continuing to watch
+  active recall quality during real dogfood and only expanding memory scoring
+  when the selected memories are visibly wrong or opaque.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer the
@@ -877,6 +885,19 @@ Next action:
 
 ## Latest Validation
 
+- 2026-04-19 active memory sprint: commits `874eccd`, `8647117`,
+  `6c6f2df`, `a4310dd`, `b57edb8`, `16ad503`, and `155630d` delivered the
+  5.12 typed/scoped memory MVP, injected active typed recall into native work
+  resume and resident THINK context, proved with the real Codex Web API that a
+  project memory can steer the first resident action, exposed
+  `mew memory --active --task-id ...` from both CLI and native self-improve
+  controls, filtered noisy self-improve boilerplate from active recall terms,
+  and made text output show recall score and matched terms. Validation included
+  focused memory/work-session tests, ruff on changed files, full
+  `uv run pytest -q` (`1036 passed, 30 subtests passed`), repeated
+  `./mew dogfood --all --cleanup --json` runs (pass), `git diff --check`, and
+  a real API dogfood where active project memory led the resident to
+  `read_file README.md`.
 - 2026-04-19 continuation dogfood kept Milestone 2 as the active focus and
   landed several small cockpit/reentry fixes from real mew use: `64a5381`
   and `7f6bcc8` make no-active work-session read tools point at one-shot
