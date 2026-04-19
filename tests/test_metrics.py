@@ -107,9 +107,9 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["latest_note"], "Recovered manually after rollback.")
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["tool_call_id"], 2)
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["path"], "tests/test_metrics.py")
-        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 4.0)
-        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["median"], 4.0)
-        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["p95"], 4.0)
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 3.0)
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["median"], 3.0)
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["p95"], 3.0)
         self.assertEqual(metrics["latency"]["model_to_tool_wait_seconds"]["avg"], 1.0)
         self.assertEqual(metrics["latency"]["tool_to_next_model_wait_seconds"]["avg"], 3.0)
         self.assertEqual(metrics["latency"]["model_resume_wait_seconds"]["avg"], 3.0)
@@ -273,7 +273,7 @@ class MetricsTests(unittest.TestCase):
 
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["count"], 2)
         self.assertEqual(metrics["diagnostics"]["slow_first_tools"][0]["session_id"], 9)
-        self.assertEqual(metrics["diagnostics"]["slow_first_tools"][0]["first_tool_start_seconds"], 45.0)
+        self.assertEqual(metrics["diagnostics"]["slow_first_tools"][0]["first_tool_start_seconds"], 44.0)
         self.assertEqual(metrics["diagnostics"]["slow_first_tools"][0]["first_model_turn_id"], 3)
         self.assertIn("Long planning", metrics["diagnostics"]["slow_first_tools"][0]["first_model_summary"])
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["model_resume_wait_seconds"], 41.0)
@@ -288,7 +288,7 @@ class MetricsTests(unittest.TestCase):
 
         text = format_observation_metrics(metrics)
         self.assertIn("slow_first_tools:", text)
-        self.assertIn("first_tool_start=45.0s first_turn=#3", text)
+        self.assertIn("first_tool_start=44.0s first_turn=#3", text)
         self.assertIn("first_model_summary: Long planning before first tool.", text)
         self.assertIn("slow_model_resumes:", text)
         self.assertIn("model_wait=41.0s raw_wait=41.0s", text)
@@ -296,6 +296,44 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("idle_ratio=0.975", text)
         self.assertIn("tools=1 turns=2 notes=1", text)
         self.assertIn("latest_note: Manual implementation", text)
+
+    def test_first_tool_latency_starts_at_first_model_turn_when_session_was_dormant(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Observe dormant session", "kind": "coding", "status": "ready"})
+        state["work_sessions"].append(
+            {
+                "id": 12,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T02:00:10Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "started_at": "2026-04-19T02:00:00Z",
+                        "finished_at": "2026-04-19T02:00:04Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "started_at": "2026-04-19T02:00:05Z",
+                        "finished_at": "2026-04-19T02:00:06Z",
+                        "parameters": {"path": "src/mew"},
+                        "result": {},
+                    }
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 5.0)
+        self.assertEqual(metrics["diagnostics"]["slow_first_tools"], [])
+        self.assertNotIn("slow_first_tool", {signal["id"] for signal in metrics["signals"]})
 
     def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
         state = default_state()

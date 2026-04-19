@@ -4443,13 +4443,13 @@ class CommandTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Mew observation metrics", text)
                 self.assertIn("sessions: total=1", text)
-                self.assertIn("first_tool_start_seconds: count=1 avg=3.0", text)
+                self.assertIn("first_tool_start_seconds: count=1 avg=2.0", text)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["metrics", "--kind", "coding", "--json"]), 0)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["sessions"]["total"], 1)
-                self.assertEqual(data["latency"]["first_tool_start_seconds"]["avg"], 3.0)
+                self.assertEqual(data["latency"]["first_tool_start_seconds"]["avg"], 2.0)
             finally:
                 os.chdir(old_cwd)
 

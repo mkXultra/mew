@@ -136,16 +136,17 @@ def _union_seconds(intervals):
     return sum(max(0.0, (end - start).total_seconds()) for start, end in merged)
 
 
-def _first_tool_start_seconds(session, tool_calls):
-    created_at = session.get("created_at")
+def _first_tool_start_seconds(session, model_turns, tool_calls):
+    started_turns = [turn for turn in model_turns or [] if isinstance(turn, dict) and turn.get("started_at")]
+    baseline = min((turn.get("started_at") for turn in started_turns), default=session.get("created_at"))
     starts = [call.get("started_at") for call in tool_calls if isinstance(call, dict) and call.get("started_at")]
     if not starts:
         return None
-    return _duration_seconds(created_at, min(starts))
+    return _duration_seconds(baseline, min(starts))
 
 
 def _first_tool_start_sample(state, session, model_turns, tool_calls):
-    seconds = _first_tool_start_seconds(session, tool_calls)
+    seconds = _first_tool_start_seconds(session, model_turns, tool_calls)
     if seconds is None or seconds <= SLOW_FIRST_TOOL_SECONDS:
         return None
     started_calls = [call for call in tool_calls if isinstance(call, dict) and call.get("started_at")]
@@ -763,7 +764,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         _merge_counts(turn_counts, _status_counts(model_turns))
         _merge_counts(approval_counts, _approval_counts(tool_calls))
         _merge_counts(verification_counts, _verification_counts(tool_calls))
-        first_tool_starts.append(_first_tool_start_seconds(session, tool_calls))
+        first_tool_starts.append(_first_tool_start_seconds(session, model_turns, tool_calls))
         model_to_tool_waits.extend(_model_to_tool_waits(model_turns, tool_calls))
         wait_records = _tool_to_next_model_wait_records(session, model_turns, tool_calls)
         tool_to_next_model_waits.extend(record.get("wait_seconds") for record in wait_records)

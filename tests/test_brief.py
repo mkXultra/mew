@@ -614,8 +614,8 @@ class BriefTests(unittest.TestCase):
                         "id": 1,
                         "status": "completed",
                         "tool_call_id": 1,
-                        "started_at": "2026-04-19T00:00:01Z",
-                        "finished_at": "2026-04-19T00:00:02Z",
+                        "started_at": "2026-04-18T23:59:15Z",
+                        "finished_at": "2026-04-18T23:59:16Z",
                         "summary": "Compare the focus surface before editing.",
                     },
                     {

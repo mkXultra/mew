@@ -56,7 +56,9 @@ Milestone 2 Done-when checklist:
   slow first-tool-start latency. The same diagnostic now reaches
   `mew focus --kind coding` as `first_tool_start_p95` plus concrete first-tool
   samples, so reentry can choose a latency slice without opening the metrics
-  report first.
+  report first. The latency now starts at the first model turn when present,
+  avoiding false slow-first-tool signals from a native session that was created
+  and then left dormant before the first follow run.
   Native self-improve sessions started inside the mew project now also seed
   `src/mew` and `tests` as write roots plus `uv run pytest -q` verification,
   preventing the resident from dead-ending in read-only mode when the chosen M2
