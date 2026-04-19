@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 01:39 JST.
+Last assessed: 2026-04-20 05:00 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -149,7 +149,15 @@ Milestone 2 Done-when checklist:
   keeps the work-session scenario green, the full `tests/test_work_session.py`
   suite passed, and
   `/tmp/mew-m2-deterministic-wait-summary-evidence/.mew/dogfood/m2-comparative-protocol.json`
-  records the task-chain verifier as passed.
+  records the task-chain verifier as passed. Task `#273` then targeted the
+  verifier-selector failure exposed by that dogfood: pytest exit 5 with
+  "no tests ran" / "not found" output is now classified as an invalid verifier
+  selector in work verification state, and verification confidence reports a
+  low-confidence recovery reason asking for a broader inferred test module or
+  suite. The full `tests/test_work_session.py` suite passed, the work-session
+  dogfood passed at `/tmp/mew-zero-test-pytest-selector-dogfood`, and
+  `/tmp/mew-m2-zero-test-selector-evidence/.mew/dogfood/m2-comparative-protocol.json`
+  records the completed task-chain verifier as passed.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

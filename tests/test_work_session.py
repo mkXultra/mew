@@ -43,6 +43,7 @@ from mew.work_session import (
     format_work_effort_brief,
     format_work_session_resume,
     format_work_session_tests,
+    latest_work_verification_state,
     latest_work_verify_command,
     select_work_recovery_plan_item,
     start_work_tool_call,
@@ -1478,6 +1479,110 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(confidence["narrow_command"])
                 self.assertFalse(confidence["finish_ready"])
                 self.assertEqual(confidence["command"], command)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_marks_zero_test_pytest_selector_as_invalid_low_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_commands.py::CommandsTests::test_one"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {
+                                "command": command,
+                                "exit_code": 5,
+                                "stderr": (
+                                    "ERROR: not found: tests/test_commands.py::CommandsTests::test_one\n"
+                                    "(no match in any of [<Module test_commands.py>])\n\n"
+                                    "no tests ran in 0.01s\n"
+                                ),
+                                "narrow_verify_command": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                confidence = build_work_session_resume(session)["verification_confidence"]
+
+                self.assertEqual(confidence["status"], "invalid")
+                self.assertEqual(confidence["latest_status"], "invalid")
+                self.assertEqual(confidence["confidence"], "low")
+                self.assertTrue(confidence["narrow_command"])
+                self.assertFalse(confidence["finish_ready"])
+                self.assertIn("matched no tests", confidence["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_resume_marks_zero_test_write_verification_as_invalid_low_confidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text("placeholder\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_commands.py::CommandsTests::test_one"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier confidence",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "failed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                                "rolled_back": True,
+                                "verification": {
+                                    "command": command,
+                                    "exit_code": 5,
+                                    "stderr": "collected 0 items\n\nno tests ran in 0.02s\n",
+                                    "narrow_verify_command": True,
+                                },
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                state = latest_work_verification_state(session["tool_calls"])
+
+                self.assertEqual(state["status"], "invalid")
+                self.assertEqual(state["kind"], "edit_file_verification")
+                self.assertEqual(state["exit_code"], 5)
+                self.assertEqual(state["command"], command)
+                self.assertTrue(state["narrow_verify_command"])
             finally:
                 os.chdir(old_cwd)
 

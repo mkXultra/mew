@@ -1903,9 +1903,12 @@ def latest_work_verification_state(calls, task=None):
         result = call.get("result") or {}
         verification = result.get("verification") or {}
         if "exit_code" in verification:
+            status = "passed" if verification.get("exit_code") == 0 else "failed"
+            if _pytest_zero_tests_result(verification):
+                status = "invalid"
             return {
                 "kind": f"{call.get('tool')}_verification",
-                "status": "passed" if verification.get("exit_code") == 0 else "failed",
+                "status": status,
                 "command": verification.get("command") or "",
                 "cwd": verification.get("cwd") or "",
                 "exit_code": verification.get("exit_code"),
@@ -1914,9 +1917,12 @@ def latest_work_verification_state(calls, task=None):
                 "narrow_verify_command": bool(verification.get("narrow_verify_command")),
             }
         if call.get("tool") == "run_tests" and "exit_code" in result:
+            status = "passed" if result.get("exit_code") == 0 else "failed"
+            if _pytest_zero_tests_result(result):
+                status = "invalid"
             return {
                 "kind": "run_tests",
-                "status": "passed" if result.get("exit_code") == 0 else "failed",
+                "status": status,
                 "command": result.get("command") or (call.get("parameters") or {}).get("command") or "",
                 "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
                 "exit_code": result.get("exit_code"),
@@ -2226,6 +2232,26 @@ def _verification_command_uses_selector(command, suggestions=None):
     return False
 
 
+def _pytest_zero_tests_result(record):
+    command = str((record or {}).get("command") or "").strip()
+    if not command or (record or {}).get("exit_code") != 5:
+        return False
+    try:
+        tokens = [token.replace("\\", "/") for token in shlex.split(command)]
+    except ValueError:
+        tokens = command.replace("\\", "/").split()
+    has_pytest = any(Path(token).name == "pytest" or token.endswith("/pytest") for token in tokens)
+    has_pytest = has_pytest or any(
+        token == "-m" and index + 1 < len(tokens) and tokens[index + 1] == "pytest"
+        for index, token in enumerate(tokens)
+    )
+    if not has_pytest:
+        return False
+    output = "\n".join(str((record or {}).get(key) or "") for key in ("stdout", "stderr", "summary", "error"))
+    normalized = output.lower()
+    return "no tests ran" in normalized or "collected 0 items" in normalized or "not found:" in normalized
+
+
 def verification_confidence_checkpoint_for_calls(calls, task=None):
     suggestions = _source_edit_verify_suggestions_for_calls(calls, include_dry_run=True)
     if not suggestions:
@@ -2292,6 +2318,14 @@ def verification_confidence_checkpoint_for_calls(calls, task=None):
                 "confidence": "low",
                 "reason": "latest passing verifier ran before the latest mew source edit",
             }
+    if latest_status == "invalid":
+        return {
+            **checkpoint,
+            "status": "invalid",
+            "confidence": "low",
+            "narrow_command": _verification_command_uses_selector(command, suggestions),
+            "reason": "latest pytest verifier matched no tests; broaden the selector to the inferred test module or suite before finish",
+        }
     if latest_status != "passed":
         return {
             **checkpoint,
