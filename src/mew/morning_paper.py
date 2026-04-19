@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .mood import active_work_continuity_issues
 from .report_io import write_generated_report
 
 
@@ -220,6 +221,7 @@ def build_morning_paper_view_model(
     return {
         "date": day,
         "interests": interests,
+        "continuity_risks": active_work_continuity_issues(state)[:MAX_ITEMS],
         "items": ranked,
         "top_picks": [item for item in ranked if item["score"] > 0],
         "explore_later": [item for item in ranked if item["score"] <= 0],
@@ -242,6 +244,7 @@ def render_item(index: int, item: dict[str, Any]) -> list[str]:
 def render_morning_paper_markdown(view_model: dict[str, Any]) -> str:
     top_picks = view_model["top_picks"]
     exploration = view_model["explore_later"]
+    continuity_risks = view_model.get("continuity_risks") or []
     lines = [
         f"# Mew Morning Paper {view_model['date']}",
         "",
@@ -254,6 +257,16 @@ def render_morning_paper_markdown(view_model: dict[str, Any]) -> str:
             lines.append(f"- {interest}")
     else:
         lines.append("- No interest tags configured")
+
+    if continuity_risks:
+        lines.extend(["", "## Continuity risks"])
+        for risk in continuity_risks:
+            session_id = risk.get("session_id") or "?"
+            task_id = risk.get("task_id")
+            task_text = f" task #{task_id}" if task_id is not None else ""
+            score = risk.get("score") or "-"
+            summary = normalize_text(risk.get("summary")) or "repair continuity before continuing"
+            lines.append(f"- work session #{session_id}{task_text}: {risk.get('status')} {score}; repair: {summary}")
 
     lines.extend(["", "## Top picks"])
     if top_picks:
@@ -276,6 +289,7 @@ def format_morning_paper_view(view_model: dict[str, Any]) -> str:
         [
             f"Mew morning paper {view_model['date']}",
             f"interests: {', '.join(view_model['interests']) if view_model['interests'] else '-'}",
+            f"continuity_risks: {len(view_model.get('continuity_risks') or [])}",
             f"top_picks: {len(view_model['top_picks'])}",
             f"explore_later: {len(view_model['explore_later'])}",
         ]

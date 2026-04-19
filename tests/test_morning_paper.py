@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 
 from mew.cli import main
-from mew.morning_paper import build_morning_paper_view_model, render_morning_paper_markdown
+from mew.morning_paper import build_morning_paper_view_model, format_morning_paper_view, render_morning_paper_markdown
 
 
 def write_feed(path: Path) -> None:
@@ -57,8 +57,48 @@ class MorningPaperTests(unittest.TestCase):
         self.assertEqual(view["top_picks"][0]["title"], "Passive AI shells")
         self.assertEqual(view["top_picks"][0]["score"], 10)
         self.assertIn("matched tag `agents`", view["top_picks"][0]["reasons"])
+        self.assertEqual(view["continuity_risks"], [])
         self.assertIn("# Mew Morning Paper 2026-04-17", text)
+        self.assertNotIn("## Continuity risks", text)
         self.assertIn("## Explore later", text)
+
+    def test_build_morning_paper_surfaces_weak_work_continuity(self):
+        state = {
+            "interests": ["agents"],
+            "tasks": [{"id": 1, "title": "Investigate handoff", "status": "ready"}],
+            "work_sessions": [
+                {
+                    "id": 5,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": "Continue work",
+                    "phase": "idle",
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "summary": "x" * 210_000,
+                            "result": {"path": "src/mew/morning_paper.py"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+        view = build_morning_paper_view_model([], state, explicit_date="2026-04-17")
+        text = render_morning_paper_markdown(view)
+        summary = format_morning_paper_view(view)
+
+        self.assertEqual(len(view["continuity_risks"]), 1)
+        self.assertEqual(view["continuity_risks"][0]["status"], "weak")
+        self.assertEqual(view["continuity_risks"][0]["score"], "6/9")
+        self.assertIn("## Continuity risks", text)
+        self.assertIn(
+            "- work session #5 task #1: weak 6/9; repair: refresh working memory",
+            text,
+        )
+        self.assertIn("continuity_risks: 1", summary)
 
     def test_explicit_interest_overrides_empty_state(self):
         items = [{"title": "Local-first agent", "source": "Blog", "summary": "local-first workflow"}]

@@ -1838,6 +1838,9 @@ Next action:
 - `mew desk` active work-session details now carry the same continuity score
   and repair hint, making the pet/status surface a viable quick reentry view
   instead of only a task/session counter.
+- `mew morning-paper` now includes a `continuity_risks` field and markdown
+  section when active work sessions are weak or broken, so the first-look
+  morning surface no longer hides unsafe reentry state.
 
 ## Current Roadmap Focus
 
