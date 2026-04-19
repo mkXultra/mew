@@ -9675,6 +9675,102 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_pairing_steer_survives_noop_test_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                Path("tests/test_pairing.py").write_text("def test_existing():\n    assert True\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview source edit first",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "src/mew/pairing.py",
+                            "old": "old",
+                            "new": "new",
+                        },
+                    },
+                    {
+                        "summary": "make a noop paired test edit",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "tests/test_pairing.py",
+                            "old": "assert True",
+                            "new": "assert True",
+                            "dry_run": False,
+                        },
+                    },
+                    {
+                        "summary": "add the real paired test",
+                        "action": {
+                            "type": "write_file",
+                            "path": "tests/test_pairing_added.py",
+                            "content": "def test_pairing_added():\n    assert True\n",
+                            "create": True,
+                            "dry_run": False,
+                        },
+                    },
+                ]
+                verify_command = f"{sys.executable} -c \"raise SystemExit(99)\""
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        verify_command,
+                                        "--max-steps",
+                                        "3",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "pending_approval")
+                self.assertTrue(Path("tests/test_pairing.py").exists())
+                self.assertFalse(Path("tests/test_pairing_added.py").exists())
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 2)
+                noop_call = session["tool_calls"][0]
+                self.assertEqual(noop_call["parameters"]["path"], "tests/test_pairing.py")
+                self.assertFalse(noop_call["parameters"]["apply"])
+                self.assertFalse(noop_call["result"]["changed"])
+                added_call = session["tool_calls"][1]
+                self.assertEqual(added_call["parameters"]["path"], "tests/test_pairing_added.py")
+                self.assertFalse(added_call["parameters"]["apply"])
+                self.assertTrue(added_call["result"]["dry_run"])
+                self.assertTrue(added_call["result"]["changed"])
+                self.assertNotIn("verification_exit_code", added_call["result"])
+                self.assertEqual(session["model_turns"][1]["coerced_dry_run_reason"], "paired_test_steer")
+                self.assertEqual(session["model_turns"][2]["coerced_dry_run_reason"], "paired_test_steer")
+                self.assertNotIn("pending_steer", session)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_allows_mew_source_edit_when_paired_test_write_exists(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -4466,7 +4466,7 @@ def command_result_tail(result, limit=20):
     }
 
 
-def compact_command_result(result, limit=5):
+def compact_command_result(result, limit=4):
     summary = {
         "command": result.get("command", []),
         "exit_code": result.get("exit_code"),
