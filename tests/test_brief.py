@@ -598,6 +598,82 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["routine_unread_info_count"], 1)
         self.assertIn("Routine info: 1 clear with `./mew ack --routine`", focus)
 
+    def test_focus_surfaces_recent_metrics_friction(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Improve focus", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 9,
+                "task_id": 7,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "tool_call_id": 1,
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    },
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:45Z",
+                        "finished_at": "2026-04-19T00:00:46Z",
+                    },
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "rejected",
+                        "rejected_at": "2026-04-19T00:00:50Z",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {
+                            "path": "tests/test_brief.py",
+                            "summary": "Speculative focus edit.",
+                            "reason": "Add paired test first.",
+                        },
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:10Z",
+                        "finished_at": "2026-04-19T00:00:11Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_brief.py",
+                                "stderr": "FAILED tests/test_brief.py::BriefTests::test_focus",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+
+        data = build_focus_data(state, limit=3, kind="coding")
+        focus = format_focus(data)
+
+        self.assertEqual(data["recent_friction"]["rates"]["approval_rejection"], 1.0)
+        self.assertIn("Recent friction", focus)
+        self.assertIn("approval_rejection=1.0", focus)
+        self.assertIn("verification_failure=1.0", focus)
+        self.assertIn("rejected edit_file#1 task=#7 path=tests/test_brief.py: Add paired test first.", focus)
+        self.assertIn(
+            "failed edit_file#2 task=#7 path=src/mew/brief.py exit=1: FAILED tests/test_brief.py",
+            focus,
+        )
+        self.assertIn("approval wait edit_file#1 task=#7 approval=rejected 41.0s path=tests/test_brief.py", focus)
+
     def test_focus_surfaces_active_work_session_reentry(self):
         state = default_state()
         add_task(state, task_id=7, title="Implement cockpit polish")

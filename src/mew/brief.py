@@ -2,6 +2,7 @@ from pathlib import Path
 
 from .cli_command import mew_command
 from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
+from .metrics import build_observation_metrics
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .question_view import format_question_context, format_waiting_hours, question_view_metadata
 from .state import is_routine_outbox_message
@@ -70,6 +71,13 @@ def _project_snapshot_item(snapshot):
 
 def open_unread_messages(state):
     return [message for message in state.get("outbox", []) if not message.get("read_at")]
+
+
+def _clip_focus_text(value, limit=180):
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def recent_unread_messages(state, limit=5):
@@ -707,6 +715,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
             kind=kind,
             current_time=generated_at,
         ),
+        "recent_friction": recent_focus_friction(state, kind=kind),
         "tasks": [
             {
                 **_task_item(task),
@@ -715,6 +724,47 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
             for task in tasks[:limit]
         ],
         "open_task_count": len(tasks),
+    }
+
+
+FOCUS_FRICTION_SIGNAL_IDS = {
+    "approval_friction",
+    "verification_friction",
+    "slow_model_resume",
+    "high_idle_ratio",
+}
+
+
+def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2):
+    metrics = build_observation_metrics(state, kind=kind, limit=session_limit, sample_limit=sample_limit)
+    signals = [
+        signal
+        for signal in metrics.get("signals") or []
+        if signal.get("id") in FOCUS_FRICTION_SIGNAL_IDS
+    ]
+    diagnostics = metrics.get("diagnostics") or {}
+    samples = {
+        "verification_failures": diagnostics.get("verification_failures") or [],
+        "approval_friction": diagnostics.get("approval_friction") or [],
+        "slow_model_resumes": diagnostics.get("slow_model_resumes") or [],
+        "approval_bound_waits": diagnostics.get("approval_bound_waits") or [],
+    }
+    if not signals and not any(samples.values()):
+        return {}
+    rates = ((metrics.get("reliability") or {}).get("rates") or {})
+    latency = metrics.get("latency") or {}
+    return {
+        "rates": {
+            "approval_rejection": rates.get("approval_rejection"),
+            "verification_failure": rates.get("verification_failure"),
+            "verification_rollback": rates.get("verification_rollback"),
+        },
+        "latency": {
+            "model_resume_p95": (latency.get("model_resume_wait_seconds") or {}).get("p95"),
+            "approval_bound_p95": (latency.get("approval_bound_wait_seconds") or {}).get("p95"),
+        },
+        "signals": signals[:sample_limit],
+        **samples,
     }
 
 
@@ -836,6 +886,66 @@ def _format_focus_memory_stale(memory):
     return ""
 
 
+def _format_focus_friction_summary(friction):
+    rates = friction.get("rates") or {}
+    latency = friction.get("latency") or {}
+    parts = []
+    for label, key in (
+        ("approval_rejection", "approval_rejection"),
+        ("verification_failure", "verification_failure"),
+        ("verification_rollback", "verification_rollback"),
+    ):
+        value = rates.get(key)
+        if value is not None and value > 0:
+            parts.append(f"{label}={value}")
+    if latency.get("model_resume_p95") is not None and friction.get("slow_model_resumes"):
+        parts.append(f"model_resume_p95={latency.get('model_resume_p95')}s")
+    if latency.get("approval_bound_p95") is not None and friction.get("approval_bound_waits"):
+        parts.append(f"approval_bound_p95={latency.get('approval_bound_p95')}s")
+    return " ".join(parts)
+
+
+def _append_focus_recent_friction(lines, friction):
+    if not friction:
+        return
+    lines.append("")
+    lines.append("Recent friction")
+    summary = _format_focus_friction_summary(friction)
+    if summary:
+        lines.append(f"- {summary}")
+    for sample in friction.get("approval_friction") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        path = f" path={sample.get('path')}" if sample.get("path") else ""
+        reason = _clip_focus_text(sample.get("reason") or sample.get("summary"), 220)
+        suffix = f": {reason}" if reason else ""
+        lines.append(
+            f"- rejected {sample.get('tool')}#{sample.get('tool_call_id')}{task}{path}{suffix}"
+        )
+    for sample in friction.get("verification_failures") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        path = f" path={sample.get('path')}" if sample.get("path") else ""
+        detail = _clip_focus_text(sample.get("stderr") or sample.get("stdout"), 220)
+        suffix = f": {detail}" if detail else ""
+        lines.append(
+            f"- failed {sample.get('tool')}#{sample.get('tool_call_id')}{task}{path} exit={sample.get('exit_code')}{suffix}"
+        )
+    for sample in friction.get("approval_bound_waits") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        path = f" path={sample.get('path')}" if sample.get("path") else ""
+        approval = f" approval={sample.get('approval_status')}" if sample.get("approval_status") else ""
+        lines.append(
+            f"- approval wait {sample.get('tool')}#{sample.get('tool_call_id')}{task}{approval} "
+            f"{sample.get('approval_bound_wait_seconds')}s{path}"
+        )
+    for sample in friction.get("slow_model_resumes") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        path = f" path={sample.get('path')}" if sample.get("path") else ""
+        lines.append(
+            f"- model resume {sample.get('tool')}#{sample.get('tool_call_id')}{task} "
+            f"{sample.get('model_resume_wait_seconds')}s{path}"
+        )
+
+
 def format_focus(data):
     title = "Mew focus"
     if data.get("kind"):
@@ -866,6 +976,8 @@ def format_focus(data):
         if note:
             lines.append(f"Checkpoint note: {note}")
         lines.append(f"Checkpoint load: {mew_command('context', '--load', '--limit', '1')}")
+
+    _append_focus_recent_friction(lines, data.get("recent_friction") or {})
 
     questions = data.get("open_questions") or []
     if questions:
