@@ -629,6 +629,62 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
 
+    def test_run_dogfood_m2_comparative_merges_fresh_cli_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "fresh-cli-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "status": "inconclusive",
+                        "next_blocker": "Run one more paired task with a write.",
+                        "notes": "Fresh CLI comparison imported from an external agent run.",
+                        "fresh_cli": {
+                            "summary": "fresh CLI completed the same task with two tool calls",
+                            "verification_result": "passed exit=0 command=pytest -q",
+                            "friction_summary": "manual_status_probes=1 dead_waits_over_30s=0",
+                            "preference_signal": "fast, but no durable resume bundle",
+                        },
+                        "friction_counts": {
+                            "manual_status_probes": 1,
+                            "dead_waits_over_30s": 0,
+                        },
+                        "resident_preference": {
+                            "choice": "inconclusive",
+                            "reason": "fresh CLI was faster, mew preserved better continuity",
+                            "blocking_gap": "need a write-heavy paired task",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+                m2_comparison_report=str(report_path),
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            runbook_path = Path(scenario["artifacts"]["markdown"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            runbook = runbook_path.read_text(encoding="utf-8")
+            fresh_cli = protocol["comparison_result"]["run_summaries"]["fresh_cli"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertIn("m2_comparative_protocol_merges_comparison_report", text)
+            self.assertEqual(protocol["comparison_report"]["status"], "loaded")
+            self.assertEqual(protocol["comparison_result"]["status"], "inconclusive")
+            self.assertEqual(protocol["comparison_result"]["next_blocker"], "Run one more paired task with a write.")
+            self.assertIn("two tool calls", fresh_cli["summary"])
+            self.assertEqual(protocol["friction_counts"]["manual_status_probes"], 1)
+            self.assertEqual(protocol["resident_preference"]["choice"], "inconclusive")
+            self.assertIn("## Comparison Report", runbook)
+            self.assertIn(str(report_path), runbook)
+
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):
         report = {
             "generated_at": "now",

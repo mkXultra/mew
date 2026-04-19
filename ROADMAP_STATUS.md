@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 22:09 JST.
+Last assessed: 2026-04-19 22:20 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -40,9 +40,10 @@ Milestone 2 Done-when checklist:
   surfaces. The M2 comparative dogfood can now prefill mew-side evidence from a
   real work session via `--mew-session-id`, so future parity checks carry actual
   wall/active time, approval, verification, resume, and continuity evidence
-  instead of only a protocol template. Parity is still not claimed until the
-  matching fresh-CLI run is filled and the paired comparison confirms lower
-  friction end to end.
+  instead of only a protocol template. It can also merge a paired fresh-CLI JSON
+  report via `--m2-comparison-report`, making the comparison executable without
+  hand-editing the protocol markdown. Parity is still not claimed until a real
+  paired comparison confirms lower friction end to end.
 - The model does not lose momentum while waiting for tool feedback: unmet.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
@@ -57,11 +58,12 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are either running a paired comparative task with
-`mew dogfood --scenario m2-comparative --mew-session-id <id>` after the mew-side
-session, or a targeted latency/friction slice chosen from
-`mew metrics --kind coding`. Polish, side projects, and later-milestone
-architecture are deferred unless they directly unblock this active criterion.
+Useful next choices are either running a real paired comparative task with
+`mew dogfood --scenario m2-comparative --mew-session-id <id>` plus
+`--m2-comparison-report <fresh-cli-report.json>`, or a targeted
+latency/friction slice chosen from `mew metrics --kind coding`. Polish, side
+projects, and later-milestone architecture are deferred unless they directly
+unblock this active criterion.
 `docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
 §0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
 levers chosen only when a measured active-milestone signal justifies them.

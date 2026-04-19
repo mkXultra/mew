@@ -5394,7 +5394,13 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
             ),
         }
     )
-    comparison["next_blocker"] = comparison.get("next_blocker") or "Run the matching fresh_cli task and fill its run summary."
+    fresh_cli_summary = ((run_summaries.get("fresh_cli") or {}).get("summary") or "").strip()
+    if not comparison.get("next_blocker"):
+        comparison["next_blocker"] = (
+            "Review the paired evidence and choose the resident preference outcome."
+            if fresh_cli_summary
+            else "Run the matching fresh_cli task and fill its run summary."
+        )
     comparison["notes"] = comparison.get("notes") or (
         f"Mew-side evidence was prefilled from work session #{evidence.get('work_session_id')}."
     )
@@ -5410,7 +5416,47 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
     return protocol
 
 
-def build_m2_comparative_protocol(mew_run_evidence=None):
+def _m2_merge_mapping(base, updates):
+    if not isinstance(base, dict) or not isinstance(updates, dict):
+        return base
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _m2_merge_mapping(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _m2_apply_comparison_report(protocol, report, source_path=""):
+    if source_path:
+        protocol["comparison_report"] = {
+            "status": "loaded" if isinstance(report, dict) and report else "missing",
+            "source": source_path,
+        }
+    if not isinstance(report, dict) or not report:
+        return protocol
+
+    comparison = protocol.setdefault("comparison_result", {})
+    if isinstance(report.get("comparison_result"), dict):
+        _m2_merge_mapping(comparison, report.get("comparison_result") or {})
+    for key in ("status", "next_blocker", "notes"):
+        if key in report:
+            comparison[key] = report.get(key)
+
+    run_summaries = comparison.setdefault("run_summaries", {})
+    fresh_cli = report.get("fresh_cli") or report.get("fresh_cli_summary")
+    if isinstance(fresh_cli, dict):
+        _m2_merge_mapping(run_summaries.setdefault("fresh_cli", {}), fresh_cli)
+    if isinstance(report.get("run_summaries"), dict):
+        _m2_merge_mapping(run_summaries, report.get("run_summaries") or {})
+
+    for key in ("friction_counts", "resume_behavior", "resident_preference"):
+        if isinstance(report.get(key), dict):
+            _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
+    return protocol
+
+
+def build_m2_comparative_protocol(mew_run_evidence=None, comparison_report=None, comparison_report_source=""):
     protocol = {
         "name": "m2-comparative",
         "generated_at": now_iso(),
@@ -5499,6 +5545,11 @@ def build_m2_comparative_protocol(mew_run_evidence=None):
             "an interrupted resident can resume inside mew without user re-briefing",
         ],
     }
+    protocol = _m2_apply_comparison_report(
+        protocol,
+        comparison_report,
+        source_path=comparison_report_source,
+    )
     return _m2_apply_mew_run_evidence(protocol, mew_run_evidence)
 
 
@@ -5533,6 +5584,16 @@ def format_m2_comparative_protocol(protocol):
                 f"    verification_result: {summary.get('verification_result', '')}",
                 f"    friction_summary: {summary.get('friction_summary', '')}",
                 f"    preference_signal: {summary.get('preference_signal', '')}",
+            ]
+        )
+    report_meta = protocol.get("comparison_report") or {}
+    if report_meta:
+        lines.extend(
+            [
+                "",
+                "## Comparison Report",
+                f"- status: {report_meta.get('status')}",
+                f"- source: `{report_meta.get('source', '')}`",
             ]
         )
     evidence = protocol.get("mew_run_evidence") or {}
@@ -5589,21 +5650,25 @@ def format_m2_comparative_protocol(protocol):
             "## Friction Counts",
         ]
     )
-    for key in (protocol.get("friction_counts") or {}):
-        lines.append(f"- {key}: 0")
+    for key, value in (protocol.get("friction_counts") or {}).items():
+        lines.append(f"- {key}: {value}")
+    resume_behavior = protocol.get("resume_behavior") or {}
+    resume_known = resume_behavior.get("could_resume_without_user_rebrief")
+    resume_text = "unknown" if resume_known is None else str(bool(resume_known)).lower()
+    preference = protocol.get("resident_preference") or {}
     lines.extend(
         [
             "",
             "## Resume Behavior",
-            f"- interrupt_point: {protocol.get('resume_behavior', {}).get('interrupt_point', '')}",
-            f"- mew_resume_command: `{protocol.get('resume_behavior', {}).get('mew_resume_command', '')}`",
-            "- could_resume_without_user_rebrief: unknown",
-            "- risky_or_missing_context: []",
+            f"- interrupt_point: {resume_behavior.get('interrupt_point', '')}",
+            f"- mew_resume_command: `{resume_behavior.get('mew_resume_command', '')}`",
+            f"- could_resume_without_user_rebrief: {resume_text}",
+            f"- risky_or_missing_context: {resume_behavior.get('risky_or_missing_context') or []}",
             "",
             "## Resident Preference",
-            "- choice: unknown",
-            "- reason:",
-            "- blocking_gap:",
+            f"- choice: {preference.get('choice', 'unknown')}",
+            f"- reason: {preference.get('reason', '')}",
+            f"- blocking_gap: {preference.get('blocking_gap', '')}",
             "",
             "## Done-When Mapping",
         ]
@@ -5613,7 +5678,7 @@ def format_m2_comparative_protocol(protocol):
     return "\n".join(lines) + "\n"
 
 
-def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None):
+def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None, comparison_report_path=None):
     del env
     commands = []
     checks = []
@@ -5621,7 +5686,19 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None):
     if mew_session_id:
         current_state = reconcile_next_ids(migrate_state(read_json_file(STATE_FILE, default_state())))
         mew_run_evidence = build_m2_mew_run_evidence(current_state, mew_session_id)
-    protocol = build_m2_comparative_protocol(mew_run_evidence=mew_run_evidence)
+    comparison_report = None
+    comparison_report_source = ""
+    if comparison_report_path:
+        report_path = Path(comparison_report_path).expanduser()
+        if not report_path.is_absolute():
+            report_path = (Path.cwd() / report_path).resolve()
+        comparison_report = read_json_file(report_path, {})
+        comparison_report_source = str(report_path)
+    protocol = build_m2_comparative_protocol(
+        mew_run_evidence=mew_run_evidence,
+        comparison_report=comparison_report,
+        comparison_report_source=comparison_report_source,
+    )
     output_dir = Path(workspace) / STATE_DIR / "dogfood"
     json_path = output_dir / "m2-comparative-protocol.json"
     md_path = output_dir / "m2-comparative-protocol.md"
@@ -5637,6 +5714,9 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None):
     comparison = loaded.get("comparison_result") or {}
     comparison_run_summaries = comparison.get("run_summaries") or {}
     loaded_evidence = loaded.get("mew_run_evidence") or {}
+    loaded_comparison_report = loaded.get("comparison_report") or {}
+    allowed_comparison_statuses = set(comparison.get("allowed_statuses") or [])
+    comparison_status = comparison.get("status")
 
     _scenario_check(
         checks,
@@ -5676,10 +5756,25 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None):
             },
             expected="m2-comparative can prefill mew-side evidence from a real work session",
         )
+    if comparison_report_path:
+        _scenario_check(
+            checks,
+            "m2_comparative_protocol_merges_comparison_report",
+            loaded_comparison_report.get("status") == "loaded"
+            and bool((comparison_run_summaries.get("fresh_cli") or {}).get("summary"))
+            and "## Comparison Report" in markdown
+            and bool((loaded.get("resident_preference") or {}).get("choice")),
+            observed={
+                "source": loaded_comparison_report.get("source"),
+                "fresh_cli": comparison_run_summaries.get("fresh_cli"),
+                "resident_preference": loaded.get("resident_preference"),
+            },
+            expected="m2-comparative can merge a paired fresh CLI comparison report",
+        )
     _scenario_check(
         checks,
         "m2_comparative_protocol_has_fillable_comparison_result",
-        comparison.get("status") == "unknown"
+        (comparison_status == "unknown" or comparison_status in allowed_comparison_statuses)
         and "blocked" in (comparison.get("allowed_statuses") or [])
         and "mew" in comparison_run_summaries
         and "fresh_cli" in comparison_run_summaries
@@ -5782,6 +5877,7 @@ def run_dogfood_scenario(args):
                     scenario_workspace,
                     env=env,
                     mew_session_id=getattr(args, "mew_session_id", None),
+                    comparison_report_path=getattr(args, "m2_comparison_report", None),
                 )
             )
         else:
