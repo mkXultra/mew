@@ -27,6 +27,16 @@ Codex + claude-ultra の相談後の採用判断：
 - 5.8 Agent Frontmatter / 5.9 Skill Manifest は M5 まで待つ。拡張性より先に、記憶・再開・受動実行の芯を固める。
 - 2026-04-19 実装メモ：5.12 の MVP は `mew memory --add --type ... --scope ...` と file-backed recall として入り始めた。`work_session.resume.active_memory` として resident THINK prompt にも渡るようになり、`mew memory --active --task-id ...` で注入内容を確認できる。この active-memory 確認コマンドは native self-improve controls にも入った。実 Codex Web API dogfood でも active project memory を理由に `README.md` を読む行動が選ばれた。
 
+### 0.2 2026-04-19 post-MVP drift guard
+
+5.12 MVP と reentry drift guard 後の補正：
+
+- `Decision: prevent long-session drift` と `Decision: observation before structural skeletons` が mew memory にある場合、この doc の古い sprint recommendation より優先する。次の構造 card を選ぶ前に、session charter と durable decision memory を読むこと。
+- 5.12 MVP は landed と扱う。含まれるもの：`mew memory --add --type/--scope`、file-backed recall、`mew memory --active`、native work THINK への `active_memory` 注入、native self-improve controls、実 Codex Web API dogfood での active project memory 起点行動。
+- 5.12 の次は「さらに storage surface を足す」ではなく、recall 品質と日常利用価値を観測する。候補：legacy journal/dream/mood/self-memory の typed memory 移行、active recall hit rate、recall latency、unknown type の扱い。
+- 5.1 / 5.11 / 5.13 / 5.14 などの構造 card は、metrics/dogfood の具体 signal が残った時に採る。現時点では unused skeleton を置かない。
+- 直近 metrics signal の例：verification failure / rollback が高い、first tool output p95 が遅い、model resume p95 が遅い、stale active sessions が残る。次タスクはこの signal から選び、`mew focus` や外部 model コメントだけで選ばない。
+
 ---
 
 ## 1. 一言 decision tree
@@ -35,6 +45,7 @@ Codex + claude-ultra の相談後の採用判断：
 
 | 症状 / 求めるもの | 行くべき card |
 |---|---|
+| reentry 後に次タスクで迷う／latest checkpoint に引っ張られる | session charter / durable decision memory → **0.1/0.2** |
 | cockpit が Codex CLI より一拍遅く感じる | **5.1 Streaming Tool Executor** |
 | ツール実行中にユーザーが打てない／打つと cancel になる | **5.2 MessageQueue** |
 | Ctrl-C の挙動がツールによって違うべきなのに一律 | **5.4 Interrupt Behavior per Tool** |
@@ -1053,9 +1064,9 @@ src/plugins/                                     plugin discovery/registry code
 
 ## 10. 最後に — 実装判断の短い推奨
 
-**今のスプリントで 1 つだけ採るなら**: **5.1 Streaming Tool Executor**。ROADMAP_STATUS が明示する M2 のギャップ「Codex CLI より遅く感じないか」に直撃する唯一の項目。依存許容なら `anyio` を同時に入れる。
+**今のスプリントで 1 つだけ採るなら**: まず session charter と durable decision memory を読む。`Decision: observation before structural skeletons` が有効な間は、5.1/5.11/5.13 などの skeleton 実装ではなく metrics/dogfood の signal を優先する。**5.1 Streaming Tool Executor** は、M2 cockpit latency が他の friction より支配的だと metrics で確認された後に採る。
 
-**今のスプリントで 2 つ採れるなら**: **5.1 + 5.11 AgentMemorySnapshot**。M2 の体感と M3 の continuity を同時に進める。ただし 5.11 は state schema の揺れが収まったタイミングに入れる。
+**今のスプリントで 2 つ採れるなら**: 1 つ目は観測で残った最大 friction を小さく潰す。2 つ目も同じ signal に紐づける。**5.11 AgentMemorySnapshot** は continuity score / resume shape が落ち着き、実際に snapshot load が必要になったタイミングに入れる。
 
 **3 つ以上は同時着手しない**。各 item が要する dogfood サイクルを考えると、並走させるほど信号が弱くなる。
 
