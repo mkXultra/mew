@@ -575,6 +575,12 @@ def build_parser():
     metrics_parser = subparsers.add_parser("metrics", help="show observation-first reliability and latency metrics")
     metrics_parser.add_argument("--kind", choices=TASK_KINDS, help="scope metrics to tasks of this kind")
     metrics_parser.add_argument("--limit", type=int, help="maximum recent work sessions to include")
+    metrics_parser.add_argument(
+        "--sample-limit",
+        type=int,
+        default=3,
+        help="maximum recent diagnostic samples to show for each bottleneck",
+    )
     metrics_parser.add_argument("--json", action="store_true", help="print structured JSON")
     metrics_parser.set_defaults(func=cmd_metrics)
 

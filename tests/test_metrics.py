@@ -46,6 +46,11 @@ class MetricsTests(unittest.TestCase):
                         "approval_status": "rejected",
                         "started_at": "2026-04-19T00:00:12Z",
                         "finished_at": "2026-04-19T00:00:13Z",
+                        "parameters": {
+                            "path": "tests/test_metrics.py",
+                            "summary": "Try a speculative metrics assertion.",
+                            "reason": "Exercise rejected dry-run diagnostics.",
+                        },
                         "result": {"dry_run": True, "changed": True},
                     },
                     {
@@ -54,11 +59,16 @@ class MetricsTests(unittest.TestCase):
                         "status": "completed",
                         "started_at": "2026-04-19T00:00:15Z",
                         "finished_at": "2026-04-19T00:00:16Z",
+                        "parameters": {"path": "src/mew/metrics.py"},
                         "result": {
                             "dry_run": False,
                             "written": True,
                             "verification_exit_code": 1,
                             "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_metrics.py",
+                                "stderr": "FAILED tests/test_metrics.py::MetricsTests::test_example",
+                            },
                         },
                     },
                     {
@@ -83,6 +93,10 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["reliability"]["approvals"]["rejected"], 1)
         self.assertEqual(metrics["reliability"]["verification"]["failed"], 1)
         self.assertEqual(metrics["reliability"]["verification"]["rolled_back"], 1)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["tool_call_id"], 3)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["command"], "uv run pytest -q tests/test_metrics.py")
+        self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["tool_call_id"], 2)
+        self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["path"], "tests/test_metrics.py")
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 4.0)
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["median"], 4.0)
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["p95"], 4.0)
@@ -100,6 +114,10 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("perceived_idle_ratio: count=1 avg=0.65 median=0.65 p95=0.65 max=0.65", text)
         self.assertIn("signals:", text)
         self.assertIn("verification failures are frequent", text)
+        self.assertIn("diagnostics:", text)
+        self.assertIn("verification_failures:", text)
+        self.assertIn("approval_friction:", text)
+        self.assertIn("uv run pytest -q tests/test_metrics.py", text)
 
 
 if __name__ == "__main__":

@@ -8134,6 +8134,7 @@ def cmd_metrics(args):
         state,
         kind=getattr(args, "kind", None) or None,
         limit=getattr(args, "limit", None),
+        sample_limit=getattr(args, "sample_limit", None),
     )
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))

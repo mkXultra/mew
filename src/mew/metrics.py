@@ -3,6 +3,8 @@ from .timeutil import parse_time
 
 
 WORK_WRITE_TOOLS = {"write_file", "edit_file"}
+DEFAULT_SAMPLE_LIMIT = 3
+SAMPLE_TEXT_MAX_CHARS = 240
 
 
 def _duration_seconds(started_at, finished_at):
@@ -20,6 +22,13 @@ def _round(value):
     if value is None:
         return None
     return round(float(value), 3)
+
+
+def _clip_text(value, max_chars=SAMPLE_TEXT_MAX_CHARS):
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 3)].rstrip() + "..."
 
 
 def _summary(values):
@@ -79,17 +88,10 @@ def _verification_counts(tool_calls):
     for call in tool_calls or []:
         if not isinstance(call, dict):
             continue
+        exit_code = _verification_exit_code(call)
+        if exit_code is None:
+            continue
         result = call.get("result") or {}
-        exit_code = result.get("verification_exit_code")
-        verification = result.get("verification") or {}
-        if exit_code is None:
-            exit_code = verification.get("exit_code")
-        if exit_code is None:
-            continue
-        try:
-            exit_code = int(exit_code)
-        except (TypeError, ValueError):
-            continue
         counts["total"] += 1
         if exit_code == 0:
             counts["passed"] += 1
@@ -199,6 +201,105 @@ def _rate(part, whole):
     if not whole:
         return None
     return _round(float(part or 0) / float(whole))
+
+
+def _verification_exit_code(call):
+    if not isinstance(call, dict):
+        return None
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    exit_code = result.get("verification_exit_code")
+    if exit_code is None:
+        exit_code = verification.get("exit_code")
+    if exit_code is None:
+        return None
+    try:
+        return int(exit_code)
+    except (TypeError, ValueError):
+        return None
+
+
+def _call_path(call):
+    parameters = call.get("parameters") or {}
+    result = call.get("result") or {}
+    return parameters.get("path") or result.get("path") or ""
+
+
+def _sample_task(state, task_id):
+    task = find_task(state, task_id)
+    if not task:
+        return {"task_id": task_id, "task_title": ""}
+    return {"task_id": task_id, "task_title": task.get("title") or ""}
+
+
+def _verification_sample(state, session, call):
+    result = call.get("result") or {}
+    verification = result.get("verification") or {}
+    sample = {
+        "session_id": session.get("id"),
+        "tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "path": _call_path(call),
+        "exit_code": _verification_exit_code(call),
+        "rolled_back": bool(result.get("rolled_back")),
+        "command": verification.get("command") or result.get("verification_command") or "",
+        "finished_at": verification.get("finished_at") or call.get("finished_at") or "",
+    }
+    sample.update(_sample_task(state, session.get("task_id")))
+    stderr = _clip_text(verification.get("stderr"))
+    stdout = _clip_text(verification.get("stdout"))
+    if stderr:
+        sample["stderr"] = stderr
+    if stdout:
+        sample["stdout"] = stdout
+    return sample
+
+
+def _approval_sample(state, session, call):
+    parameters = call.get("parameters") or {}
+    result = call.get("result") or {}
+    sample = {
+        "session_id": session.get("id"),
+        "tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "approval_status": call.get("approval_status") or "pending",
+        "path": _call_path(call),
+        "summary": _clip_text(parameters.get("summary") or call.get("summary")),
+        "reason": _clip_text(parameters.get("reason")),
+        "diff_stats": result.get("diff_stats") or {},
+        "finished_at": call.get("finished_at") or "",
+    }
+    sample.update(_sample_task(state, session.get("task_id")))
+    return sample
+
+
+def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
+    limit = max(0, int(limit or 0))
+    samples = {"verification_failures": [], "approval_friction": []}
+    if limit <= 0:
+        return samples
+
+    for session in sessions:
+        tool_calls = [call for call in session.get("tool_calls") or [] if isinstance(call, dict)]
+        for call in sorted(
+            tool_calls,
+            key=lambda item: item.get("finished_at") or item.get("started_at") or "",
+            reverse=True,
+        ):
+            if len(samples["verification_failures"]) < limit and _verification_exit_code(call) not in (None, 0):
+                samples["verification_failures"].append(_verification_sample(state, session, call))
+            result = call.get("result") or {}
+            approval_status = call.get("approval_status") or "pending"
+            if (
+                len(samples["approval_friction"]) < limit
+                and call.get("tool") in WORK_WRITE_TOOLS
+                and result.get("dry_run")
+                and approval_status in ("rejected", "failed")
+            ):
+                samples["approval_friction"].append(_approval_sample(state, session, call))
+        if all(len(items) >= limit for items in samples.values()):
+            break
+    return samples
 
 
 def _add_signal(signals, signal_id, severity, message, *, value=None, threshold=None):
@@ -317,7 +418,7 @@ def _session_matches_kind(state, session, kind):
     return bool(task) and task_kind(task) == kind
 
 
-def build_observation_metrics(state, *, kind=None, limit=None):
+def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFAULT_SAMPLE_LIMIT):
     sessions = [
         session
         for session in state.get("work_sessions", []) or []
@@ -404,10 +505,12 @@ def build_observation_metrics(state, *, kind=None, limit=None):
     return {
         "kind": kind or "all",
         "session_limit": limit,
+        "sample_limit": sample_limit,
         "sessions": session_counts,
         "reliability": reliability,
         "latency": latency,
         "signals": _build_signals(session_counts, reliability, latency),
+        "diagnostics": _diagnostic_samples(state, sessions, limit=sample_limit),
     }
 
 
@@ -466,4 +569,38 @@ def format_observation_metrics(data):
                 details.append(f"threshold={threshold}")
             suffix = f" ({', '.join(details)})" if details else ""
             lines.append(f"- {signal.get('severity')}: {signal.get('message')}{suffix}")
+    diagnostics = data.get("diagnostics") or {}
+    verification_failures = diagnostics.get("verification_failures") or []
+    approval_friction = diagnostics.get("approval_friction") or []
+    if verification_failures or approval_friction:
+        lines.append("diagnostics:")
+    if verification_failures:
+        lines.append("verification_failures:")
+        for sample in verification_failures:
+            rollback = " rolled_back=true" if sample.get("rolled_back") else ""
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            path = f" path={sample.get('path')}" if sample.get("path") else ""
+            command = f" command={sample.get('command')}" if sample.get("command") else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
+                f"{task} tool={sample.get('tool')} exit={sample.get('exit_code')}"
+                f"{rollback}{path}{command}"
+            )
+            if sample.get("stderr"):
+                lines.append(f"  stderr: {sample.get('stderr')}")
+            elif sample.get("stdout"):
+                lines.append(f"  stdout: {sample.get('stdout')}")
+    if approval_friction:
+        lines.append("approval_friction:")
+        for sample in approval_friction:
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            path = f" path={sample.get('path')}" if sample.get("path") else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
+                f"{task} tool={sample.get('tool')} status={sample.get('approval_status')}{path}"
+            )
+            if sample.get("summary"):
+                lines.append(f"  summary: {sample.get('summary')}")
+            if sample.get("reason"):
+                lines.append(f"  reason: {sample.get('reason')}")
     return "\n".join(lines)
