@@ -858,6 +858,25 @@ Next action:
   (`172 tests`, pass), full `uv run python -m unittest` (`1007 tests`, pass),
   direct `./mew self-improve --help`, and
   `./mew dogfood --all --cleanup --json` (pass).
+- Task #206 / `dd5f175` finishes the natural help front door: `mew help
+  <command...>` now forwards to the corresponding argparse help, so
+  `mew help self-improve` and nested paths like `mew help task add` work
+  without remembering `--help` placement. Validation included ruff on changed
+  files, direct help-topic checks, focused help tests, `tests.test_commands`
+  (`174 tests`, pass), full `uv run python -m unittest` (`1009 tests`, pass),
+  and `./mew dogfood --all --cleanup --json` (pass).
+- `claude-ultra` review session `8d167357-cc40-4dae-ab2c-e79d6c5fcdea`
+  identified `approve-all` verification sequencing as the next high-leverage
+  Milestone 2 cockpit fix. Task #207 / `ac5d3cb` implements it for CLI and
+  reply-file approve-all by deferring verification for every batch item except
+  the last, so multi-file batches verify against final state instead of partial
+  state. `f556a67` then preserves that behavior in the recurring work-session
+  dogfood scenario. Validation included ruff on changed files, focused
+  approve-all tests, `tests.test_work_session` (`341 tests`, pass),
+  `tests.test_commands` (`174 tests`, pass), full `uv run python -m unittest`
+  (`1010 tests`, pass), `./mew dogfood --scenario work-session --cleanup --json`
+  (pass), and `./mew dogfood --all --cleanup --json` (pass after the dogfood
+  assertion tightening).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
