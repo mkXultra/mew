@@ -586,6 +586,18 @@ class DogfoodTests(unittest.TestCase):
                     ],
                 }
             )
+            state["work_sessions"].append(
+                {
+                    "id": 8,
+                    "task_id": 4,
+                    "status": "closed",
+                    "phase": "done",
+                    "created_at": "2026-04-19T09:00:00Z",
+                    "updated_at": "2026-04-19T09:01:00Z",
+                    "tool_calls": [],
+                    "model_turns": [],
+                }
+            )
             (root / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
             try:
                 os.chdir(root)
@@ -593,7 +605,7 @@ class DogfoodTests(unittest.TestCase):
                     workspace=str(root / "dog"),
                     scenario="m2-comparative",
                     cleanup=False,
-                    mew_session_id="7",
+                    mew_session_id="latest",
                 )
 
                 report = run_dogfood_scenario(args)

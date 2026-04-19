@@ -183,6 +183,10 @@ Result: pass. The generated protocol contained both mew-side work-session
 evidence and fresh CLI report evidence. Status remained `inconclusive` because
 this was a readiness assessment, not a write-heavy paired coding task.
 
+Follow-up hardening: the fresh CLI assessment noted that `latest` depended on
+work-session list order. `--mew-session-id latest` now selects by session
+activity timestamp, with a regression test covering out-of-order sessions.
+
 Next useful M2 move: run one real paired coding task through this evidence
 pipeline and decide resident preference from that artifact instead of adding
 more comparison-surface polish.

@@ -5200,7 +5200,13 @@ def _m2_latest_work_session(state):
     sessions = [session for session in state.get("work_sessions") or [] if isinstance(session, dict)]
     if not sessions:
         return None
-    return sessions[-1]
+    return max(
+        sessions,
+        key=lambda session: (
+            session.get("updated_at") or session.get("closed_at") or session.get("created_at") or "",
+            str(session.get("id") or ""),
+        ),
+    )
 
 
 def _m2_find_work_session(state, session_id):
