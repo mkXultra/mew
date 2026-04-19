@@ -6328,6 +6328,18 @@ def work_recovery_plan_item_for_call(state, session, source_call):
     return {}
 
 
+def selected_recoverable_interrupted_call(state, session):
+    if not session:
+        return None, {}
+    resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
+    recovery_item = select_work_recovery_plan_item((resume or {}).get("recovery_plan") or {})
+    source_call = find_work_tool_call(session, recovery_item.get("tool_call_id"))
+    if source_call and source_call.get("status") == "interrupted" and not source_call.get("recovery_status"):
+        return source_call, recovery_item
+    source_call = latest_recoverable_interrupted_call(session)
+    return source_call, work_recovery_plan_item_for_call(state, session, source_call)
+
+
 def work_recover_dry_run_write_blocker(args, source_call):
     write_root = work_recovery_read_root(source_call)
     if not getattr(args, "allow_write", None):
@@ -6364,11 +6376,10 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         session = _select_active_work_session_for_args(state, args)
         if not session:
             return 0, {"recovery": {"action": "none", "reason": "no active work session"}}
-        source_call = latest_recoverable_interrupted_call(session)
+        source_call, recovery_item = selected_recoverable_interrupted_call(state, session)
         if not source_call:
             return 0, {"recovery": {"action": "none", "reason": "no interrupted work tool to recover"}}
         tool = source_call.get("tool")
-        recovery_item = work_recovery_plan_item_for_call(state, session, source_call)
         if tool == "run_tests":
             blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
             if blocker:
@@ -6532,10 +6543,13 @@ def _work_has_safe_recovery_candidate(args):
     with state_lock():
         state = load_state()
         session = _select_active_work_session_for_args(state, args)
-        source_call = latest_recoverable_interrupted_call(session) if session else None
+        source_call, recovery_item = selected_recoverable_interrupted_call(state, session)
     if not source_call:
         return False
-    return source_call.get("tool") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)
+    return (
+        recovery_item.get("action") == "retry_tool"
+        and source_call.get("tool") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)
+    )
 
 
 def _work_recover_safe_session(args, max_recoveries=5):
@@ -6560,10 +6574,14 @@ def _work_recover_safe_session(args, max_recoveries=5):
         for report in reports
         if ((report or {}).get("recovery") or {}).get("action") == "retry_tool"
     ]
-    aggregate = {
-        "recovery": {
-            "action": "retry_tool_batch",
-            "status": "completed" if code == 0 else "failed",
+    base_report = recoveries[-1] if recoveries else reports[-1]
+    aggregate = dict(base_report or {})
+    aggregate["recovery"] = dict((base_report or {}).get("recovery") or {})
+    aggregate["recovery"].update(
+        {
+            "batch": True,
+            "batch_action": "retry_tool_batch",
+            "batch_status": "completed" if code == 0 else "failed",
             "count": len(recoveries),
             "source_tool_call_ids": [
                 ((report or {}).get("recovery") or {}).get("source_tool_call_id")
@@ -6573,9 +6591,9 @@ def _work_recover_safe_session(args, max_recoveries=5):
                 ((report or {}).get("tool_call") or {}).get("id")
                 for report in recoveries
             ],
-        },
-        "recoveries": reports,
-    }
+        }
+    )
+    aggregate["recoveries"] = reports
     if recoveries:
         aggregate["tool_call"] = recoveries[-1].get("tool_call")
     return code, aggregate

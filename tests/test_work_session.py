@@ -7322,9 +7322,18 @@ class WorkSessionTests(unittest.TestCase):
                     )
                 payload = json.loads(stdout.getvalue())
                 auto_recovery = payload["auto_recovery"]
-                self.assertEqual(auto_recovery["recovery"]["action"], "retry_tool_batch")
+                self.assertEqual(auto_recovery["recovery"]["action"], "retry_tool")
+                self.assertTrue(auto_recovery["recovery"]["batch"])
+                self.assertEqual(auto_recovery["recovery"]["batch_action"], "retry_tool_batch")
                 self.assertEqual(auto_recovery["recovery"]["count"], 2)
+                self.assertEqual(
+                    auto_recovery["recovery"]["source_tool_call_id"],
+                    auto_recovery["recovery"]["source_tool_call_ids"][-1],
+                )
+                self.assertCountEqual(auto_recovery["recovery"]["source_tool_call_ids"], [1, 2])
+                self.assertIn("world_state_before", auto_recovery["recovery"])
                 self.assertEqual(len(auto_recovery["recoveries"]), 2)
+                self.assertEqual(auto_recovery["tool_call"]["status"], "completed")
                 self.assertEqual(payload["resume"]["phase"], "idle")
 
                 session = load_state()["work_sessions"][0]
@@ -7338,6 +7347,76 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 self.assertIn("first safe read", recovered_text)
                 self.assertIn("second safe read", recovered_text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_auto_recovery_does_not_cross_side_effect_review(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("review write first\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Do not cross side-effect review.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "last_tool_call_id": 2,
+                            "last_model_turn_id": 2,
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "write_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md", "content": "changed\n", "apply": True},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                                {
+                                    "id": 2,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "read_file",
+                                    "status": "interrupted",
+                                    "parameters": {"path": "README.md"},
+                                    "result": None,
+                                    "summary": "",
+                                    "error": "",
+                                    "started_at": "then",
+                                    "finished_at": "then",
+                                },
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--resume", "--allow-read", ".", "--auto-recover-safe", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["auto_recovery"]["recovery"]["action"], "needs_user")
+                self.assertEqual(payload["auto_recovery"]["recovery"]["source_tool_call_id"], 1)
+
+                session = load_state()["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertEqual(calls[1]["status"], "interrupted")
+                self.assertEqual(calls[2]["status"], "interrupted")
+                self.assertNotIn("recovery_status", calls[2])
             finally:
                 os.chdir(old_cwd)
 
