@@ -1058,9 +1058,10 @@ def execute_work_write_tool(tool, parameters, on_output=None):
         raise ValueError("write is disabled; pass --allow-write PATH")
 
     apply = bool(parameters.get("apply"))
-    if apply and (not parameters.get("allow_verify") or not parameters.get("verify_command")):
+    defer_verify = bool(parameters.get("defer_verify"))
+    if apply and not defer_verify and (not parameters.get("allow_verify") or not parameters.get("verify_command")):
         raise ValueError("applied writes require --allow-verify and --verify-command")
-    if apply:
+    if apply and not defer_verify:
         reject_shell_control_tokens(parameters.get("verify_command") or "", tool_name="write verification")
     if tool == "write_file" and "content" not in parameters:
         raise ValueError("write_file requires --content")
@@ -1097,7 +1098,10 @@ def execute_work_write_tool(tool, parameters, on_output=None):
         )
 
     result["applied"] = bool(apply)
-    if apply and result.get("written"):
+    if apply and result.get("written") and defer_verify:
+        result["verification_deferred"] = True
+        result["rolled_back"] = False
+    elif apply and result.get("written"):
         verification = run_command_for_work(
             parameters.get("verify_command") or "",
             cwd=parameters.get("verify_cwd") or ".",

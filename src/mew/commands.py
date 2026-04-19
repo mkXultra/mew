@@ -4294,6 +4294,8 @@ def _approval_parameters_from_call(call, args):
     parameters["verify_command"] = getattr(args, "verify_command", None)
     parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or "."
     parameters["verify_timeout"] = getattr(args, "verify_timeout", None)
+    if getattr(args, "defer_verify", False):
+        parameters["defer_verify"] = True
     return {key: value for key, value in parameters.items() if value is not None}
 
 
@@ -4572,6 +4574,28 @@ def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_s
     return ordered
 
 
+def _deferred_verify_approval_ids_for_batch(session, approve_ids):
+    calls_by_id = {call.get("id"): call for call in (session or {}).get("tool_calls") or []}
+    approve_ids = list(approve_ids or [])
+    id_set = set(approve_ids)
+    deferred = set()
+    seen_pairs = set()
+    for approve_id in approve_ids:
+        call = calls_by_id.get(approve_id)
+        pairing = work_write_pairing_status(session, call)
+        paired_id = pairing.get("paired_tool_call_id")
+        if paired_id not in id_set:
+            continue
+        pair_key = frozenset((approve_id, paired_id))
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+        ordered_pair = [candidate for candidate in approve_ids if candidate in pair_key]
+        if len(ordered_pair) > 1:
+            deferred.update(ordered_pair[:-1])
+    return deferred
+
+
 def cmd_work_approve_all(args):
     with state_lock():
         state = load_state()
@@ -4597,9 +4621,11 @@ def cmd_work_approve_all(args):
 
     approved = []
     exit_code = 0
+    deferred_verify_ids = _deferred_verify_approval_ids_for_batch(session, approve_ids)
     for approve_id in approve_ids:
         approve_args = SimpleNamespace(**vars(args))
         approve_args.approve_tool = approve_id
+        approve_args.defer_verify = approve_id in deferred_verify_ids
         code, data = _apply_work_approval(approve_args, approve_id)
         if data is not None:
             approved.append(data)

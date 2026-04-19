@@ -8335,6 +8335,9 @@ class WorkSessionTests(unittest.TestCase):
                 state = load_state()
                 session = state["work_sessions"][0]
                 self.assertEqual(session["default_options"]["verify_command"], promoted_command)
+                applied_test = session["tool_calls"][2]
+                self.assertTrue(applied_test["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", applied_test["result"])
                 applied_source = session["tool_calls"][3]
                 self.assertEqual(applied_source["parameters"]["verify_command"], promoted_command)
                 self.assertEqual(applied_source["result"]["verification_exit_code"], 0)
