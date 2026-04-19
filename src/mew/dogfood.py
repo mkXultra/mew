@@ -18,6 +18,7 @@ from .read_tools import is_sensitive_path
 from .state import default_state, migrate_state, next_id, reconcile_next_ids
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
+from .typed_memory import FileMemoryBackend
 
 
 DOGFOOD_SKIP_DIR_NAMES = {
@@ -426,6 +427,14 @@ def run_memory_search_scenario(workspace, env=None):
         ],
     }
     write_json_file(workspace / STATE_FILE, state)
+    FileMemoryBackend(workspace).write(
+        "User prefers compact typed memory recall in dogfood output.",
+        scope="private",
+        memory_type="user",
+        name="Dogfood recall preference",
+        description="Typed memory should stay separable from legacy state memory.",
+        created_at="2026-04-19T00:00:00Z",
+    )
 
     def run(args, timeout=30):
         result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
@@ -435,10 +444,13 @@ def run_memory_search_scenario(workspace, env=None):
     text_result = run(["memory", "--search", "trace"])
     json_result = run(["memory", "--search", "runtime", "--json"])
     snapshot_result = run(["memory", "--search", "dogfood anchor", "--json"])
+    typed_result = run(["memory", "--search", "compact typed", "--type", "user", "--json"])
     json_data = _json_stdout(json_result)
     matches = json_data.get("matches") or []
     snapshot_data = _json_stdout(snapshot_result)
     snapshot_matches = snapshot_data.get("matches") or []
+    typed_data = _json_stdout(typed_result)
+    typed_matches = typed_data.get("matches") or []
 
     _scenario_check(
         checks,
@@ -472,6 +484,19 @@ def run_memory_search_scenario(workspace, env=None):
         ),
         observed=snapshot_matches,
         expected="focused project_snapshot.files[0].summary match",
+    )
+    _scenario_check(
+        checks,
+        "memory_search_json_filters_typed_user_memory",
+        typed_result.get("exit_code") == 0
+        and any(
+            match.get("memory_type") == "user"
+            and match.get("memory_scope") == "private"
+            and match.get("storage") == "file"
+            for match in typed_matches
+        ),
+        observed=typed_matches,
+        expected="typed private user memory match from file-backed store",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
 

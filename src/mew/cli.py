@@ -1267,6 +1267,19 @@ def build_parser():
     memory_parser.add_argument("--json", action="store_true", help="print structured search results")
     memory_parser.add_argument("--add", help="add a deep memory entry")
     memory_parser.add_argument(
+        "--scope",
+        choices=("private", "team"),
+        help="typed memory scope for --add or --search",
+    )
+    memory_parser.add_argument(
+        "--type",
+        dest="memory_type",
+        choices=("user", "feedback", "project", "reference", "unknown"),
+        help="typed memory type for --add or --search; enables file-backed typed memory for --add",
+    )
+    memory_parser.add_argument("--name", help="typed memory name for --add --type")
+    memory_parser.add_argument("--description", help="typed memory description for --add --type")
+    memory_parser.add_argument(
         "--category",
         choices=("preferences", "project", "decisions"),
         default="project",

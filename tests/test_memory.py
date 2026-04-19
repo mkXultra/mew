@@ -2,12 +2,14 @@ import os
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 
 from mew.cli import main
-from mew.memory import add_deep_memory, compact_memory, search_memory
+from mew.memory import add_deep_memory, compact_memory, recall_memory, search_memory
 from mew.state import default_state, load_state, save_state
+from mew.typed_memory import FileMemoryBackend
 
 
 def add_recent_events(state, count):
@@ -98,6 +100,58 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(entry, "now: Preserve passive-first design.")
         self.assertEqual(state["memory"]["deep"]["decisions"], [entry])
 
+    def test_file_memory_backend_writes_typed_scoped_memory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = FileMemoryBackend(tmp)
+
+            entry = backend.write(
+                "Prefer compact diffs when reviewing mew.",
+                scope="private",
+                memory_type="user",
+                name="Review preference",
+                description="Human prefers compact diffs.",
+                created_at="2026-04-19T00:00:00Z",
+            )
+
+            self.assertEqual(entry.scope, "private")
+            self.assertEqual(entry.memory_type, "user")
+            self.assertTrue(entry.path.exists())
+            text = entry.path.read_text(encoding="utf-8")
+            self.assertIn('type = "user"', text)
+            self.assertIn("Prefer compact diffs", text)
+            recalled = backend.recall("compact diffs", scope="private", memory_type="user")
+            self.assertEqual(recalled[0].name, "Review preference")
+
+    def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
+        state = default_state()
+        state["memory"]["deep"]["project"].append("Legacy project fact about runtime traces.")
+        with tempfile.TemporaryDirectory() as tmp:
+            FileMemoryBackend(tmp).write(
+                "Runtime trace preference belongs to the user.",
+                scope="private",
+                memory_type="user",
+                name="Trace preference",
+                created_at="2026-04-19T00:00:00Z",
+            )
+
+            user_results = recall_memory(
+                state,
+                "runtime trace",
+                base_dir=tmp,
+                memory_type="user",
+            )
+            unknown_results = recall_memory(
+                state,
+                "runtime trace",
+                base_dir=tmp,
+                memory_type="unknown",
+            )
+
+        self.assertEqual(user_results[0]["memory_type"], "user")
+        self.assertEqual(user_results[0]["name"], "Trace preference")
+        self.assertEqual(unknown_results[0]["memory_type"], "unknown")
+        self.assertEqual(unknown_results[0]["storage"], "state")
+
     def test_cli_memory_compact(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,6 +215,57 @@ class MemoryTests(unittest.TestCase):
                 self.assertEqual(data["matches"][0]["key"], "decisions")
             finally:
                 os.chdir(old_cwd)
+
+    def test_cli_memory_add_and_search_typed_memory(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "The mew project should prioritize typed memory.",
+                                "--type",
+                                "project",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Typed memory priority",
+                                "--description",
+                                "Next inhabitation slice.",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["entry"]["memory_type"], "project")
+                self.assertTrue((Path(data["entry"]["path"])).exists())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--search", "inhabitation slice", "--type", "project", "--json"]),
+                        0,
+                    )
+                search_data = json.loads(stdout.getvalue())
+                self.assertEqual(search_data["matches"][0]["name"], "Typed memory priority")
+                self.assertEqual(search_data["matches"][0]["memory_scope"], "private")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--deep"]), 0)
+                self.assertIn("typed_memory:", stdout.getvalue())
+                self.assertIn("private.project Typed memory priority", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_rejects_typed_metadata_without_type(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["memory", "--add", "remember this", "--scope", "private"]), 1)
+
+        self.assertIn("requires --type", stderr.getvalue())
 
 
 if __name__ == "__main__":

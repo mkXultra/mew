@@ -25,6 +25,7 @@ Codex + claude-ultra の相談後の採用判断：
 - 5.11 AgentMemorySnapshot は重要だが、state schema がまだ動いている間は早い。5.12 で typed memory API を置いた後、schema が落ち着いたタイミングで採る。
 - 5.1 Streaming Tool Executor は、実際の痛みが「cockpit が Codex CLI / Claude Code より遅い」になった時の M2 最優先。現時点では inhabitation 目的の最初の 1 枚ではない。
 - 5.8 Agent Frontmatter / 5.9 Skill Manifest は M5 まで待つ。拡張性より先に、記憶・再開・受動実行の芯を固める。
+- 2026-04-19 実装メモ：5.12 の MVP は `mew memory --add --type ... --scope ...` と file-backed recall として入り始めた。次は 5.14 Active Memory Recall 的に、typed memory を resident turn の冒頭へ渡して実際の判断に効かせる。
 
 ---
 

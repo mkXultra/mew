@@ -71,6 +71,11 @@ mew?", the next persistence slice is 5.12 Memory Scope × Type, not streaming.
 Streaming remains the right M2 choice when cockpit latency becomes the live
 pain, while AgentMemorySnapshot should wait until the state/resume shape is
 less volatile.
+The 5.12 MVP now exists: file-backed typed/scoped memories can be written under
+`.mew/memory/{private,team}/{user,feedback,project,reference,unknown}/`,
+searched through `mew memory --search ... --type ... --scope ...`, and listed
+from `mew memory --deep`, while existing state memory remains legacy
+`unknown` instead of being migrated.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
@@ -602,6 +607,12 @@ Evidence:
   visible to both the resident model and external observer agents after
   reentry. The deterministic work-session dogfood scenario now also checks that
   resume and zero-step follow snapshots preserve those preferences.
+- Typed/scoped memory has a file-backed MVP for the 5.12 reference-adoption
+  slice. `mew memory --add --type ... --scope ...` writes frontmatter-backed
+  entries, `mew memory --search` can filter by memory type/scope, legacy
+  shallow/deep state memory is still searchable as `unknown`, and
+  `dogfood --scenario memory-search` verifies private user memory can be
+  recalled separately from legacy state memory.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -681,11 +692,9 @@ Missing proof:
 
 Next action:
 
-- For the next inhabitation/persistence slice, implement 5.12 Memory Scope ×
-  Type from `docs/ADOPT_FROM_REFERENCES.md`: introduce typed/scoped memory
-  (`user`, `feedback`, `project`, `reference`, `unknown`; `private`, `team`)
-  and a small recall API while treating existing journal/dream/mood/self files
-  as legacy `unknown` instead of migrating them.
+- Extend the 5.12 MVP into behavior: feed typed/scoped recall into native work
+  turn startup or a small `mew memory recall` surface so user/project/reference
+  memory can affect resident decisions without the model manually searching.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer the

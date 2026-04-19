@@ -61,7 +61,7 @@ from .journal import (
     render_journal_markdown,
     write_journal_report,
 )
-from .memory import add_deep_memory, compact_memory, search_memory
+from .memory import add_deep_memory, compact_memory, recall_memory
 from .model_backends import (
     load_model_auth,
     model_backend_default_base_url,
@@ -75,6 +75,7 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
+from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
     build_morning_paper_view_model,
     format_morning_paper_view,
@@ -9496,6 +9497,29 @@ def cmd_archive(args):
 
 def cmd_memory(args):
     if args.add:
+        if not args.memory_type and (args.scope or args.name or args.description):
+            print("mew: typed memory metadata requires --type when adding memory", file=sys.stderr)
+            return 1
+        if args.memory_type:
+            try:
+                entry = FileMemoryBackend(".").write(
+                    args.add,
+                    scope=args.scope or "private",
+                    memory_type=args.memory_type,
+                    name=args.name or "",
+                    description=args.description or "",
+                )
+            except ValueError as exc:
+                print(f"mew: {exc}", file=sys.stderr)
+                return 1
+            data = entry_to_dict(entry)
+            if args.json:
+                print(json.dumps({"entry": data}, ensure_ascii=False, indent=2))
+            else:
+                print(f"remembered {entry.scope}.{entry.memory_type}: {entry.name}")
+                if entry.path:
+                    print(f"path: {entry.path}")
+            return 0
         with state_lock():
             state = load_state()
             entry = add_deep_memory(state, args.category, args.add)
@@ -9517,7 +9541,17 @@ def cmd_memory(args):
 
     state = load_state()
     if args.search:
-        results = search_memory(state, args.search, limit=args.limit)
+        try:
+            results = recall_memory(
+                state,
+                args.search,
+                limit=args.limit,
+                scope=args.scope,
+                memory_type=args.memory_type,
+            )
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
         if args.json:
             print(json.dumps({"query": args.search, "matches": results}, ensure_ascii=False, indent=2))
             return 0
@@ -9533,6 +9567,10 @@ def cmd_memory(args):
                 details.append(str(result.get("event_type")))
             if result.get("at"):
                 details.append(str(result.get("at")))
+            if result.get("memory_type"):
+                details.append(f"type={result.get('memory_type')}")
+            if result.get("path"):
+                details.append(str(result.get("path")))
             suffix = f" ({', '.join(details)})" if details else ""
             print(f"- {location}{suffix}: {result.get('text')}")
         return 0
@@ -9557,6 +9595,13 @@ def cmd_memory(args):
         print("decisions:")
         for item in deep.get("decisions", []):
             print(f"- {item}")
+        typed_entries = FileMemoryBackend(".").entries()
+        print("typed_memory:")
+        if typed_entries:
+            for entry in typed_entries:
+                print(f"- {entry.scope}.{entry.memory_type} {entry.name}: {entry.description}")
+        else:
+            print("- none")
     return 0
 
 def cmd_snapshot(args):

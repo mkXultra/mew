@@ -1,4 +1,5 @@
 from .timeutil import now_iso
+from .typed_memory import FileMemoryBackend, entry_to_dict, normalize_memory_type, normalize_scope
 
 
 def add_deep_memory(state, category, text, current_time=None, limit=100):
@@ -88,6 +89,37 @@ def search_memory(state, query, limit=20):
             add_match("deep", key, text, match_text=f"{key} {text}", **extra)
 
     return results[-limit:]
+
+
+def recall_memory(
+    state,
+    query,
+    *,
+    limit=20,
+    scope=None,
+    memory_type=None,
+    base_dir=".",
+):
+    limit = max(0, int(limit or 0))
+    if limit <= 0:
+        return []
+    scope = normalize_scope(scope) if scope else None
+    memory_type = normalize_memory_type(memory_type) if memory_type else None
+    results = []
+    if (scope in (None, "private")) and (memory_type in (None, "unknown")):
+        for item in search_memory(state, query, limit=limit):
+            legacy = dict(item)
+            legacy.setdefault("storage", "state")
+            legacy.setdefault("memory_scope", "private")
+            legacy.setdefault("memory_type", "unknown")
+            legacy.setdefault("type", "unknown")
+            results.append(legacy)
+    remaining = max(0, limit - len(results))
+    if remaining:
+        backend = FileMemoryBackend(base_dir)
+        for entry in backend.recall(query, scope=scope, memory_type=memory_type, limit=remaining):
+            results.append(entry_to_dict(entry))
+    return results[:limit]
 
 
 def compact_memory(state, keep_recent=5, dry_run=False):
