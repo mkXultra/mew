@@ -22,6 +22,15 @@ from mew.errors import MewError
 
 
 class CommandTests(unittest.TestCase):
+    def test_help_subcommand_prints_top_level_help(self):
+        with redirect_stdout(StringIO()) as stdout:
+            code = main(["help"])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("usage: mew", output)
+        self.assertIn("start the runtime", output)
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

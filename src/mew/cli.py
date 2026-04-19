@@ -103,6 +103,11 @@ from .runtime import run_runtime
 from .tasks import TASK_KINDS
 
 
+def cmd_help(args):
+    build_parser().print_help()
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mew")
     parser.add_argument("-m", "--message", help="queue a message for the runtime")
@@ -118,6 +123,9 @@ def build_parser():
     parser.add_argument("--mark-read", dest="message_mark_read", action="store_true", help="with -m, mark printed responses as read")
 
     subparsers = parser.add_subparsers(dest="command")
+
+    help_parser = subparsers.add_parser("help", help="show top-level help")
+    help_parser.set_defaults(func=cmd_help)
 
     run_parser = subparsers.add_parser("run", help="start the runtime")
     run_parser.add_argument("--once", action="store_true", help="process one loop and exit")
