@@ -1387,6 +1387,10 @@ class CommandTests(unittest.TestCase):
                     )
                     add_question(state, "Research question should stay hidden", related_task_id=1)
                     add_question(state, "Coding question should be visible", related_task_id=2)
+                    state["agent_status"]["mode"] = "waiting_for_user"
+                    state["agent_status"]["current_focus"] = "research focus should stay hidden"
+                    state["agent_status"]["active_task_id"] = 1
+                    state["agent_status"]["pending_question"] = "Research question should stay hidden"
                     save_state(state)
 
                 chat_state = {"kind": "coding"}
@@ -1401,10 +1405,12 @@ class CommandTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("Mew brief (coding)", output)
                 self.assertIn("scope: coding", output)
+                self.assertIn("agent: idle focus=(none)", output)
                 self.assertIn("Implement scoped slash views", output)
                 self.assertIn("Coding question should be visible", output)
                 self.assertNotIn("Research unrelated topic", output)
                 self.assertNotIn("Research question should stay hidden", output)
+                self.assertNotIn("research focus should stay hidden", output)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(run_chat_slash_command("/scope research", chat_state), "continue")
@@ -1633,6 +1639,10 @@ class CommandTests(unittest.TestCase):
                     )
                     add_question(state, "Which city?", related_task_id=1)
                     add_outbox_message(state, "info", "coding note", related_task_id=2)
+                    state["agent_status"]["mode"] = "waiting_for_user"
+                    state["agent_status"]["current_focus"] = "research grants"
+                    state["agent_status"]["active_task_id"] = 1
+                    state["agent_status"]["pending_question"] = "Which city?"
                     state["thought_journal"].extend(
                         [
                             {
@@ -1671,6 +1681,9 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(responses[1]["counts"]["open_tasks"], 1)
                 self.assertEqual(responses[1]["counts"]["open_questions"], 0)
                 self.assertEqual(responses[1]["counts"]["unread_outbox"], 1)
+                self.assertEqual(responses[1]["agent_status"]["mode"], "idle")
+                self.assertIsNone(responses[1]["agent_status"]["active_task_id"])
+                self.assertTrue(responses[1]["agent_status"]["scope_filtered"])
                 self.assertEqual(responses[2]["brief"]["kind"], "coding")
                 self.assertEqual(responses[2]["brief"]["open_tasks"][0]["title"], "Improve cockpit")
                 self.assertEqual(responses[3]["activity"]["kind"], "coding")
@@ -3658,6 +3671,10 @@ class CommandTests(unittest.TestCase):
                     )
                     add_question(state, "Which city?", related_task_id=1)
                     add_outbox_message(state, "info", "coding note", related_task_id=2)
+                    state["agent_status"]["mode"] = "waiting_for_user"
+                    state["agent_status"]["current_focus"] = "research grants"
+                    state["agent_status"]["active_task_id"] = 1
+                    state["agent_status"]["pending_question"] = "Which city?"
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -3667,6 +3684,11 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(status["counts"]["open_tasks"], 1)
                 self.assertEqual(status["counts"]["open_questions"], 0)
                 self.assertEqual(status["counts"]["unread_outbox"], 1)
+                self.assertEqual(status["agent_status"]["mode"], "idle")
+                self.assertEqual(status["agent_status"]["current_focus"], "")
+                self.assertIsNone(status["agent_status"]["active_task_id"])
+                self.assertIsNone(status["agent_status"]["pending_question"])
+                self.assertTrue(status["agent_status"]["scope_filtered"])
                 self.assertIn("task #2", status["next_move"])
 
                 with redirect_stdout(StringIO()) as stdout:

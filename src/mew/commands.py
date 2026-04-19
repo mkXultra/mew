@@ -37,6 +37,7 @@ from .brief import (
     format_activity,
     format_focus,
     next_move,
+    scoped_agent_status,
     verification_outcome,
 )
 from .codex_api import load_codex_oauth
@@ -7051,7 +7052,7 @@ def session_status_payload(state, kind=None):
     return {
         "kind": kind or "",
         "runtime_status": state["runtime_status"],
-        "agent_status": state["agent_status"],
+        "agent_status": scoped_agent_status(state, kind=kind),
         "user_status": state["user_status"],
         "autonomy": state.get("autonomy", {}),
         "lock": {
@@ -7334,7 +7335,7 @@ def cmd_status(args):
         lock_state = "active" if pid_alive(lock.get("pid")) else "stale"
 
     runtime = state["runtime_status"]
-    agent = state["agent_status"]
+    agent = scoped_agent_status(state, kind=kind)
     user = state["user_status"]
     autonomy = state.get("autonomy", {})
     tasks = filter_tasks_by_kind(open_tasks(state), kind=kind)
@@ -10342,7 +10343,8 @@ def print_chat_status(kind=None):
     if kind:
         running_agents = [run for run in running_agents if str(run.get("task_id")) in task_ids]
     print(f"runtime: {state['runtime_status'].get('state')} lock={lock_state} pid={state['runtime_status'].get('pid')}")
-    print(f"agent: {state['agent_status'].get('mode')} focus={state['agent_status'].get('current_focus') or '(none)'}")
+    agent = scoped_agent_status(state, kind=kind)
+    print(f"agent: {agent.get('mode')} focus={agent.get('current_focus') or '(none)'}")
     autonomy = state.get("autonomy", {})
     print(
         f"autonomy: enabled={autonomy.get('enabled')} level={autonomy.get('level')} "

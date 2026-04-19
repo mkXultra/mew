@@ -4,7 +4,7 @@ from .cli_command import mew_command
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .question_view import format_question_context, format_waiting_hours, question_view_metadata
 from .state import is_routine_outbox_message
-from .tasks import open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
+from .tasks import find_task, open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import elapsed_hours, now_iso
 from .work_session import (
@@ -29,6 +29,25 @@ def current_project_looks_like_mew():
         and (root / "src" / "mew").is_dir()
         and (root / "mew").is_file()
     )
+
+
+def scoped_agent_status(state, kind=None):
+    agent = dict(state.get("agent_status", {}))
+    if not kind:
+        return agent
+    active_task_id = agent.get("active_task_id")
+    if active_task_id is None:
+        return agent
+    task = find_task(state, active_task_id)
+    if task and task_kind(task) == kind:
+        return agent
+    agent["mode"] = "idle"
+    agent["current_focus"] = ""
+    agent["active_task_id"] = None
+    agent["pending_question"] = None
+    agent["scope_filtered"] = True
+    agent["scope_filter_kind"] = kind
+    return agent
 
 
 def _project_snapshot_item(snapshot):
@@ -569,7 +588,7 @@ def build_brief_data(state, limit=5, kind=None):
         "generated_at": generated_at,
         "kind": kind or "",
         "runtime": state.get("runtime_status", {}),
-        "agent": state.get("agent_status", {}),
+        "agent": scoped_agent_status(state, kind=kind),
         "autonomy": state.get("autonomy", {}),
         "user": state.get("user_status", {}),
         "unread_outbox": [_message_item(message) for message in list(reversed(unread[-limit:]))],
@@ -991,7 +1010,7 @@ def next_move(state, kind=None):
 def build_brief(state, limit=5, kind=None):
     generated_at = now_iso()
     runtime = state.get("runtime_status", {})
-    agent = state.get("agent_status", {})
+    agent = scoped_agent_status(state, kind=kind)
     user = state.get("user_status", {})
     autonomy = state.get("autonomy", {})
     memory = state.get("memory", {})
