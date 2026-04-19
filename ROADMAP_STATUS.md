@@ -881,7 +881,9 @@ Next action:
   `tests.test_commands` (`174 tests`, pass), full `uv run python -m unittest`
   (`1013 tests`, pass), `./mew dogfood --scenario work-session --cleanup --json`
   (pass), and `./mew dogfood --all --cleanup --json` (pass after the rollback
-  fix).
+  fix). `codex-ultra` re-review session
+  `019da3b6-e2d9-7763-a2a1-e3523d859fd6` then returned PASS on the exact
+  failure path and ran a targeted rollback test selection (`2 passed`).
 - Task #209 / `4e72011` adds a safer recovery front door: `mew repair
   --dry-run` now computes predicted repairs and validation without saving state,
   includes `dry_run` in JSON output, and the chat cockpit accepts
