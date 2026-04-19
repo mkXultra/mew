@@ -73,18 +73,20 @@ class DogfoodTests(unittest.TestCase):
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
 
-        args = parser.parse_args(
-            [
-                "dogfood",
-                "--scenario",
-                "m2-comparative",
-                "--m2-task-shape",
-                "test_discovery",
-                "--json",
-            ]
-        )
+        for shape in ("test_discovery", "approval_pairing"):
+            with self.subTest(shape=shape):
+                args = parser.parse_args(
+                    [
+                        "dogfood",
+                        "--scenario",
+                        "m2-comparative",
+                        "--m2-task-shape",
+                        shape,
+                        "--json",
+                    ]
+                )
 
-        self.assertEqual(args.m2_task_shape, "test_discovery")
+                self.assertEqual(args.m2_task_shape, shape)
 
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
@@ -545,6 +547,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["task_shape"]["recommended_next"], "interruption_resume")
             self.assertIn("interruption_resume", protocol["task_shape"]["allowed_values"])
             self.assertIn("test_discovery", protocol["task_shape"]["allowed_values"])
+            self.assertIn("approval_pairing", protocol["task_shape"]["allowed_values"])
             self.assertEqual(protocol["interruption_resume_gate"]["status"], "unknown")
             self.assertIn("proved", protocol["interruption_resume_gate"]["allowed_statuses"])
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
@@ -684,25 +687,26 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
 
-    def test_run_dogfood_m2_comparative_sets_task_shape_from_cli(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            args = SimpleNamespace(
-                workspace=str(Path(tmp) / "dog"),
-                scenario="m2-comparative",
-                cleanup=False,
-                m2_task_shape="test_discovery",
-            )
+    def test_run_dogfood_m2_task_shape_sets_selected_from_cli(self):
+        for shape in ("test_discovery", "approval_pairing"):
+            with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:
+                args = SimpleNamespace(
+                    workspace=str(Path(tmp) / "dog"),
+                    scenario="m2-comparative",
+                    cleanup=False,
+                    m2_task_shape=shape,
+                )
 
-            report = run_dogfood_scenario(args)
-            scenario = report["scenarios"][0]
-            protocol_path = Path(scenario["artifacts"]["json"])
-            runbook_path = Path(scenario["artifacts"]["markdown"])
-            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
-            runbook = runbook_path.read_text(encoding="utf-8")
+                report = run_dogfood_scenario(args)
+                scenario = report["scenarios"][0]
+                protocol_path = Path(scenario["artifacts"]["json"])
+                runbook_path = Path(scenario["artifacts"]["markdown"])
+                protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+                runbook = runbook_path.read_text(encoding="utf-8")
 
-            self.assertEqual(report["status"], "pass")
-            self.assertEqual(protocol["task_shape"]["selected"], "test_discovery")
-            self.assertIn("- selected: test_discovery", runbook)
+                self.assertEqual(report["status"], "pass")
+                self.assertEqual(protocol["task_shape"]["selected"], shape)
+                self.assertIn(f"- selected: {shape}", runbook)
 
     def test_run_dogfood_m2_comparative_merges_fresh_cli_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -773,6 +777,53 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("## Comparison Report", runbook)
             self.assertIn("manual_rebrief_needed", runbook)
             self.assertIn(str(report_path), runbook)
+
+    def test_run_dogfood_m2_comparative_merges_flat_fresh_cli_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "fresh-cli-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "task_summary": "fresh CLI completed the approval_pairing task shape",
+                        "verification": [
+                            {
+                                "command": "uv run pytest -q tests/test_dogfood.py -k m2_task_shape",
+                                "exit_code": 0,
+                                "summary": "2 passed",
+                            }
+                        ],
+                        "manual_rebrief_needed": False,
+                        "interruption_resume_gate": "unknown",
+                        "friction_summary": "no material friction",
+                        "preference_signal": "inconclusive",
+                        "notes": "Fresh CLI was not interrupted.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+                m2_comparison_report=str(report_path),
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            fresh_cli = protocol["comparison_result"]["run_summaries"]["fresh_cli"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(protocol["comparison_result"]["status"], "inconclusive")
+            self.assertIn("approval_pairing", fresh_cli["summary"])
+            self.assertIn("exit=0", fresh_cli["verification_result"])
+            self.assertEqual(fresh_cli["friction_summary"], "no material friction")
+            self.assertEqual(protocol["resident_preference"]["choice"], "inconclusive")
+            self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "unknown")
+            self.assertFalse(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
 
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):
         report = {

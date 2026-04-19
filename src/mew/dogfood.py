@@ -59,7 +59,13 @@ DOGFOOD_SCENARIOS = (
     "work-session",
     "m2-comparative",
 )
-M2_COMPARATIVE_TASK_SHAPES = ("standard", "interruption_resume", "test_discovery", "write_heavy")
+M2_COMPARATIVE_TASK_SHAPES = (
+    "standard",
+    "interruption_resume",
+    "test_discovery",
+    "approval_pairing",
+    "write_heavy",
+)
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
 DOGFOOD_OBSERVED_DICT_LIMIT = 40
@@ -5887,6 +5893,60 @@ def _m2_merge_mapping(base, updates):
     return base
 
 
+def _m2_flat_fresh_cli_summary(report):
+    if not isinstance(report, dict):
+        return {}
+    summary = str(report.get("task_summary") or report.get("summary") or "").strip()
+    verification = report.get("verification")
+    verification_result = ""
+    if isinstance(verification, list):
+        verification_parts = []
+        for item in verification:
+            if not isinstance(item, dict):
+                continue
+            command = str(item.get("command") or "").strip()
+            exit_code = item.get("exit_code")
+            item_summary = str(item.get("summary") or "").strip()
+            if command or exit_code is not None or item_summary:
+                verification_parts.append(
+                    f"{command} exit={exit_code} {item_summary}".strip()
+                )
+        verification_result = "; ".join(verification_parts)
+    elif isinstance(verification, dict):
+        command = str(verification.get("command") or "").strip()
+        exit_code = verification.get("exit_code")
+        item_summary = str(verification.get("summary") or "").strip()
+        verification_result = f"{command} exit={exit_code} {item_summary}".strip()
+    elif verification is not None:
+        verification_result = str(verification).strip()
+
+    friction_summary = str(report.get("friction_summary") or "").strip()
+    if not friction_summary and "manual_rebrief_needed" in report:
+        friction_summary = f"manual_rebrief_needed={bool(report.get('manual_rebrief_needed'))}"
+
+    preference_signal = str(report.get("preference_signal") or "").strip()
+    flat = {}
+    if summary:
+        flat["summary"] = summary
+    if verification_result:
+        flat["verification_result"] = verification_result
+    if friction_summary:
+        flat["friction_summary"] = friction_summary
+    if preference_signal:
+        flat["preference_signal"] = preference_signal
+    return flat
+
+
+def _m2_preference_choice_from_signal(signal):
+    if signal == "mew_preferred":
+        return "mew"
+    if signal == "fresh_cli_preferred":
+        return "fresh_cli"
+    if signal in {"mew", "fresh_cli", "inconclusive"}:
+        return signal
+    return ""
+
+
 def _m2_apply_comparison_report(protocol, report, source_path=""):
     if source_path:
         protocol["comparison_report"] = {
@@ -5899,7 +5959,10 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
     comparison = protocol.setdefault("comparison_result", {})
     if isinstance(report.get("comparison_result"), dict):
         _m2_merge_mapping(comparison, report.get("comparison_result") or {})
-    for key in ("status", "next_blocker", "notes"):
+    allowed_comparison_statuses = set(comparison.get("allowed_statuses") or [])
+    if report.get("status") in allowed_comparison_statuses or report.get("status") == "unknown":
+        comparison["status"] = report.get("status")
+    for key in ("next_blocker", "notes"):
         if key in report:
             comparison[key] = report.get(key)
 
@@ -5907,15 +5970,34 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
     fresh_cli = report.get("fresh_cli") or report.get("fresh_cli_summary")
     if isinstance(fresh_cli, dict):
         _m2_merge_mapping(run_summaries.setdefault("fresh_cli", {}), fresh_cli)
+    flat_fresh_cli = _m2_flat_fresh_cli_summary(report)
+    if flat_fresh_cli:
+        _m2_merge_mapping(run_summaries.setdefault("fresh_cli", {}), flat_fresh_cli)
     if isinstance(report.get("run_summaries"), dict):
         _m2_merge_mapping(run_summaries, report.get("run_summaries") or {})
 
     for key in ("friction_counts", "resume_behavior", "resident_preference"):
         if isinstance(report.get(key), dict):
             _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
+    preference_signal = str(report.get("preference_signal") or "").strip()
+    if preference_signal in allowed_comparison_statuses:
+        comparison["status"] = preference_signal
+    preference_choice = _m2_preference_choice_from_signal(preference_signal)
+    if preference_choice:
+        protocol.setdefault("resident_preference", {})["choice"] = preference_choice
     for key in ("task_shape", "interruption_resume_gate"):
         if isinstance(report.get(key), dict):
             _m2_merge_mapping(protocol.setdefault(key, {}), report.get(key) or {})
+    gate_status = report.get("interruption_resume_gate")
+    if isinstance(gate_status, str) and gate_status:
+        fresh_gate = protocol.setdefault("interruption_resume_gate", {}).setdefault("fresh_cli", {})
+        fresh_gate["status"] = gate_status
+        if "manual_rebrief_needed" in report:
+            fresh_gate["manual_rebrief_needed"] = bool(report.get("manual_rebrief_needed"))
+        if report.get("notes"):
+            fresh_gate.setdefault("evidence_gap", [])
+            if isinstance(fresh_gate["evidence_gap"], list):
+                fresh_gate["evidence_gap"].append(str(report.get("notes")))
     return protocol
 
 
