@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
@@ -1919,12 +1919,18 @@ Next action:
   selected item instead of the newest interrupted safe call, and keeps the
   outer JSON `retry_tool` scalar contract while adding batch metadata and
   per-item `recoveries`.
+- Passive runtime recovery now applies the same idea to runtime-owned native
+  work sessions for safe read/git tools. It batches adjacent safe recoveries,
+  uses a runtime-specific selector that does not cross verifier or other
+  non-read barriers, tags runtime-created recovery calls, and stops to ask the
+  user after a failed runtime recovery instead of continuing past it.
 - Latest validation for the 2026-04-19 recovery/control slice:
-  `uv run pytest -q` passed with 1039 tests and 30 subtests,
+  `uv run pytest -q` passed with 1043 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,
   `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check` passed on
-  changed files, and
-  `git diff --check` passed.
+  changed files, `git diff --check` passed, and codex-ultra re-review of the
+  runtime recovery batch reported no findings in session
+  `019da47e-e8b1-7a91-9d7c-d20f33557ffb`.
 
 ## Current Roadmap Focus
 
