@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 21:49 JST.
+Last assessed: 2026-04-19 21:51 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -40,11 +40,12 @@ Milestone 2 Done-when checklist:
   surfaces. Parity is still not claimed until the next focused comparative run
   confirms lower friction end to end.
 - The model does not lose momentum while waiting for tool feedback: unmet.
-  `./mew metrics --kind coding` at this assessment showed
-  `first_tool_start_seconds p95=72.2s`, `model_resume_wait_seconds p95=32.3s`,
-  `perceived_idle_ratio p95=0.99`, frequent verification failures, and high
-  approval rejection. Some idle samples are human/manual gaps, but these
-  metrics are enough to block a "no momentum loss" claim.
+  `./mew metrics --kind coding --limit 20` at this assessment showed
+  `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
+  and `perceived_idle_ratio p95=0.905`, while approval and verification
+  friction remain high. Recent-session metrics now ignore later cleanup
+  `updated_at` churn when selecting and measuring session wall time, so stale
+  session cleanup no longer contaminates the current M2 momentum view.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this

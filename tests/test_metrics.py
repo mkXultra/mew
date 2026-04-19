@@ -132,6 +132,63 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("uv run pytest -q tests/test_metrics.py", text)
         self.assertIn("latest_note: Recovered manually after rollback.", text)
 
+    def test_observation_metrics_limit_uses_activity_time_not_cleanup_updated_at(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Old cleanup", "kind": "coding", "status": "done"})
+        state["tasks"].append({"id": 2, "title": "Recent work", "kind": "coding", "status": "done"})
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-18T00:00:00Z",
+                "updated_at": "2026-04-19T12:47:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "started_at": "2026-04-18T00:00:01Z",
+                        "finished_at": "2026-04-18T00:00:02Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "started_at": "2026-04-18T00:00:03Z",
+                        "finished_at": "2026-04-18T00:00:04Z",
+                        "result": {},
+                    }
+                ],
+            }
+        )
+        state["work_sessions"].append(
+            {
+                "id": 2,
+                "task_id": 2,
+                "status": "closed",
+                "created_at": "2026-04-19T12:00:00Z",
+                "updated_at": "2026-04-19T12:00:10Z",
+                "model_turns": [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T12:00:01Z",
+                        "finished_at": "2026-04-19T12:00:09Z",
+                    }
+                ],
+                "tool_calls": [],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding", limit=1)
+
+        self.assertEqual(metrics["sessions"]["total"], 1)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"], [])
+        self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["count"], 1)
+        self.assertLess(metrics["latency"]["perceived_idle_ratio"]["max"], 0.9)
+
     def test_observation_metrics_include_latency_diagnostic_samples(self):
         state = default_state()
         state["tasks"].append({"id": 1, "title": "Observe latency", "kind": "coding", "status": "ready"})

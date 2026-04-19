@@ -7,6 +7,7 @@ DEFAULT_SAMPLE_LIMIT = 3
 SAMPLE_TEXT_MAX_CHARS = 240
 SLOW_MODEL_RESUME_SECONDS = 30.0
 HIGH_IDLE_RATIO = 0.8
+UPDATED_AT_ACTIVITY_GRACE_SECONDS = 300.0
 
 
 def _duration_seconds(started_at, finished_at):
@@ -269,8 +270,68 @@ def _approval_bound_wait_samples(state, session, model_turns, tool_calls):
     return samples
 
 
-def _session_wall_seconds(session):
-    return _duration_seconds(session.get("created_at"), session.get("updated_at"))
+def _session_observed_times(session, model_turns=None, tool_calls=None):
+    times = []
+    for value in (session.get("created_at"),):
+        parsed = parse_time(value)
+        if parsed:
+            times.append(parsed)
+    observed_collections = (
+        model_turns or session.get("model_turns") or [],
+        tool_calls or session.get("tool_calls") or [],
+    )
+    for collection in observed_collections:
+        for item in collection:
+            if not isinstance(item, dict):
+                continue
+            for key in ("started_at", "finished_at"):
+                parsed = parse_time(item.get(key))
+                if parsed:
+                    times.append(parsed)
+    for note in session.get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        parsed = parse_time(note.get("created_at"))
+        if parsed:
+            times.append(parsed)
+    updated = parse_time(session.get("updated_at"))
+    if updated:
+        if len(times) <= 1:
+            times.append(updated)
+        else:
+            try:
+                latest_activity = max(times)
+                if (
+                    updated <= latest_activity
+                    or (updated - latest_activity).total_seconds() <= UPDATED_AT_ACTIVITY_GRACE_SECONDS
+                ):
+                    times.append(updated)
+            except TypeError:
+                pass
+    return times
+
+
+def _session_activity_sort_key(session):
+    times = _session_observed_times(session)
+    if not times:
+        return ""
+    return max(times).isoformat()
+
+
+def _session_wall_seconds(session, model_turns=None, tool_calls=None):
+    start = parse_time(session.get("created_at"))
+    times = _session_observed_times(session, model_turns=model_turns, tool_calls=tool_calls)
+    if not start:
+        start = min(times) if times else None
+    end = max(times) if times else None
+    if not start or not end:
+        return None
+    try:
+        if end < start:
+            return None
+        return max(0.0, (end - start).total_seconds())
+    except TypeError:
+        return None
 
 
 def _session_activity_seconds(model_turns, tool_calls):
@@ -278,7 +339,7 @@ def _session_activity_seconds(model_turns, tool_calls):
 
 
 def _session_idle_ratio(session, model_turns, tool_calls):
-    wall_seconds = _session_wall_seconds(session)
+    wall_seconds = _session_wall_seconds(session, model_turns=model_turns, tool_calls=tool_calls)
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
@@ -288,7 +349,7 @@ def _session_idle_ratio(session, model_turns, tool_calls):
 
 
 def _high_idle_session_sample(state, session, model_turns, tool_calls):
-    wall_seconds = _session_wall_seconds(session)
+    wall_seconds = _session_wall_seconds(session, model_turns=model_turns, tool_calls=tool_calls)
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
@@ -628,7 +689,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         for session in state.get("work_sessions", []) or []
         if isinstance(session, dict) and _session_matches_kind(state, session, kind)
     ]
-    sessions.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)
+    sessions.sort(key=_session_activity_sort_key, reverse=True)
     if limit is not None:
         sessions = sessions[: max(0, int(limit))]
 
