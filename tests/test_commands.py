@@ -4376,11 +4376,25 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("context_checkpoint_note: Long session checkpoint", brief)
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["brief", "--kind", "coding", "--json"]), 0)
+                brief_data = json.loads(stdout.getvalue())
+                brief_checkpoint = brief_data["memory"]["latest_context_checkpoint"]
+                self.assertEqual(brief_checkpoint["name"], "Dogfood context save")
+                self.assertNotIn("text", brief_checkpoint)
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["focus", "--kind", "coding"]), 0)
                 focus = stdout.getvalue()
                 self.assertIn("Checkpoint: Dogfood context save", focus)
                 self.assertIn("Checkpoint git: dirty", focus)
                 self.assertIn("Checkpoint note: Long session checkpoint", focus)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["focus", "--kind", "coding", "--json"]), 0)
+                focus_data = json.loads(stdout.getvalue())
+                focus_checkpoint = focus_data["latest_context_checkpoint"]
+                self.assertEqual(focus_checkpoint["name"], "Dogfood context save")
+                self.assertNotIn("text", focus_checkpoint)
             finally:
                 os.chdir(old_cwd)
 

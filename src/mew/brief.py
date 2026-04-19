@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .cli_command import mew_command
-from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
+from .context_checkpoint import compact_context_checkpoint, current_git_reentry_state, latest_context_checkpoint
 from .metrics import build_observation_metrics
 from .programmer import find_review_run_for_implementation, latest_task_plan
 from .question_view import format_question_context, format_waiting_hours, question_view_metadata
@@ -609,7 +609,7 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
             "project_snapshot": _project_snapshot_item(deep.get("project_snapshot")),
-            "latest_context_checkpoint": latest_context_checkpoint()
+            "latest_context_checkpoint": compact_context_checkpoint(latest_context_checkpoint())
             if include_context_checkpoint
             else {},
             "current_git": current_git_reentry_state() if include_context_checkpoint else {},
@@ -703,7 +703,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
         "kind": kind or "",
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
-        "latest_context_checkpoint": latest_context_checkpoint()
+        "latest_context_checkpoint": compact_context_checkpoint(latest_context_checkpoint())
         if include_context_checkpoint
         else {},
         "current_git": current_git_reentry_state() if include_context_checkpoint else {},
