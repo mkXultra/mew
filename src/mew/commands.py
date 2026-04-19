@@ -7780,7 +7780,7 @@ def repair_incomplete_work_sessions(state):
     return mark_running_work_interrupted(state)
 
 
-def build_repair_data():
+def build_repair_data(dry_run=False):
     try:
         with state_lock():
             state = load_state()
@@ -7796,10 +7796,23 @@ def build_repair_data():
                 return {
                     "ok": False,
                     "repaired": False,
+                    "dry_run": bool(dry_run),
                     "before_sha256": before_sha,
                     "after_sha256": before_sha,
                     "repairs": repairs,
                     "validation_issues": issues,
+                }
+            if dry_run:
+                after_sha = state_digest(state)
+                return {
+                    "ok": True,
+                    "repaired": before_sha != after_sha,
+                    "dry_run": True,
+                    "before_sha256": before_sha,
+                    "after_sha256": after_sha,
+                    "repairs": repairs,
+                    "validation_issues": validate_state(state),
+                    "last_effect": None,
                 }
             save_state(state)
             after_sha = state_digest(state)
@@ -7809,6 +7822,7 @@ def build_repair_data():
             return {
                 "ok": True,
                 "repaired": before_sha != after_sha,
+                "dry_run": False,
                 "before_sha256": before_sha,
                 "after_sha256": after_sha,
                 "repairs": repairs,
@@ -7819,6 +7833,7 @@ def build_repair_data():
         return {
             "ok": False,
             "repaired": False,
+            "dry_run": bool(dry_run),
             "before_sha256": "",
             "after_sha256": "",
             "repairs": [],
@@ -7832,6 +7847,7 @@ def cmd_repair(args):
         data = {
             "ok": False,
             "repaired": False,
+            "dry_run": bool(getattr(args, "dry_run", False)),
             "validation_issues": [
                 {
                     "level": "error",
@@ -7845,12 +7861,15 @@ def cmd_repair(args):
         else:
             print("mew: runtime is active; stop it before repair or pass --force", file=sys.stderr)
         return 1
-    data = build_repair_data()
+    data = build_repair_data(dry_run=getattr(args, "dry_run", False))
     if getattr(args, "json", False):
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
         if data.get("ok"):
-            status = "repaired" if data.get("repaired") else "already valid"
+            if data.get("dry_run"):
+                status = "would repair" if data.get("repaired") else "already valid"
+            else:
+                status = "repaired" if data.get("repaired") else "already valid"
             print(f"state_repair: {status}")
             print(f"before_sha256: {str(data.get('before_sha256') or '')[:12]}")
             print(f"after_sha256: {str(data.get('after_sha256') or '')[:12]}")
@@ -10271,7 +10290,8 @@ CHAT_HELP = """Commands:
 /brief [kind]         show the current operational brief
 /next [kind]          show the next useful move
 /doctor              show state/runtime health
-/repair [--force]    reconcile state if the runtime is stopped
+/repair [--force] [--dry-run]
+                    reconcile state if the runtime is stopped
 /status [kind]        show compact runtime status
 /perception           show passive workspace observations
 /add <title> [| desc] create a task from chat
@@ -12606,10 +12626,17 @@ def run_chat_slash_command(line, chat_state):
             print(format_doctor_data(build_doctor_data(args)))
         return "continue"
     if command == "repair":
-        if rest and rest.casefold() not in ("--force", "force"):
-            print("usage: /repair [--force]")
+        repair_parts = rest.split() if rest else []
+        invalid = [part for part in repair_parts if part.casefold() not in ("--force", "force", "--dry-run", "dry-run")]
+        if invalid:
+            print("usage: /repair [--force] [--dry-run]")
         else:
-            args = SimpleNamespace(force=rest.casefold() in ("--force", "force"), json=False)
+            lowered = {part.casefold() for part in repair_parts}
+            args = SimpleNamespace(
+                force=bool(lowered & {"--force", "force"}),
+                dry_run=bool(lowered & {"--dry-run", "dry-run"}),
+                json=False,
+            )
             cmd_repair(args)
         return "continue"
     if command == "status":

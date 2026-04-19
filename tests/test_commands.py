@@ -888,6 +888,58 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repair_dry_run_reports_repairs_without_saving(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_question, load_state, save_state, state_lock
+
+                legacy_text = "Task #20 is ready but has no command. What should I execute for it?"
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 20,
+                            "title": "補助金について調べる",
+                            "description": "利用可能な補助金を調査する。",
+                            "kind": "",
+                            "status": "ready",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": "",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    add_question(state, legacy_text, related_task_id=20)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--dry-run", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+
+                self.assertTrue(data["dry_run"])
+                self.assertTrue(data["repaired"])
+                self.assertEqual(len(data["repairs"]), 1)
+                state = load_state()
+                self.assertEqual(state["questions"][0]["text"], legacy_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--dry-run"]), 0)
+                self.assertIn("state_repair: would repair", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_outbox_limit_shows_recent_matching_messages(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -5244,6 +5296,14 @@ class CommandTests(unittest.TestCase):
         ):
             self.assertEqual(run_chat_slash_command("/repair --force", {}), "continue")
         self.assertTrue(repair.call_args.args[0].force)
+
+        with (
+            patch("mew.commands.cmd_repair", return_value=0) as repair,
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(run_chat_slash_command("/repair --force --dry-run", {}), "continue")
+        self.assertTrue(repair.call_args.args[0].force)
+        self.assertTrue(repair.call_args.args[0].dry_run)
 
     def test_chat_cockpit_commands_update_state(self):
         old_cwd = os.getcwd()
