@@ -246,6 +246,14 @@ Milestone 2 Done-when checklist:
   while non-mew projects and non-coding scopes keep the generic fallback. This
   preserves the active milestone gate during long sessions instead of inviting
   open-ended polish.
+  Task `#280` followed that new focus through native self-improve and added a
+  small follow-status cockpit clarity improvement: non-absent text output now
+  includes `producer_health: <state>` and the producer reason when available,
+  so a live/follow observer can see producer freshness without switching to
+  JSON. Resident session `#265` recovered from an initial absent-branch
+  assertion failure by re-reading the formatter/test windows and retargeting to
+  the shared non-absent formatter path; the focused no-testmon follow-status
+  tests and the full `tests/test_work_session.py` suite passed.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.

@@ -17534,6 +17534,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "--follow-status"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("phase: idle", text)
+                self.assertIn("producer_health: fresh", text)
                 self.assertIn("working_memory: stale", text)
                 self.assertIn("next_action: Inspect latest snapshot.", text)
                 self.assertIn("verification_warning:", text)

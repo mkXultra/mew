@@ -6041,6 +6041,12 @@ def format_work_follow_status(data):
             f"phase: {data.get('phase') or '-'}",
         ]
     )
+    producer_health = data.get("producer_health") or {}
+    if producer_health:
+        health_line = f"producer_health: {producer_health.get('state') or '-'}"
+        if producer_health.get("reason"):
+            health_line += f" ({producer_health.get('reason')})"
+        lines.append(health_line)
     if data.get("working_memory_stale"):
         lines.append("working_memory: stale")
     if data.get("next_action"):
