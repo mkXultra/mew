@@ -38,5 +38,6 @@ Current guiding judgment:
 - The current product frontier is a polished REPL-style coding cockpit: calm streaming, clear live output, and daily-use ergonomics that make mew feel preferable to starting a fresh coding CLI.
 - External observer operation is now a serious product surface: task lifecycle commands have JSON output, follow snapshots expose pending approvals and supported reply actions, `--follow-status` reports producer health, and stale/dead/absent snapshots return `suggested_recovery` commands.
 - The remaining observer frontier is not basic legibility; it is making the recommended recovery path feel obvious and trustworthy during real interrupted work, especially side-effecting command/write recovery.
+- Reference-adoption decision from 2026-04-19: when optimizing for "Would I want to be inside mew?", prefer 5.12 Memory Scope × Type as the next persistence slice before 5.11 AgentMemorySnapshot or 5.1 Streaming Tool Executor. Typed/scoped memory makes past resident knowledge findable; snapshots should wait until the state/resume shape is calmer; streaming is the right M2 choice only when cockpit latency is the active pain.
 
 If confidence is low, say what is uncertain. Use `acm run` with another model only when the user explicitly asks for that model, then compare its answer with your own before responding.

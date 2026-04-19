@@ -65,6 +65,12 @@ instead of only raw phase/next-action text.
 Journal active-session lines use that resume-derived signal too, making daily
 reports preserve the same continuity score, repair recommendation, and next
 action that `focus`/`next` use.
+The 2026-04-19 reference-adoption decision is now recorded in
+`docs/ADOPT_FROM_REFERENCES.md`: if optimizing for "would I want to be inside
+mew?", the next persistence slice is 5.12 Memory Scope × Type, not streaming.
+Streaming remains the right M2 choice when cockpit latency becomes the live
+pain, while AgentMemorySnapshot should wait until the state/resume shape is
+less volatile.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
@@ -675,9 +681,15 @@ Missing proof:
 
 Next action:
 
-- Use the day-scale reentry proof as the basis for a real multi-day resident
-  cadence test: compact noisy history, keep open risks, and verify that
-  returning after interruption is faster than starting a fresh CLI session.
+- For the next inhabitation/persistence slice, implement 5.12 Memory Scope ×
+  Type from `docs/ADOPT_FROM_REFERENCES.md`: introduce typed/scoped memory
+  (`user`, `feedback`, `project`, `reference`, `unknown`; `private`, `team`)
+  and a small recall API while treating existing journal/dream/mood/self files
+  as legacy `unknown` instead of migrating them.
+- After typed memory exists and the state/resume schema is less volatile,
+  revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
+  basis for longer resident cadence testing, but do not let that defer the
+  memory-scope foundation indefinitely.
 
 ## Milestone 4: True Recovery
 

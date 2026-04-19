@@ -16,6 +16,16 @@
 - **信頼性**：ファイル位置と行番号は 2026-04-19 時点で検証済み（§8 参照）。参照コミットは参照リポの HEAD。ただし reference リポ更新で行が drift する前提で、**引用行は再確認してから採用する**こと。
 - **mew 側パス** (`src/mew/*.py`) は構造把握の起点。行番号は書いていない（すぐ陳腐化するため）。コードを開いて該当構造を探すこと。
 
+### 0.1 2026-04-19 inhabitation adoption decision
+
+Codex + claude-ultra の相談後の採用判断：
+
+- **「AI が入りたい program」として最適化するなら、次に採る 1 枚は 5.12 Memory Scope × Type。**
+- 理由：mew は continuity/resume 表示が育ってきたが、記憶がまだ flat で、user preference / project fact / feedback / reference を future resident が迷わず思い出せない。Streaming は操作感を上げるが、Memory Scope は住める場所を作る。
+- 5.11 AgentMemorySnapshot は重要だが、state schema がまだ動いている間は早い。5.12 で typed memory API を置いた後、schema が落ち着いたタイミングで採る。
+- 5.1 Streaming Tool Executor は、実際の痛みが「cockpit が Codex CLI / Claude Code より遅い」になった時の M2 最優先。現時点では inhabitation 目的の最初の 1 枚ではない。
+- 5.8 Agent Frontmatter / 5.9 Skill Manifest は M5 まで待つ。拡張性より先に、記憶・再開・受動実行の芯を固める。
+
 ---
 
 ## 1. 一言 decision tree
