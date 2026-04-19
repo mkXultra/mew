@@ -470,6 +470,36 @@ class DogfoodTests(unittest.TestCase):
             self.assertNotIn("stdout", command)
             self.assertLess(len(json.dumps(report, ensure_ascii=False)), 125_000)
 
+    def test_run_dogfood_m2_comparative_scenario_writes_protocol(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            summary = summarize_dogfood_scenario_json(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            protocol_path = Path(artifacts["json"])
+            runbook_path = Path(artifacts["markdown"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m2-comparative")
+            self.assertTrue(protocol_path.exists())
+            self.assertTrue(runbook_path.exists())
+            self.assertIn("m2-comparative: pass", text)
+            self.assertIn("artifacts:", text)
+            self.assertIn("m2_comparative_protocol_records_resident_preference", text)
+            self.assertIn("m2_comparative_protocol_maps_to_m2_done_when", text)
+            self.assertIn("mew", protocol["resident_preference"]["allowed_values"])
+            self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
+            self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
+            self.assertIn("artifacts", summary["scenarios"][0])
+
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):
         report = {
             "generated_at": "now",

@@ -54,6 +54,7 @@ DOGFOOD_SCENARIOS = (
     "continuity",
     "chat-cockpit",
     "work-session",
+    "m2-comparative",
 )
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
@@ -5109,6 +5110,192 @@ raise SystemExit(0 if passed else 1)
     return _scenario_report("work-session", workspace, commands, checks)
 
 
+def build_m2_comparative_protocol():
+    return {
+        "name": "m2-comparative",
+        "roadmap_milestone": "M2 Interactive Parity",
+        "purpose": (
+            "Compare one focused coding task in mew against a fresh Claude Code "
+            "or Codex CLI session with enough structure to decide whether the "
+            "resident would prefer to stay inside mew."
+        ),
+        "required_runs": [
+            {
+                "id": "mew",
+                "entry": "mew code <task-id>",
+                "required_evidence": [
+                    "task_id",
+                    "work_session_id",
+                    "commands_or_tests_run",
+                    "approvals_or_rejections",
+                    "verification_result",
+                    "resume_after_interrupt",
+                    "friction_counts",
+                    "resident_preference",
+                ],
+            },
+            {
+                "id": "fresh_cli",
+                "entry": "Claude Code or Codex CLI fresh session",
+                "required_evidence": [
+                    "tool_or_command_count",
+                    "manual_rebrief_needed",
+                    "verification_result",
+                    "friction_counts",
+                    "resident_preference",
+                ],
+            },
+        ],
+        "friction_counts": {
+            "retyped_gate_flags": 0,
+            "lost_context_or_rebriefs": 0,
+            "manual_status_probes": 0,
+            "approval_confusions": 0,
+            "verification_confusions": 0,
+            "dead_waits_over_30s": 0,
+            "restart_or_recovery_steps": 0,
+        },
+        "resume_behavior": {
+            "interrupt_point": "",
+            "mew_resume_command": "mew work <task-id> --session --resume --allow-read .",
+            "could_resume_without_user_rebrief": None,
+            "risky_or_missing_context": [],
+        },
+        "resident_preference": {
+            "choice": "unknown",
+            "allowed_values": ["mew", "fresh_cli", "inconclusive"],
+            "reason": "",
+            "blocking_gap": "",
+        },
+        "done_when_mapping": [
+            "using mew for one focused coding task feels close to Claude Code / Codex CLI",
+            "the model does not lose momentum while waiting for tool feedback",
+            "an interrupted resident can resume inside mew without user re-briefing",
+        ],
+    }
+
+
+def format_m2_comparative_protocol(protocol):
+    lines = [
+        "# M2 Comparative Dogfood Protocol",
+        "",
+        f"Milestone: {protocol.get('roadmap_milestone')}",
+        "",
+        protocol.get("purpose") or "",
+        "",
+        "## Runs",
+    ]
+    for run in protocol.get("required_runs") or []:
+        lines.append(f"- {run.get('id')}: `{run.get('entry')}`")
+        evidence = ", ".join(run.get("required_evidence") or [])
+        lines.append(f"  evidence: {evidence}")
+    lines.extend(
+        [
+            "",
+            "## Friction Counts",
+        ]
+    )
+    for key in (protocol.get("friction_counts") or {}):
+        lines.append(f"- {key}: 0")
+    lines.extend(
+        [
+            "",
+            "## Resume Behavior",
+            f"- interrupt_point: {protocol.get('resume_behavior', {}).get('interrupt_point', '')}",
+            f"- mew_resume_command: `{protocol.get('resume_behavior', {}).get('mew_resume_command', '')}`",
+            "- could_resume_without_user_rebrief: unknown",
+            "- risky_or_missing_context: []",
+            "",
+            "## Resident Preference",
+            "- choice: unknown",
+            "- reason:",
+            "- blocking_gap:",
+            "",
+            "## Done-When Mapping",
+        ]
+    )
+    for item in protocol.get("done_when_mapping") or []:
+        lines.append(f"- {item}")
+    return "\n".join(lines) + "\n"
+
+
+def run_m2_comparative_scenario(workspace, env=None):
+    del env
+    commands = []
+    checks = []
+    protocol = build_m2_comparative_protocol()
+    output_dir = Path(workspace) / STATE_DIR / "dogfood"
+    json_path = output_dir / "m2-comparative-protocol.json"
+    md_path = output_dir / "m2-comparative-protocol.md"
+    write_json_file(json_path, protocol)
+    md_path.write_text(format_m2_comparative_protocol(protocol), encoding="utf-8")
+    loaded = read_json_file(json_path, {})
+    markdown = read_text_file(md_path)
+
+    run_ids = {run.get("id") for run in loaded.get("required_runs") or []}
+    friction_keys = set((loaded.get("friction_counts") or {}).keys())
+    preference_values = set((loaded.get("resident_preference") or {}).get("allowed_values") or [])
+    done_when = loaded.get("done_when_mapping") or []
+
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_writes_json_record",
+        json_path.exists() and loaded.get("roadmap_milestone") == "M2 Interactive Parity",
+        observed={"path": str(json_path), "roadmap_milestone": loaded.get("roadmap_milestone")},
+        expected="JSON protocol record exists for M2 Interactive Parity",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_writes_markdown_runbook",
+        md_path.exists()
+        and "M2 Comparative Dogfood Protocol" in markdown
+        and "Resident Preference" in markdown,
+        observed={"path": str(md_path), "chars": len(markdown)},
+        expected="Markdown runbook exists with resident preference section",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_requires_both_runs",
+        {"mew", "fresh_cli"}.issubset(run_ids),
+        observed=sorted(run_ids),
+        expected=["fresh_cli", "mew"],
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_tracks_momentum_and_resume",
+        {"dead_waits_over_30s", "lost_context_or_rebriefs", "restart_or_recovery_steps"}.issubset(friction_keys)
+        and "could_resume_without_user_rebrief" in (loaded.get("resume_behavior") or {}),
+        observed={
+            "friction_counts": sorted(friction_keys),
+            "resume_behavior": loaded.get("resume_behavior"),
+        },
+        expected="friction counts include waits/context/recovery and resume behavior gate",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_records_resident_preference",
+        {"mew", "fresh_cli", "inconclusive"}.issubset(preference_values),
+        observed=sorted(preference_values),
+        expected=["fresh_cli", "inconclusive", "mew"],
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_maps_to_m2_done_when",
+        len(done_when) == 3
+        and any("focused coding task" in item for item in done_when)
+        and any("momentum" in item for item in done_when)
+        and any("interrupted resident" in item for item in done_when),
+        observed=done_when,
+        expected="all three M2 Done-when criteria are represented",
+    )
+    report = _scenario_report("m2-comparative", workspace, commands, checks)
+    report["artifacts"] = {
+        "json": str(json_path),
+        "markdown": str(md_path),
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -5150,6 +5337,8 @@ def run_dogfood_scenario(args):
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":
             reports.append(run_work_session_scenario(scenario_workspace, env=env))
+        elif name == "m2-comparative":
+            reports.append(run_m2_comparative_scenario(scenario_workspace, env=env))
         else:
             raise ValueError(f"unknown dogfood scenario: {name}")
 
@@ -6011,6 +6200,9 @@ def format_dogfood_scenario_report(report):
             f"{scenario.get('name')}: {scenario.get('status')} "
             f"commands={scenario.get('command_count')}"
         )
+        artifacts = scenario.get("artifacts") or {}
+        if artifacts:
+            lines.append(f"  artifacts: {artifacts}")
         for check in scenario.get("checks") or []:
             marker = "PASS" if check.get("passed") else "FAIL"
             lines.append(f"- {marker} {check.get('name')}")
@@ -6039,6 +6231,7 @@ def summarize_dogfood_scenario_json(report):
                 "status": scenario.get("status"),
                 "workspace": scenario.get("workspace"),
                 "command_count": scenario.get("command_count"),
+                "artifacts": scenario.get("artifacts") or {},
                 "checks": checks,
             }
         )

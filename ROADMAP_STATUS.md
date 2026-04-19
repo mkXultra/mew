@@ -29,11 +29,12 @@ Milestone 2 Done-when checklist:
 
 - Using mew for one focused coding task feels close to Claude Code / Codex CLI:
   partial. The cockpit has live/follow cells, scoped chat, approvals, ledgers,
-  and real dogfood evidence, but it still needs a comparative task dogfood
-  protocol before treating the cockpit as parity-level: complete one real
-  coding task end-to-end in `mew code`, attempt the same task fresh in Claude
-  Code or Codex CLI, then log friction counts, resume behavior, and whether the
-  resident would have preferred to stay inside mew.
+  and real dogfood evidence. The comparative task dogfood protocol surface now
+  exists as `mew dogfood --scenario m2-comparative`, but the actual comparative
+  run is still needed before treating the cockpit as parity-level: complete one
+  real coding task end-to-end in `mew code`, attempt the same task fresh in
+  Claude Code or Codex CLI, then log friction counts, resume behavior, and
+  whether the resident would have preferred to stay inside mew.
 - The model does not lose momentum while waiting for tool feedback: unmet.
   `./mew metrics --kind coding` at this assessment showed
   `first_tool_start_seconds p95=72.2s`, `model_resume_wait_seconds p95=32.3s`,
@@ -619,6 +620,10 @@ Evidence:
 - High-idle metrics samples now include tool/model-turn/note counts plus the
   latest work-session note preview, so long wall-clock gaps can be interpreted
   as manual/out-of-band work when that is what happened.
+- `mew dogfood --scenario m2-comparative` now writes JSON and Markdown
+  protocol artifacts under `.mew/dogfood/`, requiring both a `mew code` run and
+  a fresh Claude Code / Codex CLI run, friction counts, resume behavior,
+  resident preference, and explicit mapping to all three M2 Done-when criteria.
 
 Missing proof:
 
@@ -628,11 +633,16 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
+- The M2 comparative dogfood protocol exists, but it has not yet been used on
+  a real paired mew-vs-fresh-CLI coding task.
 - TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 
-- Dogfood a real coding change through `mew code <task-id>` to see whether the live/follow cockpit feels calmer than a reactive CLI; treat hard mid-stream cancellation as a later TTY/runtime problem, not the next small slice.
+- Use `mew dogfood --scenario m2-comparative` as the recording surface for a
+  real paired coding task, then decide from the friction counts whether to
+  tackle first-tool latency, model-resume latency, approval confusion, or
+  resume/rebrief gaps next.
 
 ## Milestone 3: Persistent Advantage
 
