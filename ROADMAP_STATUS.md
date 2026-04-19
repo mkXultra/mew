@@ -9,28 +9,32 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `final_gate` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, and stale follow-snapshot detection. Source-side parity work has plateaued; the remaining gap is a final comparative evidence gate. |
+| 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 06:55 JST.
+Last assessed: 2026-04-20 07:18 JST.
 
-Active milestone: Milestone 2, Interactive Parity, narrowed to a final evidence gate.
+Active milestone: Milestone 3, Persistent Advantage.
 
-Rationale: Milestone 1 is closed. Milestones 3-5 have useful foundations, but
-they should not pull fresh implementation away from the earliest unfinished
-roadmap gate unless the user explicitly redirects the session or the final M2
-evidence gate reveals a concrete failure. Recent scoped metrics are green and
-two self-improve investigations (#288/#289) found no further concrete source
-gap on the investigated accept-edits/follow-status surfaces. Codex-ultra and
-claude-ultra external reviews on 2026-04-20 both agreed that M2 should not keep
-absorbing broad polish; it should close or produce one measured blocker through
-one final paired comparative run.
+Rationale: Milestone 1 is closed and Milestone 2 has now passed its final
+evidence gate. Task `#293` / session `#275` completed a focused no-change
+coding investigation after an explicit stop/reentry, preserved `continuity:
+9/9`, verified the focused suite, and finished without forcing edits or needing
+user rebrief. A true fresh `codex-ultra` restart comparator from a detached
+worktree reached the same no-change conclusion and passed the same verification.
+The merged artifact at
+`/tmp/mew-m2-no-change-guard-293-combined-v3/.mew/dogfood/m2-comparative-protocol.json`
+records `comparison_result.status=parity`, `resident_preference.choice=parity`,
+`interruption_resume_gate.mew.status=proved`, `fresh_cli.context_mode=true_restart`,
+and no `next_blocker`. This is enough to stop M2 polish and move the active
+focus to the next earliest unfinished milestone: proving mew's persistent
+advantage over fresh CLI sessions across longer-running resident cadence.
 
-Final M2 evidence gate:
+Closed M2 evidence gate:
 
 - Run one real focused mew coding task through the current cockpit.
 - Interrupt or stop the mew leg mid-task, then resume from mew's own
@@ -39,15 +43,17 @@ Final M2 evidence gate:
   artifact.
 - Run a paired true fresh-CLI comparator, preferably with an interruption-shaped
   fresh leg as well, and merge the report.
-- Close M2 if the artifact records `mew_preferred` or clear parity with
-  continuity advantage and no supervisor source edits, stale controls, or
-  manual rebrief. If it fails, keep M2 narrowed to the single measured failure
-  instead of returning to broad polish.
+- Closed because the artifact records clear parity with mew-side continuity
+  advantage, no manual rebrief, no stale controls, and no source edits forced
+  by the resident in the compared task. The supervisor did patch two protocol
+  recording gaps discovered while preserving this evidence: consumed
+  `last_stop_request` records now count as interruption evidence, and `parity`
+  is a first-class comparison result.
 
 Milestone 2 Done-when checklist:
 
 - Using mew for one focused coding task feels close to Claude Code / Codex CLI:
-  partial. The cockpit has live/follow cells, scoped chat, approvals, ledgers,
+  met for M2. The cockpit has live/follow cells, scoped chat, approvals, ledgers,
   and real dogfood evidence. The first `mew dogfood --scenario m2-comparative`
   paired run is recorded in `docs/M2_COMPARATIVE_DOGFOOD_2026-04-19.md`; it
   preferred a fresh CLI for the small local task because mew hit a paired
@@ -79,9 +85,11 @@ Milestone 2 Done-when checklist:
   hand-editing the protocol markdown. A real paired high-idle metrics refactor
   then flowed through this evidence pipeline with mew session `#246` and a
   fresh `codex-ultra` worktree report; the combined artifact passed and marked
-  `fresh_cli_preferred`. Parity is still not claimed: for small localized
-  changes, mew's persistent context is useful but the observer/supervision
-  overhead remains higher than a fresh CLI. A small permission-mode slice now
+  `fresh_cli_preferred`. At that point, parity was still unclaimed for small
+  localized changes where mew's persistent context was useful but the
+  observer/supervision overhead remained higher than a fresh CLI. The final
+  task `#293` paired artifact later closed the M2 gate with
+  `comparison_result.status=parity` and no `next_blocker`. A small permission-mode slice now
   adds explicit `--approval-mode accept-edits` for `mew do`, `mew work --live`,
   and `mew code` defaults: dry-run write/edit previews are applied
   automatically only when this mode is requested, while write roots,
@@ -214,7 +222,7 @@ Milestone 2 Done-when checklist:
   `dogfood.py` -> `commands.py` import boundary. The paired
   `tests/test_dogfood.py` and `tests/test_work_session.py` suite passed, and
   work-session dogfood passed at `/tmp/mew-low-yield-resume-dogfood`.
-- The model does not lose momentum while waiting for tool feedback: partial.
+- The model does not lose momentum while waiting for tool feedback: met for M2.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
   and `perceived_idle_ratio p95=0.905`, while approval and verification
@@ -312,7 +320,7 @@ Milestone 2 Done-when checklist:
   continuous cockpit is solved.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
-  CLI: partial. M1-level resume and M3 continuity foundations exist. A scoped
+  CLI: met for M2. M1-level resume and M3 continuity foundations exist. A scoped
   `mew dogfood --scenario m3-reentry-gate` proof now exercises the narrow
   interruption/context-compression gate that M2 needs: an interrupted coding
   task resumes with the pending change, failed verifier risk, live world state,
@@ -329,20 +337,20 @@ Milestone 2 Done-when checklist:
   its actual interruption and final verification landed in separate work
   sessions, so M2 comparative dogfood now supports `--mew-session-id task:<id>`
   task-chain evidence. That task-chain gate is also `proved`. The combined
-  resident preference remains `inconclusive` because the matching fresh CLI leg
-  was not interrupted.
+  resident preference remained `inconclusive` because the matching fresh CLI leg
+  was not interrupted; the later #293 final gate resolved this by pairing a
+  proved mew stop/reentry leg with a true fresh restart comparator and recording
+  `parity`.
 
-Current decision rule: the next implementation task must close one unmet
-Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are now either a true fresh-restart M2 comparison, targeted
-M2 friction slices that explain why the proved same-session-resume comparison
-still preferred fresh CLI, or a latency slice chosen from
-`mew metrics --kind coding` if it becomes active again. Polish, side projects,
-and later-milestone architecture are deferred unless they directly unblock this
-active criterion.
-The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
-a milestone switch: after it is green, return to M2 by running or preparing a
-paired interruption-shaped comparative dogfood task.
+Current decision rule: Milestone 2 is closed. The next implementation task must
+close one unmet Milestone 3 Done-when criterion or collect the specific evidence
+needed to decide that criterion. Useful next choices are long-running resident
+cadence, automatic context reconstruction quality, project-memory recall that
+changes model behavior, or passive tick next-action refinement. Polish, side
+projects, and later-milestone architecture are deferred unless they directly
+unblock this active M3 criterion.
+The 2026-04-19 scoped M3 Reentry Gate is no longer only a supporting slice for
+M2; it is now the seed evidence for the active Persistent Advantage milestone.
 `docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
 §0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
 levers chosen only when a measured active-milestone signal justifies them.
@@ -680,7 +688,7 @@ Next action:
 
 ## Milestone 2: Interactive Parity
 
-Status: `in_progress`
+Status: `done`
 
 Evidence:
 
@@ -965,23 +973,16 @@ Evidence:
 
 Missing proof:
 
-- Model delta streaming and a separated thinking-pane preview now exist and work against the live Codex Web API, but the reasoning/status pane still needs longer dogfood and polish before it is comparable to Claude Code / Codex CLI.
-- `mew chat --work-mode`, `/c`, and bounded `/follow` now reduce cockpit friction, but the broader resident coding loop still needs more long-session dogfood before it can replace a mature coding CLI.
-- Batch support removes the strict one-tool limit for read-only inspection, but applied writes, shell commands, and verification still run one tool at a time.
-- Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
-- Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
-- `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- The first process-stop comparative run proved the mew-side task-chain gate,
-  but it did not yet prove a resident preference over a matching interrupted
-  fresh CLI run. It also exposed remaining approval/deferred-verification
-  ceremony in multi-edit test-first flows.
-- TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
+- No M2-blocking proof remains. The final #293 paired artifact records
+  `parity` with mew-side stop/reentry continuity advantage and no `next_blocker`.
+- Remaining cockpit improvements such as TTY redraw, cell-level collapse/expand,
+  global prompt budget enforcement, semantic compaction, and more long-session
+  cadence proof are now M3/M4 quality work, not reasons to keep M2 open.
 
 Next action:
 
-- Reduce the paired approval / deferred-verification ceremony found during the
-  process-stop run, or run a matching interrupted fresh-CLI comparison. The
-  broader cockpit latency slice remains the other active M2 option.
+- Handoff complete. Move new work to Milestone 3 Persistent Advantage and use
+  M2 evidence only as regression coverage.
 
 ## Milestone 3: Persistent Advantage
 
@@ -2379,9 +2380,9 @@ Next action:
   comparator concluded no source change was warranted, verified the focused
   metrics/brief suite, and the combined artifact at
   `/tmp/mew-m2-metrics-friction-291-combined-v2/.mew/dogfood/m2-comparative-protocol.json`
-  records `fresh_cli_preferred`. This keeps M2 in `final_gate`: reentry is
-  usable, but the resident still over-edits ambiguous no-change tasks compared
-  with a fresh CLI.
+  records `fresh_cli_preferred`. At that time this kept M2 in `final_gate`:
+  reentry was usable, but the resident still over-edited ambiguous no-change
+  tasks compared with a fresh CLI.
 - Task `#292` added a narrow prompt guard for that exact #291 blocker: when
   investigation shows the task premise is false, already covered, or
   intentionally handled by existing tests, the resident should validate the
@@ -2399,33 +2400,41 @@ Next action:
   `stop_request`, `last_stop_request`, and stop/interrupted phases as preserved
   interruption markers, and the rebuilt artifact at
   `/tmp/mew-m2-no-change-guard-293-mew-v2/.mew/dogfood/m2-comparative-protocol.json`
-  records the mew resume gate as `proved`.
-- Latest validation for the 2026-04-20 final-gate control coverage slice:
+  records the mew resume gate as `proved`. A paired true fresh `codex-ultra`
+  restart comparator in `/tmp/mew-fresh-no-change-293-148fefd` reached the same
+  no-change conclusion, passed `uv run pytest -q tests/test_metrics.py
+  tests/test_brief.py` with 57 tests, and wrote
+  `/tmp/mew-fresh-no-change-293-report.json`. After adding `parity` as a
+  first-class M2 comparison result, the merged final artifact at
+  `/tmp/mew-m2-no-change-guard-293-combined-v3/.mew/dogfood/m2-comparative-protocol.json`
+  records `comparison_result.status=parity`, `resident_preference.choice=parity`,
+  `interruption_resume_gate.mew.status=proved`,
+  `interruption_resume_gate.fresh_cli.context_mode=true_restart`, and no
+  `next_blocker`.
+- Latest validation for the 2026-04-20 M2 closeout slice:
   focused `tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`
-  passed, full `tests/test_dogfood.py` passed with 60 tests and 6 subtests,
+  passed, full `tests/test_dogfood.py` passed with 62 tests and 6 subtests,
   `./mew dogfood --scenario work-session --workspace
   /tmp/mew-final-gate-dogfood-coverage --json` passed, `./mew dogfood
   --scenario m2-comparative --workspace
-  /tmp/mew-m2-no-change-guard-293-mew-v2 --mew-session-id 275
+  /tmp/mew-m2-no-change-guard-293-combined-v3 --mew-session-id 275
+  --m2-comparison-report /tmp/mew-fresh-no-change-293-report.json
   --m2-task-shape interruption_resume --json` passed, `ruff` passed for
   touched files, `uv run pytest -q` passed with 64 tests, 174 deselected, and
-  6 subtests, `uv run pytest --no-testmon -q` passed with 1102 tests and 36
+  6 subtests, `uv run pytest --no-testmon -q` passed with 1104 tests and 36
   subtests, and `git diff --check` passed.
 
 ## Current Roadmap Focus
 
-Milestone 2: Interactive Parity.
+Milestone 3: Persistent Advantage.
 
 The canonical active decision is the top-level `Active Milestone Decision`.
 Fresh implementation should continue dogfooding real coding changes through
-`mew code <task-id>` or choose a targeted friction slice from
-`mew metrics --kind coding`; either path must map to a Milestone 2 Done-when
-criterion. The front-door route and core mid-loop control lanes are coherent,
-and global `focus` / `next` keep the coding reentry visible even when stale
-non-coding questions still need a user answer. The remaining Milestone 2 work
-is making the active coding loop feel as fast and calm as Claude Code or Codex
-CLI while preserving mew's persistent memory and audit trail. Same-surface
-audit and verification confidence are visible cockpit/checkpoint artifacts
-rather than only prompt guidance. Do not spend new long-session work on polish
-or later-milestone architecture unless it directly closes a current Milestone 2
-gap or reduces a measured M2 blocker.
+`mew code <task-id>` or a native self-improvement session, but the task must
+map to a Milestone 3 Done-when criterion: returning to mew after interruption,
+context compression, terminal close, or time away should be faster than
+starting a new Claude Code or Codex CLI session. Prefer evidence that improves
+or measures automatic context reconstruction, long-running resident cadence,
+project-memory recall that changes model behavior, or passive next-action
+refinement. Do not spend new long-session work on polish, side projects, or
+later-milestone architecture unless it directly closes an M3 evidence gap.

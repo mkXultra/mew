@@ -6795,11 +6795,14 @@ def _m2_apply_mew_run_evidence(protocol, evidence):
     )
     fresh_cli_summary = ((run_summaries.get("fresh_cli") or {}).get("summary") or "").strip()
     if not comparison.get("next_blocker"):
-        comparison["next_blocker"] = (
-            "Review the paired evidence and choose the resident preference outcome."
-            if fresh_cli_summary
-            else "Run the matching fresh_cli task and fill its run summary."
-        )
+        if comparison.get("status") in {"mew_preferred", "fresh_cli_preferred", "parity"}:
+            comparison["next_blocker"] = ""
+        else:
+            comparison["next_blocker"] = (
+                "Review the paired evidence and choose the resident preference outcome."
+                if fresh_cli_summary
+                else "Run the matching fresh_cli task and fill its run summary."
+            )
     comparison["notes"] = comparison.get("notes") or (
         f"Mew-side evidence was prefilled from {session_label}."
     )
@@ -6942,7 +6945,7 @@ def _m2_preference_choice_from_signal(signal):
         return "mew"
     if signal == "fresh_cli_preferred":
         return "fresh_cli"
-    if signal in {"mew", "fresh_cli", "inconclusive"}:
+    if signal in {"mew", "fresh_cli", "parity", "inconclusive"}:
         return signal
     return ""
 
@@ -6952,6 +6955,8 @@ def _m2_comparison_status_from_preference_choice(choice):
         return "mew_preferred"
     if choice == "fresh_cli":
         return "fresh_cli_preferred"
+    if choice == "parity":
+        return "parity"
     if choice == "inconclusive":
         return "inconclusive"
     return ""
@@ -7137,7 +7142,7 @@ def build_m2_comparative_protocol(
         ],
         "comparison_result": {
             "status": "unknown",
-            "allowed_statuses": ["mew_preferred", "fresh_cli_preferred", "inconclusive", "blocked"],
+            "allowed_statuses": ["mew_preferred", "fresh_cli_preferred", "parity", "inconclusive", "blocked"],
             "next_blocker": "",
             "notes": "",
             "run_summaries": {
@@ -7200,7 +7205,7 @@ def build_m2_comparative_protocol(
         },
         "resident_preference": {
             "choice": "unknown",
-            "allowed_values": ["mew", "fresh_cli", "inconclusive"],
+            "allowed_values": ["mew", "fresh_cli", "parity", "inconclusive"],
             "reason": "",
             "blocking_gap": "",
         },

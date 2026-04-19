@@ -15,6 +15,7 @@ from mew.dogfood import (
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
     build_dogfood_report,
+    build_m2_comparative_protocol,
     build_runtime_command,
     copy_source_workspace,
     dogfood_subprocess_env,
@@ -564,6 +565,7 @@ class DogfoodTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(protocol["comparison_result"]["status"], "unknown")
+            self.assertIn("parity", protocol["comparison_result"]["allowed_statuses"])
             self.assertEqual(protocol["comparison_result"]["next_blocker"], "")
             self.assertEqual(protocol["comparison_result"]["notes"], "")
             self.assertEqual(protocol["task_shape"]["recommended_next"], "interruption_resume")
@@ -773,6 +775,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("Implement a synthetic M2 evidence path.", fresh_cli_prompt)
             self.assertIn("pytest -q", fresh_cli_prompt)
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
+            self.assertIn("parity", protocol["resident_preference"]["allowed_values"])
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
 
@@ -1280,6 +1283,87 @@ class DogfoodTests(unittest.TestCase):
                 "not_proved",
             )
             self.assertIn("true fresh CLI restart", protocol["comparison_result"]["next_blocker"])
+
+    def test_run_dogfood_m2_comparative_accepts_parity_comparison_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "fresh-cli-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "task_summary": "fresh CLI reached the same no-change conclusion",
+                        "verification": [
+                            {
+                                "command": "uv run pytest -q tests/test_metrics.py tests/test_brief.py",
+                                "exit_code": 0,
+                                "summary": "57 passed",
+                            }
+                        ],
+                        "fresh_cli_context_mode": "true_restart",
+                        "fresh_cli_session_resumed": False,
+                        "fresh_cli_handoff_note_used": False,
+                        "fresh_cli_restart_comparator_status": "proved",
+                        "interruption_resume_gate": "not_proved",
+                        "preference_signal": "parity",
+                        "resident_preference": {
+                            "choice": "parity",
+                            "reason": "both runs made the same no-change decision",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+                m2_comparison_report=str(report_path),
+            )
+
+            report = run_dogfood_scenario(args)
+            protocol_path = Path(report["scenarios"][0]["artifacts"]["json"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(protocol["comparison_result"]["status"], "parity")
+            self.assertEqual(protocol["resident_preference"]["choice"], "parity")
+            self.assertIn("parity", protocol["comparison_result"]["allowed_statuses"])
+            self.assertIn("parity", protocol["resident_preference"]["allowed_values"])
+
+    def test_m2_comparative_parity_with_mew_evidence_clears_review_blocker(self):
+        protocol = build_m2_comparative_protocol(
+            mew_run_evidence={
+                "status": "found",
+                "work_session_id": 7,
+                "task_id": 3,
+                "session_status": "closed",
+                "phase": "done",
+                "model_turns": 1,
+                "tool_calls": 1,
+                "effort": {},
+                "approval_counts": {},
+                "verification": {"status": "passed", "exit_code": 0, "command": "pytest -q"},
+                "continuity": {"score": "9/9", "status": "strong"},
+                "resume_command": "mew work 3 --session --resume --allow-read .",
+                "resume_gate": {"status": "proved", "evidence_gap": []},
+            },
+            comparison_report={
+                "preference_signal": "parity",
+                "fresh_cli": {
+                    "summary": "fresh CLI reached the same no-change conclusion",
+                    "verification_result": "passed exit=0 command=pytest -q",
+                },
+                "resident_preference": {
+                    "choice": "parity",
+                    "reason": "both runs reached the same conclusion",
+                    "blocking_gap": "",
+                },
+            },
+        )
+
+        self.assertEqual(protocol["comparison_result"]["status"], "parity")
+        self.assertEqual(protocol["comparison_result"]["next_blocker"], "")
+        self.assertEqual(protocol["resident_preference"]["choice"], "parity")
 
     def test_run_dogfood_m2_comparative_derives_interruption_gate_from_children(self):
         with tempfile.TemporaryDirectory() as tmp:
