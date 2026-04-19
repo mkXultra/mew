@@ -4176,6 +4176,62 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_next_json_routes_weak_work_continuity_to_resume(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Repair continuity",
+                            "kind": "coding",
+                            "description": "",
+                            "status": "ready",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "agent_backend": "",
+                            "agent_model": "",
+                            "agent_prompt": "",
+                            "agent_run_id": None,
+                            "plans": [],
+                            "latest_plan_id": None,
+                            "runs": [],
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    state["work_sessions"].append(
+                        {
+                            "id": 3,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Repair continuity",
+                            "goal": "No working memory yet.",
+                            "created_at": "now",
+                            "updated_at": "now",
+                            "tool_calls": [],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["next", "--kind", "coding", "--json"]), 0)
+                payload = json.loads(stdout.getvalue())
+
+                self.assertIn("repair continuity for active work session #3", payload["next_move"])
+                self.assertEqual(payload["command"], "mew work 1 --session --resume")
+            finally:
+                os.chdir(old_cwd)
+
     def test_command_from_next_move_accepts_path_style_mew_launcher(self):
         from mew.commands import command_from_next_move
 
