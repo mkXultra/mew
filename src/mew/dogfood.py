@@ -7389,6 +7389,8 @@ def format_m2_comparative_protocol(protocol):
                 "## Comparison Report",
                 f"- status: {report_meta.get('status')}",
                 f"- source: `{report_meta.get('source', '')}`",
+                f"- comparison_status: {comparison.get('status', 'unknown')}",
+                f"- next_blocker: {comparison.get('next_blocker', '')}",
             ]
         )
     evidence = protocol.get("mew_run_evidence") or {}

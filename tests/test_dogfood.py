@@ -1227,6 +1227,8 @@ class DogfoodTests(unittest.TestCase):
                 "proved",
             )
             self.assertIn("## Comparison Report", runbook)
+            self.assertIn("- comparison_status: inconclusive", runbook)
+            self.assertIn("- next_blocker: Run one more paired task with a write.", runbook)
             self.assertIn("manual_rebrief_needed", runbook)
             self.assertIn(str(report_path), runbook)
 

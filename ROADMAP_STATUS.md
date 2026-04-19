@@ -1149,6 +1149,12 @@ Evidence:
   recover the measured passive tick count from JSON output instead of inferring
   it from pass/fail text. `/tmp/mew-resident-loop-passive-events-v2` passed
   with `passive_events=2` and `passive_gaps_seconds=[2.0]`.
+- Native self-improve task `#298` added a supporting comparison-artifact
+  affordance rather than a new M3 proof: the existing comparative runbook now
+  prints `comparison_status` and `next_blocker` inside its Comparison Report
+  section when a fresh-CLI report is merged. This makes future reentry-vs-fresh
+  comparison artifacts easier to interpret after context compression, but it
+  should not be counted as closing M3 by itself.
 
 Missing proof:
 
@@ -1165,9 +1171,11 @@ Next action:
 
 - Run or implement the first M3-focused native self-improvement slice:
   `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`.
-  Prefer long-running resident cadence, automatic context reconstruction
-  quality, project-memory recall that changes model behavior, or passive
-  next-action refinement.
+  Prefer a true M3 comparison or evidence slice: long-running resident cadence,
+  automatic context reconstruction quality, project-memory recall that changes
+  model behavior, or passive next-action refinement. Treat M2 comparative
+  runbook polish as supporting work only unless it directly produces a M3
+  reentry-vs-fresh artifact.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer active
