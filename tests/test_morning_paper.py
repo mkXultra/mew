@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mew.cli import main
 from mew.morning_paper import build_morning_paper_view_model, format_morning_paper_view, render_morning_paper_markdown
+from mew.state import load_state, save_state, state_lock
 
 
 def write_feed(path: Path) -> None:
@@ -157,8 +158,49 @@ class MorningPaperTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
             self.assertEqual(data["top_picks"], 2)
+            self.assertEqual(data["continuity_risks"], [])
             self.assertEqual(path, Path(".mew/morning-paper/2026-04-17.md"))
             self.assertTrue((root / path).exists())
+
+    def test_morning_paper_command_json_surfaces_continuity_risks(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feed = root / "feed.json"
+            feed.write_text(json.dumps({"items": []}), encoding="utf-8")
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append({"id": 1, "title": "Investigate handoff", "status": "ready"})
+                    state["work_sessions"].append(
+                        {
+                            "id": 5,
+                            "task_id": 1,
+                            "status": "active",
+                            "goal": "Continue work",
+                            "phase": "idle",
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "tool": "read_file",
+                                    "status": "completed",
+                                    "summary": "x" * 210_000,
+                                    "result": {"path": "README.md"},
+                                }
+                            ],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["morning-paper", str(feed), "--date", "2026-04-17", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(data["continuity_risks"][0]["session_id"], 5)
+        self.assertEqual(data["continuity_risks"][0]["status"], "weak")
 
     def test_morning_paper_command_rejects_invalid_date_limit_and_json_show(self):
         with tempfile.TemporaryDirectory() as tmp:

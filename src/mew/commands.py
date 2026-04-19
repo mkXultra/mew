@@ -8230,6 +8230,7 @@ def cmd_morning_paper(args):
         data = {
             "date": view_model["date"],
             "interests": view_model["interests"],
+            "continuity_risks": view_model.get("continuity_risks") or [],
             "top_picks": len(view_model["top_picks"]),
             "explore_later": len(view_model["explore_later"]),
             "items": view_model["items"],

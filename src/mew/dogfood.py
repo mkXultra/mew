@@ -2704,6 +2704,57 @@ def run_continuity_scenario(workspace, env=None):
     )
     follow_status_data = _json_stdout(follow_status_result)
 
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    weak_task_id = next_id(state, "task")
+    weak_session_id = next_id(state, "work_session")
+    state.setdefault("tasks", []).append(
+        {
+            "id": weak_task_id,
+            "title": "Weak continuity first-look task",
+            "kind": "coding",
+            "status": "ready",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+    )
+    state.setdefault("work_sessions", []).append(
+        {
+            "id": weak_session_id,
+            "task_id": weak_task_id,
+            "status": "active",
+            "title": "Weak continuity first-look task",
+            "goal": "Continue work after a large context window",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "tool_calls": [
+                {
+                    "id": next_id(state, "work_tool_call"),
+                    "session_id": weak_session_id,
+                    "task_id": weak_task_id,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "summary": "x" * 210_000,
+                    "result": {"path": "README.md"},
+                    "started_at": now_iso(),
+                    "finished_at": now_iso(),
+                }
+            ],
+            "model_turns": [],
+        }
+    )
+    write_json_file(state_path, state)
+    morning_feed = Path(workspace) / "morning-feed.json"
+    morning_feed.write_text(json.dumps({"items": []}), encoding="utf-8")
+    morning_risk_result = run(
+        ["morning-paper", str(morning_feed), "--date", "2026-04-17", "--write", "--json"],
+        timeout=15,
+    )
+    bundle_risk_result = run(["bundle", "--date", "2026-04-17", "--json"], timeout=15)
+    morning_risk_data = _json_stdout(morning_risk_result)
+    bundle_text = (Path(workspace) / STATE_DIR / "passive-bundle" / "2026-04-17.md").read_text(
+        encoding="utf-8"
+    )
+
     _scenario_check(
         checks,
         "continuity_resume_scores_reentry_artifacts",
@@ -2768,6 +2819,22 @@ def run_continuity_scenario(workspace, env=None):
             "follow_status": follow_status_data.get("status"),
         },
         expected="observer snapshot and follow-status expose the same continuity score",
+    )
+    _scenario_check(
+        checks,
+        "continuity_morning_paper_and_bundle_surface_weak_reentry",
+        morning_risk_result.get("exit_code") == 0
+        and bundle_risk_result.get("exit_code") == 0
+        and any(
+            str(risk.get("session_id")) == str(weak_session_id) and risk.get("status") == "weak"
+            for risk in (morning_risk_data.get("continuity_risks") or [])
+        )
+        and f"Morning Paper: work session #{weak_session_id} task #{weak_task_id}: weak 6/9" in bundle_text,
+        observed={
+            "morning_risks": morning_risk_data.get("continuity_risks"),
+            "bundle_tail": bundle_text[-1000:],
+        },
+        expected="morning-paper JSON and passive bundle reentry hints surface weak active-work continuity",
     )
     return _scenario_report("continuity", workspace, commands, checks)
 

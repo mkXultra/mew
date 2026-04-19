@@ -1844,6 +1844,9 @@ Next action:
 - Passive bundles now promote a Morning Paper `Continuity risks` item into
   the top-level Reentry hints, preventing the composed daily report from
   burying unsafe active-work state beneath ordinary article picks.
+- The `continuity` dogfood scenario now plants a weak active work session and
+  verifies that both `morning-paper --json` and the composed passive bundle
+  surface the unsafe reentry hint.
 
 ## Current Roadmap Focus
 
