@@ -561,6 +561,19 @@ Evidence:
 - `mew work --live/--follow --max-steps 0 --json` can refresh a snapshot and print a structured refresh report without spending a model turn.
 - `mew task add/list/show/update/done --json` provide task lifecycle data without text parsing, and `mew observe --json` aliases passive workspace perception for observer-oriented naming.
 - `mew self-improve --start-session` now prints `resume: mew work <task-id> --session --resume --allow-read .` next to its continue/follow commands.
+- `mew metrics --kind coding` now reports observation-first reliability and
+  latency signals with diagnostic samples for approval friction, verification
+  failures, slow model resumes, approval-bound waits, and high-idle sessions.
+  Approval-bound dry-run wait is split from true model-resume latency, so
+  human review time no longer masquerades as runtime slowness.
+- `mew focus --kind coding` now surfaces a concise `Recent friction` section
+  from the same metrics diagnostics, making approval rejection reasons,
+  verifier failures, approval-bound waits, and slow model-resume samples part
+  of the default reentry surface instead of a separate command the resident has
+  to remember.
+- High-idle metrics samples now include tool/model-turn/note counts plus the
+  latest work-session note preview, so long wall-clock gaps can be interpreted
+  as manual/out-of-band work when that is what happened.
 
 Missing proof:
 
@@ -888,6 +901,16 @@ Next action:
 
 ## Latest Validation
 
+- 2026-04-19 observation/reentry sprint: commits `b70f6d5`, `d83cd87`,
+  `2030c7a`, `0a5a31f`, `57e2fd7`, and `a67aeb6` made metrics actionable for
+  resident dogfood. `mew metrics --kind coding` now exposes friction samples,
+  splits approval-bound dry-run waiting from model-resume latency, ignores
+  empty sessions in idle ratios, and adds high-idle session context. `mew
+  focus --kind coding` now brings those friction samples into the default
+  reentry view. Validation included focused metrics/brief tests, ruff on
+  changed files, `git diff --check`, metrics text/JSON smoke checks, repeated
+  `./mew dogfood --all --cleanup --json` runs (pass), and full
+  `uv run pytest -q` runs up to `1052 passed, 30 subtests passed`.
 - 2026-04-19 active memory sprint: commits `874eccd`, `8647117`,
   `6c6f2df`, `a4310dd`, `b57edb8`, `16ad503`, and `155630d` delivered the
   5.12 typed/scoped memory MVP, injected active typed recall into native work
