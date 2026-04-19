@@ -41,6 +41,12 @@ Continuity is now actionable when it is not strong: the score carries a
 `recommendation` with ordered repair actions, and text resume, focus,
 `status`, and `follow-status` surface a `continuity_next:` line for weak or
 usable bundles instead of leaving the resident to infer the recovery step.
+Claude-ultra review then found one false-strong risk in that contract:
+human-readable waiting text and hint-only recovery items could look more
+runnable than they were. The continuity score now uses word-boundary runnable
+action checks, rejects waiting/pending next-action prose outside active waiting
+phases, and requires recovery hints to contain a real mew/chat control or an
+explicit command/review step.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

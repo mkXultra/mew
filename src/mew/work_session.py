@@ -2479,6 +2479,28 @@ def _approval_has_visible_control(approval):
     return has_identity and has_review and has_decision
 
 
+def _continuity_text_has_command_control(text):
+    text = str(text or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.search(r"(^|\s)(?:\./)?mew\s+", text)
+        or re.search(r"(^|\s)/(?:continue|work-session)\b", text)
+    )
+
+
+def _continuity_text_has_runnable_action(text):
+    text = str(text or "").strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    if re.match(r"^(wait|waiting|pending)\b", lowered):
+        return False
+    if _continuity_text_has_command_control(text):
+        return True
+    return bool(re.search(r"\b(approve|reject|retry|inspect|recover|resume|review|run|continue)\b", lowered))
+
+
 def _continuity_next_action_runnable(resume):
     next_action = str((resume or {}).get("next_action") or "").strip()
     if not next_action:
@@ -2489,14 +2511,13 @@ def _continuity_next_action_runnable(resume):
     recovery = (resume or {}).get("recovery_plan") or {}
     if recovery:
         for item in recovery.get("items") or []:
-            if item.get("hint") or item.get("auto_hint") or item.get("review_hint") or item.get("chat_auto_hint"):
+            if _continuity_recovery_item_has_control(item):
                 return True
-        return bool(recovery.get("next_action"))
-    runnable_markers = ("mew ", "/continue", "/work-session", "approve", "reject", "retry", "inspect")
+        return _continuity_text_has_runnable_action(recovery.get("next_action"))
     waiting_phases = {"running_tool", "planning", "stop_requested"}
     if (resume or {}).get("phase") in waiting_phases and "wait" in next_action:
         return True
-    return any(marker in next_action for marker in runnable_markers)
+    return _continuity_text_has_runnable_action(next_action)
 
 
 def _continuity_failure_visible(failure):
@@ -2520,14 +2541,9 @@ def _continuity_recovery_item_visible(item):
 def _continuity_recovery_item_has_control(item):
     if not item:
         return False
-    return bool(
-        item.get("hint")
-        or item.get("auto_hint")
-        or item.get("chat_auto_hint")
-        or item.get("review_hint")
-        or item.get("command")
-        or item.get("review_steps")
-    )
+    hint_fields = ("hint", "auto_hint", "chat_auto_hint", "review_hint")
+    has_command_hint = any(_continuity_text_has_command_control(item.get(field)) for field in hint_fields)
+    return bool(has_command_hint or item.get("command") or item.get("review_steps"))
 
 
 def _continuity_verification_visible(confidence):

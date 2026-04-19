@@ -363,6 +363,58 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(axis["ok"])
         self.assertEqual(axis["reason"], "pending steer or queued follow-up is visible")
 
+    def test_work_continuity_next_action_requires_runnable_word_or_control(self):
+        resume = {
+            "phase": "idle",
+            "next_action": "Waiting for approval decision",
+            "working_memory": {"hypothesis": "Waiting is visible.", "next_step": "Need a real control."},
+            "recent_decisions": [{"model_turn_id": 1, "action": "finish"}],
+            "context": {"pressure": "low"},
+        }
+
+        continuity = build_work_continuity_score(resume)
+        axis = {item["key"]: item for item in continuity["axes"]}["next_action_runnable"]
+
+        self.assertFalse(axis["ok"])
+        self.assertIn("next_action_runnable", continuity["missing"])
+
+        resume["next_action"] = "continue the work session with mew work 1 --live"
+        continuity = build_work_continuity_score(resume)
+        axis = {item["key"]: item for item in continuity["axes"]}["next_action_runnable"]
+        self.assertTrue(axis["ok"])
+
+    def test_work_continuity_recovery_path_requires_actionable_control(self):
+        resume = {
+            "phase": "failed",
+            "next_action": "retry the safe read",
+            "working_memory": {"hypothesis": "Recovery is needed.", "next_step": "Retry only with controls."},
+            "failures": [{"tool_call_id": 7, "summary": "read interrupted"}],
+            "recovery_plan": {
+                "next_action": "retry the safe read",
+                "items": [
+                    {
+                        "tool_call_id": 7,
+                        "action": "retry_tool",
+                        "reason": "read was interrupted",
+                        "hint": "retry this read manually",
+                    }
+                ],
+            },
+            "recent_decisions": [{"model_turn_id": 1, "action": "finish"}],
+            "context": {"pressure": "low"},
+        }
+
+        continuity = build_work_continuity_score(resume)
+        axes = {item["key"]: item for item in continuity["axes"]}
+
+        self.assertFalse(axes["recovery_path_visible"]["ok"])
+        self.assertIn("recovery_path_visible", continuity["missing"])
+
+        resume["recovery_plan"]["items"][0]["hint"] = "mew work 1 --session --resume --allow-read . --auto-recover-safe"
+        continuity = build_work_continuity_score(resume)
+        axes = {item["key"]: item for item in continuity["axes"]}
+        self.assertTrue(axes["recovery_path_visible"]["ok"])
+
     def test_work_session_resume_compresses_prior_think(self):
         task = {"id": 1, "title": "Compressed think", "status": "ready", "kind": "coding", "notes": ""}
         turns = []
