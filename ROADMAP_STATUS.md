@@ -848,6 +848,16 @@ Next action:
   `tests.test_commands` (`172 tests`, pass), full `uv run python -m unittest`
   (`1007 tests`, pass), direct `./mew help`, `./mew focus`, and `./mew next`
   checks, and `./mew dogfood --all --cleanup --json` (pass).
+- Native self-improve task #205 / work session #207 then used mew itself as a
+  read-only buddy to pick the next small Milestone 2 friction. The resident
+  selected self-improve help clarity, and `c046dff` now states that
+  `--start-session` prints concrete continue/follow/status/resume controls
+  while `--json` returns the same controls as structured fields. Validation
+  included ruff on changed files, the focused self-improve help test,
+  `tests.test_self_improve` (`26 tests`, pass), `tests.test_commands`
+  (`172 tests`, pass), full `uv run python -m unittest` (`1007 tests`, pass),
+  direct `./mew self-improve --help`, and
+  `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
