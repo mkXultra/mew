@@ -2101,10 +2101,10 @@ def _work_call_changed_write(call):
 
 
 def _work_call_counts_as_test_pair(call):
-    return _work_call_changed_write(call) and call.get("approval_status") not in (
-        "rejected",
-        "failed",
-        APPROVAL_STATUS_INDETERMINATE,
+    return (
+        (call or {}).get("status") == "completed"
+        and _work_call_changed_write(call)
+        and call.get("approval_status") not in ("rejected", "failed", APPROVAL_STATUS_INDETERMINATE)
     )
 
 

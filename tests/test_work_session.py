@@ -1952,6 +1952,24 @@ class WorkSessionTests(unittest.TestCase):
                         "diff": "--- /dev/null\n+++ b/tests/test_pairing_failed.py\n@@ -0,0 +1 @@\n+def test_pairing_failed(): pass\n",
                     },
                 },
+                {
+                    "id": 6,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "tests/test_pairing_rolled_back.py"},
+                    "result": {
+                        "path": "tests/test_pairing_rolled_back.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "rolled_back": True,
+                        "diff": (
+                            "--- /dev/null\n"
+                            "+++ b/tests/test_pairing_rolled_back.py\n"
+                            "@@ -0,0 +1 @@\n"
+                            "+def test_pairing_rolled_back(): pass\n"
+                        ),
+                    },
+                },
             ],
         }
 
