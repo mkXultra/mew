@@ -166,7 +166,13 @@ Milestone 2 Done-when checklist:
   work-session dogfood passed at
   `/tmp/mew-zero-test-selector-dogfood-coverage`, and
   `/tmp/mew-m2-zero-test-dogfood-coverage-evidence/.mew/dogfood/m2-comparative-protocol.json`
-  records the completed task-chain verifier as passed. Task `#275` then
+  records the completed task-chain verifier as passed. A fresh-CLI comparator
+  report for the same narrow dogfood regression was then merged into
+  `/tmp/mew-m2-zero-test-dogfood-fresh-combined/.mew/dogfood/m2-comparative-protocol.json`;
+  it recorded `fresh_cli_preferred` because the fresh run reached a passing
+  implementation with only a report-size adjustment, while the mew resident
+  preserved continuity but still needed supervisor recovery after over-searching
+  and a wrong first assertion. Task `#275` then
   addressed the repeated-search behavior exposed by resident session `#261`:
   work-session resumes now include `low_yield_observations` when repeated
   `search_text` calls on the same path/pattern return zero matches, the
