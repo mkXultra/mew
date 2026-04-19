@@ -1037,6 +1037,7 @@ def run_resident_loop_scenario(workspace, env=None):
         observed={
             "processed": len(processed_events),
             "by_type": count_by(processed_events, "type"),
+            "passive_events": len(passive_events),
             "passive_gaps_seconds": passive_gaps,
         },
         expected="startup and at least two spaced passive_tick events are processed",
@@ -1070,7 +1071,13 @@ def run_resident_loop_scenario(workspace, env=None):
         observed=resident_report.get("runtime_output_tail"),
         expected="runtime stdout includes repeated passive_tick summaries",
     )
-    return _scenario_report("resident-loop", workspace, commands, checks)
+    report = _scenario_report("resident-loop", workspace, commands, checks)
+    report["artifacts"] = {
+        "processed_events": len(processed_events),
+        "passive_events": len(passive_events),
+        "passive_gaps_seconds": passive_gaps,
+    }
+    return report
 
 
 def run_native_work_scenario(workspace, env=None):

@@ -300,10 +300,19 @@ class DogfoodTests(unittest.TestCase):
 
             report = run_dogfood_scenario(args)
             text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
 
             self.assertEqual(report["status"], "pass")
-            self.assertEqual(report["scenarios"][0]["name"], "resident-loop")
+            self.assertEqual(scenario["name"], "resident-loop")
+            checks = scenario["checks"]
             self.assertIn("resident_loop_processes_multiple_events", text)
+            cadence_check = next(
+                check
+                for check in checks
+                if check["name"] == "resident_loop_processes_multiple_events"
+            )
+            self.assertGreaterEqual(cadence_check["observed"]["passive_events"], 2)
+            self.assertGreaterEqual(scenario["artifacts"]["passive_events"], 2)
 
     def test_run_dogfood_native_work_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1142,6 +1142,13 @@ Evidence:
   the exact safe `read_file` reobserve action before retry. The focused test and
   `/tmp/mew-continuity-failed-edit-reentry` scenario both passed; the full
   `tests/test_dogfood.py` suite and `uv run pytest --no-testmon -q` also passed.
+- Native self-improve task `#297` then strengthened the short resident cadence
+  proof. `mew dogfood --scenario resident-loop --json` now emits explicit
+  cadence artifacts (`processed_events`, `passive_events`, and
+  `passive_gaps_seconds`), so a future resident or compressed supervisor can
+  recover the measured passive tick count from JSON output instead of inferring
+  it from pass/fail text. `/tmp/mew-resident-loop-passive-events-v2` passed
+  with `passive_events=2` and `passive_gaps_seconds=[2.0]`.
 
 Missing proof:
 
@@ -1151,7 +1158,8 @@ Missing proof:
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - Watcher-driven passive output now has controlled, real-repo one-shot,
   short resident-loop, native-work-start, and real API native-work-advance
-  proofs, but not yet a long-running cadence proof across several hours or days.
+  proofs, and short resident-loop JSON now carries explicit cadence counts, but
+  there is still no long-running cadence proof across several hours or days.
 
 Next action:
 
