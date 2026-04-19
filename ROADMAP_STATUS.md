@@ -2382,6 +2382,12 @@ Next action:
   records `fresh_cli_preferred`. This keeps M2 in `final_gate`: reentry is
   usable, but the resident still over-edits ambiguous no-change tasks compared
   with a fresh CLI.
+- Task `#292` added a narrow prompt guard for that exact #291 blocker: when
+  investigation shows the task premise is false, already covered, or
+  intentionally handled by existing tests, the resident should validate the
+  conclusion with `run_tests` and finish with a no-change summary instead of
+  forcing a source edit. The focused prompt regression and full
+  `tests/test_work_session.py` suite passed.
 - Latest validation for the 2026-04-20 final-gate control coverage slice:
   focused `tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`
   passed, full `tests/test_dogfood.py` passed with 59 tests and 6 subtests,
