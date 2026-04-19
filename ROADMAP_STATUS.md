@@ -877,6 +877,13 @@ Next action:
   (`1010 tests`, pass), `./mew dogfood --scenario work-session --cleanup --json`
   (pass), and `./mew dogfood --all --cleanup --json` (pass after the dogfood
   assertion tightening).
+- Task #209 / `4e72011` adds a safer recovery front door: `mew repair
+  --dry-run` now computes predicted repairs and validation without saving state,
+  includes `dry_run` in JSON output, and the chat cockpit accepts
+  `/repair --dry-run`. Validation included ruff on changed files, direct
+  `repair --dry-run` checks, focused repair/chat slash tests,
+  `tests.test_commands` (`175 tests`, pass), full `uv run python -m unittest`
+  (`1011 tests`, pass), and `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
