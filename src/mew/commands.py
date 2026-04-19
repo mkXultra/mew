@@ -76,7 +76,7 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
-from .typed_memory import FileMemoryBackend, entry_to_dict
+from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
 from .morning_paper import (
     build_morning_paper_view_model,
     format_morning_paper_view,
@@ -8465,9 +8465,54 @@ def build_context_save_text(context, current_time, note):
     return "\n".join(lines)
 
 
+def load_context_checkpoints(query, limit):
+    limit = max(0, int(limit or 0))
+    entries = [
+        entry
+        for entry in FileMemoryBackend(".").entries()
+        if entry.memory_type == "project" and memory_entry_matches(entry, query)
+    ]
+    entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
+    return [entry_to_dict(entry) for entry in entries[:limit]]
+
+
+def format_context_load_report(data):
+    lines = [
+        "Mew context load",
+        f"query: {data.get('query') or ''}",
+        f"matches: {len(data.get('matches') or [])}",
+    ]
+    for item in data.get("matches") or []:
+        lines.append("")
+        lines.append(f"- {item.get('name') or item.get('key') or item.get('id')}")
+        if item.get("description"):
+            lines.append(f"  description: {item.get('description')}")
+        if item.get("path"):
+            lines.append(f"  path: {item.get('path')}")
+        lines.append("  text:")
+        preview = clip_output(item.get("text") or "", 900)
+        for line in preview.splitlines() or [""]:
+            lines.append(f"    {line}")
+    return "\n".join(lines)
+
+
 def cmd_context(args):
     state = load_state()
     current_time = now_iso()
+    if getattr(args, "load", False):
+        if getattr(args, "save", None) is not None:
+            print("mew: --load cannot be combined with --save", file=sys.stderr)
+            return 1
+        data = {
+            "query": args.query,
+            "matches": load_context_checkpoints(args.query, args.limit),
+        }
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return 0
+        print(format_context_load_report(data))
+        return 0
+
     message = getattr(args, "context_message", None)
     event = {
         "id": 0,

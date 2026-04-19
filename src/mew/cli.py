@@ -591,6 +591,17 @@ def build_parser():
         metavar="NOTE",
         help="save the context diagnostics plus a reentry note to typed project memory",
     )
+    context_parser.add_argument(
+        "--load",
+        action="store_true",
+        help="load recent context checkpoints from typed project memory",
+    )
+    context_parser.add_argument(
+        "--query",
+        default="Context save next safe action context compression long session",
+        help="checkpoint search query for --load",
+    )
+    context_parser.add_argument("--limit", type=int, default=3, help="maximum context checkpoints for --load")
     context_parser.add_argument("--name", help="typed memory name for --save")
     context_parser.add_argument("--description", help="typed memory description for --save")
     context_parser.add_argument(

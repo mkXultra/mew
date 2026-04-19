@@ -21,6 +21,7 @@ git status --short
 ./mew brief --kind coding
 ./mew memory --search "decision" --type project --json
 ./mew memory --search "next safe action context compression long session" --type project --json
+./mew context --load --json
 ```
 
 If these do not explain deferred structural work, add a targeted project-memory search:

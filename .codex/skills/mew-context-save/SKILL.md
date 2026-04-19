@@ -77,6 +77,12 @@ If the current context diagnostics themselves are useful, prefer the native chec
 
 Use `--json` only when you need the saved memory path programmatically; the JSON output includes the full context diagnostics and can be large.
 
+After compression or interruption, recover saved checkpoints with:
+
+```bash
+./mew context --load --json
+```
+
 ## Pair With Load
 
 After saving, a future agent should be able to use `mew-planning-reentry` and recover:

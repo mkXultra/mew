@@ -4353,6 +4353,12 @@ class CommandTests(unittest.TestCase):
                     )
                 matches = json.loads(stdout.getvalue())["matches"]
                 self.assertTrue(any(match.get("name") == "Dogfood context save" for match in matches))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["context", "--load", "--json"]), 0)
+                loaded = json.loads(stdout.getvalue())
+                self.assertEqual(loaded["matches"][0]["name"], "Dogfood context save")
+                self.assertIn("Long session checkpoint", loaded["matches"][0]["text"])
             finally:
                 os.chdir(old_cwd)
 
