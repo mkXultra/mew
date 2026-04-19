@@ -226,7 +226,7 @@ def _approval_bound_wait_seconds(call, finished, next_start):
         return 0.0
 
 
-def _tool_to_next_model_wait_records(session, model_turns, tool_calls):
+def _tool_to_next_model_wait_records(session, model_turns, tool_calls, *, successful_verifications=None):
     turn_starts = sorted(
         (parse_time(turn.get("started_at")), turn)
         for turn in model_turns or []
@@ -253,6 +253,8 @@ def _tool_to_next_model_wait_records(session, model_turns, tool_calls):
             continue
         wait_seconds = max(0.0, (next_start - finished).total_seconds())
         approval_bound_seconds = min(wait_seconds, _approval_bound_wait_seconds(call, finished, next_start))
+        if approval_bound_seconds > 0 and _call_retired_by_later_success(call, successful_verifications or []):
+            continue
         model_resume_seconds = max(0.0, wait_seconds - approval_bound_seconds)
         if approval_bound_seconds > 0 and model_resume_seconds <= 0:
             model_resume_seconds = None
@@ -278,9 +280,14 @@ def _tool_to_next_model_wait_records(session, model_turns, tool_calls):
     return records
 
 
-def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
+def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls, *, successful_verifications=None):
     samples = []
-    for record in _tool_to_next_model_wait_records(session, model_turns, tool_calls):
+    for record in _tool_to_next_model_wait_records(
+        session,
+        model_turns,
+        tool_calls,
+        successful_verifications=successful_verifications,
+    ):
         if (record.get("model_resume_wait_seconds") or 0) <= SLOW_MODEL_RESUME_SECONDS:
             continue
         sample = {
@@ -292,9 +299,14 @@ def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
     return samples
 
 
-def _approval_bound_wait_samples(state, session, model_turns, tool_calls):
+def _approval_bound_wait_samples(state, session, model_turns, tool_calls, *, successful_verifications=None):
     samples = []
-    for record in _tool_to_next_model_wait_records(session, model_turns, tool_calls):
+    for record in _tool_to_next_model_wait_records(
+        session,
+        model_turns,
+        tool_calls,
+        successful_verifications=successful_verifications,
+    ):
         if (record.get("approval_bound_wait_seconds") or 0) <= SLOW_MODEL_RESUME_SECONDS:
             continue
         sample = {
@@ -701,8 +713,24 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
         first_tool_sample = _first_tool_start_sample(state, session, model_turns, tool_calls)
         if first_tool_sample:
             slow_first_tools.append(first_tool_sample)
-        slow_model_resumes.extend(_tool_to_next_model_wait_samples(state, session, model_turns, tool_calls))
-        approval_bound_waits.extend(_approval_bound_wait_samples(state, session, model_turns, tool_calls))
+        slow_model_resumes.extend(
+            _tool_to_next_model_wait_samples(
+                state,
+                session,
+                model_turns,
+                tool_calls,
+                successful_verifications=successful_verifications,
+            )
+        )
+        approval_bound_waits.extend(
+            _approval_bound_wait_samples(
+                state,
+                session,
+                model_turns,
+                tool_calls,
+                successful_verifications=successful_verifications,
+            )
+        )
         idle_sample = _high_idle_session_sample(state, session, model_turns, tool_calls)
         if idle_sample:
             high_idle_sessions.append(idle_sample)
@@ -922,7 +950,12 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         )
         first_tool_starts.append(_first_tool_start_seconds(session, model_turns, tool_calls))
         model_to_tool_waits.extend(_model_to_tool_waits(model_turns, tool_calls))
-        wait_records = _tool_to_next_model_wait_records(session, model_turns, tool_calls)
+        wait_records = _tool_to_next_model_wait_records(
+            session,
+            model_turns,
+            tool_calls,
+            successful_verifications=successful_verifications,
+        )
         tool_to_next_model_waits.extend(record.get("wait_seconds") for record in wait_records)
         model_resume_waits.extend(
             record.get("model_resume_wait_seconds")

@@ -73,6 +73,9 @@ Milestone 2 Done-when checklist:
   `approval_rejection=None`, `verification_failure=0.0`, and
   `verification_rollback=0.0`; the remaining active signal is idle time rather
   than stale approval/verification history.
+  Covered historical dry-run approvals are also excluded from approval-bound
+  wait metrics, so rejected stale proposals no longer reappear as
+  `approval_bound_p95` after later verification proves the same surface healthy.
   `mew focus --kind coding` now uses the same 20-session observation window as
   the metrics-targeted self-improve next move, and renders
   `perceived_idle_ratio`, `high_idle_sessions`, and concrete high-idle session

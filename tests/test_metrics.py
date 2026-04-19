@@ -351,6 +351,12 @@ class MetricsTests(unittest.TestCase):
                         "status": "completed",
                         "started_at": "2026-04-19T00:00:01Z",
                         "finished_at": "2026-04-19T00:00:02Z",
+                    },
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:40Z",
+                        "finished_at": "2026-04-19T00:00:41Z",
                     }
                 ],
                 "tool_calls": [
@@ -359,6 +365,7 @@ class MetricsTests(unittest.TestCase):
                         "tool": "edit_file",
                         "status": "completed",
                         "approval_status": "rejected",
+                        "rejected_at": "2026-04-19T00:00:30Z",
                         "started_at": "2026-04-19T00:00:03Z",
                         "finished_at": "2026-04-19T00:00:04Z",
                         "parameters": {"path": "tests/test_metrics.py", "reason": "Needs paired source."},
@@ -416,6 +423,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["reliability"]["rates"]["verification_failure"], 0.0)
         self.assertEqual(metrics["diagnostics"]["approval_friction"], [])
         self.assertEqual(metrics["diagnostics"]["verification_failures"], [])
+        self.assertEqual(metrics["diagnostics"]["approval_bound_waits"], [])
+        self.assertEqual(metrics["latency"]["approval_bound_wait_seconds"]["count"], 0)
         self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
         self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
         self.assertNotIn("approval_friction", {signal["id"] for signal in metrics["signals"]})
