@@ -327,6 +327,32 @@ class SelfImproveTests(unittest.TestCase):
                     finally:
                         os.chdir(old_cwd)
 
+    def test_cli_self_improve_native_rejects_force_plan(self):
+        old_cwd = os.getcwd()
+        cases = (
+            ["--native", "--force-plan"],
+            ["--start-session", "--force-plan"],
+        )
+        for extra_args in cases:
+            with self.subTest(extra_args=extra_args):
+                with tempfile.TemporaryDirectory() as tmp:
+                    os.chdir(tmp)
+                    try:
+                        with redirect_stderr(StringIO()) as stderr:
+                            code = main(["self-improve", *extra_args])
+
+                        self.assertEqual(code, 1)
+                        self.assertIn(
+                            "--native/--start-session cannot be combined with --force-plan",
+                            stderr.getvalue(),
+                        )
+                        state = load_state()
+                        self.assertEqual(state["tasks"], [])
+                        self.assertEqual(state["agent_runs"], [])
+                        self.assertEqual(state["work_sessions"], [])
+                    finally:
+                        os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_rejects_dispatch_and_cycle(self):
         old_cwd = os.getcwd()
         cases = (

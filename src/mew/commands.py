@@ -8760,11 +8760,15 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
     print(f"resume: {controls['resume']}")
 
 
-def self_improve_native_validation_error(*, native=False, dispatch=False, cycle=False, show_prompt=False):
+def self_improve_native_validation_error(
+    *, native=False, dispatch=False, cycle=False, show_prompt=False, force_plan=False
+):
     if native and (cycle or dispatch):
         return "--native/--start-session cannot be combined with --cycle or --dispatch"
     if native and show_prompt:
         return "--native/--start-session cannot be combined with --prompt"
+    if native and force_plan:
+        return "--native/--start-session cannot be combined with --force-plan"
     if cycle and show_prompt:
         return "--prompt cannot be combined with --cycle"
     return ""
@@ -8780,6 +8784,7 @@ def cmd_self_improve(args):
         dispatch=args.dispatch,
         cycle=args.cycle,
         show_prompt=args.prompt,
+        force_plan=args.force_plan,
     )
     if validation_error:
         print(f"mew: {validation_error}", file=sys.stderr)
@@ -12368,6 +12373,7 @@ def chat_self_improve(rest):
         native=native,
         dispatch=dispatch,
         show_prompt=show_prompt,
+        force_plan=force_plan,
     )
     if validation_error:
         print(f"mew: {validation_error}")

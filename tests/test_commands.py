@@ -5480,6 +5480,39 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_chat_self_improve_native_rejects_force_plan(self):
+        old_cwd = os.getcwd()
+        cases = (
+            "/self native force-plan\n/exit\n",
+            "/self start force-plan\n/exit\n",
+        )
+        for command in cases:
+            with self.subTest(command=command.strip()):
+                with tempfile.TemporaryDirectory() as tmp:
+                    os.chdir(tmp)
+                    try:
+                        from mew.state import load_state
+
+                        stdin = StringIO(command)
+                        with (
+                            patch("sys.stdin", stdin),
+                            redirect_stdout(StringIO()) as stdout,
+                            redirect_stderr(StringIO()),
+                        ):
+                            code = main(["chat", "--no-brief", "--no-unread", "--no-activity"])
+
+                        self.assertEqual(code, 0)
+                        self.assertIn(
+                            "mew: --native/--start-session cannot be combined with --force-plan",
+                            stdout.getvalue(),
+                        )
+                        state = load_state()
+                        self.assertEqual(state["tasks"], [])
+                        self.assertEqual(state["agent_runs"], [])
+                        self.assertEqual(state["work_sessions"], [])
+                    finally:
+                        os.chdir(old_cwd)
+
     def test_chat_self_improve_dispatch_surfaces_failed_start(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
