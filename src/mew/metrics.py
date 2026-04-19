@@ -5,6 +5,8 @@ from .timeutil import parse_time
 WORK_WRITE_TOOLS = {"write_file", "edit_file"}
 DEFAULT_SAMPLE_LIMIT = 3
 SAMPLE_TEXT_MAX_CHARS = 240
+SLOW_MODEL_RESUME_SECONDS = 30.0
+HIGH_IDLE_RATIO = 0.8
 
 
 def _duration_seconds(started_at, finished_at):
@@ -180,16 +182,83 @@ def _tool_to_next_model_waits(model_turns, tool_calls):
     return waits
 
 
+def _tool_to_next_model_wait_samples(state, session, model_turns, tool_calls):
+    turn_starts = sorted(
+        (parse_time(turn.get("started_at")), turn)
+        for turn in model_turns or []
+        if isinstance(turn, dict) and parse_time(turn.get("started_at"))
+    )
+    samples = []
+    for call in tool_calls or []:
+        if not isinstance(call, dict):
+            continue
+        finished = parse_time(call.get("finished_at"))
+        if not finished:
+            continue
+        next_turn = None
+        next_start = None
+        for turn_start, turn in turn_starts:
+            try:
+                if turn_start >= finished:
+                    next_start = turn_start
+                    next_turn = turn
+                    break
+            except TypeError:
+                continue
+        if next_start is None:
+            continue
+        wait_seconds = max(0.0, (next_start - finished).total_seconds())
+        if wait_seconds <= SLOW_MODEL_RESUME_SECONDS:
+            continue
+        sample = {
+            "session_id": session.get("id"),
+            "tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "path": _call_path(call),
+            "wait_seconds": _round(wait_seconds),
+            "finished_at": call.get("finished_at") or "",
+            "next_model_turn_id": next_turn.get("id") if next_turn else None,
+            "next_model_started_at": next_turn.get("started_at") if next_turn else "",
+        }
+        sample.update(_sample_task(state, session.get("task_id")))
+        samples.append(sample)
+    return samples
+
+
 def _session_wall_seconds(session):
     return _duration_seconds(session.get("created_at"), session.get("updated_at"))
+
+
+def _session_activity_seconds(model_turns, tool_calls):
+    return _union_seconds(_intervals(model_turns) + _intervals(tool_calls))
 
 
 def _session_idle_ratio(session, model_turns, tool_calls):
     wall_seconds = _session_wall_seconds(session)
     if not wall_seconds:
         return None
-    active_seconds = _union_seconds(_intervals(model_turns) + _intervals(tool_calls))
+    active_seconds = _session_activity_seconds(model_turns, tool_calls)
     return max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
+
+
+def _high_idle_session_sample(state, session, model_turns, tool_calls):
+    wall_seconds = _session_wall_seconds(session)
+    if not wall_seconds:
+        return None
+    active_seconds = _session_activity_seconds(model_turns, tool_calls)
+    idle_ratio = max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
+    if idle_ratio <= HIGH_IDLE_RATIO:
+        return None
+    sample = {
+        "session_id": session.get("id"),
+        "status": session.get("status") or "",
+        "idle_ratio": _round(idle_ratio),
+        "wall_seconds": _round(wall_seconds),
+        "active_seconds": _round(active_seconds),
+        "updated_at": session.get("updated_at") or "",
+    }
+    sample.update(_sample_task(state, session.get("task_id")))
+    return sample
 
 
 def _merge_counts(target, source):
@@ -275,12 +344,24 @@ def _approval_sample(state, session, call):
 
 def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
     limit = max(0, int(limit or 0))
-    samples = {"verification_failures": [], "approval_friction": []}
+    samples = {
+        "verification_failures": [],
+        "approval_friction": [],
+        "slow_model_resumes": [],
+        "high_idle_sessions": [],
+    }
     if limit <= 0:
         return samples
 
+    slow_model_resumes = []
+    high_idle_sessions = []
     for session in sessions:
         tool_calls = [call for call in session.get("tool_calls") or [] if isinstance(call, dict)]
+        model_turns = [turn for turn in session.get("model_turns") or [] if isinstance(turn, dict)]
+        slow_model_resumes.extend(_tool_to_next_model_wait_samples(state, session, model_turns, tool_calls))
+        idle_sample = _high_idle_session_sample(state, session, model_turns, tool_calls)
+        if idle_sample:
+            high_idle_sessions.append(idle_sample)
         for call in sorted(
             tool_calls,
             key=lambda item: item.get("finished_at") or item.get("started_at") or "",
@@ -297,8 +378,16 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
                 and approval_status in ("rejected", "failed")
             ):
                 samples["approval_friction"].append(_approval_sample(state, session, call))
-        if all(len(items) >= limit for items in samples.values()):
-            break
+    samples["slow_model_resumes"] = sorted(
+        slow_model_resumes,
+        key=lambda item: item.get("wait_seconds") or 0,
+        reverse=True,
+    )[:limit]
+    samples["high_idle_sessions"] = sorted(
+        high_idle_sessions,
+        key=lambda item: item.get("idle_ratio") or 0,
+        reverse=True,
+    )[:limit]
     return samples
 
 
@@ -572,7 +661,9 @@ def format_observation_metrics(data):
     diagnostics = data.get("diagnostics") or {}
     verification_failures = diagnostics.get("verification_failures") or []
     approval_friction = diagnostics.get("approval_friction") or []
-    if verification_failures or approval_friction:
+    slow_model_resumes = diagnostics.get("slow_model_resumes") or []
+    high_idle_sessions = diagnostics.get("high_idle_sessions") or []
+    if verification_failures or approval_friction or slow_model_resumes or high_idle_sessions:
         lines.append("diagnostics:")
     if verification_failures:
         lines.append("verification_failures:")
@@ -603,4 +694,23 @@ def format_observation_metrics(data):
                 lines.append(f"  summary: {sample.get('summary')}")
             if sample.get("reason"):
                 lines.append(f"  reason: {sample.get('reason')}")
+    if slow_model_resumes:
+        lines.append("slow_model_resumes:")
+        for sample in slow_model_resumes:
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            path = f" path={sample.get('path')}" if sample.get("path") else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
+                f"{task} tool={sample.get('tool')} wait={sample.get('wait_seconds')}s"
+                f" next_turn=#{sample.get('next_model_turn_id')}{path}"
+            )
+    if high_idle_sessions:
+        lines.append("high_idle_sessions:")
+        for sample in high_idle_sessions:
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')}{task} status={sample.get('status')} "
+                f"idle_ratio={sample.get('idle_ratio')} wall={sample.get('wall_seconds')}s "
+                f"active={sample.get('active_seconds')}s"
+            )
     return "\n".join(lines)

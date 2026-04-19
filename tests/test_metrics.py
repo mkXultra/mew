@@ -119,6 +119,58 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("approval_friction:", text)
         self.assertIn("uv run pytest -q tests/test_metrics.py", text)
 
+    def test_observation_metrics_include_latency_diagnostic_samples(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Observe latency", "kind": "coding", "status": "ready"})
+        state["work_sessions"].append(
+            {
+                "id": 7,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:02:00Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "tool_call_id": 1,
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    },
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:45Z",
+                        "finished_at": "2026-04-19T00:00:46Z",
+                    },
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "README.md"},
+                        "result": {"path": "README.md", "text": "ok"},
+                    }
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["wait_seconds"], 41.0)
+        self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["next_model_turn_id"], 2)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["session_id"], 7)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["idle_ratio"], 0.975)
+
+        text = format_observation_metrics(metrics)
+        self.assertIn("slow_model_resumes:", text)
+        self.assertIn("wait=41.0s", text)
+        self.assertIn("high_idle_sessions:", text)
+        self.assertIn("idle_ratio=0.975", text)
+
 
 if __name__ == "__main__":
     unittest.main()
