@@ -48,6 +48,43 @@ class MoodTests(unittest.TestCase):
         self.assertEqual(view["scores"]["worry"]["score"], 20)
         self.assertNotIn("open question #1: Not now?", view["signals"])
 
+    def test_build_mood_treats_weak_work_continuity_as_worry_signal(self):
+        state = {
+            "tasks": [{"id": 1, "title": "Investigate handoff", "status": "ready"}],
+            "work_sessions": [
+                {
+                    "id": 5,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": "Continue work",
+                    "phase": "idle",
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "summary": "x" * 210_000,
+                            "result": {"path": "src/mew/mood.py"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+        view = build_mood_view_model(state, explicit_date="2026-04-17")
+
+        self.assertEqual(view["scores"]["worry"]["score"], 30)
+        self.assertIn(
+            "1 active work session(s) have weak continuity",
+            view["scores"]["worry"]["reasons"],
+        )
+        self.assertTrue(
+            any(
+                "work session #5 task #1 continuity weak 6/9: refresh working memory" in signal
+                for signal in view["signals"]
+            )
+        )
+
     def test_productive_but_watchful_when_joy_and_worry_are_both_high(self):
         state = {
             "tasks": [{"id": index, "title": f"Done {index}", "status": "done"} for index in range(1, 9)],

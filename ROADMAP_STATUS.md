@@ -1832,6 +1832,9 @@ Next action:
   remain on the human-review path.
 - The dogfood suite now includes `passive-auto-recovery-write`, which exercises
   that dry-run preview recovery path and confirms the target file is unchanged.
+- `mew mood` now treats weak or broken active work-session continuity as worry
+  and signal output, so the passive emotional/status surface reflects when a
+  resident would struggle to resume after compression.
 
 ## Current Roadmap Focus
 

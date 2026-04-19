@@ -13,6 +13,7 @@ from .desk import (
     open_tasks_for_desk,
 )
 from .report_io import write_generated_report
+from .work_session import build_work_session_resume
 
 
 MAX_ITEMS = 8
@@ -99,6 +100,30 @@ def failed_runtime_effects(state: dict[str, Any]) -> list[dict[str, Any]]:
     return failed
 
 
+def active_work_continuity_issues(state: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks_by_id = {str(task.get("id")): task for task in state.get("tasks", []) if isinstance(task, dict)}
+    issues = []
+    for session in active_work_sessions_for_desk(state):
+        task_id = session.get("task_id")
+        task = tasks_by_id.get(str(task_id)) if task_id is not None else None
+        resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
+        continuity = resume.get("continuity") or {}
+        status = normalize_text(continuity.get("status")).casefold()
+        if status not in {"weak", "broken"}:
+            continue
+        recommendation = continuity.get("recommendation") or {}
+        issues.append(
+            {
+                "session_id": session.get("id"),
+                "task_id": task_id,
+                "status": status,
+                "score": continuity.get("score") or "",
+                "summary": normalize_text(recommendation.get("summary")) or "repair continuity before continuing",
+            }
+        )
+    return issues
+
+
 def count_recent_passed_verifications(state: dict[str, Any]) -> int:
     return sum(1 for run in verification_runs(state)[-MAX_ITEMS:] if run.get("exit_code") == 0)
 
@@ -150,6 +175,7 @@ def score_worry(state: dict[str, Any]) -> AxisScore:
     question_count = len(open_questions_for_desk(state))
     open_attention_count = len(open_attention_for_desk(state))
     blocked_count = len(tasks_by_status(state, "blocked"))
+    continuity_issue_count = len(active_work_continuity_issues(state))
     failed_verifications = count_recent_failed_verifications(state)
     failed_effects = len(failed_runtime_effects(state))
     passed_verifications = count_recent_passed_verifications(state)
@@ -158,6 +184,7 @@ def score_worry(state: dict[str, Any]) -> AxisScore:
     value += min(question_count * 15, 45)
     value += min(open_attention_count * 8, 32)
     value += min(blocked_count * 10, 30)
+    value += min(continuity_issue_count * 10, 30)
     value += min(failed_verifications * 20, 40)
     value += min(failed_effects * 12, 36)
     value -= min(passed_verifications * 3, 15)
@@ -170,6 +197,11 @@ def score_worry(state: dict[str, Any]) -> AxisScore:
         f"{open_attention_count} open attention item(s) need resolution",
     )
     add_reason(reasons, blocked_count > 0, f"{blocked_count} blocked task(s) detected")
+    add_reason(
+        reasons,
+        continuity_issue_count > 0,
+        f"{continuity_issue_count} active work session(s) have weak continuity",
+    )
     add_reason(
         reasons,
         failed_verifications > 0,
@@ -244,6 +276,16 @@ def signal_lines(state: dict[str, Any]) -> list[str]:
         question_id = question.get("question_id") or question.get("id")
         text = normalize_text(question.get("text")) or "Untitled question"
         lines.append(f"open question #{question_id}: {text}")
+    for issue in active_work_continuity_issues(state)[:MAX_ITEMS]:
+        session_id = issue.get("session_id") or "?"
+        task_id = issue.get("task_id")
+        task_text = f" task #{task_id}" if task_id is not None else ""
+        score = issue.get("score") or "-"
+        lines.append(
+            f"work session #{session_id}{task_text} continuity {issue['status']} {score}: {issue['summary']}"
+        )
+        if len(lines) >= MAX_ITEMS:
+            break
     for effect in reversed(recent_runtime_effects(state)):
         effect_id = effect.get("id", "?")
         reason = normalize_text(effect.get("reason")) or "unknown"
