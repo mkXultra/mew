@@ -4073,8 +4073,8 @@ def cmd_work_ai(args):
                         (action.get("text") if action_type == "send_message" else "")
                         or (action.get("question") if action_type == "ask_user" else "")
                         or (action.get("note") if action_type == "remember" else "")
-                        or action.get("summary")
                         or action.get("reason")
+                        or action.get("summary")
                         or action.get("text")
                         or action.get("question")
                         or ""
@@ -4105,8 +4105,8 @@ def cmd_work_ai(args):
                         (action.get("text") if action_type == "send_message" else "")
                         or (action.get("question") if action_type == "ask_user" else "")
                         or (action.get("note") if action_type == "remember" else "")
-                        or action.get("summary")
                         or action.get("reason")
+                        or action.get("summary")
                         or action.get("text")
                         or action.get("question")
                         or ""

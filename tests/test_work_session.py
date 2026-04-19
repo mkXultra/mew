@@ -10796,6 +10796,7 @@ class WorkSessionTests(unittest.TestCase):
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(report["stop_reason"], "wait")
                 self.assertIn("write batch is limited", report["steps"][0]["action"]["reason"])
+                self.assertIn("write batch is limited", report["steps"][0]["summary"])
                 self.assertEqual(load_state()["work_sessions"][0]["tool_calls"], [])
                 self.assertEqual(Path("src/mew/pairing.py").read_text(encoding="utf-8"), "VALUE = 'old'\n")
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old docs\n")

@@ -142,6 +142,13 @@ Milestone 2 Done-when checklist:
   keeps the work-session scenario green, the full `tests/test_work_session.py`
   and `tests/test_dogfood.py` suites passed, and
   `/tmp/mew-m2-multi-paired-write-batch-evidence-v2/.mew/dogfood/m2-comparative-protocol.json`
+  records the task-chain verifier as passed. Task `#272` then addressed the
+  reporting side of the same friction: when deterministic ACT safely converts a
+  planned edit into `wait`, report/live summaries now prefer the normalized wait
+  reason over the stale decision summary. `/tmp/mew-deterministic-wait-summary-dogfood`
+  keeps the work-session scenario green, the full `tests/test_work_session.py`
+  suite passed, and
+  `/tmp/mew-m2-deterministic-wait-summary-evidence/.mew/dogfood/m2-comparative-protocol.json`
   records the task-chain verifier as passed.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed

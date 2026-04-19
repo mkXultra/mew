@@ -676,7 +676,12 @@ def normalize_work_model_action(action_plan, verify_command=""):
                 )
             return result
 
-    if action_type != "finish" and not normalized.get("summary") and action_plan.get("summary"):
+    if (
+        action_type != "finish"
+        and not (action_type == "wait" and normalized.get("reason"))
+        and not normalized.get("summary")
+        and action_plan.get("summary")
+    ):
         normalized["summary"] = action_plan.get("summary")
     edit_old = normalized.get("old")
     edit_new = normalized.get("new")
@@ -930,8 +935,9 @@ def plan_work_model_turn(
         progress(f"session #{session.get('id')}: THINK ok")
     if act_mode == "deterministic":
         action = normalize_work_model_action(decision_plan, verify_command=verify_command)
+        action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
-            "summary": decision_plan.get("summary") or action.get("summary") or action.get("reason") or "",
+            "summary": action_summary or decision_plan.get("summary") or action.get("summary") or action.get("reason") or "",
             "action": action,
             "act_mode": "deterministic",
         }
