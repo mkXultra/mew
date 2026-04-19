@@ -730,6 +730,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
 FOCUS_FRICTION_SIGNAL_IDS = {
     "approval_friction",
     "verification_friction",
+    "slow_first_tool",
     "slow_model_resume",
     "high_idle_ratio",
 }
@@ -746,6 +747,7 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
     samples = {
         "verification_failures": diagnostics.get("verification_failures") or [],
         "approval_friction": diagnostics.get("approval_friction") or [],
+        "slow_first_tools": diagnostics.get("slow_first_tools") or [],
         "slow_model_resumes": diagnostics.get("slow_model_resumes") or [],
         "approval_bound_waits": diagnostics.get("approval_bound_waits") or [],
     }
@@ -763,6 +765,7 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
             "verification_rollback": rates.get("verification_rollback"),
         },
         "latency": {
+            "first_tool_start_p95": (latency.get("first_tool_start_seconds") or {}).get("p95"),
             "model_resume_p95": (latency.get("model_resume_wait_seconds") or {}).get("p95"),
             "approval_bound_p95": (latency.get("approval_bound_wait_seconds") or {}).get("p95"),
         },
@@ -901,6 +904,8 @@ def _format_focus_friction_summary(friction):
         value = rates.get(key)
         if value is not None and value > 0:
             parts.append(f"{label}={value}")
+    if latency.get("first_tool_start_p95") is not None and friction.get("slow_first_tools"):
+        parts.append(f"first_tool_start_p95={latency.get('first_tool_start_p95')}s")
     if latency.get("model_resume_p95") is not None and friction.get("slow_model_resumes"):
         parts.append(f"model_resume_p95={latency.get('model_resume_p95')}s")
     if latency.get("approval_bound_p95") is not None and friction.get("approval_bound_waits"):
@@ -945,6 +950,20 @@ def _append_focus_recent_friction(lines, friction):
         lines.append(
             f"- approval wait {sample.get('tool')}#{sample.get('tool_call_id')}{task}{approval} "
             f"{sample.get('approval_bound_wait_seconds')}s{path}"
+        )
+    for sample in friction.get("slow_first_tools") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        path = f" path={sample.get('path')}" if sample.get("path") else ""
+        first_turn = (
+            f" first_turn=#{sample.get('first_model_turn_id')}"
+            if sample.get("first_model_turn_id")
+            else ""
+        )
+        summary = _clip_focus_text(sample.get("first_model_summary"), 220)
+        suffix = f": {summary}" if summary else ""
+        lines.append(
+            f"- first tool {sample.get('tool')}#{sample.get('tool_call_id')}{task} "
+            f"{sample.get('first_tool_start_seconds')}s{path}{first_turn}{suffix}"
         )
     for sample in friction.get("slow_model_resumes") or []:
         task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""

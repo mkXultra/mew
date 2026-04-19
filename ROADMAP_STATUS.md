@@ -53,7 +53,10 @@ Milestone 2 Done-when checklist:
   session cleanup no longer contaminates the current M2 momentum view.
   `mew metrics` now also surfaces `slow_first_tools` diagnostics, including the
   session, first tool call, first turn id, path, and first model summary behind
-  slow first-tool-start latency.
+  slow first-tool-start latency. The same diagnostic now reaches
+  `mew focus --kind coding` as `first_tool_start_p95` plus concrete first-tool
+  samples, so reentry can choose a latency slice without opening the metrics
+  report first.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this

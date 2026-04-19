@@ -606,7 +606,7 @@ class BriefTests(unittest.TestCase):
                 "id": 9,
                 "task_id": 7,
                 "status": "closed",
-                "created_at": "2026-04-19T00:00:00Z",
+                "created_at": "2026-04-18T23:59:15Z",
                 "updated_at": "2026-04-19T00:01:00Z",
                 "notes": [{"created_at": "2026-04-19T00:00:12Z", "text": "Recovered manually after rollback."}],
                 "model_turns": [
@@ -616,6 +616,7 @@ class BriefTests(unittest.TestCase):
                         "tool_call_id": 1,
                         "started_at": "2026-04-19T00:00:01Z",
                         "finished_at": "2026-04-19T00:00:02Z",
+                        "summary": "Compare the focus surface before editing.",
                     },
                     {
                         "id": 2,
@@ -669,10 +670,13 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Recent friction (historical; no active blockers)", focus)
         self.assertIn("approval_rejection=1.0", focus)
         self.assertIn("verification_failure=1.0", focus)
+        self.assertIn("first_tool_start_p95=", focus)
         self.assertIn("model_resume_p95=", focus)
         self.assertIn("rejected edit_file#1 task=#7 path=tests/test_brief.py: Add paired test first.", focus)
         self.assertIn("failed edit_file#2 task=#7 path=src/mew/brief.py exit=1: note: Recovered manually after rollback.", focus)
         self.assertIn("approval wait edit_file#1 task=#7 approval=rejected 41.0s path=tests/test_brief.py", focus)
+        self.assertIn("first tool edit_file#1 task=#7 48.0s path=tests/test_brief.py first_turn=#1", focus)
+        self.assertIn("Compare the focus surface before editing.", focus)
         self.assertIn("model resume edit_file#2 task=#7", focus)
         self.assertIn("next_turn=#2", focus)
 
