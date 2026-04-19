@@ -2388,13 +2388,29 @@ Next action:
   conclusion with `run_tests` and finish with a no-change summary instead of
   forcing a source edit. The focused prompt regression and full
   `tests/test_work_session.py` suite passed.
+- Task `#293` then dogfooded the same no-change metrics/focus question through
+  the guarded path. The resident accepted the stop/reentry steer, resumed from
+  session `#275` with `continuity: 9/9`, validated the existing semantics, and
+  finished with `task_done=true` without forcing an edit. The supervisor
+  confirmed the focused metrics/brief suite with `--no-testmon`. While recording
+  that evidence, `m2-comparative` exposed a protocol gap: consumed
+  `last_stop_request` records were visible in `work --session --resume` but did
+  not count as interruption evidence. The dogfood protocol now treats
+  `stop_request`, `last_stop_request`, and stop/interrupted phases as preserved
+  interruption markers, and the rebuilt artifact at
+  `/tmp/mew-m2-no-change-guard-293-mew-v2/.mew/dogfood/m2-comparative-protocol.json`
+  records the mew resume gate as `proved`.
 - Latest validation for the 2026-04-20 final-gate control coverage slice:
   focused `tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`
-  passed, full `tests/test_dogfood.py` passed with 59 tests and 6 subtests,
+  passed, full `tests/test_dogfood.py` passed with 60 tests and 6 subtests,
   `./mew dogfood --scenario work-session --workspace
-  /tmp/mew-final-gate-dogfood-coverage --json` passed, `ruff` passed for
-  touched files, `uv run pytest -q` passed with 383 tests, 58 deselected, and
-  16 subtests, and `git diff --check` passed.
+  /tmp/mew-final-gate-dogfood-coverage --json` passed, `./mew dogfood
+  --scenario m2-comparative --workspace
+  /tmp/mew-m2-no-change-guard-293-mew-v2 --mew-session-id 275
+  --m2-task-shape interruption_resume --json` passed, `ruff` passed for
+  touched files, `uv run pytest -q` passed with 64 tests, 174 deselected, and
+  6 subtests, `uv run pytest --no-testmon -q` passed with 1102 tests and 36
+  subtests, and `git diff --check` passed.
 
 ## Current Roadmap Focus
 

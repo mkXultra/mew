@@ -776,6 +776,98 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
 
+    def test_run_dogfood_m2_comparative_counts_preserved_stop_request_as_resume_risk(self):
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            state_dir = root / STATE_DIR
+            state_dir.mkdir(parents=True)
+            state = default_state()
+            state["tasks"].append(
+                {
+                    "id": 3,
+                    "title": "M2 stopped no-change evidence task",
+                    "description": "Resume after a deliberate stop and finish with no source change.",
+                    "status": "done",
+                    "priority": "medium",
+                    "kind": "coding",
+                }
+            )
+            state["work_sessions"].append(
+                {
+                    "id": 7,
+                    "task_id": 3,
+                    "status": "closed",
+                    "phase": "done",
+                    "created_at": "2026-04-19T10:00:00Z",
+                    "updated_at": "2026-04-19T10:05:00Z",
+                    "last_stop_request": {
+                        "requested_at": "2026-04-19T10:02:00Z",
+                        "reason": "intentional final-gate stop before resume",
+                        "action": "",
+                        "submit_text": "",
+                    },
+                    "working_memory": {
+                        "hypothesis": "the stopped session resumed and reached a no-change conclusion",
+                        "next_step": "review the no-change evidence",
+                        "last_verified_state": "pytest passed",
+                    },
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:00:00Z",
+                            "finished_at": "2026-04-19T10:04:00Z",
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": 11,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "approval_status": "applied",
+                            "started_at": "2026-04-19T10:01:00Z",
+                            "finished_at": "2026-04-19T10:02:00Z",
+                            "parameters": {"path": "tests/test_dogfood.py"},
+                            "result": {"dry_run": True, "changed": True},
+                        },
+                        {
+                            "id": 12,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:04:00Z",
+                            "finished_at": "2026-04-19T10:05:00Z",
+                            "parameters": {"command": "pytest -q"},
+                            "result": {"command": "pytest -q", "exit_code": 0, "stdout": "ok\n"},
+                        },
+                    ],
+                }
+            )
+            (root / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+            try:
+                os.chdir(root)
+                args = SimpleNamespace(
+                    workspace=str(root / "dog"),
+                    scenario="m2-comparative",
+                    cleanup=False,
+                    mew_session_id="7",
+                )
+
+                report = run_dogfood_scenario(args)
+            finally:
+                os.chdir(previous_cwd)
+
+            protocol_path = Path(report["scenarios"][0]["artifacts"]["json"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            gate = protocol["mew_run_evidence"]["resume_gate"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(gate["status"], "proved")
+            self.assertTrue(gate["risk_or_interruption_preserved"])
+            self.assertNotIn("resume did not preserve an interruption, failure, or recovery risk", gate["evidence_gap"])
+            self.assertEqual(protocol["interruption_resume_gate"]["mew"]["status"], "proved")
+
     def test_run_dogfood_m2_comparative_prefills_task_chain_evidence(self):
         previous_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:

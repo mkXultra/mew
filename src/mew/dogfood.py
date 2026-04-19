@@ -6366,6 +6366,24 @@ def _m2_turn_has_failure_or_interruption(turn):
     return bool(turn.get("status") in {"failed", "interrupted"} or turn.get("error"))
 
 
+def _m2_resume_has_interruption_marker(resume):
+    if not isinstance(resume, dict):
+        return False
+    stop_request = resume.get("stop_request") or {}
+    last_stop_request = resume.get("last_stop_request") or {}
+    return bool(
+        resume.get("phase") in {"interrupted", "stop_requested"}
+        or (
+            isinstance(stop_request, dict)
+            and any(stop_request.get(key) for key in ("requested_at", "reason", "action", "submit_text"))
+        )
+        or (
+            isinstance(last_stop_request, dict)
+            and any(last_stop_request.get(key) for key in ("requested_at", "reason", "action", "submit_text"))
+        )
+    )
+
+
 def _m2_resume_gate_status(gate):
     if not gate:
         return "unknown"
@@ -6399,6 +6417,7 @@ def _m2_resume_gate_evidence(resume, calls, approval_counts, verification, resum
         "risk_or_interruption_preserved": bool(
             resume.get("unresolved_failure")
             or resume.get("failures")
+            or _m2_resume_has_interruption_marker(resume)
             or any(_m2_call_has_failure_or_interruption(call) for call in calls)
             or any(_m2_turn_has_failure_or_interruption(turn) for turn in turns)
         ),
@@ -6424,6 +6443,7 @@ def _m2_session_risk_preserved(resume, calls, turns):
     return bool(
         resume.get("unresolved_failure")
         or resume.get("failures")
+        or _m2_resume_has_interruption_marker(resume)
         or any(_m2_call_has_failure_or_interruption(call) for call in calls or [])
         or any(_m2_turn_has_failure_or_interruption(turn) for turn in turns or [])
     )
