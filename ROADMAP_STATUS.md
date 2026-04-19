@@ -33,6 +33,10 @@ text, includes a `user_pivot_preserved` axis for pending steer / queued
 follow-up state, and `mew focus` surfaces that pivot cue. The local fresh-CLI
 reference symlinks are also guarded by pytest `testpaths = ["tests"]`, so
 default `uv run pytest` no longer recurses into external reference checkouts.
+Codex-ultra re-review of those three findings passed in session
+`019da3df-9b5c-7932-8452-d14fd83f77e9`, with local verification of
+`uv run pytest tests/test_work_session.py tests/test_dogfood.py` and
+default `uv run pytest`.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
