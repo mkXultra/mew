@@ -91,7 +91,12 @@ Milestone 2 Done-when checklist:
   write batch for `tests/test_dogfood.py` plus `src/mew/dogfood.py`,
   `accept-edits` auto-approved both previews, full pytest and the focused M2
   comparative test passed, and `/tmp/mew-m2-paired-batch-evidence` records
-  `paired_write_batch.status=proved` in the comparative protocol.
+  `paired_write_batch.status=proved` in the comparative protocol. The merged
+  fresh `codex-ultra` comparison at `/tmp/mew-m2-paired-batch-combined` still
+  records `resident_preference.choice=fresh_cli` for this narrow write-heavy
+  edit/test loop: paired batch reduces mew ceremony, but direct fresh CLI is
+  still lower overhead when no pause, handoff, or resident memory advantage is
+  exercised.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
@@ -163,11 +168,11 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are running a true interruption-shaped process-stop or
-paired source/test M2 comparative task after the auto-defer change, running a
-matching interrupted fresh-CLI comparison, or a targeted latency/friction slice chosen from
-`mew metrics --kind coding`. Polish, side projects, and later-milestone
-architecture are deferred unless they directly unblock this active criterion.
+Useful next choices are running a true interruption-shaped paired source/test
+M2 comparative task and a matching interrupted fresh-CLI comparison, or a
+targeted latency/friction slice chosen from `mew metrics --kind coding`.
+Polish, side projects, and later-milestone architecture are deferred unless
+they directly unblock this active criterion.
 The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
 a milestone switch: after it is green, return to M2 by running or preparing a
 paired interruption-shaped comparative dogfood task.

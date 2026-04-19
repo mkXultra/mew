@@ -55,6 +55,11 @@ uv run pytest --no-testmon -q \
   --workspace /tmp/mew-m2-paired-batch-evidence \
   --mew-session-id 251 \
   --json
+./mew dogfood --scenario m2-comparative \
+  --workspace /tmp/mew-m2-paired-batch-combined \
+  --mew-session-id 251 \
+  --m2-comparison-report /tmp/mew-fresh-paired-batch-report.json \
+  --json
 ```
 
 Observed:
@@ -77,6 +82,11 @@ Observed:
 - `/tmp/mew-m2-paired-batch-evidence/.mew/dogfood/m2-comparative-protocol.json`
   records `paired_write_batch.status: proved`, `tool_call_ids: [1530, 1531]`,
   `applied_count: 2`, and `forced_preview: true` for session `#251`.
+- `/tmp/mew-m2-paired-batch-combined/.mew/dogfood/m2-comparative-protocol.md`
+  merges a fresh `codex-ultra` implementation report for the same paired-batch
+  evidence feature. The mew leg proves `paired_write_batch`, but the fresh leg
+  still records `resident_preference.choice: fresh_cli` for this narrow
+  write-heavy edit/test loop.
 - focused comparative evidence check confirms `approval_mode: accept-edits` is
   serialized into JSON and the markdown runbook.
 - comparative artifact:
@@ -105,6 +115,11 @@ preview-only, and application still flows through approval / approve-all.
 The M2 comparative artifact now preserves whether this path was used, which
 makes the next fresh-CLI comparison less hand-wavy.
 
-Next M2 evidence should compare a real small write-heavy task using
-`accept-edits` plus paired write batch against a fresh CLI run and record
-whether the result moves from `fresh_cli_preferred` toward `equivalent`.
+The paired-batch comparison did not move this narrow task to mew-preferred. It
+does reduce mew's approval ceremony, but direct fresh CLI remains lower overhead
+for compact local edit/test work that does not need resident memory.
+
+Next M2 evidence should use an interruption-shaped paired source/test task:
+pause or stop the mew resident mid-change, resume without user rebrief, finish
+verification, and compare that against an interrupted fresh CLI leg. That is the
+task shape where mew's persistent body should have a real chance to win.
