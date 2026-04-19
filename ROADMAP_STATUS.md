@@ -258,6 +258,12 @@ Milestone 2 Done-when checklist:
   already exposed `producer=working alive=True` in the human-readable
   `active_work_session` line, and the focused command test now locks that in so
   cockpit observers keep seeing producer/alive context without opening JSON.
+  Task `#282` added another source-level follow-status text improvement:
+  non-absent snapshots now print `steps: <step_count>`, matching the JSON
+  `step_count` field so live/follow observers can see resident progress without
+  switching modes. The absent snapshot early-return remains out of scope; dead,
+  completed, stale, and fresh non-absent statuses share the updated formatter
+  path. The full `tests/test_work_session.py` suite passed.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.

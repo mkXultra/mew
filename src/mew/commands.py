@@ -6039,6 +6039,7 @@ def format_work_follow_status(data):
             f"producer: pid={data.get('producer_pid') or '-'} alive={bool(data.get('producer_alive'))}",
             f"pending_approvals: {data.get('pending_approval_count', 0)}",
             f"phase: {data.get('phase') or '-'}",
+            f"steps: {data.get('step_count') if data.get('step_count') is not None else '-'}",
         ]
     )
     producer_health = data.get("producer_health") or {}

@@ -17487,6 +17487,7 @@ class WorkSessionTests(unittest.TestCase):
                             "task_id": 1,
                             "heartbeat_at": now_iso(),
                             "producer": {"pid": os.getpid()},
+                            "step_count": 7,
                             "pending_approvals": [{"tool_call_id": 3}],
                             "resume": {
                                 "phase": "idle",
@@ -17520,6 +17521,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["producer_health"]["state"], "fresh")
                 self.assertEqual(data["suggested_recovery"], {})
                 self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(data["step_count"], 7)
                 self.assertEqual(data["phase"], "idle")
                 self.assertEqual(data["next_action"], "Inspect latest snapshot.")
                 self.assertTrue(data["working_memory_stale"])
@@ -17534,6 +17536,7 @@ class WorkSessionTests(unittest.TestCase):
                     self.assertEqual(main(["work", "--follow-status"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("phase: idle", text)
+                self.assertIn("steps: 7", text)
                 self.assertIn("producer_health: fresh", text)
                 self.assertIn("working_memory: stale", text)
                 self.assertIn("next_action: Inspect latest snapshot.", text)
