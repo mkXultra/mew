@@ -5662,6 +5662,21 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     }
 
 
+def _append_work_follow_status_checkpoint_lines(lines, data):
+    checkpoint = data.get("latest_context_checkpoint") or {}
+    if not checkpoint:
+        return
+    lines.append(
+        f"checkpoint: {checkpoint.get('name') or checkpoint.get('key')} "
+        f"({checkpoint.get('created_at') or '-'})"
+    )
+    current_git = data.get("current_git") or {}
+    if current_git:
+        lines.append(
+            f"checkpoint_git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
+        )
+
+
 def format_work_follow_status(data):
     lines = [
         f"Follow snapshot status: {data.get('status')}",
@@ -5669,6 +5684,7 @@ def format_work_follow_status(data):
     ]
     if not data.get("exists"):
         lines.append("snapshot: absent")
+        _append_work_follow_status_checkpoint_lines(lines, data)
         recovery = data.get("suggested_recovery") or {}
         if recovery:
             lines.append(f"recovery: {recovery.get('kind') or '-'}")
@@ -5691,17 +5707,7 @@ def format_work_follow_status(data):
         lines.append("working_memory: stale")
     if data.get("next_action"):
         lines.append(f"next_action: {data.get('next_action')}")
-    checkpoint = data.get("latest_context_checkpoint") or {}
-    if checkpoint:
-        lines.append(
-            f"checkpoint: {checkpoint.get('name') or checkpoint.get('key')} "
-            f"({checkpoint.get('created_at') or '-'})"
-        )
-        current_git = data.get("current_git") or {}
-        if current_git:
-            lines.append(
-                f"checkpoint_git: {current_git.get('status')} head={current_git.get('head') or '(unknown)'}"
-            )
+    _append_work_follow_status_checkpoint_lines(lines, data)
     recovery = data.get("suggested_recovery") or {}
     if recovery:
         lines.append(f"recovery: {recovery.get('kind') or '-'}")

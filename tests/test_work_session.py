@@ -16310,14 +16310,32 @@ class WorkSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                from mew.typed_memory import FileMemoryBackend
+
+                FileMemoryBackend().write(
+                    "Context save next safe action context compression long session\n"
+                    "Note: Absent follow checkpoint.",
+                    scope="private",
+                    memory_type="project",
+                    name="Absent follow checkpoint",
+                    description="Recover absent follow status.",
+                )
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "--follow-status", "--json"]), 1)
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "absent")
                 self.assertFalse(data["exists"])
                 self.assertEqual(data["producer_health"]["state"], "absent")
+                self.assertEqual(data["latest_context_checkpoint"]["name"], "Absent follow checkpoint")
+                self.assertNotIn("text", data["latest_context_checkpoint"])
                 self.assertEqual(data["suggested_recovery"]["kind"], "select_task")
                 self.assertIn("task list --json", data["suggested_recovery"]["command"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--follow-status"]), 1)
+                text = stdout.getvalue()
+                self.assertIn("checkpoint: Absent follow checkpoint", text)
+                self.assertIn("checkpoint_git:", text)
             finally:
                 os.chdir(old_cwd)
 
