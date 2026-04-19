@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 21:27 JST.
+Last assessed: 2026-04-19 21:44 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -34,7 +34,10 @@ Milestone 2 Done-when checklist:
   preferred a fresh CLI for the small local task because mew hit a paired
   source/test approval loop. A first mitigation now exposes explicit
   single-approval `--defer-verify` controls for test-first or paired-change
-  flows, but this needs another paired dogfood run before claiming parity.
+  flows, and a follow-up mew-led implementation task used that control to avoid
+  the rollback loop and finish. Parity is still not claimed because the compact
+  follow stop surface made the defer control less obvious than the resume/cell
+  surfaces.
 - The model does not lose momentum while waiting for tool feedback: unmet.
   `./mew metrics --kind coding` at this assessment showed
   `first_tool_start_seconds p95=72.2s`, `model_resume_wait_seconds p95=32.3s`,
@@ -48,11 +51,10 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are either rerunning the same focused coding dogfood/bakeoff
-through `mew code <task-id>` to test the deferred-verification mitigation, or a
-targeted latency/friction slice chosen from `mew metrics --kind coding`. Polish,
-side projects, and later-milestone architecture are deferred unless they
-directly unblock this active criterion.
+Useful next choices are either improving the first-stop defer-control surface
+found by the mitigation dogfood, or a targeted latency/friction slice chosen
+from `mew metrics --kind coding`. Polish, side projects, and later-milestone
+architecture are deferred unless they directly unblock this active criterion.
 `docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
 §0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
 levers chosen only when a measured active-milestone signal justifies them.

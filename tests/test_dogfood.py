@@ -499,11 +499,21 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m2_comparative_protocol_maps_to_m2_done_when", text)
             self.assertIn("m2_comparative_protocol_has_fillable_comparison_result", text)
             self.assertTrue(protocol["generated_at"])
+            self.assertEqual(
+                protocol["observer_tip"],
+                (
+                    "When approving only one half of a paired source/test change, "
+                    "apply it with deferred verification and run the verifier after "
+                    "the companion change lands."
+                ),
+            )
             self.assertEqual(protocol["comparison_result"]["status"], "unknown")
             self.assertEqual(protocol["comparison_result"]["next_blocker"], "")
             self.assertEqual(protocol["comparison_result"]["notes"], "")
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
             self.assertIn("fresh_cli", protocol["comparison_result"]["run_summaries"])
+            self.assertIn("## Observer Tip", runbook)
+            self.assertIn("apply it with deferred verification", runbook)
             self.assertIn("## Comparison Result", runbook)
             self.assertIn("- next_blocker:", runbook)
             self.assertIn("  - fresh_cli:", runbook)

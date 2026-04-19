@@ -5198,6 +5198,11 @@ def build_m2_comparative_protocol():
             "or Codex CLI session with enough structure to decide whether the "
             "resident would prefer to stay inside mew."
         ),
+        "observer_tip": (
+            "When approving only one half of a paired source/test change, "
+            "apply it with deferred verification and run the verifier after "
+            "the companion change lands."
+        ),
         "required_runs": [
             {
                 "id": "mew",
@@ -5285,6 +5290,9 @@ def format_m2_comparative_protocol(protocol):
         f"Milestone: {protocol.get('roadmap_milestone')}",
         "",
         protocol.get("purpose") or "",
+        "",
+        "## Observer Tip",
+        protocol.get("observer_tip") or "",
         "",
         "## Comparison Result",
         f"- status: {comparison.get('status', 'unknown')}",

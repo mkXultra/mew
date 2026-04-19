@@ -94,3 +94,44 @@ Validation:
 - `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k "approve or approval or reply_schema or follow_snapshot or cockpit_controls"`
 - `uv run python -m py_compile src/mew/cli.py src/mew/commands.py src/mew/work_session.py src/mew/work_cells.py src/mew/dogfood.py tests/test_work_session.py tests/test_dogfood.py`
 - `git diff --check`
+
+## Mitigation Dogfood
+
+Task: add an observer tip to the M2 comparative dogfood protocol so future
+paired source/test runs explicitly know to use deferred verification for a
+single half of a paired change.
+
+### mew
+
+- Entry: `mew code 242 --quiet --timeout 0 ...`, then
+  `mew work 242 --follow ...`
+- Task/session: task `#242`, work session `#236`
+- Result: completed with observer approval
+- Verification:
+  - `uv run pytest -q tests/test_dogfood.py -k m2_comparative`
+  - `uv run python -m unittest tests.test_dogfood`
+  - `./mew dogfood --scenario m2-comparative --workspace /tmp/mew-m2-comparative-observer-tip --json`
+  - `uv run python -m py_compile src/mew/dogfood.py tests/test_dogfood.py`
+  - `git diff --check`
+- Summary: mew started with the right files, hit paired-test steering on the
+  first source-first attempt, then created the test change first. The observer
+  applied the test edit with `--defer-verify`, avoiding the previous rollback
+  loop. mew then proposed an incomplete source edit, accepted rejection
+  feedback, and completed the formatter change. The final source approval ran
+  the verifier successfully, and mew self-selected the broader
+  `uv run python -m unittest tests.test_dogfood` check before finishing.
+
+Friction counts:
+
+- retyped_gate_flags: 0
+- lost_context_or_rebriefs: 0
+- manual_status_probes: 2
+- approval_confusions: 1
+- verification_confusions: 0
+- dead_waits_over_30s: 1
+- restart_or_recovery_steps: 0
+
+Remaining UI note: the compact follow stop output did not surface the
+deferred-verification control as clearly as `mew work --session --resume` and
+`mew work --cells` did. The capability works, but the first stop surface may
+still be less obvious than the resident cockpit needs.
