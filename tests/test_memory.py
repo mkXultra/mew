@@ -319,6 +319,8 @@ class MemoryTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Active memory for task #1", text)
                 self.assertIn("Active recall debug route", text)
+                self.assertIn("score=", text)
+                self.assertIn("matched=", text)
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["memory", "--active", "--search", "debug"]), 1)

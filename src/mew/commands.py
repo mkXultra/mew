@@ -9541,8 +9541,13 @@ def format_active_memory(active_memory, task=None, session=None):
         name = item.get("name") or item.get("key") or "memory"
         reason = item.get("reason") or "recalled"
         matched = ", ".join(str(term) for term in item.get("matched_terms") or [])
-        suffix = f"; matched={matched}" if matched else ""
-        lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({reason}{suffix})")
+        score = item.get("score")
+        details = [reason]
+        if score is not None:
+            details.append(f"score={score}")
+        if matched:
+            details.append(f"matched={matched}")
+        lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({'; '.join(details)})")
     if active_memory.get("truncated"):
         lines.append(f"... {active_memory.get('total')} total active memories; older items omitted")
     return "\n".join(lines)
