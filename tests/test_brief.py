@@ -669,9 +669,12 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Recent friction (historical; no active blockers)", focus)
         self.assertIn("approval_rejection=1.0", focus)
         self.assertIn("verification_failure=1.0", focus)
+        self.assertIn("model_resume_p95=", focus)
         self.assertIn("rejected edit_file#1 task=#7 path=tests/test_brief.py: Add paired test first.", focus)
         self.assertIn("failed edit_file#2 task=#7 path=src/mew/brief.py exit=1: note: Recovered manually after rollback.", focus)
         self.assertIn("approval wait edit_file#1 task=#7 approval=rejected 41.0s path=tests/test_brief.py", focus)
+        self.assertIn("model resume edit_file#2 task=#7", focus)
+        self.assertIn("next_turn=#2", focus)
 
     def test_focus_surfaces_active_work_session_reentry(self):
         state = default_state()

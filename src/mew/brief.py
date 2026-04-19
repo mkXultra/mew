@@ -949,9 +949,14 @@ def _append_focus_recent_friction(lines, friction):
     for sample in friction.get("slow_model_resumes") or []:
         task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
         path = f" path={sample.get('path')}" if sample.get("path") else ""
+        next_turn = (
+            f" next_turn=#{sample.get('next_model_turn_id')}"
+            if sample.get("next_model_turn_id")
+            else ""
+        )
         lines.append(
             f"- model resume {sample.get('tool')}#{sample.get('tool_call_id')}{task} "
-            f"{sample.get('model_resume_wait_seconds')}s{path}"
+            f"{sample.get('model_resume_wait_seconds')}s{path}{next_turn}"
         )
 
 
