@@ -1119,6 +1119,14 @@ Evidence:
   session activity has occurred, the next passive tick records
   `previous_native_work_step_failed` and leaves recovery to the visible
   runtime/model path or a human/manual session update.
+- After M2 closeout, idle coding focus/desk/brief now derive the self-improve
+  focus from `ROADMAP_STATUS.md`'s active milestone. With M3 active and no
+  current coding task, the next move is
+  `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`
+  instead of the stale M2 cockpit parity prompt. This makes roadmap reentry a
+  behavior change, not only documentation. Focused `tests/test_brief.py` /
+  `tests/test_desk.py`, `ruff`, manual focus/desk/brief checks, and full
+  `uv run pytest --no-testmon -q` passed after the change.
 
 Missing proof:
 
@@ -1132,13 +1140,15 @@ Missing proof:
 
 Next action:
 
-- Move back to the broader cockpit/recovery roadmap, while continuing to watch
-  active recall quality during real dogfood and only expanding memory scoring
-  when the selected memories are visibly wrong or opaque.
+- Run or implement the first M3-focused native self-improvement slice:
+  `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`.
+  Prefer long-running resident cadence, automatic context reconstruction
+  quality, project-memory recall that changes model behavior, or passive
+  next-action refinement.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
-  basis for longer resident cadence testing, but do not let that defer the
-  memory-scope foundation indefinitely.
+  basis for longer resident cadence testing, but do not let that defer active
+  M3 evidence work.
 
 ## Milestone 4: True Recovery
 

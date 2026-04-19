@@ -294,7 +294,7 @@ class DeskTests(unittest.TestCase):
                 "self-improve",
                 "--start-session",
                 "--focus",
-                "Close the remaining M2 continuous coding cockpit parity gap",
+                "Prove M3 persistent advantage in resident reentry",
             ),
         )
 

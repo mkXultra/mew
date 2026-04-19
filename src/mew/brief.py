@@ -35,6 +35,29 @@ def current_project_looks_like_mew():
     )
 
 
+def active_roadmap_self_improve_focus(root=None):
+    root = Path.cwd() if root is None else Path(root)
+    status_path = root / "ROADMAP_STATUS.md"
+    try:
+        text = status_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    active = ""
+    for line in text.splitlines():
+        if line.startswith("Active milestone:"):
+            active = line.split(":", 1)[1].strip()
+            break
+    if "Milestone 3" in active:
+        return "Prove M3 persistent advantage in resident reentry"
+    if "Milestone 4" in active:
+        return "Improve M4 safe recovery after interrupted work"
+    if "Milestone 5" in active:
+        return "Advance M5 audited self-improvement loop"
+    if "Milestone 2" in active:
+        return "Close the remaining M2 continuous coding cockpit parity gap"
+    return ""
+
+
 def scoped_agent_status(state, kind=None):
     agent = dict(state.get("agent_status", {}))
     if not kind:
@@ -1129,8 +1152,11 @@ def continuity_repair_summary(continuity):
 def coding_self_improve_focus_from_friction(state, kind=None):
     if kind != "coding" or not current_project_looks_like_mew():
         return "Pick the next small mew improvement"
+    roadmap_focus = active_roadmap_self_improve_focus()
     friction = recent_focus_friction(state, kind=kind, session_limit=20, sample_limit=5)
     signal_ids = {signal.get("id") for signal in friction.get("signals") or []}
+    if roadmap_focus and friction and friction.get("active_blocker_count") == 0:
+        return roadmap_focus
     action = "Reduce"
     if friction and friction.get("active_blocker_count") == 0:
         action = "Reproduce or retire historical"
@@ -1146,7 +1172,7 @@ def coding_self_improve_focus_from_friction(state, kind=None):
         return f"{action} M2 first-tool latency from recent coding metrics"
     if "high_idle_ratio" in signal_ids:
         return f"{action} M2 idle-time friction from recent coding metrics"
-    return "Close the remaining M2 continuous coding cockpit parity gap"
+    return roadmap_focus or "Close the remaining M2 continuous coding cockpit parity gap"
 
 
 def next_move(state, kind=None):

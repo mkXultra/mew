@@ -62,7 +62,7 @@ class BriefTests(unittest.TestCase):
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
         self.assertEqual(
             next_move(default_state(), kind="coding"),
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
         )
 
     def test_next_move_coding_filter_in_empty_project_suggests_task_creation(self):
@@ -182,7 +182,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", data["next_move"])
         self.assertEqual(
             data["coding_next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
         )
         self.assertIn("Coding: start a native self-improvement session", focus)
 
@@ -749,12 +749,21 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        data = build_focus_data(state, kind="coding")
+        with patch("mew.brief.active_roadmap_self_improve_focus", return_value=""):
+            data = build_focus_data(state, kind="coding")
 
         self.assertIn(
             "Reproduce or retire historical M2 approval/verification friction from recent coding metrics",
             data["next_move"],
         )
+
+        with patch(
+            "mew.brief.active_roadmap_self_improve_focus",
+            return_value="Prove M3 persistent advantage in resident reentry",
+        ):
+            data = build_focus_data(state, kind="coding")
+
+        self.assertIn("Prove M3 persistent advantage in resident reentry", data["next_move"])
 
     def test_focus_surfaces_active_work_session_reentry(self):
         state = default_state()
@@ -1088,7 +1097,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(
             data["next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
         )
 
     def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
