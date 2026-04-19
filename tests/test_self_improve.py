@@ -158,15 +158,16 @@ class SelfImproveTests(unittest.TestCase):
         self.assertIn("native mew work task without a programmer plan", output)
         self.assertIn("Native work-session flow:", output)
         self.assertIn("mew self-improve --start-session --focus", output)
-        self.assertIn("prints concrete continue/follow/status/resume/active-memory/chat controls", output)
+        self.assertIn("prints concrete continue/follow/status/resume/cells/active-memory/chat controls", output)
         self.assertIn("mew self-improve --start-session --json --focus", output)
         self.assertIn(
-            "returns controls.continue, controls.follow, controls.status, controls.resume, controls.active_memory, controls.chat",
+            "returns controls.continue, controls.follow, controls.status, controls.resume, controls.cells, controls.active_memory, controls.chat",
             output,
         )
         self.assertIn("mew work <task-id> --live --allow-read . --compact-live --max-steps 1", output)
         self.assertIn("mew work <task-id> --follow --quiet --allow-read . --compact-live --max-steps 10", output)
         self.assertIn("mew work <task-id> --session --resume --allow-read .", output)
+        self.assertIn("mew work <task-id> --cells", output)
         self.assertIn("mew memory --active --task-id <task-id>", output)
         self.assertIn("mew work <task-id> --follow-status --json", output)
         self.assertIn("mew chat", output)
@@ -261,6 +262,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("active memory: mew memory --active --task-id 1", output)
                 self.assertIn("chat: mew chat", output)
                 state = load_state()
@@ -405,6 +407,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("active memory: mew memory --active --task-id 1", output)
                 self.assertIn("chat: mew chat", output)
                 state = load_state()
@@ -448,6 +451,7 @@ class SelfImproveTests(unittest.TestCase):
                 )
                 self.assertEqual(data["controls"]["status"], "mew work 1 --follow-status --json")
                 self.assertEqual(data["controls"]["resume"], "mew work 1 --session --resume --allow-read .")
+                self.assertEqual(data["controls"]["cells"], "mew work 1 --cells")
                 self.assertEqual(data["controls"]["active_memory"], "mew memory --active --task-id 1")
                 self.assertEqual(data["controls"]["chat"], "mew chat")
             finally:
@@ -533,6 +537,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn(f"follow: mew work 1 --follow --quiet --allow-read {resolved} --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn(f"resume: mew work 1 --session --resume --allow-read {resolved}", output)
+                self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("active memory: mew memory --active --task-id 1", output)
                 self.assertIn("chat: mew chat", output)
                 state = load_state()

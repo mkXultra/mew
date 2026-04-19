@@ -5859,6 +5859,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("chat: mew chat", output)
                 self.assertNotIn("created plan", output)
 
@@ -5894,6 +5895,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("chat: mew chat", output)
 
                 state = load_state()
