@@ -73,7 +73,12 @@ Milestone 2 Done-when checklist:
   and passing `/tmp/mew-accept-edits-work-session-dogfood` run. M2 comparative
   artifacts now also serialize the mew-side `approval_mode` and default
   permission posture, so future fresh-CLI comparisons can tell whether
-  `accept-edits` was actually used.
+  `accept-edits` was actually used. Real dogfood of task `#259` exposed a
+  test-first failure mode where `accept-edits` auto-applied a normal paired-test
+  preview and verified before the source edit landed; paired-test-steer previews
+  are now marked with `defer_verify_on_approval`, and
+  `/tmp/mew-accept-edits-paired-defer-dogfood` proves
+  `work_ai_accept_edits_defers_paired_test_first_verification`.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

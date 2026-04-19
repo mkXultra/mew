@@ -4851,6 +4851,75 @@ observed = {
     "verification_exit_code": apply_result.get("verification_exit_code"),
     "content": Path("accept-edits.md").read_text(encoding="utf-8"),
 }
+
+Path("src/mew/accept_pairing.py").write_text("VALUE = 'old'\\n", encoding="utf-8")
+pair_outputs = [
+    {
+        "summary": "preview source edit first",
+        "action": {
+            "type": "edit_file",
+            "path": "src/mew/accept_pairing.py",
+            "old": "old",
+            "new": "new",
+        },
+    },
+    {
+        "summary": "add paired test first",
+        "action": {
+            "type": "write_file",
+            "path": "tests/test_accept_pairing.py",
+            "content": "def test_accept_pairing():\\n    assert True\\n",
+            "create": True,
+        },
+    },
+]
+code, output = run_main(["task", "add", "Dogfood accept-edits paired test-first task", "--kind", "coding", "--json"])
+pair_task_id = str(json.loads(output)["task"]["id"])
+failing_verify = f"{sys.executable} -c \\"raise SystemExit(99)\\""
+with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+    with patch("mew.work_loop.call_model_json_with_retries", side_effect=pair_outputs):
+        pair_code, pair_output = run_main(
+            [
+                "work",
+                pair_task_id,
+                "--ai",
+                "--json",
+                "--auth",
+                "auth.json",
+                "--allow-read",
+                ".",
+                "--allow-write",
+                ".",
+                "--allow-verify",
+                "--verify-command",
+                failing_verify,
+                "--approval-mode",
+                "accept-edits",
+                "--max-steps",
+                "2",
+                "--act-mode",
+                "deterministic",
+            ]
+        )
+pair_report = json.loads(pair_output)
+pair_session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == pair_task_id)
+pair_calls = pair_session.get("tool_calls") or []
+pair_steps = pair_report.get("steps") or []
+pair_preview = pair_calls[0] if pair_calls else {}
+pair_apply = pair_calls[1] if len(pair_calls) > 1 else {}
+pair_apply_result = pair_apply.get("result") or {}
+observed["paired_test_first"] = {
+    "exit_code": pair_code,
+    "stop_reason": pair_report.get("stop_reason"),
+    "inline_approval": ((pair_steps[1] if len(pair_steps) > 1 else {})).get("inline_approval"),
+    "preview_defer_verify_on_approval": (pair_preview.get("parameters") or {}).get("defer_verify_on_approval"),
+    "paired_test_source_path": (pair_preview.get("parameters") or {}).get("paired_test_source_path"),
+    "preview_approval_status": pair_preview.get("approval_status"),
+    "apply_verification_deferred": pair_apply_result.get("verification_deferred"),
+    "verification_exit_code_present": "verification_exit_code" in pair_apply_result,
+    "test_file_exists": Path("tests/test_accept_pairing.py").exists(),
+    "source_after": Path("src/mew/accept_pairing.py").read_text(encoding="utf-8"),
+}
 passed = (
     code == 0
     and observed["stdout_parseable_json"] is True
@@ -4862,6 +4931,16 @@ passed = (
     and observed["apply_dry_run"] is False
     and observed["verification_exit_code"] == 0
     and observed["content"] == "new text\\n"
+    and observed["paired_test_first"]["exit_code"] == 0
+    and observed["paired_test_first"]["stop_reason"] == "max_steps"
+    and observed["paired_test_first"]["inline_approval"] == "auto_applied"
+    and observed["paired_test_first"]["preview_defer_verify_on_approval"] is True
+    and observed["paired_test_first"]["paired_test_source_path"] == "src/mew/accept_pairing.py"
+    and observed["paired_test_first"]["preview_approval_status"] == "applied"
+    and observed["paired_test_first"]["apply_verification_deferred"] is True
+    and observed["paired_test_first"]["verification_exit_code_present"] is False
+    and observed["paired_test_first"]["test_file_exists"] is True
+    and observed["paired_test_first"]["source_after"] == "VALUE = 'old'\\n"
 )
 print(json.dumps({"passed": passed, "observed": observed}, ensure_ascii=False))
 raise SystemExit(0 if passed else 1)
@@ -5241,6 +5320,22 @@ raise SystemExit(0 if passed else 1)
         expected=(
             "approval-mode accept-edits applies one dry-run write/edit preview automatically "
             "and keeps JSON work-loop output parseable"
+        ),
+    )
+    accept_edits_paired = accept_edits_observed.get("paired_test_first") or {}
+    _scenario_check(
+        checks,
+        "work_ai_accept_edits_defers_paired_test_first_verification",
+        accept_edits_ai_result.get("exit_code") == 0
+        and accept_edits_ai_data.get("passed") is True
+        and accept_edits_paired.get("inline_approval") == "auto_applied"
+        and accept_edits_paired.get("preview_defer_verify_on_approval") is True
+        and accept_edits_paired.get("apply_verification_deferred") is True
+        and accept_edits_paired.get("verification_exit_code_present") is False,
+        observed=accept_edits_paired or command_result_tail(accept_edits_ai_result, limit=5),
+        expected=(
+            "approval-mode accept-edits auto-applies paired-test-steer test previews "
+            "with verification deferred until the source edit lands"
         ),
     )
     _scenario_check(

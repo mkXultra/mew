@@ -44,6 +44,8 @@ Observed:
 - focused pytest: `3 passed`
 - dogfood: `pass`
 - dogfood check added: `work_ai_accept_edits_auto_applies_preview`
+- dogfood check added after real test-first failure:
+  `work_ai_accept_edits_defers_paired_test_first_verification`
 - focused comparative evidence check confirms `approval_mode: accept-edits` is
   serialized into JSON and the markdown runbook.
 - comparative artifact:
@@ -57,11 +59,13 @@ This does not close M2 by itself. It gives the resident a Claude Code-like
 `acceptEdits` mode for low-friction small edits and creates executable dogfood
 evidence that the mode works without breaking JSON observation.
 
-The real dogfood task also exposed a remaining M2 gap: test-first edits can
-still run verification before the source-side companion edit lands unless the
-resident explicitly defers verification or the system can apply the paired edit
-as a batch. That points back to batch or multi-action approval as the next
-stronger M2 lever.
+The real dogfood task exposed a remaining M2 gap: test-first edits could run
+verification before the source-side companion edit landed when the model emitted
+a normal dry-run preview under a paired-test steer. The follow-up fix marks
+paired-test-steer previews with `defer_verify_on_approval`, so
+`accept-edits` can auto-apply the test half without running the verifier until
+the source edit lands. This reduces the sharpest failure mode, but batch or
+multi-action approval remains the stronger M2 lever.
 
 Next M2 evidence should compare a real small write-heavy task using
 `accept-edits` against a fresh CLI run and record whether the result moves from

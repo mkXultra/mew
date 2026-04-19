@@ -3119,16 +3119,16 @@ def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parame
         return False
     if not _work_path_is_tests_path((parameters or {}).get("path")):
         return False
-    if not (parameters or {}).get("apply"):
-        return False
-    parameters["apply"] = False
+    if (parameters or {}).get("apply"):
+        parameters["apply"] = False
+        if isinstance(action, dict):
+            action["apply"] = False
+            action["dry_run"] = True
     parameters["defer_verify_on_approval"] = True
     metadata = pending_steer.get("metadata") or {}
     if metadata.get("source_path"):
         parameters["paired_test_source_path"] = metadata.get("source_path")
     if isinstance(action, dict):
-        action["apply"] = False
-        action["dry_run"] = True
         action["coerced_dry_run_reason"] = "paired_test_steer"
         action["defer_verify_on_approval"] = True
         if metadata.get("source_path"):
