@@ -374,10 +374,22 @@ def build_observation_metrics(state, *, kind=None, limit=None):
     )
     completed_sessions = session_counts["closed"] or 0
     completion_ratio = (completed_sessions / session_counts["total"]) if session_counts["total"] else None
+    approval_problem_count = approval_counts["rejected"] + approval_counts["failed"]
+    verification_failure_count = verification_counts["failed"]
+    reliability_rates = {
+        "completion": _round(completion_ratio),
+        "interventions_per_session": _rate(intervention_count, session_counts["total"]),
+        "tool_failure": _rate(tool_counts["failed"] + tool_counts["interrupted"], tool_counts["total"]),
+        "model_turn_failure": _rate(turn_counts["failed"] + turn_counts["interrupted"], turn_counts["total"]),
+        "approval_rejection": _rate(approval_problem_count, approval_counts["total"]),
+        "verification_failure": _rate(verification_failure_count, verification_counts["total"]),
+        "verification_rollback": _rate(verification_counts["rolled_back"], verification_counts["total"]),
+    }
 
     reliability = {
         "completion_ratio": _round(completion_ratio),
         "interventions": intervention_count,
+        "rates": reliability_rates,
         "tool_calls": tool_counts,
         "model_turns": turn_counts,
         "approvals": approval_counts,
@@ -419,6 +431,7 @@ def format_observation_metrics(data):
         ),
     ]
     for label, key in (
+        ("rates", "rates"),
         ("tool_calls", "tool_calls"),
         ("model_turns", "model_turns"),
         ("approvals", "approvals"),

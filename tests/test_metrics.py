@@ -77,6 +77,9 @@ class MetricsTests(unittest.TestCase):
 
         self.assertEqual(metrics["sessions"]["total"], 1)
         self.assertEqual(metrics["reliability"]["completion_ratio"], 1.0)
+        self.assertEqual(metrics["reliability"]["rates"]["approval_rejection"], 1.0)
+        self.assertEqual(metrics["reliability"]["rates"]["verification_failure"], 1.0)
+        self.assertEqual(metrics["reliability"]["rates"]["interventions_per_session"], 3.0)
         self.assertEqual(metrics["reliability"]["approvals"]["rejected"], 1)
         self.assertEqual(metrics["reliability"]["verification"]["failed"], 1)
         self.assertEqual(metrics["reliability"]["verification"]["rolled_back"], 1)
@@ -93,6 +96,7 @@ class MetricsTests(unittest.TestCase):
         text = format_observation_metrics(metrics)
         self.assertIn("Mew observation metrics", text)
         self.assertIn("interventions=3", text)
+        self.assertIn("rates: completion=1.0 interventions_per_session=3.0", text)
         self.assertIn("perceived_idle_ratio: count=1 avg=0.65 median=0.65 p95=0.65 max=0.65", text)
         self.assertIn("signals:", text)
         self.assertIn("verification failures are frequent", text)
