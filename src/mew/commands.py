@@ -8101,9 +8101,15 @@ def cmd_brief(args):
     state = load_state()
     kind = getattr(args, "kind", None) or None
     if args.json:
-        print(json.dumps(build_brief_data(state, limit=args.limit, kind=kind), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                build_brief_data(state, limit=args.limit, kind=kind, include_context_checkpoint=True),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
-    print(build_brief(state, limit=args.limit, kind=kind))
+    print(build_brief(state, limit=args.limit, kind=kind, include_context_checkpoint=True))
     return 0
 
 def cmd_focus(args):
@@ -13090,7 +13096,7 @@ def run_chat_slash_command(line, chat_state):
         if error:
             print(error)
         else:
-            print(build_brief(load_state(), kind=kind))
+            print(build_brief(load_state(), kind=kind, include_context_checkpoint=True))
         return "continue"
     if command == "next":
         kind, error = chat_kind_filter(rest, default_kind=chat_state.get("kind"))
@@ -13458,7 +13464,7 @@ def cmd_chat(args):
         if getattr(args, "compact_brief", False):
             print(format_compact_chat_brief(state, kind=kind), flush=True)
         else:
-            print(build_brief(state, limit=args.limit, kind=kind), flush=True)
+            print(build_brief(state, limit=args.limit, kind=kind, include_context_checkpoint=True), flush=True)
     session = active_work_session_for_kind(state, kind=kind)
     if session and not suppress_startup_controls:
         print(

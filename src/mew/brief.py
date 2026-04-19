@@ -7,6 +7,7 @@ from .state import is_routine_outbox_message
 from .tasks import find_task, open_tasks, task_kind, task_needs_programmer_plan, task_sort_key
 from .thoughts import recent_thoughts_for_context
 from .timeutil import elapsed_hours, now_iso
+from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
 from .work_session import (
     build_work_session_resume,
     format_work_continuity_inline,
@@ -17,11 +18,35 @@ from .work_session import (
 )
 
 
+CONTEXT_CHECKPOINT_QUERY = "Context save next safe action context compression long session"
+
+
 def _first_nonempty(*values):
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _context_checkpoint_note(text):
+    for line in str(text or "").splitlines():
+        if line.startswith("Note:"):
+            return line.removeprefix("Note:").strip()
+    return ""
+
+
+def latest_context_checkpoint(query=CONTEXT_CHECKPOINT_QUERY):
+    entries = [
+        entry
+        for entry in FileMemoryBackend(".").entries()
+        if entry.memory_type == "project" and memory_entry_matches(entry, query)
+    ]
+    if not entries:
+        return {}
+    entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
+    item = entry_to_dict(entries[0])
+    item["reentry_note"] = _context_checkpoint_note(item.get("text"))
+    return item
 
 
 def current_project_looks_like_mew():
@@ -543,7 +568,7 @@ def format_activity(state, limit=10, kind=None):
     return "\n".join(lines)
 
 
-def build_brief_data(state, limit=5, kind=None):
+def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False):
     generated_at = now_iso()
     memory = state.get("memory", {})
     shallow = memory.get("shallow", {})
@@ -600,6 +625,9 @@ def build_brief_data(state, limit=5, kind=None):
             "current_context": _first_nonempty(shallow.get("current_context"), ""),
             "latest_task_summary": _first_nonempty(shallow.get("latest_task_summary"), ""),
             "project_snapshot": _project_snapshot_item(deep.get("project_snapshot")),
+            "latest_context_checkpoint": latest_context_checkpoint()
+            if include_context_checkpoint
+            else {},
         },
         "recent_activity": activity,
         "thought_journal": [_thought_item(thought) for thought in thoughts],
@@ -1043,7 +1071,7 @@ def next_move(state, kind=None):
     return "wait for the next user request"
 
 
-def build_brief(state, limit=5, kind=None):
+def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     generated_at = now_iso()
     runtime = state.get("runtime_status", {})
     agent = scoped_agent_status(state, kind=kind)
@@ -1083,6 +1111,7 @@ def build_brief(state, limit=5, kind=None):
     thoughts = [] if kind else recent_thoughts_for_context(state, limit=limit)
     activity = [] if kind else recent_activity(state, limit=limit)
     recent_unread = list(reversed(unread[-limit:]))
+    context_checkpoint = latest_context_checkpoint() if include_context_checkpoint else {}
     if kind:
         task_ids = {str(task.get("id")) for task in tasks}
         running_runs = [run for run in running_runs if str(run.get("task_id")) in task_ids]
@@ -1102,6 +1131,19 @@ def build_brief(state, limit=5, kind=None):
         f"memory: {_first_nonempty(shallow.get('current_context'), shallow.get('latest_task_summary'), '(empty)')}",
         "",
     ]
+    if context_checkpoint:
+        note = " ".join(str(context_checkpoint.get("reentry_note") or "").split())
+        if len(note) > 500:
+            note = note[:497].rstrip() + "..."
+        lines.insert(
+            -1,
+            "context_checkpoint: "
+            f"{context_checkpoint.get('name') or context_checkpoint.get('key')} "
+            f"at={context_checkpoint.get('created_at')} "
+            f"load={mew_command('context', '--load', '--limit', '1')}",
+        )
+        if note:
+            lines.insert(-1, f"context_checkpoint_note: {note}")
     skip_recovery = runtime.get("last_native_work_skip_recovery") or {}
     if runtime.get("last_native_work_step_skip"):
         recovery = f" next={skip_recovery.get('command')}" if skip_recovery.get("command") else ""

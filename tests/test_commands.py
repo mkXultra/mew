@@ -4362,6 +4362,12 @@ class CommandTests(unittest.TestCase):
                 self.assertTrue(loaded["matches"][0]["recommended"])
                 self.assertIn("Long session checkpoint", loaded["matches"][0]["reentry_note"])
                 self.assertIn("Long session checkpoint", loaded["matches"][0]["text"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["brief", "--kind", "coding"]), 0)
+                brief = stdout.getvalue()
+                self.assertIn("context_checkpoint: Dogfood context save", brief)
+                self.assertIn("context_checkpoint_note: Long session checkpoint", brief)
             finally:
                 os.chdir(old_cwd)
 
