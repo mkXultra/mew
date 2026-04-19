@@ -254,6 +254,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("chat: mew chat", output)
                 state = load_state()
                 self.assertEqual(len(state["tasks"]), 1)
                 self.assertEqual(state["tasks"][0]["latest_plan_id"], None)
@@ -396,6 +397,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("chat: mew chat", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["status"], "ready")
                 self.assertEqual(state["tasks"][0]["plans"], [])
@@ -437,6 +439,7 @@ class SelfImproveTests(unittest.TestCase):
                 )
                 self.assertEqual(data["controls"]["status"], "mew work 1 --follow-status --json")
                 self.assertEqual(data["controls"]["resume"], "mew work 1 --session --resume --allow-read .")
+                self.assertEqual(data["controls"]["chat"], "mew chat")
             finally:
                 os.chdir(old_cwd)
 
@@ -520,6 +523,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn(f"follow: mew work 1 --follow --quiet --allow-read {resolved} --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn(f"resume: mew work 1 --session --resume --allow-read {resolved}", output)
+                self.assertIn("chat: mew chat", output)
                 state = load_state()
                 defaults = state["work_sessions"][0]["default_options"]
                 self.assertEqual(defaults["allow_read"], [resolved])

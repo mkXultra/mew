@@ -5566,6 +5566,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("chat: mew chat", output)
                 self.assertNotIn("created plan", output)
 
                 state = load_state()
@@ -5600,6 +5601,7 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("follow: mew work 1 --follow --quiet --allow-read . --compact-live --max-steps 10", output)
                 self.assertIn("status: mew work 1 --follow-status --json", output)
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
+                self.assertIn("chat: mew chat", output)
 
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["status"], "ready")

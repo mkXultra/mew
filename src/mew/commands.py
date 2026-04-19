@@ -8747,6 +8747,7 @@ def native_self_improve_controls(task, *, include_start_hint=False):
         ),
         "status": mew_command("work", task["id"], "--follow-status", "--json"),
         "resume": mew_command("work", task["id"], "--session", "--resume", "--allow-read", read_root),
+        "chat": mew_command("chat"),
     }
     if include_start_hint:
         controls["start_session"] = mew_command(
@@ -8769,6 +8770,7 @@ def print_native_self_improve_controls(task, *, include_start_hint=False):
     print(f"follow: {controls['follow']}")
     print(f"status: {controls['status']}")
     print(f"resume: {controls['resume']}")
+    print(f"chat: {controls['chat']}")
 
 
 def self_improve_native_validation_error(
