@@ -2564,6 +2564,35 @@ def _continuity_pivot_text(resume):
     return texts
 
 
+_CONTINUITY_REPAIR_ACTIONS = {
+    "working_memory_survived": "refresh working memory with a hypothesis, next step, or verified state",
+    "risks_preserved": "inspect unresolved failures, pending approvals, and recovery state before acting",
+    "next_action_runnable": "record a runnable next action, approval control, or recovery command",
+    "approvals_visible": "preserve approve and reject controls for every pending approval",
+    "recovery_path_visible": "record a safe recovery or reobserve path",
+    "verifier_confidence_kept": "record verification status or a suggested verify command",
+    "bundle_within_budget": "compact or summarize the session before continuing",
+    "recent_decisions_preserved": "summarize recent decisions or older think before continuing",
+    "user_pivot_preserved": "surface and handle the pending user pivot or follow-up",
+}
+
+
+def _continuity_recommendation(missing):
+    missing = [str(item) for item in (missing or []) if item]
+    if not missing:
+        return {
+            "summary": "continue from the preserved next action",
+            "actions": [],
+            "primary_axis": "",
+        }
+    actions = [_CONTINUITY_REPAIR_ACTIONS.get(axis, f"repair {axis}") for axis in missing]
+    return {
+        "summary": actions[0],
+        "actions": actions,
+        "primary_axis": missing[0],
+    }
+
+
 def build_work_continuity_score(resume):
     """Score whether a work resume can restore continuity after interruption."""
     resume = resume or {}
@@ -2706,6 +2735,7 @@ def build_work_continuity_score(resume):
         "total": total,
         "score": f"{passed}/{total}",
         "missing": missing,
+        "recommendation": _continuity_recommendation(missing),
         "axes": axes,
     }
 
@@ -2716,6 +2746,14 @@ def format_work_continuity_inline(continuity):
     missing = continuity.get("missing") or []
     suffix = f" missing={','.join(str(item) for item in missing)}" if missing else ""
     return f"continuity: {continuity.get('score') or '-'} status={continuity.get('status') or 'unknown'}{suffix}"
+
+
+def format_work_continuity_recommendation(continuity):
+    if not continuity or not (continuity.get("missing") or []):
+        return ""
+    recommendation = continuity.get("recommendation") or {}
+    summary = str(recommendation.get("summary") or "").strip()
+    return f"continuity_next: {summary}" if summary else ""
 
 
 def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
@@ -3391,6 +3429,9 @@ def format_work_session_resume(resume):
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
+    continuity_next = format_work_continuity_recommendation(resume.get("continuity") or {})
+    if continuity_next:
+        lines.append(continuity_next)
     lines.extend(["", "Files touched"])
     files = resume.get("files_touched") or []
     if files:

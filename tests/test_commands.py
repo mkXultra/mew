@@ -3771,6 +3771,8 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(session["follow_status_command"], "mew work 1 --follow-status --json")
                 self.assertTrue(session["follow_status"]["producer_alive"])
                 self.assertEqual(session["follow_status"]["producer_health"]["state"], "working")
+                self.assertIn("continuity", session)
+                self.assertIn("recommendation", session["continuity"])
 
                 with patch("mew.commands.pid_alive", return_value=True):
                     with redirect_stdout(StringIO()) as stdout:
@@ -3782,6 +3784,8 @@ class CommandTests(unittest.TestCase):
                     output,
                 )
                 self.assertIn("status=mew work 1 --follow-status --json", output)
+                self.assertIn("continuity:", output)
+                self.assertIn("continuity_next:", output)
             finally:
                 os.chdir(old_cwd)
 

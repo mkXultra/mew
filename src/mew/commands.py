@@ -192,6 +192,7 @@ from .work_session import (
     format_diff_preview,
     format_work_action,
     format_work_continuity_inline,
+    format_work_continuity_recommendation,
     format_work_failure_risk,
     format_work_session_commands,
     format_work_session_diffs,
@@ -4317,6 +4318,8 @@ def active_work_session_status_items(state, kind=None):
         calls = session.get("tool_calls") or []
         turns = session.get("model_turns") or []
         pending_ids = _pending_approval_tool_ids(session)
+        task = find_task(state, task_id) if task_id is not None else None
+        resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
         status_command = (
             mew_command(
                 "work",
@@ -4334,12 +4337,14 @@ def active_work_session_status_items(state, kind=None):
                 "id": session.get("id"),
                 "task_id": task_id,
                 "status": session.get("status") or "",
-                "phase": work_session_phase(session, calls, turns, pending_ids),
+                "phase": resume.get("phase") or work_session_phase(session, calls, turns, pending_ids),
                 "title": session.get("title") or "",
                 "updated_at": session.get("updated_at") or "",
                 "pending_approval_count": len(pending_ids),
                 "follow_status": follow_status,
                 "follow_status_command": status_command,
+                "continuity": resume.get("continuity") or {},
+                "next_action": resume.get("next_action") or "",
                 "resume_command": (
                     mew_command("work", task_id, "--session", "--resume") if task_id is not None else ""
                 ),
@@ -5662,6 +5667,9 @@ def format_work_follow_status(data):
     continuity_text = format_work_continuity_inline(data.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
+    continuity_next = format_work_continuity_recommendation(data.get("continuity") or {})
+    if continuity_next:
+        lines.append(continuity_next)
     return "\n".join(lines)
 
 
@@ -7568,6 +7576,12 @@ def cmd_status(args):
             f"alive={bool(follow.get('producer_alive'))} "
             f"status={session.get('follow_status_command')}"
         )
+        continuity_text = format_work_continuity_inline(session.get("continuity") or {})
+        if continuity_text:
+            print(f"  {continuity_text}")
+        continuity_next = format_work_continuity_recommendation(session.get("continuity") or {})
+        if continuity_next:
+            print(f"  {continuity_next}")
     if attention:
         top = attention[0]
         print(f"top_attention: #{top['id']} {top.get('title')}: {top.get('reason')}")

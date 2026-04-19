@@ -10,6 +10,7 @@ from .timeutil import elapsed_hours, now_iso
 from .work_session import (
     build_work_session_resume,
     format_work_continuity_inline,
+    format_work_continuity_recommendation,
     format_work_failure_risk,
     latest_unresolved_failure,
     work_session_task,
@@ -872,6 +873,9 @@ def format_focus(data):
             continuity_text = format_work_continuity_inline(session.get("continuity") or {})
             if continuity_text:
                 lines.append(f"  {continuity_text}")
+            continuity_next = format_work_continuity_recommendation(session.get("continuity") or {})
+            if continuity_next:
+                lines.append(f"  {continuity_next}")
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
             if session.get("risk"):

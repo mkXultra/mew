@@ -108,6 +108,8 @@ Target:
   - verifier confidence kept
   - bundle within budget
   - prior decisions preserved
+  - pending user pivots preserved
+  - weak continuity includes the next repair action
 - project memory search that affects model behavior
 - user preference memory
 - daily passive bundle for reentry across journal, mood, research, dream, and self-memory artifacts

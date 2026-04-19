@@ -333,12 +333,19 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         continuity = build_work_continuity_score(resume)
+        resume["continuity"] = continuity
 
         self.assertIn("working_memory_survived", continuity["missing"])
         self.assertIn("risks_preserved", continuity["missing"])
         self.assertIn("next_action_runnable", continuity["missing"])
         self.assertIn("recovery_path_visible", continuity["missing"])
         self.assertIn("recent_decisions_preserved", continuity["missing"])
+        self.assertEqual(continuity["recommendation"]["primary_axis"], "working_memory_survived")
+        self.assertIn(
+            "refresh working memory",
+            continuity["recommendation"]["summary"],
+        )
+        self.assertIn("continuity_next: refresh working memory", format_work_session_resume(resume))
 
     def test_work_continuity_score_counts_user_pivot_when_visible(self):
         resume = {
