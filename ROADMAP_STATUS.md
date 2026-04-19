@@ -179,6 +179,16 @@ Milestone 2 Done-when checklist:
   outcome lines, so live follow mode can show the search trap without opening a
   full resume. The full `tests/test_work_session.py` suite passed and the
   work-session dogfood passed at `/tmp/mew-low-yield-live-output-dogfood`.
+  Task `#277` then moved the same low-yield search-trap signal into the
+  work-session dogfood scenario itself: the synthetic resume now includes three
+  zero-match `search_text` calls on the same path/pattern and proves
+  `work_low_yield_search_trap_surfaces_in_resume`. Resident session `#262`
+  improved over the prior over-search loop by using targeted reads and paired
+  diffs, but still needed supervisor correction after trying to couple dogfood
+  coverage to live-output formatting in a way that would have crossed the
+  `dogfood.py` -> `commands.py` import boundary. The paired
+  `tests/test_dogfood.py` and `tests/test_work_session.py` suite passed, and
+  work-session dogfood passed at `/tmp/mew-low-yield-resume-dogfood`.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

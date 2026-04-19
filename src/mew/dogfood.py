@@ -5192,7 +5192,7 @@ raise SystemExit(0 if passed else 1)
     old_cwd = os.getcwd()
     try:
         os.chdir(workspace)
-        zero_test_verification_confidence = build_work_session_resume(
+        synthetic_verification_resume = build_work_session_resume(
             {
                 "id": 99,
                 "task_id": 1,
@@ -5225,10 +5225,33 @@ raise SystemExit(0 if passed else 1)
                             "narrow_verify_command": True,
                         },
                     },
+                    {
+                        "id": 3,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew", "query": "missing_symbol", "pattern": "src/mew/**/*.py"},
+                        "result": {"matches": []},
+                    },
+                    {
+                        "id": 4,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew", "query": "missing_symbol_extra", "pattern": "src/mew/**/*.py"},
+                        "result": {"matches": []},
+                    },
+                    {
+                        "id": 5,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew", "query": "missing_symbol_final", "pattern": "src/mew/**/*.py"},
+                        "result": {"matches": []},
+                    },
                 ],
                 "model_turns": [],
             }
-        ).get("verification_confidence") or {}
+        )
+        zero_test_verification_confidence = synthetic_verification_resume.get("verification_confidence") or {}
+        low_yield_observations = synthetic_verification_resume.get("low_yield_observations") or []
     finally:
         os.chdir(old_cwd)
     running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
@@ -6081,6 +6104,18 @@ raise SystemExit(0 if passed else 1)
         and "broaden the selector" in str(zero_test_verification_confidence.get("reason") or ""),
         observed={"verification_confidence": zero_test_verification_confidence},
         expected="zero-test pytest verifier output is surfaced as invalid low-confidence verification needing a broader selector",
+    )
+    _scenario_check(
+        checks,
+        "work_low_yield_search_trap_surfaces_in_resume",
+        len(low_yield_observations) == 1
+        and low_yield_observations[0].get("tool") == "search_text"
+        and low_yield_observations[0].get("count") == 3
+        and low_yield_observations[0].get("pattern") == "src/mew/**/*.py"
+        and "missing_symbol_extra" in (low_yield_observations[0].get("queries") or [])
+        and "stop searching this same surface" in str(low_yield_observations[0].get("suggested_next") or ""),
+        observed={"low_yield_observations": low_yield_observations},
+        expected="repeated zero-match search traps are surfaced in work-session resume data",
     )
     _scenario_check(
         checks,

@@ -505,6 +505,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("work_approve_tool_can_defer_verification", text)
             self.assertIn("work_unpaired_source_approval_requires_override", text)
             self.assertIn("work_zero_test_pytest_invalid_verifier_confidence", text)
+            self.assertIn("work_low_yield_search_trap_surfaces_in_resume", text)
             command = report["scenarios"][0]["commands"][0]
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)
