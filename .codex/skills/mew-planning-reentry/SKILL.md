@@ -9,17 +9,27 @@ Use this skill when resuming mew work after context compression, a long session,
 
 Goal: rebuild the current plan from mew itself, not from stale chat memory, and avoid drifting from the long-session charter after context compression.
 
+If the user asks what to do next, gives long-session freedom, or asks whether
+mew is good enough, route task selection through `mew-product-evaluator`.
+The evaluator's active milestone and Done-when checklist are the value
+function; do not keep selecting polish after context compression.
+
 ## Decision Precedence
 
 When deciding what to do next, apply this order:
 
 1. The user's newest explicit instruction.
 2. The long-session charter or plan saved before the session started.
-3. Durable project decisions in mew memory and project docs such as `docs/ADOPT_FROM_REFERENCES.md`.
-4. Current active task/session state and the latest context checkpoint.
-5. `mew focus`, latest friction, and recent model recommendations.
+3. `mew-product-evaluator` active milestone / Done-when decision, backed by
+   `ROADMAP.md` and `ROADMAP_STATUS.md`.
+4. Durable project decisions in mew memory and project docs such as
+   `docs/ADOPT_FROM_REFERENCES.md`.
+5. Current active task/session state and the latest context checkpoint.
+6. `mew focus`, latest friction, and recent model recommendations.
 
 Do not let a fresh active task, latest checkpoint, or external model comment override the session charter unless the user explicitly changed direction.
+Do not let `mew focus` or an attractive recent suggestion override the active
+milestone gate unless it closes that milestone's Done-when criteria.
 
 ## Reentry Checklist
 
@@ -36,6 +46,8 @@ git status --short
 ./mew memory --search "decision" --type project --json
 ./mew memory --search "next safe action context compression long session" --type project --json
 ./mew context --load --json
+sed -n '1,120p' ROADMAP.md
+sed -n '1,140p' ROADMAP_STATUS.md
 ```
 
 If these do not explain deferred structural work, add a targeted project-memory search:
@@ -59,6 +71,9 @@ If an active work session or task is visible, inspect it before acting:
 ```
 
 If roadmap status is the question, use `mew-roadmap-status` after this reentry check.
+If product direction or next implementation target is the question, use
+`mew-product-evaluator` after this reentry check and choose only work that maps
+to the active milestone's Done-when checklist.
 
 ## What To Extract
 
@@ -70,6 +85,8 @@ Summarize only:
 - deferred work and why it is deferred
 - pending approvals, recovery paths, or stale sessions
 - latest known validation and whether it is current
+- active roadmap milestone, unmet Done-when criteria, and which one the next
+  task closes
 - next safest action
 
 ## Drift Check
@@ -81,6 +98,8 @@ Before starting or continuing a self-improve task, compare it against the sessio
 - If the charter says to wait for concrete signal, do not start structural skeletons just because a reference review mentioned them.
 - If `docs/ADOPT_FROM_REFERENCES.md` and a later memory decision disagree, prefer the newer explicit decision memory and mention the conflict.
 - If the next step is chosen from `mew focus`, explain why it is compatible with the charter instead of treating focus as authoritative.
+- If the next step does not map to the active milestone's Done-when checklist,
+  do not implement it during a free-form long session; record it as deferred.
 
 Validation rule: report validation visible in `brief`, task notes, or work-session resume as "last observed". Do not rerun full validation unless the user asked for validation or you changed files in this turn.
 

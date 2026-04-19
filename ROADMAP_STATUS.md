@@ -14,7 +14,52 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
-## Current Focus
+## Active Milestone Decision
+
+Last assessed: 2026-04-19 20:45 JST.
+
+Active milestone: Milestone 2, Interactive Parity.
+
+Rationale: Milestone 1 is closed. Milestones 3-5 have useful foundations, but
+they should not pull fresh implementation away from the earliest unfinished
+roadmap gate unless the user explicitly redirects the session or a concrete
+M2-blocking metric requires a supporting slice.
+
+Milestone 2 Done-when checklist:
+
+- Using mew for one focused coding task feels close to Claude Code / Codex CLI:
+  partial. The cockpit has live/follow cells, scoped chat, approvals, ledgers,
+  and real dogfood evidence, but it still needs a comparative task dogfood
+  protocol before treating the cockpit as parity-level: complete one real
+  coding task end-to-end in `mew code`, attempt the same task fresh in Claude
+  Code or Codex CLI, then log friction counts, resume behavior, and whether the
+  resident would have preferred to stay inside mew.
+- The model does not lose momentum while waiting for tool feedback: unmet.
+  `./mew metrics --kind coding` at this assessment showed
+  `first_tool_start_seconds p95=72.2s`, `model_resume_wait_seconds p95=32.3s`,
+  `perceived_idle_ratio p95=0.99`, frequent verification failures, and high
+  approval rejection. Some idle samples are human/manual gaps, but these
+  metrics are enough to block a "no momentum loss" claim.
+- During a focused coding task, an interrupted resident can resume inside mew
+  without user re-briefing and would not prefer to restart in a fresh coding
+  CLI: partial. M1-level resume and M3 continuity foundations exist, but this
+  has not yet been proven as part of the M2 comparative coding flow.
+
+Current decision rule: the next implementation task must close one unmet
+Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
+Useful next choices are either a real focused coding dogfood/bakeoff through
+`mew code <task-id>` or a targeted latency/friction slice chosen from
+`mew metrics --kind coding`. Polish, side projects, and later-milestone
+architecture are deferred unless they directly unblock this active criterion.
+`docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
+§0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
+levers chosen only when a measured active-milestone signal justifies them.
+
+## Current Focus Notes (Historical)
+
+Canonical current focus is the `Active Milestone Decision` above. The notes
+below are retained as recent evidence and should not override the active
+milestone gate.
 
 The active Persistent Advantage framing is now continuity, not calendar time.
 `mew work` resume bundles compute a `continuity` score across working memory,
@@ -1963,14 +2008,16 @@ Next action:
 
 Milestone 2: Interactive Parity.
 
+The canonical active decision is the top-level `Active Milestone Decision`.
 Fresh implementation should continue dogfooding real coding changes through
-`mew code <task-id>`. The front-door route and core mid-loop control lanes are
-now coherent, and global `focus` / `next` keep the coding reentry visible even
-when stale non-coding questions still need a user answer; the remaining
-Milestone 2 work is making the active coding loop itself feel as fast and calm
-as Claude Code or Codex CLI while preserving mew's persistent memory and audit
-trail. Same-surface audit and verification confidence are now visible
-cockpit/checkpoint artifacts rather than only prompt guidance. The next useful
-slice is a longer real live/follow coding dogfood session that measures whether
-these checkpoints reduce finish/approval mistakes without making the cockpit
-feel slower than a fresh Claude Code or Codex CLI session.
+`mew code <task-id>` or choose a targeted friction slice from
+`mew metrics --kind coding`; either path must map to a Milestone 2 Done-when
+criterion. The front-door route and core mid-loop control lanes are coherent,
+and global `focus` / `next` keep the coding reentry visible even when stale
+non-coding questions still need a user answer. The remaining Milestone 2 work
+is making the active coding loop feel as fast and calm as Claude Code or Codex
+CLI while preserving mew's persistent memory and audit trail. Same-surface
+audit and verification confidence are visible cockpit/checkpoint artifacts
+rather than only prompt guidance. Do not spend new long-session work on polish
+or later-milestone architecture unless it directly closes a current Milestone 2
+gap or reduces a measured M2 blocker.

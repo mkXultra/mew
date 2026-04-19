@@ -72,6 +72,11 @@ For long sessions, prefer one concise `mew memory --add` planning note named lik
 
 Write the charter separately from progress checkpoints. Checkpoints record what just happened; the charter records what should continue to govern task selection after context compression.
 
+For free-form mew improvement sessions, include the active roadmap milestone,
+the unmet Done-when criterion being attacked, and the rule for rejecting polish.
+Use `mew-product-evaluator` and `ROADMAP_STATUS.md` as the source of that
+decision instead of copying only the latest chat preference.
+
 If the current context diagnostics themselves are useful, prefer the native checkpoint command:
 
 ```bash

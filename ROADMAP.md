@@ -85,6 +85,8 @@ Done when:
 
 - using mew for one focused coding task feels close to Claude Code / Codex CLI
 - the model does not lose momentum while waiting for tool feedback
+- during a focused coding task, an interrupted resident can resume inside mew
+  without user re-briefing and would not prefer to restart in a fresh coding CLI
 
 ## Milestone 3: Persistent Advantage
 

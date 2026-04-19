@@ -13,6 +13,9 @@
   2. §2 の drama ranking で優先度を把握
   3. §3 の M2/M3 integration plan で現在の sprint との接続点を確認
   4. §5 の実装カードで詳細（現状／差分／pinpoint 参照／概算 LOC／前提／落とし穴／スケッチ）
+- **荷重の置き方**：§0.1 と §0.2 だけが採用判断として
+  load-bearing。§1-§5 は active milestone の Done-when を閉じるための
+  design option であり、ROADMAP/ROADMAP_STATUS より強い prescription ではない。
 - **信頼性**：ファイル位置と行番号は 2026-04-19 時点で検証済み（§8 参照）。参照コミットは参照リポの HEAD。ただし reference リポ更新で行が drift する前提で、**引用行は再確認してから採用する**こと。
 - **mew 側パス** (`src/mew/*.py`) は構造把握の起点。行番号は書いていない（すぐ陳腐化するため）。コードを開いて該当構造を探すこと。
 
