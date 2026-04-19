@@ -7146,6 +7146,102 @@ def format_m2_comparative_protocol(protocol):
     return "\n".join(lines) + "\n"
 
 
+def build_m2_fresh_cli_report_template(protocol):
+    evidence = (protocol or {}).get("mew_run_evidence") or {}
+    task_summary = evidence.get("task_title") or ""
+    verification = (evidence.get("verification") or {}).get("command") or ""
+    return {
+        "task_summary": task_summary,
+        "fresh_cli_context_mode": "true_restart",
+        "fresh_cli_session_resumed": False,
+        "fresh_cli_handoff_note_used": False,
+        "fresh_cli_restart_comparator_status": "unknown",
+        "manual_rebrief_needed": None,
+        "interruption_resume_gate": "unknown",
+        "verification": [
+            {
+                "command": verification,
+                "exit_code": None,
+                "summary": "",
+            }
+        ],
+        "friction_summary": "",
+        "preference_signal": "",
+        "resident_preference": {
+            "choice": "inconclusive",
+            "reason": "",
+            "blocking_gap": "",
+        },
+        "notes": "",
+    }
+
+
+def format_m2_fresh_cli_restart_prompt(protocol, report_template_path="m2-fresh-cli-report-template.json"):
+    evidence = (protocol or {}).get("mew_run_evidence") or {}
+    task_shape = (protocol or {}).get("task_shape") or {}
+    commands = evidence.get("commands_or_tests_run") or []
+    lines = [
+        "# M2 Fresh CLI Restart Comparator",
+        "",
+        "You are running the fresh CLI leg of mew's M2 comparative dogfood.",
+        "",
+        "Use a new coding-agent session. Do not resume a previous agent session. "
+        "Treat the repository checkout and this prompt as the only starting context.",
+        "",
+        "## Comparator Rules",
+        "",
+        "- Set `fresh_cli_context_mode` to `true_restart` only if no prior agent-session context was used.",
+        "- Set `fresh_cli_context_mode` to `same_session_resume` if you resume an earlier external agent session.",
+        "- Set `fresh_cli_session_resumed` and `fresh_cli_handoff_note_used` honestly.",
+        "- Record whether a human had to rebrief the task after interruption.",
+        "- Run verification or explain the blocker.",
+        "- Write a JSON report using the template below.",
+        "",
+        "## Task Shape",
+        "",
+        f"- selected: {task_shape.get('selected', '')}",
+        f"- recommended_next: {task_shape.get('recommended_next', '')}",
+        "",
+        "## Mew-Side Evidence Summary",
+        "",
+        f"- task_id: {evidence.get('task_id', '')}",
+        f"- task_title: {evidence.get('task_title', '')}",
+        f"- work_session_id: {evidence.get('work_session_id', '')}",
+        f"- work_session_ids: {evidence.get('work_session_ids') or []}",
+        f"- resume_gate: {(evidence.get('resume_gate') or {}).get('status', '')}",
+        f"- continuity: {(evidence.get('continuity') or {}).get('score', '')} "
+        f"{(evidence.get('continuity') or {}).get('status', '')}".rstrip(),
+        "",
+    ]
+    if commands:
+        lines.append("## Mew-Side Commands Or Tests")
+        lines.append("")
+        for command in commands:
+            lines.append(
+                f"- {command.get('tool')}: `{command.get('command')}` exit={command.get('exit_code')}"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "## Required Report",
+            "",
+            f"Write the completed report to `{report_template_path}` or another explicit JSON path.",
+            "The report must include these fields:",
+            "",
+            "```json",
+            json.dumps(build_m2_fresh_cli_report_template(protocol), indent=2, ensure_ascii=False),
+            "```",
+            "",
+            "After writing the report, the supervisor should merge it with:",
+            "",
+            "```bash",
+            "./mew dogfood --scenario m2-comparative --m2-comparison-report <report.json>",
+            "```",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def run_m2_comparative_scenario(
     workspace,
     env=None,
@@ -7177,10 +7273,22 @@ def run_m2_comparative_scenario(
     output_dir = Path(workspace) / STATE_DIR / "dogfood"
     json_path = output_dir / "m2-comparative-protocol.json"
     md_path = output_dir / "m2-comparative-protocol.md"
+    fresh_cli_template_path = output_dir / "m2-fresh-cli-report-template.json"
+    fresh_cli_prompt_path = output_dir / "m2-fresh-cli-restart-prompt.md"
     write_json_file(json_path, protocol)
     md_path.write_text(format_m2_comparative_protocol(protocol), encoding="utf-8")
+    write_json_file(fresh_cli_template_path, build_m2_fresh_cli_report_template(protocol))
+    fresh_cli_prompt_path.write_text(
+        format_m2_fresh_cli_restart_prompt(
+            protocol,
+            report_template_path=str(fresh_cli_template_path),
+        ),
+        encoding="utf-8",
+    )
     loaded = read_json_file(json_path, {})
     markdown = read_text_file(md_path)
+    fresh_cli_template = read_json_file(fresh_cli_template_path, {})
+    fresh_cli_prompt = read_text_file(fresh_cli_prompt_path)
 
     run_ids = {run.get("id") for run in loaded.get("required_runs") or []}
     friction_keys = set((loaded.get("friction_counts") or {}).keys())
@@ -7218,6 +7326,22 @@ def run_m2_comparative_scenario(
         and "Resident Preference" in markdown,
         observed={"path": str(md_path), "chars": len(markdown)},
         expected="Markdown runbook exists with comparison result and resident preference sections",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_writes_fresh_cli_restart_assets",
+        fresh_cli_template_path.exists()
+        and fresh_cli_prompt_path.exists()
+        and fresh_cli_template.get("fresh_cli_context_mode") == "true_restart"
+        and fresh_cli_template.get("fresh_cli_session_resumed") is False
+        and "M2 Fresh CLI Restart Comparator" in fresh_cli_prompt
+        and "fresh_cli_context_mode" in fresh_cli_prompt,
+        observed={
+            "template": str(fresh_cli_template_path),
+            "prompt": str(fresh_cli_prompt_path),
+            "template_context_mode": fresh_cli_template.get("fresh_cli_context_mode"),
+        },
+        expected="fresh CLI restart prompt and report template are emitted beside the protocol",
     )
     if mew_session_id:
         _scenario_check(
@@ -7332,6 +7456,8 @@ def run_m2_comparative_scenario(
     report["artifacts"] = {
         "json": str(json_path),
         "markdown": str(md_path),
+        "fresh_cli_report_template": str(fresh_cli_template_path),
+        "fresh_cli_restart_prompt": str(fresh_cli_prompt_path),
     }
     return report
 

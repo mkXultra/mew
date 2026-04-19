@@ -113,6 +113,10 @@ Milestone 2 Done-when checklist:
   `handoff_note_used`, and `restart_comparator_status`; the status-fallback
   fresh leg is now documented as `same_session_resume`, so it should not be
   treated as proof that mew lost against a no-prior-context fresh restart.
+  The same M2 comparative scenario now emits a `m2-fresh-cli-restart-prompt.md`
+  and `m2-fresh-cli-report-template.json`, so the next external comparator can
+  run from a new agent session and report restart context without hand-written
+  schema reconstruction.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

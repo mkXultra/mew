@@ -523,13 +523,19 @@ class DogfoodTests(unittest.TestCase):
             artifacts = scenario["artifacts"]
             protocol_path = Path(artifacts["json"])
             runbook_path = Path(artifacts["markdown"])
+            fresh_cli_template_path = Path(artifacts["fresh_cli_report_template"])
+            fresh_cli_prompt_path = Path(artifacts["fresh_cli_restart_prompt"])
             protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
             runbook = runbook_path.read_text(encoding="utf-8")
+            fresh_cli_template = json.loads(fresh_cli_template_path.read_text(encoding="utf-8"))
+            fresh_cli_prompt = fresh_cli_prompt_path.read_text(encoding="utf-8")
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(scenario["name"], "m2-comparative")
             self.assertTrue(protocol_path.exists())
             self.assertTrue(runbook_path.exists())
+            self.assertTrue(fresh_cli_template_path.exists())
+            self.assertTrue(fresh_cli_prompt_path.exists())
             self.assertIn("m2-comparative: pass", text)
             self.assertIn("artifacts:", text)
             self.assertIn("m2_comparative_protocol_records_resident_preference", text)
@@ -537,6 +543,12 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m2_comparative_protocol_has_fillable_comparison_result", text)
             self.assertIn("m2_comparative_protocol_tracks_interruption_resume_gate", text)
             self.assertIn("m2_comparative_protocol_tracks_fresh_cli_restart_context", text)
+            self.assertIn("m2_comparative_protocol_writes_fresh_cli_restart_assets", text)
+            self.assertEqual(fresh_cli_template["fresh_cli_context_mode"], "true_restart")
+            self.assertFalse(fresh_cli_template["fresh_cli_session_resumed"])
+            self.assertFalse(fresh_cli_template["fresh_cli_handoff_note_used"])
+            self.assertIn("M2 Fresh CLI Restart Comparator", fresh_cli_prompt)
+            self.assertIn("fresh_cli_context_mode", fresh_cli_prompt)
             self.assertTrue(protocol["generated_at"])
             self.assertEqual(
                 protocol["observer_tip"],
@@ -694,8 +706,12 @@ class DogfoodTests(unittest.TestCase):
             scenario = report["scenarios"][0]
             protocol_path = Path(scenario["artifacts"]["json"])
             runbook_path = Path(scenario["artifacts"]["markdown"])
+            fresh_cli_template_path = Path(scenario["artifacts"]["fresh_cli_report_template"])
+            fresh_cli_prompt_path = Path(scenario["artifacts"]["fresh_cli_restart_prompt"])
             protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
             runbook = runbook_path.read_text(encoding="utf-8")
+            fresh_cli_template = json.loads(fresh_cli_template_path.read_text(encoding="utf-8"))
+            fresh_cli_prompt = fresh_cli_prompt_path.read_text(encoding="utf-8")
             mew_summary = protocol["comparison_result"]["run_summaries"]["mew"]
 
             self.assertEqual(report["status"], "pass")
@@ -734,6 +750,10 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("## Interruption Resume Gate", runbook)
             self.assertIn("- work_session_id: 7", runbook)
             self.assertIn("`pytest -q`", runbook)
+            self.assertEqual(fresh_cli_template["task_summary"], "M2 evidence task")
+            self.assertEqual(fresh_cli_template["verification"][0]["command"], "pytest -q")
+            self.assertIn("M2 evidence task", fresh_cli_prompt)
+            self.assertIn("pytest -q", fresh_cli_prompt)
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
