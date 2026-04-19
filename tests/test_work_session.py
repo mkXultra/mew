@@ -2657,6 +2657,49 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stale_memory_next: Use the old plan.", text)
         self.assertNotIn("  memory_next: Use the old plan.", text.splitlines())
 
+    def test_work_resume_next_action_refreshes_stale_memory_after_tool(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "created_at": "2026-04-19T00:00:00Z",
+            "updated_at": "2026-04-19T00:00:10Z",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "started_at": "2026-04-19T00:00:01Z",
+                    "finished_at": "2026-04-19T00:00:02Z",
+                    "tool_call_id": 2,
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "Need source context.",
+                            "next_step": "Read README.",
+                        }
+                    },
+                    "action": {"type": "read_file"},
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "started_at": "2026-04-19T00:00:03Z",
+                    "finished_at": "2026-04-19T00:00:04Z",
+                    "parameters": {"path": "README.md"},
+                    "result": {"path": "README.md", "text": "ok"},
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task={"id": 1, "title": "Refresh"})
+        text = format_work_session_resume(resume)
+
+        self.assertIn("refresh working memory from latest read_file result", resume["next_action"])
+        self.assertIn("then continue the work session", resume["next_action"])
+        self.assertIn("Next action\nrefresh working memory from latest read_file result", text)
+
     def test_work_live_step_result_surfaces_verification_coverage_warning(self):
         text = format_work_live_step_result(
             {"status": "completed", "action": {"type": "run_tests"}, "summary": "verified"},

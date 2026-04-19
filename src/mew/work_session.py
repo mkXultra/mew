@@ -3530,6 +3530,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         calls,
         pending_approvals,
     )
+    if phase == "idle":
+        next_action = refresh_stale_memory_next_action(next_action, working_memory)
     user_preferences = build_work_user_preferences(state, limit=limit)
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
@@ -3612,6 +3614,16 @@ def recovery_next_action_with_world_state(next_action, world_state):
     if files or git_status:
         return f"{next_action}; live world check: review git status and observed paths before retrying"
     return next_action
+
+
+def refresh_stale_memory_next_action(next_action, working_memory):
+    if not working_memory or not working_memory.get("stale_after_tool_call_id"):
+        return next_action
+    latest_tool = working_memory.get("stale_after_tool") or "tool"
+    prefix = f"refresh working memory from latest {latest_tool} result"
+    if next_action:
+        return f"{prefix}, then {next_action}"
+    return prefix
 
 
 def attach_work_resume_world_state(resume, world_state):
