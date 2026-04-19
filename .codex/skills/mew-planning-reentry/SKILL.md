@@ -19,14 +19,14 @@ git status --short
 ./mew desk --kind coding --json
 ./mew focus --kind coding
 ./mew brief --kind coding
-./mew memory --search "decision roadmap next structural snapshot mailbox streaming trust reliability latency self-improve dogfood" --type project --json
-```
-
-If the memory search returns no useful decisions, immediately fall back to broader decision queries:
-
-```bash
 ./mew memory --search "decision" --type project --json
 ./mew memory --search "next safe action context compression long session" --type project --json
+```
+
+If these do not explain deferred structural work, add a targeted project-memory search:
+
+```bash
+./mew memory --search "structural snapshot mailbox streaming trust reliability latency self-improve dogfood" --type project --json
 ```
 
 If an active work session or task is visible, inspect it before acting:
@@ -49,6 +49,8 @@ Summarize only:
 - pending approvals, recovery paths, or stale sessions
 - latest known validation and whether it is current
 - next safest action
+
+Validation rule: report validation visible in `brief`, task notes, or work-session resume as "last observed". Do not rerun full validation unless the user asked for validation or you changed files in this turn.
 
 ## Long-Session Rule
 
