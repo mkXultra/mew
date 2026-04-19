@@ -2977,6 +2977,29 @@ class WorkSessionTests(unittest.TestCase):
             text,
         )
 
+    def test_work_live_step_result_surfaces_low_yield_search_ribbon(self):
+        text = format_work_live_step_result(
+            {"status": "completed", "action": {"type": "search_text"}, "summary": "searched"},
+            resume={
+                "phase": "idle",
+                "low_yield_observations": [
+                    {
+                        "tool": "search_text",
+                        "path": "src/mew/dogfood.py",
+                        "count": 4,
+                        "last_tool_call_id": 12,
+                        "suggested_next": "stop searching this same surface; use a targeted read",
+                    }
+                ],
+            },
+        )
+
+        self.assertIn(
+            "low_yield: search_text src/mew/dogfood.py returned zero matches 4x; last_tool=#12",
+            text,
+        )
+        self.assertIn("low_yield_next: stop searching this same surface; use a targeted read", text)
+
     def test_work_session_resume_detects_recurring_failures(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 

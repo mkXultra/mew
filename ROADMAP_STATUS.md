@@ -174,7 +174,11 @@ Milestone 2 Done-when checklist:
   history and a suggested next move, and the THINK prompt tells the resident to
   switch away from that same search surface. The full `tests/test_work_session.py`
   suite passed and the work-session dogfood passed at
-  `/tmp/mew-low-yield-observations-dogfood`.
+  `/tmp/mew-low-yield-observations-dogfood`. Task `#276` also surfaces the same
+  signal in `format_work_live_step_result` as `low_yield` / `low_yield_next`
+  outcome lines, so live follow mode can show the search trap without opening a
+  full resume. The full `tests/test_work_session.py` suite passed and the
+  work-session dogfood passed at `/tmp/mew-low-yield-live-output-dogfood`.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

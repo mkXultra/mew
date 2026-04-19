@@ -1223,6 +1223,14 @@ def format_work_live_step_result(step, resume=None):
             f"(same error: {clip_inline_text(item.get('error'), 180)}); "
             f"last_tool=#{item.get('last_tool_call_id')}"
         )
+    for item in (resume or {}).get("low_yield_observations") or []:
+        target = f" {item.get('path')}" if item.get("path") else ""
+        outcome_lines.append(
+            f"low_yield: {item.get('tool')}{target} returned zero matches {item.get('count')}x; "
+            f"last_tool=#{item.get('last_tool_call_id')}"
+        )
+        if item.get("suggested_next"):
+            outcome_lines.append(f"low_yield_next: {clip_inline_text(item.get('suggested_next'), 220)}")
     lines = []
     _append_live_section(lines, "outcome", outcome_lines)
     tool_lines = []
