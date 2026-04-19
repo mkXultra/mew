@@ -730,7 +730,7 @@ class BriefTests(unittest.TestCase):
         data = build_focus_data(state, kind="coding")
 
         self.assertIn(
-            "Reduce M2 approval/verification friction from recent coding metrics",
+            "Reproduce or retire historical M2 approval/verification friction from recent coding metrics",
             data["next_move"],
         )
 

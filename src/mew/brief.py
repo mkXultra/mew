@@ -1118,18 +1118,21 @@ def coding_self_improve_focus_from_friction(state, kind=None):
         return "Pick the next small mew improvement"
     friction = recent_focus_friction(state, kind=kind, session_limit=20, sample_limit=5)
     signal_ids = {signal.get("id") for signal in friction.get("signals") or []}
+    action = "Reduce"
+    if friction and friction.get("active_blocker_count") == 0:
+        action = "Reproduce or retire historical"
     if {"approval_friction", "verification_friction"} <= signal_ids:
-        return "Reduce M2 approval/verification friction from recent coding metrics"
+        return f"{action} M2 approval/verification friction from recent coding metrics"
     if "verification_friction" in signal_ids:
-        return "Reduce M2 verification friction from recent coding metrics"
+        return f"{action} M2 verification friction from recent coding metrics"
     if "approval_friction" in signal_ids:
-        return "Reduce M2 approval friction from recent coding metrics"
+        return f"{action} M2 approval friction from recent coding metrics"
     if "slow_model_resume" in signal_ids:
-        return "Reduce M2 model resume latency from recent coding metrics"
+        return f"{action} M2 model resume latency from recent coding metrics"
     if "slow_first_tool" in signal_ids:
-        return "Reduce M2 first-tool latency from recent coding metrics"
+        return f"{action} M2 first-tool latency from recent coding metrics"
     if "high_idle_ratio" in signal_ids:
-        return "Reduce M2 idle-time friction from recent coding metrics"
+        return f"{action} M2 idle-time friction from recent coding metrics"
     return "Pick the next small mew improvement"
 
 
