@@ -59,6 +59,9 @@ repair command.
 Self-memory continuity cues now build from the same work-session resume bundle,
 so generated self-memory preserves the active session's continuity score and
 repair recommendation alongside phase and next action.
+Dream active-session lines now use the same resume-derived continuity signal,
+so overnight-style reflection preserves the active work score and repair cue
+instead of only raw phase/next-action text.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

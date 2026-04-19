@@ -34,7 +34,10 @@ class DreamTests(unittest.TestCase):
         text = render_dream_markdown(view)
 
         self.assertEqual(view["active_tasks"], ["#1 Open work [ready]"])
-        self.assertIn("#3 task #1: Open work: Continue work [think]; next: run tests", view["active_work_sessions"])
+        self.assertIn(
+            "#3 task #1: Open work: Continue work [think]; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: run tests",
+            view["active_work_sessions"],
+        )
         self.assertEqual(view["learnings"], ["learned one thing"])
         self.assertIn("# Mew Dream 2026-04-17", text)
 
