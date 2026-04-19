@@ -5778,6 +5778,42 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_tool_without_active_prints_one_shot_hint(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("hello\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "search_text",
+                                "--query",
+                                "hello",
+                                "--path",
+                                ".",
+                                "--allow-read",
+                                ".",
+                            ]
+                        ),
+                        1,
+                    )
+
+                output = stderr.getvalue()
+                self.assertIn("no active work session", output)
+                self.assertIn("one-shot: mew tool search hello . --root .", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_multi_pane_without_task_session_prints_single_hint(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

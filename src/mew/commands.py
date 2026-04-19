@@ -4260,6 +4260,8 @@ def format_no_work_tool_session(state, args):
     if latest:
         lines.append(f"review: {mew_command('work', task_id, '--session', '--resume', '--allow-read', '.')}")
         lines.append(f"read-only review tools: {', '.join(sorted(_review_work_tools()))}")
+    for command in no_active_work_session_one_shot_tool_commands(args):
+        lines.append(f"one-shot: {command}")
     return "\n".join(lines)
 
 
@@ -4833,6 +4835,8 @@ def print_no_active_work_session_response(state, args=None, limit=5, kind=None):
         print(json.dumps(no_active_work_session_json(state, args=args, limit=limit, kind=kind), ensure_ascii=False, indent=2))
     else:
         print(f"No active {kind} work session." if kind else "No active work session.")
+        for command in no_active_work_session_one_shot_tool_commands(args):
+            print(f"one-shot: {command}")
 
 
 def cmd_work_show_session(args):
