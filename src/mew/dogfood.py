@@ -226,6 +226,13 @@ def dogfood_subprocess_env():
     return env
 
 
+def dogfood_runtime_env(extra_env=None):
+    env = dogfood_subprocess_env()
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 def run_command(command, workspace, timeout=30, env=None, input_text=None):
     try:
         result = subprocess.run(
@@ -5430,9 +5437,7 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
     started_at = time.monotonic()
     exit_code = None
 
-    runtime_env = dogfood_subprocess_env()
-    if env:
-        runtime_env.update(env)
+    runtime_env = dogfood_runtime_env(env)
     with output_path.open("ab") as output:
         process = subprocess.Popen(
             command,
@@ -5451,7 +5456,7 @@ def _run_dogfood_in_workspace(args, workspace, created_temp, source_copy=None, p
             [sys.executable, "-m", "mew", "message", message],
             workspace,
             timeout=args.message_timeout,
-            env=env,
+            env=runtime_env,
         )
         injected_event_ids.append(queued_message_event_id(result.get("stdout")))
 

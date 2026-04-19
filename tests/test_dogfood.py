@@ -19,6 +19,7 @@ from mew.dogfood import (
     copy_source_workspace,
     dogfood_subprocess_env,
     dogfood_stop_timeout,
+    dogfood_runtime_env,
     format_dogfood_loop_report,
     format_dogfood_report,
     format_dogfood_scenario_report,
@@ -45,6 +46,14 @@ class DogfoodTests(unittest.TestCase):
             env = dogfood_subprocess_env()
 
         self.assertEqual(env["MEW_EXECUTABLE"], "/tmp/custom-mew")
+
+    def test_dogfood_runtime_env_adds_overrides_to_subprocess_env(self):
+        with patch("mew.dogfood.dogfood_subprocess_env", return_value={"PYTHONPATH": "src", "KEEP": "base"}):
+            env = dogfood_runtime_env({"KEEP": "override", "EXTRA": "1"})
+
+        self.assertEqual(env["PYTHONPATH"], "src")
+        self.assertEqual(env["KEEP"], "override")
+        self.assertEqual(env["EXTRA"], "1")
 
     def test_cli_dogfood_scenario_choices_follow_registered_scenarios(self):
         parser = build_parser()
