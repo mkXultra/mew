@@ -63,7 +63,7 @@ Milestone 2 Done-when checklist:
   `fresh_cli_preferred`. Parity is still not claimed: for small localized
   changes, mew's persistent context is useful but the observer/supervision
   overhead remains higher than a fresh CLI.
-- The model does not lose momentum while waiting for tool feedback: unmet.
+- The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
   and `perceived_idle_ratio p95=0.905`, while approval and verification
@@ -100,9 +100,16 @@ Milestone 2 Done-when checklist:
   `perceived_idle_ratio`, `high_idle_sessions`, and concrete high-idle session
   samples when idle-time friction drives the next M2 task. This keeps the
   suggested next self-improve loop grounded in visible evidence instead of a
-  hidden metrics signal. The paired-test approval auto-defer slice also reduces
-  approval/verification ceremony for the B1 rollback-loop blocker without
-  claiming that idle latency is solved.
+  hidden metrics signal. The idle ratio is now measured over the actual
+  model/tool loop window instead of the whole session span, so human pause time,
+  session creation delay, and later notes no longer look like model momentum
+  loss. With that definition, `./mew metrics --kind coding --limit 20` reports
+  `first_tool_start_seconds p95=14.3s`, `model_resume_wait_seconds p95=21.5s`,
+  and `perceived_idle_ratio p95=0.551`, with no high-idle signal; remaining
+  samples are slow individual model resumes rather than a broad active blocker.
+  The paired-test approval auto-defer slice also reduces approval/verification
+  ceremony for the B1 rollback-loop blocker without claiming that the broader
+  continuous cockpit is solved.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist. A scoped

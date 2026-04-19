@@ -386,8 +386,17 @@ def _session_activity_seconds(model_turns, tool_calls):
     return _union_seconds(_intervals(model_turns) + _intervals(tool_calls))
 
 
+def _session_loop_wall_seconds(model_turns, tool_calls):
+    times = []
+    for start, end in _intervals(model_turns) + _intervals(tool_calls):
+        times.extend([start, end])
+    if not times:
+        return None
+    return max(0.0, (max(times) - min(times)).total_seconds())
+
+
 def _session_idle_details(session, model_turns, tool_calls):
-    wall_seconds = _session_wall_seconds(session, model_turns=model_turns, tool_calls=tool_calls)
+    wall_seconds = _session_loop_wall_seconds(model_turns, tool_calls)
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
@@ -397,6 +406,7 @@ def _session_idle_details(session, model_turns, tool_calls):
         "idle_ratio": max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds)),
         "wall_seconds": wall_seconds,
         "active_seconds": active_seconds,
+        "wall_scope": "model_tool_loop",
     }
 
 
@@ -422,6 +432,7 @@ def _high_idle_session_sample(state, session, model_turns, tool_calls):
         "idle_ratio": _round(idle_ratio),
         "wall_seconds": _round(idle["wall_seconds"]),
         "active_seconds": _round(idle["active_seconds"]),
+        "wall_scope": idle.get("wall_scope") or "",
         "tool_call_count": len(tool_calls or []),
         "model_turn_count": len(model_turns or []),
         "note_count": len(notes),
