@@ -11,8 +11,8 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
-| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
+| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
 
@@ -84,6 +84,9 @@ added `mew memory --active --task-id ...` as the debug surface, exposed that
 command from native self-improve controls, tightened term extraction so
 self-improve boilerplate and recent commit hashes do not dominate recall, and
 now prints score plus matched terms in text output.
+Native self-improve entry output now also exposes the task-scoped
+`mew work <task-id> --cells` command, giving a context-compressed resident a
+stable cell cockpit reentry surface without remembering the flag.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
@@ -1910,6 +1913,18 @@ Next action:
 - The `continuity` dogfood scenario now plants a weak active work session and
   verifies that both `morning-paper --json` and the composed passive bundle
   surface the unsafe reentry hint.
+- CLI/chat `--auto-recover-safe` now drains multiple safe read/git recovery
+  items in one call when they are selected by the recovery plan. The batch
+  path still stops at side-effect review barriers, follows the recovery plan's
+  selected item instead of the newest interrupted safe call, and keeps the
+  outer JSON `retry_tool` scalar contract while adding batch metadata and
+  per-item `recoveries`.
+- Latest validation for the 2026-04-19 recovery/control slice:
+  `uv run pytest -q` passed with 1039 tests and 30 subtests,
+  `./mew dogfood --all --cleanup --json` passed all scenarios,
+  `UV_CACHE_DIR=/tmp/uv-cache uv run --with ruff ruff check` passed on
+  changed files, and
+  `git diff --check` passed.
 
 ## Current Roadmap Focus
 
