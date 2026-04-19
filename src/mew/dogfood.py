@@ -6387,6 +6387,7 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         "work_session_ids": [session.get("id") for session in sessions],
         "task_id": task_id_value,
         "task_title": (task or {}).get("title") or latest_session.get("title") or "",
+        "task_description": (task or {}).get("description") or "",
         "session_status": latest_session.get("status") or "",
         "phase": latest_session.get("phase") or "",
         "created_at": sessions[0].get("created_at") or "",
@@ -6451,6 +6452,7 @@ def build_m2_mew_run_evidence(state, session_id):
         "work_session_id": session.get("id"),
         "task_id": task_id,
         "task_title": (task or {}).get("title") or session.get("title") or "",
+        "task_description": (task or {}).get("description") or "",
         "session_status": session.get("status") or "",
         "phase": session.get("phase") or "",
         "created_at": session.get("created_at") or "",
@@ -7049,6 +7051,7 @@ def format_m2_comparative_protocol(protocol):
                 f"- work_session_ids: {evidence.get('work_session_ids') or []}",
                 f"- task_id: {evidence.get('task_id', '')}",
                 f"- task_title: {evidence.get('task_title', '')}",
+                f"- task_description: {evidence.get('task_description', '')}",
                 f"- session_status: {evidence.get('session_status', '')}",
                 f"- phase: {evidence.get('phase', '')}",
                 f"- approval_mode: {evidence.get('approval_mode', 'default')}",
@@ -7149,9 +7152,11 @@ def format_m2_comparative_protocol(protocol):
 def build_m2_fresh_cli_report_template(protocol):
     evidence = (protocol or {}).get("mew_run_evidence") or {}
     task_summary = evidence.get("task_title") or ""
+    task_description = evidence.get("task_description") or ""
     verification = (evidence.get("verification") or {}).get("command") or ""
     return {
         "task_summary": task_summary,
+        "task_description": task_description,
         "fresh_cli_context_mode": "true_restart",
         "fresh_cli_session_resumed": False,
         "fresh_cli_handoff_note_used": False,
@@ -7206,6 +7211,7 @@ def format_m2_fresh_cli_restart_prompt(protocol, report_template_path="m2-fresh-
         "",
         f"- task_id: {evidence.get('task_id', '')}",
         f"- task_title: {evidence.get('task_title', '')}",
+        f"- task_description: {evidence.get('task_description', '')}",
         f"- work_session_id: {evidence.get('work_session_id', '')}",
         f"- work_session_ids: {evidence.get('work_session_ids') or []}",
         f"- resume_gate: {(evidence.get('resume_gate') or {}).get('status', '')}",

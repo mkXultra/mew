@@ -598,6 +598,7 @@ class DogfoodTests(unittest.TestCase):
                 {
                     "id": 3,
                     "title": "M2 evidence task",
+                    "description": "Implement a synthetic M2 evidence path.",
                     "status": "done",
                     "priority": "medium",
                     "kind": "coding",
@@ -749,10 +750,16 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("## Mew Run Evidence", runbook)
             self.assertIn("## Interruption Resume Gate", runbook)
             self.assertIn("- work_session_id: 7", runbook)
+            self.assertIn("Implement a synthetic M2 evidence path.", runbook)
             self.assertIn("`pytest -q`", runbook)
             self.assertEqual(fresh_cli_template["task_summary"], "M2 evidence task")
+            self.assertEqual(
+                fresh_cli_template["task_description"],
+                "Implement a synthetic M2 evidence path.",
+            )
             self.assertEqual(fresh_cli_template["verification"][0]["command"], "pytest -q")
             self.assertIn("M2 evidence task", fresh_cli_prompt)
+            self.assertIn("Implement a synthetic M2 evidence path.", fresh_cli_prompt)
             self.assertIn("pytest -q", fresh_cli_prompt)
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
