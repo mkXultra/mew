@@ -56,6 +56,9 @@ Codex-ultra re-review of that fix passed in session
 continuity routes to `mew code`, broken continuity routes to
 `mew work ... --live --max-steps 1`, and `mew next --json` returns the live
 repair command.
+Self-memory continuity cues now build from the same work-session resume bundle,
+so generated self-memory preserves the active session's continuity score and
+repair recommendation alongside phase and next action.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

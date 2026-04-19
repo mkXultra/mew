@@ -43,7 +43,10 @@ class SelfMemoryTests(unittest.TestCase):
         self.assertIn("prefers small verified slices", view["traits"])
         self.assertIn("journal helps reentry", view["learnings"])
         self.assertIn("report surfaces should be generated locally", view["learnings"])
-        self.assertIn("Work session #3 task #2: Open work is think: Continue report work; next: run tests", view["continuity_cues"])
+        self.assertIn(
+            "Work session #3 task #2: Open work is think: Continue report work; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: run tests",
+            view["continuity_cues"],
+        )
         self.assertIn("# Mew Self Memory 2026-04-17", text)
 
     def test_self_memory_command_outputs_json_and_can_write_report(self):

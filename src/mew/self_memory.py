@@ -7,6 +7,7 @@ from typing import Any
 
 from .desk import active_work_sessions_for_desk
 from .report_io import write_generated_report
+from .work_session import build_work_session_resume
 
 
 MAX_ITEMS = 8
@@ -145,19 +146,32 @@ def task_title_by_id(state: dict[str, Any]) -> dict[str, str]:
 
 
 def collect_continuity_cues(state: dict[str, Any]) -> list[str]:
-    titles = task_title_by_id(state)
+    tasks_by_id = {str(task.get("id")): task for task in state.get("tasks", []) if isinstance(task, dict)}
+    titles = {
+        task_id: normalize_text(task.get("title"))
+        for task_id, task in tasks_by_id.items()
+        if normalize_text(task.get("title"))
+    }
     cues = []
     for session in active_work_sessions_for_desk(state):
         session_id = session.get("id", "?")
-        goal = normalize_text(session.get("goal") or session.get("title")) or "Untitled"
         task_id = session.get("task_id")
+        task_record = tasks_by_id.get(str(task_id)) if task_id is not None else None
+        resume = build_work_session_resume(session, task=task_record, limit=3, state=state) or {}
+        goal = normalize_text(resume.get("goal") or session.get("goal") or session.get("title")) or "Untitled"
         task = f" task #{task_id}" if task_id is not None else ""
         task_title = titles.get(str(task_id), "") if task_id is not None else ""
         if task_title:
             task = f"{task}: {task_title}"
-        phase = normalize_text(session.get("phase")) or "unknown phase"
+        phase = normalize_text(session.get("phase") or resume.get("phase")) or "unknown phase"
         cue = f"Work session #{session_id}{task} is {phase}: {goal}"
-        next_action = normalize_text(session.get("next_action"))
+        continuity = resume.get("continuity") or {}
+        if continuity:
+            cue = f"{cue}; continuity: {continuity.get('score') or '-'} {continuity.get('status') or 'unknown'}"
+            recommendation = continuity.get("recommendation") or {}
+            if continuity.get("missing") and recommendation.get("summary"):
+                cue = f"{cue}; repair: {normalize_text(recommendation.get('summary'))}"
+        next_action = normalize_text(session.get("next_action") or resume.get("next_action"))
         if next_action:
             cue = f"{cue}; next: {next_action}"
         cues.append(cue)
