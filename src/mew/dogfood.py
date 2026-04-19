@@ -479,6 +479,8 @@ def run_memory_search_scenario(workspace, env=None):
         ]
     )
     context_load_result = run(["context", "--load", "--query", "Dogfood context checkpoint", "--limit", "1"])
+    context_focus_result = run(["focus", "--kind", "coding"])
+    context_brief_result = run(["brief", "--kind", "coding"])
     json_data = _json_stdout(json_result)
     matches = json_data.get("matches") or []
     snapshot_data = _json_stdout(snapshot_result)
@@ -556,6 +558,24 @@ def run_memory_search_scenario(workspace, env=None):
         and "current_git_status:" in (context_load_result.get("stdout") or ""),
         observed=command_result_tail(context_load_result),
         expected="context --save checkpoint is recoverable through context --load",
+    )
+    _scenario_check(
+        checks,
+        "context_checkpoint_surfaces_in_focus",
+        context_focus_result.get("exit_code") == 0
+        and "Checkpoint: Dogfood context checkpoint" in (context_focus_result.get("stdout") or "")
+        and "Dogfood checkpoint next safe action" in (context_focus_result.get("stdout") or ""),
+        observed=command_result_tail(context_focus_result),
+        expected="focus surfaces the latest context checkpoint and next safe action",
+    )
+    _scenario_check(
+        checks,
+        "context_checkpoint_surfaces_in_brief",
+        context_brief_result.get("exit_code") == 0
+        and "context_checkpoint: Dogfood context checkpoint" in (context_brief_result.get("stdout") or "")
+        and "context_checkpoint_note: Dogfood checkpoint next safe action" in (context_brief_result.get("stdout") or ""),
+        observed=command_result_tail(context_brief_result),
+        expected="brief surfaces the latest context checkpoint and note",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
 
