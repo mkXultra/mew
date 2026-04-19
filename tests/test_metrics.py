@@ -15,6 +15,7 @@ class MetricsTests(unittest.TestCase):
                 "status": "closed",
                 "created_at": "2026-04-19T00:00:00Z",
                 "updated_at": "2026-04-19T00:00:20Z",
+                "notes": [{"text": "Recovered manually after rollback."}],
                 "model_turns": [
                     {
                         "id": 1,
@@ -95,6 +96,10 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["reliability"]["verification"]["rolled_back"], 1)
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["tool_call_id"], 3)
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["command"], "uv run pytest -q tests/test_metrics.py")
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["session_status"], "closed")
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["task_status"], "ready")
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["note_count"], 1)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["latest_note"], "Recovered manually after rollback.")
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["tool_call_id"], 2)
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["path"], "tests/test_metrics.py")
         self.assertEqual(metrics["latency"]["first_tool_start_seconds"]["avg"], 4.0)
@@ -120,6 +125,7 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("verification_failures:", text)
         self.assertIn("approval_friction:", text)
         self.assertIn("uv run pytest -q tests/test_metrics.py", text)
+        self.assertIn("latest_note: Recovered manually after rollback.", text)
 
     def test_observation_metrics_include_latency_diagnostic_samples(self):
         state = default_state()

@@ -924,7 +924,10 @@ def _append_focus_recent_friction(lines, friction):
     for sample in friction.get("verification_failures") or []:
         task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
         path = f" path={sample.get('path')}" if sample.get("path") else ""
-        detail = _clip_focus_text(sample.get("stderr") or sample.get("stdout"), 220)
+        latest_note = sample.get("latest_note")
+        detail = _clip_focus_text(latest_note or sample.get("stderr") or sample.get("stdout"), 220)
+        if latest_note and detail:
+            detail = f"note: {detail}"
         suffix = f": {detail}" if detail else ""
         lines.append(
             f"- failed {sample.get('tool')}#{sample.get('tool_call_id')}{task}{path} exit={sample.get('exit_code')}{suffix}"

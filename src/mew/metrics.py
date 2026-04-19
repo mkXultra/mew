@@ -351,15 +351,18 @@ def _call_path(call):
 def _sample_task(state, task_id):
     task = find_task(state, task_id)
     if not task:
-        return {"task_id": task_id, "task_title": ""}
-    return {"task_id": task_id, "task_title": task.get("title") or ""}
+        return {"task_id": task_id, "task_title": "", "task_status": ""}
+    return {"task_id": task_id, "task_title": task.get("title") or "", "task_status": task.get("status") or ""}
 
 
 def _verification_sample(state, session, call):
     result = call.get("result") or {}
     verification = result.get("verification") or {}
+    notes = [note for note in session.get("notes") or [] if isinstance(note, dict)]
+    latest_note = notes[-1] if notes else {}
     sample = {
         "session_id": session.get("id"),
+        "session_status": session.get("status") or "",
         "tool_call_id": call.get("id"),
         "tool": call.get("tool") or "",
         "path": _call_path(call),
@@ -367,6 +370,8 @@ def _verification_sample(state, session, call):
         "rolled_back": bool(result.get("rolled_back")),
         "command": verification.get("command") or result.get("verification_command") or "",
         "finished_at": verification.get("finished_at") or call.get("finished_at") or "",
+        "note_count": len(notes),
+        "latest_note": _clip_text(latest_note.get("text")),
     }
     sample.update(_sample_task(state, session.get("task_id")))
     stderr = _clip_text(verification.get("stderr"))
@@ -761,6 +766,8 @@ def format_observation_metrics(data):
                 lines.append(f"  stderr: {sample.get('stderr')}")
             elif sample.get("stdout"):
                 lines.append(f"  stdout: {sample.get('stdout')}")
+            if sample.get("latest_note"):
+                lines.append(f"  latest_note: {sample.get('latest_note')}")
     if approval_friction:
         lines.append("approval_friction:")
         for sample in approval_friction:

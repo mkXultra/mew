@@ -608,6 +608,7 @@ class BriefTests(unittest.TestCase):
                 "status": "closed",
                 "created_at": "2026-04-19T00:00:00Z",
                 "updated_at": "2026-04-19T00:01:00Z",
+                "notes": [{"text": "Recovered manually after rollback."}],
                 "model_turns": [
                     {
                         "id": 1,
@@ -668,10 +669,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("approval_rejection=1.0", focus)
         self.assertIn("verification_failure=1.0", focus)
         self.assertIn("rejected edit_file#1 task=#7 path=tests/test_brief.py: Add paired test first.", focus)
-        self.assertIn(
-            "failed edit_file#2 task=#7 path=src/mew/brief.py exit=1: FAILED tests/test_brief.py",
-            focus,
-        )
+        self.assertIn("failed edit_file#2 task=#7 path=src/mew/brief.py exit=1: note: Recovered manually after rollback.", focus)
         self.assertIn("approval wait edit_file#1 task=#7 approval=rejected 41.0s path=tests/test_brief.py", focus)
 
     def test_focus_surfaces_active_work_session_reentry(self):
