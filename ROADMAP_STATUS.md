@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 22:20 JST.
+Last assessed: 2026-04-19 22:31 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -51,6 +51,9 @@ Milestone 2 Done-when checklist:
   friction remain high. Recent-session metrics now ignore later cleanup
   `updated_at` churn when selecting and measuring session wall time, so stale
   session cleanup no longer contaminates the current M2 momentum view.
+  `mew metrics` now also surfaces `slow_first_tools` diagnostics, including the
+  session, first tool call, first turn id, path, and first model summary behind
+  slow first-tool-start latency.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this

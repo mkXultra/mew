@@ -5,6 +5,7 @@ from .timeutil import parse_time
 WORK_WRITE_TOOLS = {"write_file", "edit_file"}
 DEFAULT_SAMPLE_LIMIT = 3
 SAMPLE_TEXT_MAX_CHARS = 240
+SLOW_FIRST_TOOL_SECONDS = 30.0
 SLOW_MODEL_RESUME_SECONDS = 30.0
 HIGH_IDLE_RATIO = 0.8
 UPDATED_AT_ACTIVITY_GRACE_SECONDS = 300.0
@@ -141,6 +142,33 @@ def _first_tool_start_seconds(session, tool_calls):
     if not starts:
         return None
     return _duration_seconds(created_at, min(starts))
+
+
+def _first_tool_start_sample(state, session, model_turns, tool_calls):
+    seconds = _first_tool_start_seconds(session, tool_calls)
+    if seconds is None or seconds <= SLOW_FIRST_TOOL_SECONDS:
+        return None
+    started_calls = [call for call in tool_calls if isinstance(call, dict) and call.get("started_at")]
+    if not started_calls:
+        return None
+    first_call = min(started_calls, key=lambda call: call.get("started_at") or "")
+    started_turns = [turn for turn in model_turns or [] if isinstance(turn, dict) and turn.get("started_at")]
+    first_turn = min(started_turns, key=lambda turn: turn.get("started_at") or "") if started_turns else {}
+    sample = {
+        "session_id": session.get("id"),
+        "status": session.get("status") or "",
+        "first_tool_start_seconds": _round(seconds),
+        "tool_call_id": first_call.get("id"),
+        "tool": first_call.get("tool") or "",
+        "path": _call_path(first_call),
+        "started_at": first_call.get("started_at") or "",
+        "first_model_turn_id": first_turn.get("id"),
+        "first_model_summary": _clip_text(
+            first_turn.get("summary") or (first_turn.get("action_plan") or {}).get("summary") or first_turn.get("reason")
+        ),
+    }
+    sample.update(_sample_task(state, session.get("task_id")))
+    return sample
 
 
 def _model_to_tool_waits(model_turns, tool_calls):
@@ -515,6 +543,7 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
     samples = {
         "verification_failures": [],
         "approval_friction": [],
+        "slow_first_tools": [],
         "slow_model_resumes": [],
         "approval_bound_waits": [],
         "high_idle_sessions": [],
@@ -523,11 +552,15 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
         return samples
 
     slow_model_resumes = []
+    slow_first_tools = []
     approval_bound_waits = []
     high_idle_sessions = []
     for session in sessions:
         tool_calls = [call for call in session.get("tool_calls") or [] if isinstance(call, dict)]
         model_turns = [turn for turn in session.get("model_turns") or [] if isinstance(turn, dict)]
+        first_tool_sample = _first_tool_start_sample(state, session, model_turns, tool_calls)
+        if first_tool_sample:
+            slow_first_tools.append(first_tool_sample)
         slow_model_resumes.extend(_tool_to_next_model_wait_samples(state, session, model_turns, tool_calls))
         approval_bound_waits.extend(_approval_bound_wait_samples(state, session, model_turns, tool_calls))
         idle_sample = _high_idle_session_sample(state, session, model_turns, tool_calls)
@@ -549,6 +582,11 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT):
                 and approval_status in ("rejected", "failed")
             ):
                 samples["approval_friction"].append(_approval_sample(state, session, call))
+    samples["slow_first_tools"] = sorted(
+        slow_first_tools,
+        key=lambda item: item.get("first_tool_start_seconds") or 0,
+        reverse=True,
+    )[:limit]
     samples["slow_model_resumes"] = sorted(
         slow_model_resumes,
         key=lambda item: item.get("model_resume_wait_seconds") or 0,
@@ -639,14 +677,14 @@ def _build_signals(sessions, reliability, latency):
         )
 
     first_tool_p95 = (latency.get("first_tool_start_seconds") or {}).get("p95")
-    if first_tool_p95 is not None and first_tool_p95 > 60:
+    if first_tool_p95 is not None and first_tool_p95 > SLOW_FIRST_TOOL_SECONDS:
         _add_signal(
             signals,
             "slow_first_tool",
             "warn",
             "first tool output is slow at p95",
             value=first_tool_p95,
-            threshold="<=60s",
+            threshold=f"<={SLOW_FIRST_TOOL_SECONDS:.0f}s",
         )
 
     model_resume_p95 = (latency.get("model_resume_wait_seconds") or {}).get("p95")
@@ -854,10 +892,18 @@ def format_observation_metrics(data):
     diagnostics = data.get("diagnostics") or {}
     verification_failures = diagnostics.get("verification_failures") or []
     approval_friction = diagnostics.get("approval_friction") or []
+    slow_first_tools = diagnostics.get("slow_first_tools") or []
     slow_model_resumes = diagnostics.get("slow_model_resumes") or []
     approval_bound_waits = diagnostics.get("approval_bound_waits") or []
     high_idle_sessions = diagnostics.get("high_idle_sessions") or []
-    if verification_failures or approval_friction or slow_model_resumes or approval_bound_waits or high_idle_sessions:
+    if (
+        verification_failures
+        or approval_friction
+        or slow_first_tools
+        or slow_model_resumes
+        or approval_bound_waits
+        or high_idle_sessions
+    ):
         lines.append("diagnostics:")
     if verification_failures:
         lines.append("verification_failures:")
@@ -890,6 +936,19 @@ def format_observation_metrics(data):
                 lines.append(f"  summary: {sample.get('summary')}")
             if sample.get("reason"):
                 lines.append(f"  reason: {sample.get('reason')}")
+    if slow_first_tools:
+        lines.append("slow_first_tools:")
+        for sample in slow_first_tools:
+            task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+            path = f" path={sample.get('path')}" if sample.get("path") else ""
+            turn = f" first_turn=#{sample.get('first_model_turn_id')}" if sample.get("first_model_turn_id") else ""
+            lines.append(
+                f"- session=#{sample.get('session_id')} call=#{sample.get('tool_call_id')}"
+                f"{task} tool={sample.get('tool')} first_tool_start={sample.get('first_tool_start_seconds')}s"
+                f"{turn}{path}"
+            )
+            if sample.get("first_model_summary"):
+                lines.append(f"  first_model_summary: {sample.get('first_model_summary')}")
     if slow_model_resumes:
         lines.append("slow_model_resumes:")
         for sample in slow_model_resumes:
