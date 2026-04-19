@@ -35,6 +35,7 @@ from mew.work_session import (
     create_work_session,
     finish_work_tool_call,
     first_unquoted_shell_operator,
+    compact_work_tool_summary,
     format_diff_preview,
     format_work_action,
     format_work_effort_brief,
@@ -75,6 +76,32 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_compact_running_search_summary_uses_parameters_before_result(self):
+        summary = compact_work_tool_summary(
+            {
+                "tool": "search_text",
+                "status": "running",
+                "parameters": {"path": "src/mew/commands.py", "query": "def print_native_self_improve_controls"},
+                "result": {},
+            }
+        )
+
+        self.assertIn("for 'def print_native_self_improve_controls'", summary)
+        self.assertNotIn("for None", summary)
+
+    def test_compact_running_glob_summary_uses_parameters_before_result(self):
+        summary = compact_work_tool_summary(
+            {
+                "tool": "glob",
+                "status": "running",
+                "parameters": {"path": ".", "pattern": "src/**/*.py"},
+                "result": {},
+            }
+        )
+
+        self.assertIn("for 'src/**/*.py'", summary)
+        self.assertNotIn("for None", summary)
+
     def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
         session = {
             "id": 1,

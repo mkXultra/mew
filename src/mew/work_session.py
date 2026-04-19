@@ -1272,6 +1272,7 @@ def format_work_tool_observation_state(call):
 def compact_work_tool_summary(call):
     tool = call.get("tool")
     result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
     summary = call.get("summary") or call.get("error") or ""
     if call.get("status") in ("failed", "interrupted") and summary:
         if summary.startswith(f"{tool} {call.get('status')}:") or summary.startswith(f"{tool} failed:"):
@@ -1296,16 +1297,19 @@ def compact_work_tool_summary(call):
         )
     if tool == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
-        pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""
+        query = result.get("query") if result.get("query") is not None else parameters.get("query")
+        pattern_value = result.get("pattern") if result.get("pattern") is not None else parameters.get("pattern")
+        pattern = f" pattern={pattern_value!r}" if pattern_value else ""
         return (
-            f"Searched {result.get('path') or (call.get('parameters') or {}).get('path')} "
-            f"for {result.get('query')!r}{pattern} matches={len(result.get('matches') or [])}{suffix}"
+            f"Searched {result.get('path') or parameters.get('path')} "
+            f"for {query!r}{pattern} matches={len(result.get('matches') or [])}{suffix}"
         )
     if tool == "glob":
         suffix = " (truncated)" if result.get("truncated") else ""
+        pattern = result.get("pattern") if result.get("pattern") is not None else parameters.get("pattern")
         return (
-            f"Globbed {result.get('path') or (call.get('parameters') or {}).get('path')} "
-            f"for {result.get('pattern')!r} matches={len(result.get('matches') or [])}{suffix}"
+            f"Globbed {result.get('path') or parameters.get('path')} "
+            f"for {pattern!r} matches={len(result.get('matches') or [])}{suffix}"
         )
     return summary
 
