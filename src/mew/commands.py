@@ -5932,6 +5932,16 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
     return {}
 
 
+def _work_follow_status_session_state_newer(snapshot_updated_at, session_updated_at):
+    snapshot_time = parse_time(snapshot_updated_at)
+    session_time = parse_time(session_updated_at)
+    if snapshot_time and session_time:
+        return session_time > snapshot_time
+    if snapshot_updated_at and session_updated_at:
+        return str(session_updated_at) > str(snapshot_updated_at)
+    return False
+
+
 def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
     current_git = current_git_reentry_state()
@@ -5970,12 +5980,6 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         status = "dead"
     else:
         status = "stale"
-    suggested_recovery = work_follow_status_suggested_recovery(
-        status,
-        snapshot_data=data,
-        task_id=task_id,
-        session=session,
-    )
     resume = data.get("resume") or {}
     working_memory = resume.get("working_memory") or {}
     working_memory_stale = bool(
@@ -5983,6 +5987,25 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     )
     checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
     current_git = data.get("current_git") or current_git
+    snapshot_session_updated_at = data.get("session_updated_at")
+    current_session_updated_at = (session or {}).get("updated_at")
+    session_state_newer = _work_follow_status_session_state_newer(
+        snapshot_session_updated_at,
+        current_session_updated_at,
+    )
+    suggested_recovery = work_follow_status_suggested_recovery(
+        status,
+        snapshot_data=data,
+        task_id=task_id,
+        session=session,
+    )
+    if session_state_newer and not suggested_recovery:
+        recovery_task_id = data.get("task_id") or task_id or (session or {}).get("task_id")
+        suggested_recovery = {
+            "kind": "inspect_resume",
+            "command": _work_follow_status_inspect_command(recovery_task_id, session=session),
+            "reason": "current session state is newer than the follow snapshot",
+        }
     return {
         "snapshot_path": str(path),
         "status": status,
@@ -6008,7 +6031,9 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
         "pending_approval_count": len(data.get("pending_approvals") or []),
-        "session_updated_at": data.get("session_updated_at"),
+        "session_updated_at": snapshot_session_updated_at,
+        "current_session_updated_at": current_session_updated_at,
+        "session_state_newer": session_state_newer,
     }
 
 
@@ -6056,6 +6081,12 @@ def format_work_follow_status(data):
     )
     if data.get("stop_reason"):
         lines.append(f"stop_reason: {data.get('stop_reason')}")
+    if data.get("session_state_newer"):
+        lines.append(
+            "session_state: newer_than_snapshot "
+            f"current={data.get('current_session_updated_at') or '-'} "
+            f"snapshot={data.get('session_updated_at') or '-'}"
+        )
     producer_health = data.get("producer_health") or {}
     if producer_health:
         health_line = f"producer_health: {producer_health.get('state') or '-'}"

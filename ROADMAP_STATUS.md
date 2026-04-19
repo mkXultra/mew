@@ -2332,6 +2332,11 @@ Next action:
 - Closed-but-not-done work sessions now include a `mark task done` command in
   Next CLI controls, so a resident that finishes or no-changes a coding task
   has a direct cockpit path to close the task instead of leaving it `ready`.
+- `work --follow-status` now compares the stopped follow snapshot's
+  `session_updated_at` with the current work-session state. When the session
+  has moved on after the producer wrote its final snapshot, the text/JSON
+  status marks `session_state_newer` and points recovery at the current resume
+  instead of silently trusting stale pending-approval data.
 - Latest validation for the 2026-04-19 recovery/control slice:
   `uv run pytest -q` passed with 1044 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,

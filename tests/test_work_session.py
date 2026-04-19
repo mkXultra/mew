@@ -17614,6 +17614,66 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_status_marks_session_state_newer_than_snapshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["status"] = "closed"
+                    session["updated_at"] = "2026-04-18T00:10:00Z"
+                    session["default_options"] = {"allow_read": ["."]}
+                    save_state(state)
+
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "stop_reason": "finish",
+                            "producer": {"pid": 999999},
+                            "resume": {"phase": "awaiting_approval"},
+                            "pending_approvals": [{"tool_call_id": 7}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["session_state_newer"])
+                self.assertEqual(data["session_updated_at"], "2026-04-18T00:00:00Z")
+                self.assertEqual(data["current_session_updated_at"], "2026-04-18T00:10:00Z")
+                self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
+                self.assertIn("current session state is newer", data["suggested_recovery"]["reason"])
+                self.assertIn("mew work 1 --session --resume", data["suggested_recovery"]["command"])
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn(
+                    "session_state: newer_than_snapshot current=2026-04-18T00:10:00Z "
+                    "snapshot=2026-04-18T00:00:00Z",
+                    text,
+                )
+                self.assertIn("recovery: inspect_resume", text)
+                self.assertIn("recovery_command: mew work 1 --session --resume", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_status_keeps_fresh_status_when_zero_step_producer_exited(self):
         from mew.timeutil import now_iso
 
