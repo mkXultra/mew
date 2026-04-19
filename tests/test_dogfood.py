@@ -79,12 +79,12 @@ class DogfoodTests(unittest.TestCase):
                 "--scenario",
                 "m2-comparative",
                 "--m2-task-shape",
-                "interruption_resume",
+                "test_discovery",
                 "--json",
             ]
         )
 
-        self.assertEqual(args.m2_task_shape, "interruption_resume")
+        self.assertEqual(args.m2_task_shape, "test_discovery")
 
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
@@ -544,6 +544,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["comparison_result"]["notes"], "")
             self.assertEqual(protocol["task_shape"]["recommended_next"], "interruption_resume")
             self.assertIn("interruption_resume", protocol["task_shape"]["allowed_values"])
+            self.assertIn("test_discovery", protocol["task_shape"]["allowed_values"])
             self.assertEqual(protocol["interruption_resume_gate"]["status"], "unknown")
             self.assertIn("proved", protocol["interruption_resume_gate"]["allowed_statuses"])
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
@@ -689,7 +690,7 @@ class DogfoodTests(unittest.TestCase):
                 workspace=str(Path(tmp) / "dog"),
                 scenario="m2-comparative",
                 cleanup=False,
-                m2_task_shape="interruption_resume",
+                m2_task_shape="test_discovery",
             )
 
             report = run_dogfood_scenario(args)
@@ -700,8 +701,8 @@ class DogfoodTests(unittest.TestCase):
             runbook = runbook_path.read_text(encoding="utf-8")
 
             self.assertEqual(report["status"], "pass")
-            self.assertEqual(protocol["task_shape"]["selected"], "interruption_resume")
-            self.assertIn("- selected: interruption_resume", runbook)
+            self.assertEqual(protocol["task_shape"]["selected"], "test_discovery")
+            self.assertIn("- selected: test_discovery", runbook)
 
     def test_run_dogfood_m2_comparative_merges_fresh_cli_report(self):
         with tempfile.TemporaryDirectory() as tmp:

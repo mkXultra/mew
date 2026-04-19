@@ -59,7 +59,7 @@ DOGFOOD_SCENARIOS = (
     "work-session",
     "m2-comparative",
 )
-M2_COMPARATIVE_TASK_SHAPES = ("standard", "interruption_resume", "write_heavy")
+M2_COMPARATIVE_TASK_SHAPES = ("standard", "interruption_resume", "test_discovery", "write_heavy")
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
 DOGFOOD_OBSERVED_DICT_LIMIT = 40

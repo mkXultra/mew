@@ -695,6 +695,13 @@ Evidence:
   convention path. This addresses the follow-up blocker from that dogfood where
   `src/mew/cli.py` steered the resident toward nonexistent `tests/test_cli.py`
   instead of the existing dogfood parser coverage in `tests/test_dogfood.py`.
+- The B5 follow-up comparative dogfood is recorded in
+  `docs/M2_B5_COMPARATIVE_DOGFOOD_2026-04-20.md`. In a disposable worktree,
+  mew completed a `test_discovery` task-shape change with continuity `9/9`,
+  one deferred paired-test approval, and passing broad verification. The paired
+  steer correctly suggested `tests/test_dogfood.py`. A fresh `codex-ultra` run
+  completed the same non-interrupted task with less ceremony and judged
+  `fresh_cli_preferred`.
 
 Missing proof:
 
@@ -704,18 +711,16 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- The first M2 comparative dogfood run favored fresh CLI for a small local
-  change. The nonexistent paired-test path blocker is addressed, but mew still
-  needs a rerun of the same class of task and may still need a better paired
-  source/test approval path before it can claim interactive parity.
+- The B5 comparative rerun favored fresh CLI for a small non-interrupted task.
+  mew proved the previous nonexistent paired-test path blocker is fixed, but it
+  still has not proved the M2 interruption-resume gate on a real paired task.
 - TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 
-- Rerun the M2 comparative paired task after the paired-test discovery fix. If
-  mew still loses momentum, fix the remaining paired source/test approval flow:
-  either approve paired source+test edits as a unit or add an explicit
-  expected-failing-test approval mode for resident TDD flows.
+- Run a true interruption-shaped M2 comparative paired task. If mew still loses
+  momentum after B5, fix the remaining paired source/test approval flow or the
+  direct cockpit latency rather than revisiting test discovery.
 
 ## Milestone 3: Persistent Advantage
 
