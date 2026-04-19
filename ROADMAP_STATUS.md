@@ -136,12 +136,12 @@ Milestone 2 Done-when checklist:
   records both arguments as `task:270` and a passing task-level verifier. That
   dogfood also exposed another cockpit friction: the resident correctly planned
   a five-edit paired batch but the guarded batch path only allowed exactly one
-  source edit and one test edit. Task `#271` generalizes the guard to allow up
-  to five write/edit tools as long as every write is under `tests/**` or
-  `src/mew/**` and both surfaces are present. `/tmp/mew-multi-paired-write-batch-dogfood`
+  source edit and one test edit. Task `#271` generalizes both the normalizer and
+  execution path to allow up to five write/edit tools as long as every write is
+  under `tests/**` or `src/mew/**` and both surfaces are present. `/tmp/mew-multi-paired-write-batch-dogfood-v4`
   keeps the work-session scenario green, the full `tests/test_work_session.py`
-  suite passed, and
-  `/tmp/mew-m2-multi-paired-write-batch-evidence/.mew/dogfood/m2-comparative-protocol.json`
+  and `tests/test_dogfood.py` suites passed, and
+  `/tmp/mew-m2-multi-paired-write-batch-evidence-v2/.mew/dogfood/m2-comparative-protocol.json`
   records the task-chain verifier as passed.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed

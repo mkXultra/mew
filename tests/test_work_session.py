@@ -10810,9 +10810,23 @@ class WorkSessionTests(unittest.TestCase):
                 Path("src/mew").mkdir(parents=True)
                 Path("tests").mkdir()
                 source = Path("src/mew/pairing.py")
+                extra_source = Path("src/mew/pairing_extra.py")
                 test_path = Path("tests/test_pairing.py")
+                extra_test_path = Path("tests/test_pairing_extra.py")
                 source.write_text("VALUE = 'old'\n", encoding="utf-8")
-                test_path.write_text("from pathlib import Path\n\ndef test_pairing():\n    assert 'old' in Path('src/mew/pairing.py').read_text()\n", encoding="utf-8")
+                extra_source.write_text("EXTRA = 'old'\n", encoding="utf-8")
+                test_path.write_text(
+                    "from pathlib import Path\n\n"
+                    "def test_pairing():\n"
+                    "    assert 'old' in Path('src/mew/pairing.py').read_text()\n",
+                    encoding="utf-8",
+                )
+                extra_test_path.write_text(
+                    "from pathlib import Path\n\n"
+                    "def test_pairing_extra():\n"
+                    "    assert 'old' in Path('src/mew/pairing_extra.py').read_text()\n",
+                    encoding="utf-8",
+                )
                 with state_lock():
                     state = load_state()
                     add_coding_task(state)
@@ -10832,7 +10846,21 @@ class WorkSessionTests(unittest.TestCase):
                             },
                             {
                                 "type": "edit_file",
+                                "path": str(extra_source),
+                                "old": "old",
+                                "new": "new",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
                                 "path": str(test_path),
+                                "old": "'old'",
+                                "new": "'new'",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": str(extra_test_path),
                                 "old": "'old'",
                                 "new": "'new'",
                                 "dry_run": False,
@@ -10843,7 +10871,9 @@ class WorkSessionTests(unittest.TestCase):
                 verify_command = (
                     f"{sys.executable} -c \"from pathlib import Path; "
                     "assert 'new' in Path('src/mew/pairing.py').read_text(); "
-                    "assert 'new' in Path('tests/test_pairing.py').read_text()\""
+                    "assert 'new' in Path('src/mew/pairing_extra.py').read_text(); "
+                    "assert 'new' in Path('tests/test_pairing.py').read_text(); "
+                    "assert 'new' in Path('tests/test_pairing_extra.py').read_text()\""
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
@@ -10877,21 +10907,25 @@ class WorkSessionTests(unittest.TestCase):
 
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(report["steps"][0]["inline_approval"], "auto_applied")
-                self.assertEqual(report["steps"][0]["inline_approval_count"], 2)
+                self.assertEqual(report["steps"][0]["inline_approval_count"], 4)
                 self.assertIn("new", source.read_text(encoding="utf-8"))
+                self.assertIn("new", extra_source.read_text(encoding="utf-8"))
                 self.assertIn("'new'", test_path.read_text(encoding="utf-8"))
+                self.assertIn("'new'", extra_test_path.read_text(encoding="utf-8"))
 
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(
-                    [call["parameters"]["path"] for call in session["tool_calls"][:2]],
-                    [str(test_path), str(source)],
+                    [call["parameters"]["path"] for call in session["tool_calls"][:4]],
+                    [str(test_path), str(extra_test_path), str(source), str(extra_source)],
                 )
-                self.assertEqual([call["approval_status"] for call in session["tool_calls"][:2]], ["applied", "applied"])
-                test_apply = session["tool_calls"][2]
-                source_apply = session["tool_calls"][3]
-                self.assertTrue(test_apply["result"]["verification_deferred"])
-                self.assertNotIn("verification_exit_code", test_apply["result"])
-                self.assertEqual(source_apply["result"]["verification_exit_code"], 0)
+                self.assertEqual(
+                    [call["approval_status"] for call in session["tool_calls"][:4]],
+                    ["applied", "applied", "applied", "applied"],
+                )
+                apply_results = [call["result"] for call in session["tool_calls"][4:8]]
+                self.assertEqual(sum(1 for result in apply_results if result.get("verification_deferred")), 3)
+                self.assertNotIn("verification_exit_code", apply_results[0])
+                self.assertEqual(apply_results[-1]["verification_exit_code"], 0)
             finally:
                 os.chdir(old_cwd)
 

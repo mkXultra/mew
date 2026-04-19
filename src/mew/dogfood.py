@@ -4923,10 +4923,17 @@ observed["paired_test_first"] = {
 }
 
 Path("src/mew/accept_batch.py").write_text("VALUE = 'old'\\n", encoding="utf-8")
+Path("src/mew/accept_batch_extra.py").write_text("EXTRA = 'old'\\n", encoding="utf-8")
 Path("tests/test_accept_batch.py").write_text(
     "from pathlib import Path\\n\\n"
     "def test_accept_batch():\\n"
     "    assert 'old' in Path('src/mew/accept_batch.py').read_text()\\n",
+    encoding="utf-8",
+)
+Path("tests/test_accept_batch_extra.py").write_text(
+    "from pathlib import Path\\n\\n"
+    "def test_accept_batch_extra():\\n"
+    "    assert 'old' in Path('src/mew/accept_batch_extra.py').read_text()\\n",
     encoding="utf-8",
 )
 code, output = run_main(["task", "add", "Dogfood accept-edits paired batch task", "--kind", "coding", "--json"])
@@ -4945,7 +4952,21 @@ batch_model_output = {
             },
             {
                 "type": "edit_file",
+                "path": "src/mew/accept_batch_extra.py",
+                "old": "old",
+                "new": "new",
+                "dry_run": False,
+            },
+            {
+                "type": "edit_file",
                 "path": "tests/test_accept_batch.py",
+                "old": "'old'",
+                "new": "'new'",
+                "dry_run": False,
+            },
+            {
+                "type": "edit_file",
+                "path": "tests/test_accept_batch_extra.py",
                 "old": "'old'",
                 "new": "'new'",
                 "dry_run": False,
@@ -4956,7 +4977,9 @@ batch_model_output = {
 batch_verify_command = (
     f"{sys.executable} -c \\"from pathlib import Path; "
     "assert 'new' in Path('src/mew/accept_batch.py').read_text(); "
-    "assert 'new' in Path('tests/test_accept_batch.py').read_text()\\""
+    "assert 'new' in Path('src/mew/accept_batch_extra.py').read_text(); "
+    "assert 'new' in Path('tests/test_accept_batch.py').read_text(); "
+    "assert 'new' in Path('tests/test_accept_batch_extra.py').read_text()\\""
 )
 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
     with patch("mew.work_loop.call_model_json_with_retries", return_value=batch_model_output):
@@ -4987,8 +5010,8 @@ batch_report = json.loads(batch_output)
 batch_session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == batch_task_id)
 batch_calls = batch_session.get("tool_calls") or []
 batch_steps = batch_report.get("steps") or []
-batch_preview_paths = [(call.get("parameters") or {}).get("path") for call in batch_calls[:2]]
-batch_apply_results = [(call.get("result") or {}) for call in batch_calls[2:4]]
+batch_preview_paths = [(call.get("parameters") or {}).get("path") for call in batch_calls[:4]]
+batch_apply_results = [(call.get("result") or {}) for call in batch_calls[4:8]]
 observed["paired_write_batch"] = {
     "exit_code": batch_code,
     "stop_reason": batch_report.get("stop_reason"),
@@ -4996,14 +5019,18 @@ observed["paired_write_batch"] = {
     "inline_approval": ((batch_steps[0] if batch_steps else {})).get("inline_approval"),
     "inline_approval_count": ((batch_steps[0] if batch_steps else {})).get("inline_approval_count"),
     "preview_paths": batch_preview_paths,
-    "preview_apply_flags": [(call.get("parameters") or {}).get("apply") for call in batch_calls[:2]],
-    "preview_approval_statuses": [call.get("approval_status") for call in batch_calls[:2]],
-    "test_verification_deferred": (batch_apply_results[0] if batch_apply_results else {}).get("verification_deferred"),
-    "source_verification_exit_code": (
-        (batch_apply_results[1] if len(batch_apply_results) > 1 else {}).get("verification_exit_code")
+    "preview_apply_flags": [(call.get("parameters") or {}).get("apply") for call in batch_calls[:4]],
+    "preview_approval_statuses": [call.get("approval_status") for call in batch_calls[:4]],
+    "deferred_verification_count": sum(
+        1 for result in batch_apply_results if result.get("verification_deferred")
+    ),
+    "final_source_verification_exit_code": (
+        (batch_apply_results[-1] if batch_apply_results else {}).get("verification_exit_code")
     ),
     "source_after": Path("src/mew/accept_batch.py").read_text(encoding="utf-8"),
+    "extra_source_after": Path("src/mew/accept_batch_extra.py").read_text(encoding="utf-8"),
     "test_after": Path("tests/test_accept_batch.py").read_text(encoding="utf-8"),
+    "extra_test_after": Path("tests/test_accept_batch_extra.py").read_text(encoding="utf-8"),
 }
 passed = (
     code == 0
@@ -5024,20 +5051,27 @@ passed = (
     and observed["paired_test_first"]["preview_approval_status"] == "applied"
     and observed["paired_test_first"]["apply_verification_deferred"] is True
     and observed["paired_test_first"]["verification_exit_code_present"] is False
-    and observed["paired_test_first"]["test_file_exists"] is True
-    and observed["paired_test_first"]["source_after"] == "VALUE = 'old'\\n"
-    and observed["paired_write_batch"]["exit_code"] == 0
-    and observed["paired_write_batch"]["action_type"] == "batch"
-    and observed["paired_write_batch"]["inline_approval"] == "auto_applied"
-    and observed["paired_write_batch"]["inline_approval_count"] == 2
-    and observed["paired_write_batch"]["preview_paths"]
-    == ["tests/test_accept_batch.py", "src/mew/accept_batch.py"]
-    and observed["paired_write_batch"]["preview_apply_flags"] == [False, False]
-    and observed["paired_write_batch"]["preview_approval_statuses"] == ["applied", "applied"]
-    and observed["paired_write_batch"]["test_verification_deferred"] is True
-    and observed["paired_write_batch"]["source_verification_exit_code"] == 0
-    and observed["paired_write_batch"]["source_after"] == "VALUE = 'new'\\n"
-    and "'new'" in observed["paired_write_batch"]["test_after"]
+	    and observed["paired_test_first"]["test_file_exists"] is True
+	    and observed["paired_test_first"]["source_after"] == "VALUE = 'old'\\n"
+	    and observed["paired_write_batch"]["exit_code"] == 0
+	    and observed["paired_write_batch"]["action_type"] == "batch"
+	    and observed["paired_write_batch"]["inline_approval"] == "auto_applied"
+	    and observed["paired_write_batch"]["inline_approval_count"] == 4
+	    and observed["paired_write_batch"]["preview_paths"]
+	    == [
+	        "tests/test_accept_batch.py",
+	        "tests/test_accept_batch_extra.py",
+	        "src/mew/accept_batch.py",
+	        "src/mew/accept_batch_extra.py",
+	    ]
+	    and observed["paired_write_batch"]["preview_apply_flags"] == [False, False, False, False]
+	    and observed["paired_write_batch"]["preview_approval_statuses"] == ["applied", "applied", "applied", "applied"]
+	    and observed["paired_write_batch"]["deferred_verification_count"] == 3
+	    and observed["paired_write_batch"]["final_source_verification_exit_code"] == 0
+	    and observed["paired_write_batch"]["source_after"] == "VALUE = 'new'\\n"
+	    and observed["paired_write_batch"]["extra_source_after"] == "EXTRA = 'new'\\n"
+	    and "'new'" in observed["paired_write_batch"]["test_after"]
+	    and "'new'" in observed["paired_write_batch"]["extra_test_after"]
 )
 print(json.dumps({"passed": passed, "observed": observed}, ensure_ascii=False))
 raise SystemExit(0 if passed else 1)
@@ -5439,15 +5473,20 @@ raise SystemExit(0 if passed else 1)
     _scenario_check(
         checks,
         "work_ai_accept_edits_auto_approves_paired_write_batch",
-        accept_edits_ai_result.get("exit_code") == 0
-        and accept_edits_ai_data.get("passed") is True
-        and accept_edits_batch.get("action_type") == "batch"
-        and accept_edits_batch.get("inline_approval") == "auto_applied"
-        and accept_edits_batch.get("inline_approval_count") == 2
-        and accept_edits_batch.get("preview_paths")
-        == ["tests/test_accept_batch.py", "src/mew/accept_batch.py"]
-        and accept_edits_batch.get("test_verification_deferred") is True
-        and accept_edits_batch.get("source_verification_exit_code") == 0,
+	    accept_edits_ai_result.get("exit_code") == 0
+	    and accept_edits_ai_data.get("passed") is True
+	    and accept_edits_batch.get("action_type") == "batch"
+	    and accept_edits_batch.get("inline_approval") == "auto_applied"
+	    and accept_edits_batch.get("inline_approval_count") == 4
+	    and accept_edits_batch.get("preview_paths")
+	    == [
+	        "tests/test_accept_batch.py",
+	        "tests/test_accept_batch_extra.py",
+	        "src/mew/accept_batch.py",
+	        "src/mew/accept_batch_extra.py",
+	    ]
+	    and accept_edits_batch.get("deferred_verification_count") == 3
+	    and accept_edits_batch.get("final_source_verification_exit_code") == 0,
         observed=accept_edits_batch or command_result_tail(accept_edits_ai_result, limit=5),
         expected=(
             "approval-mode accept-edits can preview and approve a paired tests/** + src/mew/** "

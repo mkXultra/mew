@@ -2564,19 +2564,19 @@ def _paired_write_batch_actions(actions):
         for action in actions or []
         if (action.get("type") or action.get("tool")) in BATCH_WRITE_WORK_TOOLS
     ]
-    if len(write_actions) != 2 or len(write_actions) != len(actions or []):
+    if len(write_actions) < 2 or len(write_actions) != len(actions or []):
         return []
     tests = [action for action in write_actions if _work_path_is_tests_path(action.get("path"))]
     sources = [action for action in write_actions if _work_path_is_mew_source_path(action.get("path"))]
-    if len(tests) != 1 or len(sources) != 1:
+    if not tests or not sources or len(tests) + len(sources) != len(write_actions):
         return []
     source_path = sources[0].get("path")
     ordered = []
-    for index, raw_action in enumerate((tests[0], sources[0])):
+    for raw_action in [*tests, *sources]:
         action = dict(raw_action)
         action["apply"] = False
         action["dry_run"] = True
-        if index == 0:
+        if raw_action in tests:
             action["defer_verify_on_approval"] = True
             action["paired_test_source_path"] = source_path
         ordered.append(action)
@@ -2599,7 +2599,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             {
                 "type": "wait",
                 "reason": (
-                    "batch requires exactly one tests/** write/edit and one src/mew/** write/edit"
+                    "batch requires write/edit tools under tests/** and src/mew/** with at least one of each"
                     if write_batch
                     else "batch has no read-only tools"
                 ),
