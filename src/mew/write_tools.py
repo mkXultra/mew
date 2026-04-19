@@ -190,13 +190,25 @@ def edit_file(
     if not isinstance(new, str):
         raise ValueError("new text must be a string")
 
-    resolved = resolve_allowed_write_path(path, allowed_roots, create=False)
+    try:
+        resolved = resolve_allowed_write_path(path, allowed_roots, create=False)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("path does not exist:"):
+            missing_path = message.split("path does not exist:", 1)[1].split(";", 1)[0].strip()
+            raise ValueError(
+                f"path does not exist: {missing_path}; use write_file with --create/create=True to create new files"
+            ) from exc
+        raise
     before = _read_text_if_exists(resolved)
     count = before.count(old)
     if count == 0:
         raise ValueError("old text was not found; confirm the exact existing text before retrying")
     if count > 1 and not replace_all:
-        raise ValueError(f"old text matched {count} times; pass --replace-all to replace all matches")
+        raise ValueError(
+            f"old text matched {count} times; pass --replace-all to replace all matches "
+            "or include surrounding context to narrow the match"
+        )
 
     after = before.replace(old, new) if replace_all else before.replace(old, new, 1)
     edit_size = max(len(new), abs(len(after) - len(before)))

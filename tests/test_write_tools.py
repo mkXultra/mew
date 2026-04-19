@@ -50,7 +50,14 @@ class WriteToolsTests(unittest.TestCase):
             path = Path(tmp) / "notes.md"
             path.write_text("mew mew\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "matched 2 times"):
+            with self.assertRaisesRegex(ValueError, "matched 2 times;.*include surrounding context"):
+                edit_file(str(path), "mew", "shell", [tmp])
+
+    def test_edit_missing_path_recommends_write_file_create(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "new_notes.md"
+
+            with self.assertRaisesRegex(ValueError, "use write_file with --create/create=True"):
                 edit_file(str(path), "mew", "shell", [tmp])
 
     def test_write_and_edit_enforce_size_limits(self):
