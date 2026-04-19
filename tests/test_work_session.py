@@ -10159,6 +10159,28 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(all(tool["pattern"] == "*.py" for tool in action["tools"]))
         self.assertIn("find related code", action["reason"])
 
+    def test_work_model_dedupes_duplicate_pipe_search_text_queries(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "search_text",
+                    "path": "src/mew",
+                    "query": "resident|resident|search_text|resident|finish|search_text",
+                    "pattern": "*.py",
+                    "reason": "inspect likely surface",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual([tool["query"] for tool in action["tools"]], ["resident", "search_text", "finish"])
+        self.assertTrue(all(tool["path"] == "src/mew" for tool in action["tools"]))
+        self.assertTrue(all(tool["pattern"] == "*.py" for tool in action["tools"]))
+        self.assertIn("inspect likely surface", action["reason"])
+        self.assertNotIn("truncated_tools", action)
+
     def test_work_model_batch_flattens_pipe_search_text_queries(self):
         from mew.work_loop import normalize_work_model_action
 

@@ -611,7 +611,8 @@ def normalize_work_model_action(action_plan, verify_command=""):
                 break
     if action_type == "search_text":
         all_split_queries = split_pipe_search_query(normalized.get("query"), limit=None)
-        split_queries = all_split_queries[:5]
+        unique_split_queries = list(dict.fromkeys(all_split_queries))
+        split_queries = unique_split_queries[:5]
         if split_queries:
             tools = []
             for query in split_queries:
@@ -630,7 +631,7 @@ def normalize_work_model_action(action_plan, verify_command=""):
             }
             if normalized.get("summary"):
                 result["summary"] = normalized.get("summary")
-            dropped_tool_count = len(all_split_queries) - len(split_queries)
+            dropped_tool_count = len(unique_split_queries) - len(split_queries)
             if dropped_tool_count:
                 result["truncated_tools"] = dropped_tool_count
                 result["reason"] = (
