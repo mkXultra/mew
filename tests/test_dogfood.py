@@ -70,6 +70,22 @@ class DogfoodTests(unittest.TestCase):
         self.assertTrue(args.all_scenarios)
         self.assertIsNone(args.scenario)
 
+    def test_cli_dogfood_m2_task_shape_choices(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "dogfood",
+                "--scenario",
+                "m2-comparative",
+                "--m2-task-shape",
+                "interruption_resume",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(args.m2_task_shape, "interruption_resume")
+
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
 
@@ -666,6 +682,26 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("fresh_cli", protocol["resident_preference"]["allowed_values"])
             self.assertIn("dead_waits_over_30s", protocol["friction_counts"])
             self.assertIn("artifacts", summary["scenarios"][0])
+
+    def test_run_dogfood_m2_comparative_sets_task_shape_from_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+                m2_task_shape="interruption_resume",
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            runbook_path = Path(scenario["artifacts"]["markdown"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            runbook = runbook_path.read_text(encoding="utf-8")
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(protocol["task_shape"]["selected"], "interruption_resume")
+            self.assertIn("- selected: interruption_resume", runbook)
 
     def test_run_dogfood_m2_comparative_merges_fresh_cli_report(self):
         with tempfile.TemporaryDirectory() as tmp:

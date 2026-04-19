@@ -2,7 +2,7 @@
 import argparse
 import os
 
-from .dogfood import DOGFOOD_SCENARIOS
+from .dogfood import DOGFOOD_SCENARIOS, M2_COMPARATIVE_TASK_SHAPES
 from .commands import (
     CHAT_HELP,
     cmd_attach,
@@ -715,6 +715,11 @@ def build_parser():
     dogfood_parser.add_argument(
         "--m2-comparison-report",
         help="for m2-comparative, merge a JSON report from the paired fresh CLI run",
+    )
+    dogfood_parser.add_argument(
+        "--m2-task-shape",
+        choices=M2_COMPARATIVE_TASK_SHAPES,
+        help="for m2-comparative, set task_shape.selected for this paired run",
     )
     dogfood_parser.add_argument("--duration", type=float, default=45.0, help="seconds to run the runtime")
     dogfood_parser.add_argument("--interval", type=float, default=10.0, help="passive wake interval in seconds")

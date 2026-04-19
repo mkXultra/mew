@@ -59,6 +59,7 @@ DOGFOOD_SCENARIOS = (
     "work-session",
     "m2-comparative",
 )
+M2_COMPARATIVE_TASK_SHAPES = ("standard", "interruption_resume", "write_heavy")
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
 DOGFOOD_OBSERVED_DICT_LIMIT = 40
@@ -5834,7 +5835,19 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
     return protocol
 
 
-def build_m2_comparative_protocol(mew_run_evidence=None, comparison_report=None, comparison_report_source=""):
+def _m2_task_shape_selected(value):
+    selected = str(value or "").strip()
+    if selected in M2_COMPARATIVE_TASK_SHAPES:
+        return selected
+    return "standard"
+
+
+def build_m2_comparative_protocol(
+    mew_run_evidence=None,
+    comparison_report=None,
+    comparison_report_source="",
+    task_shape_selected=None,
+):
     protocol = {
         "name": "m2-comparative",
         "generated_at": now_iso(),
@@ -5850,9 +5863,9 @@ def build_m2_comparative_protocol(mew_run_evidence=None, comparison_report=None,
             "the companion change lands."
         ),
         "task_shape": {
-            "selected": "standard",
+            "selected": _m2_task_shape_selected(task_shape_selected),
             "recommended_next": "interruption_resume",
-            "allowed_values": ["standard", "interruption_resume", "write_heavy"],
+            "allowed_values": list(M2_COMPARATIVE_TASK_SHAPES),
             "why": (
                 "M2 cannot be closed until an interruption-shaped task proves "
                 "that the resident can resume without user rebrief and still "
@@ -6126,7 +6139,13 @@ def format_m2_comparative_protocol(protocol):
     return "\n".join(lines) + "\n"
 
 
-def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None, comparison_report_path=None):
+def run_m2_comparative_scenario(
+    workspace,
+    env=None,
+    mew_session_id=None,
+    comparison_report_path=None,
+    task_shape=None,
+):
     del env
     commands = []
     checks = []
@@ -6146,6 +6165,7 @@ def run_m2_comparative_scenario(workspace, env=None, mew_session_id=None, compar
         mew_run_evidence=mew_run_evidence,
         comparison_report=comparison_report,
         comparison_report_source=comparison_report_source,
+        task_shape_selected=task_shape,
     )
     output_dir = Path(workspace) / STATE_DIR / "dogfood"
     json_path = output_dir / "m2-comparative-protocol.json"
@@ -6346,6 +6366,7 @@ def run_dogfood_scenario(args):
                     env=env,
                     mew_session_id=getattr(args, "mew_session_id", None),
                     comparison_report_path=getattr(args, "m2_comparison_report", None),
+                    task_shape=getattr(args, "m2_task_shape", None),
                 )
             )
         else:
