@@ -8465,6 +8465,44 @@ def build_context_save_text(context, current_time, note):
     return "\n".join(lines)
 
 
+def context_load_current_state():
+    data = {"git_head": "", "git_status": "unknown", "git_status_short": ""}
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if head.returncode == 0:
+            data["git_head"] = (head.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if status.returncode == 0:
+            status_text = (status.stdout or "").strip()
+            data["git_status_short"] = status_text
+            data["git_status"] = "dirty" if status_text else "clean"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return data
+
+
+def extract_context_save_note(text):
+    for line in str(text or "").splitlines():
+        if line.startswith("Note:"):
+            return line.removeprefix("Note:").strip()
+    return ""
+
+
 def load_context_checkpoints(query, limit):
     limit = max(0, int(limit or 0))
     entries = [
@@ -8473,23 +8511,42 @@ def load_context_checkpoints(query, limit):
         if entry.memory_type == "project" and memory_entry_matches(entry, query)
     ]
     entries.sort(key=lambda entry: (entry.created_at or "", entry.id), reverse=True)
-    return [entry_to_dict(entry) for entry in entries[:limit]]
+    matches = []
+    for index, entry in enumerate(entries[:limit]):
+        item = entry_to_dict(entry)
+        item["recommended"] = index == 0
+        item["reentry_note"] = extract_context_save_note(item.get("text"))
+        item["diagnostics_are_historical"] = True
+        matches.append(item)
+    return matches
 
 
 def format_context_load_report(data):
+    current = data.get("current") or {}
     lines = [
         "Mew context load",
         f"query: {data.get('query') or ''}",
         f"matches: {len(data.get('matches') or [])}",
+        f"current_git_head: {current.get('git_head') or '(unknown)'}",
+        f"current_git_status: {current.get('git_status') or 'unknown'}",
     ]
+    if data.get("matches"):
+        lines.append(f"recommended: {(data.get('matches') or [{}])[0].get('name')}")
     for item in data.get("matches") or []:
         lines.append("")
-        lines.append(f"- {item.get('name') or item.get('key') or item.get('id')}")
+        label = "recommended, historical" if item.get("recommended") else "historical"
+        lines.append(f"- [{label}] {item.get('name') or item.get('key') or item.get('id')}")
+        if item.get("created_at"):
+            lines.append(f"  created_at: {item.get('created_at')}")
         if item.get("description"):
             lines.append(f"  description: {item.get('description')}")
         if item.get("path"):
             lines.append(f"  path: {item.get('path')}")
-        lines.append("  text:")
+        if item.get("reentry_note"):
+            lines.append("  note:")
+            for line in str(item.get("reentry_note") or "").splitlines() or [""]:
+                lines.append(f"    {line}")
+        lines.append("  diagnostics_preview:")
         preview = clip_output(item.get("text") or "", 900)
         for line in preview.splitlines() or [""]:
             lines.append(f"    {line}")
@@ -8505,6 +8562,7 @@ def cmd_context(args):
             return 1
         data = {
             "query": args.query,
+            "current": context_load_current_state(),
             "matches": load_context_checkpoints(args.query, args.limit),
         }
         if args.json:

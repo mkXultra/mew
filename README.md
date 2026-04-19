@@ -222,7 +222,11 @@ uv run mew brief
 uv run mew brief --json
 uv run mew activity
 uv run mew activity --kind coding
+uv run mew metrics --kind coding --limit 20
+uv run mew metrics --kind coding --limit 20 --json
 uv run mew context
+uv run mew context --save "current intent; next action; validation; blockers"
+uv run mew context --load
 uv run mew step --dry-run
 uv run mew step --ai --auth auth.json --allow-read . --max-steps 3
 uv run mew step --ai --auth auth.json --allow-read . --max-reflex-rounds 1 --focus "Read README.md, then decide"
@@ -276,6 +280,11 @@ Read-only inspections also maintain a compact `project_snapshot` under deep
 memory, so dogfood runs and resident prompts can reuse repository shape without
 re-reading every file.
 Run `mew snapshot --allow-read .` to refresh that map deterministically.
+`mew metrics` summarizes work-session reliability, approval/verification
+friction, and latency percentiles, then surfaces compact bottleneck signals for
+the selected task kind. `mew context --save` writes a reentry checkpoint to
+typed project memory, and `mew context --load` reads the latest checkpoints after
+context compression or interruption.
 `mew dogfood --report <path>` stores the structured report for later inspection,
 including model phase counts, cycle summaries, active dropped-thread warnings,
 and the final project snapshot.
