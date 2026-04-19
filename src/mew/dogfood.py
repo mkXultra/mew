@@ -48,6 +48,7 @@ DOGFOOD_SCENARIOS = (
     "passive-auto-recovery-read",
     "passive-auto-recovery-write",
     "day-reentry",
+    "continuity",
     "chat-cockpit",
     "work-session",
 )
@@ -2526,6 +2527,248 @@ def run_day_reentry_scenario(workspace, env=None):
     return _scenario_report("day-reentry", workspace, commands, checks)
 
 
+def run_continuity_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, input_text=None):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env, input_text=input_text)
+        commands.append(result)
+        return result
+
+    readme = Path(workspace) / "README.md"
+    readme.write_text(
+        "# Continuity Dogfood\n\n"
+        "mew should restore the work thread after interruption, failed verification, and pending approval.\n",
+        encoding="utf-8",
+    )
+    verifier_command = f"{sys.executable} -c \"import sys; print('continuity verifier failed'); sys.exit(1)\""
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Continuity reentry task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verifier_command,
+            "--json",
+        ],
+        timeout=15,
+    )
+    read_result = run(
+        ["work", str(task_id), "--tool", "read_file", "--path", "README.md", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    approval_result = run(
+        [
+            "work",
+            str(task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "README.md",
+            "--old",
+            "restore the work thread",
+            "--new",
+            "restore continuity",
+            "--allow-write",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    failed_verify_result = run(
+        [
+            "work",
+            str(task_id),
+            "--tool",
+            "run_tests",
+            "--command",
+            verifier_command,
+            "--allow-verify",
+            "--json",
+        ],
+        timeout=15,
+    )
+    note_result = run(
+        [
+            "work",
+            str(task_id),
+            "--session-note",
+            "User pivot: preserve pending approval, failed verifier, and next action for reentry.",
+            "--json",
+        ],
+        timeout=15,
+    )
+    queue_result = run(
+        [
+            "work",
+            str(task_id),
+            "--queue-followup",
+            "After the pivot, inspect the failed verifier before approving README.md.",
+            "--json",
+        ],
+        timeout=15,
+    )
+
+    state_path = Path(workspace) / STATE_FILE
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    start_data = _json_stdout(start_result)
+    session_id = (start_data.get("work_session") or {}).get("id")
+    for candidate in state.get("work_sessions") or []:
+        if str(candidate.get("id")) != str(session_id):
+            continue
+        timestamp = now_iso()
+        turn_id = next_id(state, "work_model_turn")
+        candidate.setdefault("model_turns", []).append(
+            {
+                "id": turn_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "status": "completed",
+                "decision_plan": {
+                    "summary": "preserve continuity after interruption",
+                    "working_memory": {
+                        "hypothesis": "Continuity is viable when memory, risks, approvals, and next action survive interruption.",
+                        "next_step": "Inspect the failed verifier, then decide whether to approve the README dry-run edit.",
+                        "open_questions": ["Is the pending README approval still visible after reentry?"],
+                        "last_verified_state": "The explicit continuity verifier failed and must be reviewed.",
+                    },
+                },
+                "action_plan": {},
+                "action": {"type": "finish", "reason": "pause for continuity reentry"},
+                "summary": "Captured continuity working memory.",
+                "started_at": timestamp,
+                "finished_at": timestamp,
+            }
+        )
+        candidate["updated_at"] = timestamp
+        break
+    write_json_file(state_path, state)
+
+    resume_json_result = run(
+        ["work", str(task_id), "--session", "--resume", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    resume_text_result = run(
+        ["work", str(task_id), "--session", "--resume", "--allow-read", "."],
+        timeout=15,
+    )
+    focus_text_result = run(["focus", "--kind", "coding"], timeout=15)
+    follow_snapshot_result = run(
+        [
+            "work",
+            str(task_id),
+            "--follow",
+            "--max-steps",
+            "0",
+            "--allow-read",
+            ".",
+            "--quiet",
+            "--json",
+        ],
+        timeout=15,
+    )
+    follow_status_result = run(["work", str(task_id), "--follow-status", "--json"], timeout=15)
+
+    resume_data = _json_stdout(resume_json_result)
+    failed_verify_data = _json_stdout(failed_verify_result)
+    resume = resume_data.get("resume") or {}
+    continuity = resume.get("continuity") or {}
+    axes = {axis.get("key"): axis for axis in continuity.get("axes") or []}
+    pending_approvals = resume.get("pending_approvals") or []
+    focus_text = focus_text_result.get("stdout") or ""
+    resume_text = resume_text_result.get("stdout") or ""
+    follow_snapshot_file_data = read_json_file(
+        Path(workspace) / STATE_DIR / "follow" / f"session-{session_id}.json",
+        {},
+    )
+    follow_status_data = _json_stdout(follow_status_result)
+
+    _scenario_check(
+        checks,
+        "continuity_resume_scores_reentry_artifacts",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and read_result.get("exit_code") == 0
+        and approval_result.get("exit_code") == 0
+        and (failed_verify_data.get("tool_call") or {}).get("status") == "failed"
+        and note_result.get("exit_code") == 0
+        and queue_result.get("exit_code") == 0
+        and resume_json_result.get("exit_code") == 0
+        and continuity.get("score") == "8/8"
+        and continuity.get("status") == "strong"
+        and axes.get("working_memory_survived", {}).get("ok") is True
+        and axes.get("risks_preserved", {}).get("ok") is True
+        and axes.get("approvals_visible", {}).get("ok") is True
+        and axes.get("verifier_confidence_kept", {}).get("ok") is True,
+        observed={
+            "continuity": continuity,
+            "pending_approvals": pending_approvals,
+            "unresolved_failure": resume.get("unresolved_failure"),
+            "working_memory": resume.get("working_memory"),
+        },
+        expected="resume continuity score preserves memory, risk, approval, and verifier artifacts",
+    )
+    _scenario_check(
+        checks,
+        "continuity_text_surfaces_score_and_controls",
+        resume_text_result.get("exit_code") == 0
+        and "continuity: 8/8 status=strong" in resume_text
+        and "Pending approvals" in resume_text
+        and "continuity verifier failed" in resume_text
+        and "Working memory" in resume_text
+        and "Next action" in resume_text,
+        observed=command_result_tail(resume_text_result),
+        expected="text resume exposes continuity score with approval, failed verifier, memory, and next action",
+    )
+    _scenario_check(
+        checks,
+        "continuity_focus_surfaces_score",
+        focus_text_result.get("exit_code") == 0
+        and "continuity: 8/8 status=strong" in focus_text
+        and "Continuity is viable" in focus_text
+        and "risk: run_tests#" in focus_text,
+        observed=command_result_tail(focus_text_result),
+        expected="focus preserves continuity score and reentry cues after user pivot",
+    )
+    _scenario_check(
+        checks,
+        "continuity_follow_snapshot_and_status_surface_score",
+        follow_snapshot_result.get("exit_code") == 0
+        and follow_status_result.get("exit_code") == 0
+        and (follow_snapshot_file_data.get("resume") or {}).get("continuity", {}).get("score") == "8/8"
+        and follow_snapshot_file_data.get("continuity", {}).get("score") == "8/8"
+        and follow_status_data.get("continuity", {}).get("score") == "8/8",
+        observed={
+            "snapshot_continuity": follow_snapshot_file_data.get("continuity"),
+            "status_continuity": follow_status_data.get("continuity"),
+            "follow_status": follow_status_data.get("status"),
+        },
+        expected="observer snapshot and follow-status expose the same continuity score",
+    )
+    return _scenario_report("continuity", workspace, commands, checks)
+
+
 def run_chat_cockpit_scenario(workspace, env=None):
     commands = []
     checks = []
@@ -4435,6 +4678,8 @@ def run_dogfood_scenario(args):
             reports.append(run_passive_auto_recovery_write_scenario(scenario_workspace, env=env))
         elif name == "day-reentry":
             reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
+        elif name == "continuity":
+            reports.append(run_continuity_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":
@@ -4513,6 +4758,14 @@ def compact_dogfood_value(value, *, depth=0):
             items.append({"omitted_items": len(value) - DOGFOOD_OBSERVED_LIST_LIMIT})
         return items
     if isinstance(value, dict):
+        if {"status", "score", "axes"}.issubset(value.keys()):
+            return {
+                "status": value.get("status"),
+                "score": value.get("score"),
+                "passed": value.get("passed"),
+                "total": value.get("total"),
+                "missing": compact_dogfood_value(value.get("missing") or [], depth=depth + 1),
+            }
         compacted = {}
         items = list(value.items())
         for key, item in items[:DOGFOOD_OBSERVED_DICT_LIMIT]:

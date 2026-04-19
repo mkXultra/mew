@@ -9,6 +9,7 @@ from .thoughts import recent_thoughts_for_context
 from .timeutil import elapsed_hours, now_iso
 from .work_session import (
     build_work_session_resume,
+    format_work_continuity_inline,
     format_work_failure_risk,
     latest_unresolved_failure,
     work_session_task,
@@ -742,6 +743,8 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "inactive_for": format_waiting_hours(inactive_hours, minimum_hours=0.0),
                 "next_action": resume.get("next_action") or "",
                 "risk": risk,
+                "continuity": resume.get("continuity") or {},
+                "compressed_prior_think": resume.get("compressed_prior_think") or {},
                 "working_memory": resume.get("working_memory") or {},
                 "resume_command": resume_command,
                 "continue_command": continue_command,
@@ -863,6 +866,9 @@ def format_focus(data):
                 f"- #{session.get('id')} task=#{session.get('task_id')} "
                 f"phase={session.get('phase')} {session.get('title') or ''}"
             )
+            continuity_text = format_work_continuity_inline(session.get("continuity") or {})
+            if continuity_text:
+                lines.append(f"  {continuity_text}")
             if session.get("next_action"):
                 lines.append(f"  next: {session.get('next_action')}")
             if session.get("risk"):
@@ -882,6 +888,14 @@ def format_focus(data):
                 lines.append(f"  memory_stale: {stale_memory}")
             elif memory.get("next_step"):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
+            compressed_prior = session.get("compressed_prior_think") or {}
+            if compressed_prior.get("items"):
+                item = (compressed_prior.get("items") or [])[-1]
+                summary = item.get("summary") or item.get("hypothesis") or ""
+                lines.append(
+                    f"  prior_think: {compressed_prior.get('shown')}/{compressed_prior.get('total_older_model_turns')} "
+                    f"older turn(s); latest=#{item.get('model_turn_id')} {summary}".rstrip()
+                )
             lines.append(f"  resume: {session.get('resume_command')}")
             lines.append(f"  continue: {session.get('continue_command')}")
             lines.append(f"  follow: {session.get('follow_command')}")

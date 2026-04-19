@@ -260,6 +260,115 @@ class WorkSessionTests(unittest.TestCase):
         no_op_resume = build_work_session_resume(session, task=task)
         self.assertEqual(no_op_resume["same_surface_audit"], {})
 
+    def test_work_session_resume_scores_continuity(self):
+        task = {"id": 1, "title": "Continuity", "status": "ready", "kind": "coding", "notes": ""}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Continuity",
+            "goal": "Keep reentry state durable.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:03:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "started_at": "2026-04-17T00:00:00Z",
+                    "finished_at": "2026-04-17T00:00:01Z",
+                    "parameters": {"path": "README.md"},
+                    "result": {"path": "README.md", "text": "body"},
+                    "summary": "Read README.md for continuity context.",
+                },
+                {
+                    "id": 2,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "started_at": "2026-04-17T00:01:00Z",
+                    "finished_at": "2026-04-17T00:01:03Z",
+                    "parameters": {"command": "python -m pytest"},
+                    "result": {"command": "python -m pytest", "exit_code": 1, "stderr": "failed\n"},
+                    "error": "tests failed",
+                    "summary": "Verifier failed.",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "started_at": "2026-04-17T00:02:00Z",
+                    "finished_at": "2026-04-17T00:02:10Z",
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "Continuity is restorable.",
+                            "next_step": "Inspect the failed verifier before editing.",
+                            "open_questions": ["Which test failed?"],
+                            "last_verified_state": "Verifier failed.",
+                        }
+                    },
+                    "action": {"type": "finish"},
+                    "summary": "Captured continuity memory.",
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task=task)
+        continuity = resume["continuity"]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(continuity["score"], "8/8")
+        self.assertEqual(continuity["status"], "strong")
+        self.assertEqual(continuity["missing"], [])
+        self.assertIn("continuity: 8/8 status=strong", text)
+        self.assertTrue(all(axis["ok"] for axis in continuity["axes"]))
+
+    def test_work_session_resume_compresses_prior_think(self):
+        task = {"id": 1, "title": "Compressed think", "status": "ready", "kind": "coding", "notes": ""}
+        turns = []
+        for index in range(10):
+            turn_id = index + 1
+            turns.append(
+                {
+                    "id": turn_id,
+                    "status": "completed",
+                    "started_at": f"2026-04-17T00:{index:02d}:00Z",
+                    "finished_at": f"2026-04-17T00:{index:02d}:01Z",
+                    "guidance_snapshot": f"Guidance {turn_id}",
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": f"Hypothesis {turn_id}",
+                            "next_step": f"Next step {turn_id}",
+                            "last_verified_state": f"Verified {turn_id}",
+                        }
+                    },
+                    "action": {"type": "read_file"},
+                    "summary": f"Turn summary {turn_id}",
+                }
+            )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compressed think",
+            "goal": "Preserve older reasoning after compaction.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:09:01Z",
+            "tool_calls": [],
+            "model_turns": turns,
+        }
+
+        resume = build_work_session_resume(session, task=task, limit=3)
+        prior = resume["compressed_prior_think"]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(prior["total_older_model_turns"], 7)
+        self.assertEqual(prior["shown"], 4)
+        self.assertEqual(prior["items"][-1]["model_turn_id"], 7)
+        self.assertEqual(prior["items"][-1]["hypothesis"], "Hypothesis 7")
+        self.assertIn("Compressed prior think (4/7 older turn(s))", text)
+        self.assertIn("#7 [completed] read_file Turn summary 7", text)
+
     def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
         active_session = {
             "id": 1,

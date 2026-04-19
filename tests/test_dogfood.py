@@ -391,6 +391,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("day_reentry_focus_surfaces_aged_active_session", text)
             self.assertIn("day_reentry_resume_restores_memory_and_world_state", text)
 
+    def test_run_dogfood_continuity_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="continuity",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "continuity")
+            self.assertIn("continuity_resume_scores_reentry_artifacts", text)
+            self.assertIn("continuity_follow_snapshot_and_status_surface_score", text)
+
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

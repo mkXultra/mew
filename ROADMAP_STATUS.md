@@ -10,11 +10,23 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, and external-cwd/default-preserving observer recovery hints; the remaining gap is a polished continuous REPL-style coding cockpit. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, durable work notes, user preferences, unresolved-risk reentry, older-tool digests, live world-state context, task-kind scoped reentry views, short passive native-work advancement, and a deterministic day-scale reentry proof now exist; multi-day resident cadence is still unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, and a day-scale reentry proof now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, and direct Ctrl-C capture for manual work tools exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets and preserve recent completed work, and recent sessions can commit multiple safe fixes, but closed-loop self-improvement is not yet reliable. |
 
 ## Current Focus
+
+The active Persistent Advantage framing is now continuity, not calendar time.
+`mew work` resume bundles compute a `continuity` score across working memory,
+risk preservation, runnable next action, approval visibility, recovery path,
+verifier confidence, context budget, and prior decisions. The same score is
+visible in text resume output, `mew focus`, follow snapshots, and
+`follow-status`, and `dogfood --scenario continuity` deterministically proves
+that memory, failed verification, pending approval, focus reentry, and observer
+status survive an interruption-style pivot. `compressed_prior_think` also keeps
+older model turns visible after the recent decision window would otherwise drop
+them. Keep one day-scale scenario for time-decay failures, but choose next work
+from continuity friction first.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not

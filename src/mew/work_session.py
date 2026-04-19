@@ -2455,6 +2455,223 @@ def format_work_effort_brief(effort):
     return f"effort={pressure} steps={used}/{budget} failures={failures or 0}"
 
 
+def _continuity_axis(key, ok, reason, artifacts=None):
+    return {
+        "key": key,
+        "ok": bool(ok),
+        "reason": reason,
+        "artifacts": [artifact for artifact in (artifacts or []) if artifact],
+    }
+
+
+def _approval_has_visible_control(approval):
+    if not approval:
+        return False
+    has_identity = approval.get("tool_call_id") is not None and bool(approval.get("path") or approval.get("tool"))
+    has_review = bool(approval.get("diff_preview") or approval.get("diff"))
+    has_decision = bool(
+        approval.get("approve_hint")
+        or approval.get("cli_approve_hint")
+        or approval.get("approval_blocked_reason")
+        or approval.get("override_approve_hint")
+        or approval.get("cli_override_approve_hint")
+    ) and bool(approval.get("reject_hint") or approval.get("cli_reject_hint"))
+    return has_identity and has_review and has_decision
+
+
+def _continuity_next_action_runnable(resume):
+    next_action = str((resume or {}).get("next_action") or "").strip()
+    if not next_action:
+        return False
+    approvals = (resume or {}).get("pending_approvals") or []
+    if approvals:
+        return all(_approval_has_visible_control(approval) for approval in approvals)
+    recovery = (resume or {}).get("recovery_plan") or {}
+    if recovery:
+        for item in recovery.get("items") or []:
+            if item.get("hint") or item.get("auto_hint") or item.get("review_hint") or item.get("chat_auto_hint"):
+                return True
+        return bool(recovery.get("next_action"))
+    runnable_markers = ("mew ", "/continue", "/work-session", "approve", "reject", "retry", "inspect")
+    return any(marker in next_action for marker in runnable_markers) or bool(next_action)
+
+
+def build_work_continuity_score(resume):
+    """Score whether a work resume can restore continuity after interruption."""
+    resume = resume or {}
+    memory = resume.get("working_memory") or {}
+    failures = resume.get("failures") or []
+    unresolved_failure = resume.get("unresolved_failure") or {}
+    recovery_plan = resume.get("recovery_plan") or {}
+    pending_approvals = resume.get("pending_approvals") or []
+    verification_confidence = resume.get("verification_confidence") or {}
+    suggested_verify = resume.get("suggested_verify_command") or {}
+    context = resume.get("context") or {}
+    decisions = resume.get("recent_decisions") or []
+    compressed_prior = resume.get("compressed_prior_think") or {}
+    notes = resume.get("notes") or []
+
+    memory_ok = bool(memory.get("hypothesis") or memory.get("next_step") or memory.get("last_verified_state"))
+    risky = bool(
+        unresolved_failure
+        or failures
+        or recovery_plan
+        or pending_approvals
+        or (verification_confidence and verification_confidence.get("status") != "verified")
+        or resume.get("same_surface_audit")
+        or resume.get("recurring_failures")
+    )
+    risks_ok = not risky or bool(
+        unresolved_failure
+        or failures
+        or recovery_plan
+        or pending_approvals
+        or verification_confidence
+        or resume.get("same_surface_audit")
+        or resume.get("recurring_failures")
+    )
+    approvals_ok = not pending_approvals or all(_approval_has_visible_control(approval) for approval in pending_approvals)
+    needs_recovery = bool(recovery_plan or unresolved_failure or failures or resume.get("phase") in ("interrupted", "failed"))
+    recovery_ok = not needs_recovery or bool(
+        (recovery_plan.get("items") if isinstance(recovery_plan, dict) else [])
+        or resume.get("suggested_safe_reobserve")
+        or resume.get("next_action")
+    )
+    verification_needed = bool(
+        pending_approvals
+        or verification_confidence
+        or suggested_verify
+        or any((command or {}).get("tool") in ("run_tests", "verification") for command in resume.get("commands") or [])
+    )
+    verifier_ok = not verification_needed or bool(verification_confidence or suggested_verify or resume.get("commands"))
+    context_pressure = context.get("pressure") or "unknown"
+    context_ok = context_pressure in ("low", "medium") or context.get("total_session_chars") is None
+    decisions_ok = bool(decisions or compressed_prior.get("items") or notes or memory)
+
+    axes = [
+        _continuity_axis(
+            "working_memory_survived",
+            memory_ok,
+            "working memory has hypothesis, next step, or latest verification state"
+            if memory_ok
+            else "working memory is absent",
+            ["working_memory"],
+        ),
+        _continuity_axis(
+            "risks_preserved",
+            risks_ok,
+            "risk-bearing state is visible" if risky else "no unresolved risk detected",
+            ["unresolved_failure", "failures", "recovery_plan", "verification_confidence"],
+        ),
+        _continuity_axis(
+            "next_action_runnable",
+            _continuity_next_action_runnable(resume),
+            "next action has a visible command, recovery path, or approval control",
+            ["next_action", "pending_approvals", "recovery_plan"],
+        ),
+        _continuity_axis(
+            "approvals_visible",
+            approvals_ok,
+            "pending approvals have review and decision controls" if pending_approvals else "no pending approvals",
+            ["pending_approvals"],
+        ),
+        _continuity_axis(
+            "recovery_path_visible",
+            recovery_ok,
+            "recovery or failure review path is visible" if needs_recovery else "no recovery path needed",
+            ["recovery_plan", "suggested_safe_reobserve", "next_action"],
+        ),
+        _continuity_axis(
+            "verifier_confidence_kept",
+            verifier_ok,
+            "verification state or command history is visible"
+            if verification_needed
+            else "no verifier context is required yet",
+            ["verification_confidence", "suggested_verify_command", "commands"],
+        ),
+        _continuity_axis(
+            "bundle_within_budget",
+            context_ok,
+            f"context pressure is {context_pressure}",
+            ["context"],
+        ),
+        _continuity_axis(
+            "recent_decisions_preserved",
+            decisions_ok,
+            "recent decisions, compressed prior think, notes, or working memory preserve the thread"
+            if decisions_ok
+            else "no decisions, compressed prior think, notes, or memory are visible",
+            ["recent_decisions", "compressed_prior_think", "notes", "working_memory"],
+        ),
+    ]
+    passed = sum(1 for axis in axes if axis.get("ok"))
+    total = len(axes)
+    if passed == total:
+        status = "strong"
+    elif passed >= max(1, total - 2):
+        status = "usable"
+    elif passed >= max(1, total // 2):
+        status = "weak"
+    else:
+        status = "broken"
+    missing = [axis.get("key") for axis in axes if not axis.get("ok")]
+    return {
+        "status": status,
+        "passed": passed,
+        "total": total,
+        "score": f"{passed}/{total}",
+        "missing": missing,
+        "axes": axes,
+    }
+
+
+def format_work_continuity_inline(continuity):
+    if not continuity:
+        return ""
+    missing = continuity.get("missing") or []
+    suffix = f" missing={','.join(str(item) for item in missing)}" if missing else ""
+    return f"continuity: {continuity.get('score') or '-'} status={continuity.get('status') or 'unknown'}{suffix}"
+
+
+def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
+    turns = list(turns or [])
+    recent_count = max(0, int(recent_limit or 0))
+    older_turns = turns[:-recent_count] if recent_count else turns
+    if not older_turns:
+        return {}
+    entries = []
+    for turn in older_turns[-max(1, int(limit or 1)):]:
+        action = turn.get("action") or {}
+        plan = turn.get("decision_plan") or {}
+        memory = plan.get("working_memory") if isinstance(plan, dict) else {}
+        memory = memory if isinstance(memory, dict) else {}
+        entry = {
+            "model_turn_id": turn.get("id"),
+            "status": turn.get("status") or "unknown",
+            "action": action.get("type") or action.get("tool") or "unknown",
+            "summary": clip_inline_text(
+                turn.get("finished_note") or turn.get("summary") or turn.get("error") or "",
+                240,
+            ),
+        }
+        guidance = work_turn_guidance_snapshot(turn)
+        if guidance:
+            entry["guidance_snapshot"] = clip_inline_text(guidance, 240)
+        for key in ("hypothesis", "next_step", "last_verified_state"):
+            if memory.get(key):
+                entry[key] = clip_inline_text(memory.get(key), 240)
+        questions = memory.get("open_questions") or []
+        if questions:
+            entry["open_questions"] = [clip_inline_text(str(item), 160) for item in questions[:3]]
+        entries.append(entry)
+    return {
+        "total_older_model_turns": len(older_turns),
+        "shown": len(entries),
+        "omitted": max(0, len(older_turns) - len(entries)),
+        "items": entries,
+    }
+
+
 def work_session_phase(session, calls, turns, pending_approvals):
     if not session:
         return "none"
@@ -2915,6 +3132,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 "tool_call_id": turn.get("tool_call_id"),
             }
         )
+    compressed_prior_think = build_compressed_prior_think(turns, recent_limit=limit, limit=4)
 
     phase = work_session_phase(session, calls, turns, pending_approvals)
     latest_call = calls[-1] if calls else None
@@ -2986,7 +3204,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
     verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
 
-    return {
+    resume = {
         "session_id": session.get("id"),
         "task_id": session.get("task_id"),
         "status": session.get("status"),
@@ -3016,6 +3234,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "cli_override_approve_all_hint": cli_override_approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
+        "compressed_prior_think": compressed_prior_think,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
         "same_surface_audit": same_surface_audit,
@@ -3036,6 +3255,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "suggested_safe_reobserve": latest_safe_reobserve,
         "next_action": next_action,
     }
+    resume["continuity"] = build_work_continuity_score(resume)
+    return resume
 
 
 def recovery_next_action_with_world_state(next_action, world_state):
@@ -3081,9 +3302,11 @@ def format_work_session_resume(resume):
         f"title: {resume.get('title') or ''}",
         f"phase: {resume.get('phase') or 'unknown'}",
         f"updated_at: {resume.get('updated_at')}",
-        "",
-        "Files touched",
     ]
+    continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
+    if continuity_text:
+        lines.append(continuity_text)
+    lines.extend(["", "Files touched"])
     files = resume.get("files_touched") or []
     if files:
         lines.extend(f"- {path}" for path in files)
@@ -3353,6 +3576,24 @@ def format_work_session_resume(resume):
                 lines.append(f"  guidance: {guidance_text}")
     else:
         lines.append("(none)")
+
+    compressed_prior = resume.get("compressed_prior_think") or {}
+    if compressed_prior:
+        shown = compressed_prior.get("shown")
+        total = compressed_prior.get("total_older_model_turns")
+        lines.extend(["", f"Compressed prior think ({shown}/{total} older turn(s))"])
+        for item in compressed_prior.get("items") or []:
+            lines.append(
+                f"#{item.get('model_turn_id')} [{item.get('status')}] "
+                f"{item.get('action') or 'unknown'} {item.get('summary') or ''}".rstrip()
+            )
+            for key in ("hypothesis", "next_step", "last_verified_state"):
+                if item.get(key):
+                    lines.append(f"  {key}: {item.get(key)}")
+            if item.get("guidance_snapshot"):
+                lines.append(f"  guidance: {item.get('guidance_snapshot')}")
+        if compressed_prior.get("omitted"):
+            lines.append(f"... {compressed_prior.get('omitted')} older model turn(s) omitted")
 
     stop_request = resume.get("stop_request") or {}
     if stop_request:

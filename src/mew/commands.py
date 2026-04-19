@@ -191,6 +191,7 @@ from .work_session import (
     clip_inline_text,
     format_diff_preview,
     format_work_action,
+    format_work_continuity_inline,
     format_work_failure_risk,
     format_work_session_commands,
     format_work_session_diffs,
@@ -648,6 +649,9 @@ def _format_workbench_reentry(resume, task):
     if not resume:
         return []
     lines = []
+    continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
+    if continuity_text:
+        lines.append(continuity_text)
     next_action = clip_inline_text(resume.get("next_action") or "", 360)
     if next_action:
         lines.append(f"resume_next_action: {next_action}")
@@ -718,6 +722,14 @@ def _format_workbench_reentry(resume, task):
         lines.append(
             f"latest_decision: #{decision.get('model_turn_id')} "
             f"{decision.get('action') or 'unknown'}{tool_text} {summary}".rstrip()
+        )
+    compressed_prior = resume.get("compressed_prior_think") or {}
+    if compressed_prior.get("items"):
+        item = (compressed_prior.get("items") or [])[-1]
+        summary = clip_inline_text(item.get("summary") or item.get("hypothesis") or "", 240)
+        lines.append(
+            f"prior_think: {compressed_prior.get('shown')}/{compressed_prior.get('total_older_model_turns')} "
+            f"older turn(s); latest=#{item.get('model_turn_id')} {summary}".rstrip()
         )
 
     task_notes = _format_workbench_task_notes((task or {}).get("notes") or "")
@@ -2093,6 +2105,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "step_count": len((report or {}).get("steps") or []),
         "last_step": step or (((report or {}).get("steps") or [None])[-1]),
         "resume": resume or {},
+        "continuity": (resume or {}).get("continuity") or {},
         "pending_approvals": (resume or {}).get("pending_approvals") or [],
         "suggested_recovery": work_recovery_suggestion_from_plan(
             (resume or {}).get("recovery_plan") or {},
@@ -5603,6 +5616,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "suggested_recovery": suggested_recovery,
         "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
         "verification_confidence": resume.get("verification_confidence") or {},
+        "continuity": resume.get("continuity") or data.get("continuity") or {},
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
         "pending_approval_count": len(data.get("pending_approvals") or []),
@@ -5645,6 +5659,9 @@ def format_work_follow_status(data):
     verification_confidence = data.get("verification_confidence") or {}
     if verification_confidence and verification_confidence.get("status") != "verified":
         lines.append(_format_verification_confidence_inline(verification_confidence))
+    continuity_text = format_work_continuity_inline(data.get("continuity") or {})
+    if continuity_text:
+        lines.append(continuity_text)
     return "\n".join(lines)
 
 

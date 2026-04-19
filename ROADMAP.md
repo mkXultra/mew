@@ -99,6 +99,15 @@ Target:
   - decisions made
   - open risks
 - automatic context reconstruction when resuming a task
+- continuity scoring for interrupted work:
+  - working memory survived
+  - risks preserved
+  - runnable next action
+  - approvals visible
+  - recovery path visible
+  - verifier confidence kept
+  - bundle within budget
+  - prior decisions preserved
 - project memory search that affects model behavior
 - user preference memory
 - daily passive bundle for reentry across journal, mood, research, dream, and self-memory artifacts
@@ -113,8 +122,8 @@ Target:
 
 Done when:
 
-- returning to mew after a day is faster than starting a new Claude Code or Codex CLI session
-- the model can explain what it was doing, what changed, and what it should do next
+- returning to mew after interruption, context compression, terminal close, or a day away is faster than starting a new Claude Code or Codex CLI session
+- the model can explain what it was doing, what changed, what is risky, and what it should do next
 
 ## Milestone 4: True Recovery
 
