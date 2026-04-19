@@ -73,6 +73,12 @@ Milestone 2 Done-when checklist:
   `approval_rejection=None`, `verification_failure=0.0`, and
   `verification_rollback=0.0`; the remaining active signal is idle time rather
   than stale approval/verification history.
+  `mew focus --kind coding` now uses the same 20-session observation window as
+  the metrics-targeted self-improve next move, and renders
+  `perceived_idle_ratio`, `high_idle_sessions`, and concrete high-idle session
+  samples when idle-time friction drives the next M2 task. This keeps the
+  suggested next self-improve loop grounded in visible evidence instead of a
+  hidden metrics signal.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this

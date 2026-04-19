@@ -715,7 +715,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
             kind=kind,
             current_time=generated_at,
         ),
-        "recent_friction": recent_focus_friction(state, kind=kind),
+        "recent_friction": recent_focus_friction(state, kind=kind, session_limit=20, sample_limit=3),
         "tasks": [
             {
                 **_task_item(task),
@@ -750,6 +750,7 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
         "slow_first_tools": diagnostics.get("slow_first_tools") or [],
         "slow_model_resumes": diagnostics.get("slow_model_resumes") or [],
         "approval_bound_waits": diagnostics.get("approval_bound_waits") or [],
+        "high_idle_sessions": diagnostics.get("high_idle_sessions") or [],
     }
     if not signals and not any(samples.values()):
         return {}
@@ -768,6 +769,7 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
             "first_tool_start_p95": (latency.get("first_tool_start_seconds") or {}).get("p95"),
             "model_resume_p95": (latency.get("model_resume_wait_seconds") or {}).get("p95"),
             "approval_bound_p95": (latency.get("approval_bound_wait_seconds") or {}).get("p95"),
+            "perceived_idle_ratio_p95": (latency.get("perceived_idle_ratio") or {}).get("p95"),
         },
         "signals": signals[:sample_limit],
         **samples,
@@ -910,6 +912,10 @@ def _format_focus_friction_summary(friction):
         parts.append(f"model_resume_p95={latency.get('model_resume_p95')}s")
     if latency.get("approval_bound_p95") is not None and friction.get("approval_bound_waits"):
         parts.append(f"approval_bound_p95={latency.get('approval_bound_p95')}s")
+    if latency.get("perceived_idle_ratio_p95") is not None and friction.get("high_idle_sessions"):
+        parts.append(f"perceived_idle_ratio={latency.get('perceived_idle_ratio_p95')}")
+    if friction.get("high_idle_sessions"):
+        parts.append(f"high_idle_sessions={len(friction.get('high_idle_sessions'))}")
     return " ".join(parts)
 
 
@@ -976,6 +982,13 @@ def _append_focus_recent_friction(lines, friction):
         lines.append(
             f"- model resume {sample.get('tool')}#{sample.get('tool_call_id')}{task} "
             f"{sample.get('model_resume_wait_seconds')}s{path}{next_turn}"
+        )
+    for sample in friction.get("high_idle_sessions") or []:
+        task = f" task=#{sample.get('task_id')}" if sample.get("task_id") is not None else ""
+        lines.append(
+            f"- high idle session#{sample.get('session_id')}{task} "
+            f"idle_ratio={sample.get('idle_ratio')} wall={sample.get('wall_seconds')}s "
+            f"active={sample.get('active_seconds')}s"
         )
 
 
