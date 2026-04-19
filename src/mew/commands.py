@@ -1756,6 +1756,23 @@ def _work_cli_approve_command(session, tool_call_id, path):
     return f"{shlex.join(parts)} {_work_cli_verify_suffix(session)}"
 
 
+def _work_cli_defer_verify_approve_command(session, tool_call_id, path):
+    task_id = (session or {}).get("task_id")
+    parts = [mew_executable(), "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.extend(
+        [
+            "--approve-tool",
+            str(tool_call_id),
+            "--allow-write",
+            path or ".",
+            "--defer-verify",
+        ]
+    )
+    return shlex.join(parts)
+
+
 def _work_cli_override_approve_command(session, tool_call_id, path):
     return f"{_work_cli_approve_command(session, tool_call_id, path)} --allow-unpaired-source-edit"
 
@@ -1849,6 +1866,12 @@ def _work_cli_approval_items(session, resume):
             {
                 "label": approve_label,
                 "command": _work_cli_approve_command(session, tool_call_id, approval.get("path") or "."),
+            }
+        )
+        items.append(
+            {
+                "label": f"apply tool #{tool_call_id} and defer verification",
+                "command": _work_cli_defer_verify_approve_command(session, tool_call_id, approval.get("path") or "."),
             }
         )
         items.append(
@@ -5242,6 +5265,7 @@ def _normalize_work_reply_actions(payload):
                             raw.get("allow_unpaired_source_edit"),
                             "allow_unpaired_source_edit",
                         ),
+                        "defer_verify": _coerce_work_reply_bool(raw.get("defer_verify"), "defer_verify"),
                     }
                 )
             elif action_type in ("approve_all", "approve-all"):
@@ -5295,6 +5319,7 @@ def _normalize_work_reply_actions(payload):
                 approve.get("allow_unpaired_source_edit"),
                 "allow_unpaired_source_edit",
             )
+            defer_verify = _coerce_work_reply_bool(approve.get("defer_verify"), "defer_verify")
         else:
             _reject_reply_verify_overrides(payload)
             tool_call_id = payload.get("approve_tool") or approve
@@ -5303,12 +5328,14 @@ def _normalize_work_reply_actions(payload):
                 payload.get("allow_unpaired_source_edit"),
                 "allow_unpaired_source_edit",
             )
+            defer_verify = _coerce_work_reply_bool(payload.get("defer_verify"), "defer_verify")
         actions.append(
             {
                 "type": "approve",
                 "tool_call_id": tool_call_id,
                 "allow_write": allow_write,
                 "allow_unpaired_source_edit": allow_unpaired,
+                "defer_verify": defer_verify,
             }
         )
     if payload.get("approve_all"):
@@ -5384,7 +5411,7 @@ def _work_reply_supported_actions():
             "type": "approve",
             "description": "approve and apply a pending dry-run write_file/edit_file tool call",
             "required": ["tool_call_id"],
-            "optional": ["allow_write", "allow_unpaired_source_edit"],
+            "optional": ["allow_write", "allow_unpaired_source_edit", "defer_verify"],
         },
         {
             "type": "approve_all",
@@ -5822,6 +5849,7 @@ def _reply_approval_args(args, session, source_call, action):
     approval_args.verify_cwd = getattr(args, "verify_cwd", None) or "."
     approval_args.verify_timeout = getattr(args, "verify_timeout", None)
     approval_args.allow_unpaired_source_edit = bool(action.get("allow_unpaired_source_edit"))
+    approval_args.defer_verify = bool(action.get("defer_verify"))
     approval_args.progress = False
     approval_args.json = False
     return approval_args
@@ -5861,7 +5889,7 @@ def _apply_work_reply_approval_action(args, session_id, action, expected_updated
                 print(f"mew: {approval_error}", file=sys.stderr)
                 return 1, approved
             approval_args = _reply_approval_args(args, session, source_call, action)
-            approval_args.defer_verify = approve_id in deferred_verify_ids
+            approval_args.defer_verify = bool(action.get("defer_verify")) or approve_id in deferred_verify_ids
             approval_args.expected_session_updated_at = expected_updated_at
         code, data = _apply_work_approval(approval_args, approve_id)
         if data is not None:
@@ -11986,7 +12014,7 @@ def chat_work_session(rest, chat_state=None):
         if len(parts) < 2:
             print(
                 'usage: /work-session approve <tool-call-id|all> [--task <task-id>] '
-                '--allow-write <path> --verify-command "<command>"'
+                '--allow-write <path> [--defer-verify|--verify-command "<command>"]'
             )
             return
         approve_all = parts[1] == "all"
@@ -12001,6 +12029,7 @@ def chat_work_session(rest, chat_state=None):
         approve_task_id = None
         allow_write = []
         allow_unpaired_source_edit = False
+        defer_verify = False
         verify_command = ""
         verify_cwd = "."
         verify_timeout = 300.0
@@ -12024,6 +12053,10 @@ def chat_work_session(rest, chat_state=None):
                 continue
             if token == "--allow-unpaired-source-edit":
                 allow_unpaired_source_edit = True
+                index += 1
+                continue
+            if token == "--defer-verify":
+                defer_verify = True
                 index += 1
                 continue
             if token == "--verify-command" and index + 1 < len(parts):
@@ -12080,6 +12113,7 @@ def chat_work_session(rest, chat_state=None):
             verify_cwd=verify_cwd,
             verify_timeout=verify_timeout,
             allow_unpaired_source_edit=allow_unpaired_source_edit,
+            defer_verify=defer_verify,
             allow_read=[],
             json=False,
         )

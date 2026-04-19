@@ -1006,6 +1006,11 @@ def build_parser():
     work_parser.add_argument("--approve-tool", type=int, help="approve and apply a dry-run write/edit tool call")
     work_parser.add_argument("--approve-all", action="store_true", help="approve and apply all pending dry-run write/edit tool calls")
     work_parser.add_argument(
+        "--defer-verify",
+        action="store_true",
+        help="apply an approved write/edit now and leave verification for a later paired approval or manual verify",
+    )
+    work_parser.add_argument(
         "--allow-unpaired-source-edit",
         action="store_true",
         help="allow approval of a src/mew/** write/edit without a paired tests/** write/edit in the same work session",

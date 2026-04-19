@@ -3385,6 +3385,9 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} "
                     f"--allow-verify --verify-command {verify_command_hint}"
                 ),
+                "defer_verify_hint": (
+                    f"/work-session approve {tool_call_id} --allow-write {shlex.quote(write_path)} --defer-verify"
+                ),
                 "reject_hint": f"/work-session reject {tool_call_id} <reason>",
                 "cli_approve_hint": work_task_command(
                     "--approve-tool",
@@ -3394,6 +3397,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     "--allow-verify",
                     "--verify-command",
                     verify_command or "<command>",
+                ),
+                "cli_defer_verify_hint": work_task_command(
+                    "--approve-tool",
+                    tool_call_id,
+                    "--allow-write",
+                    write_path,
+                    "--defer-verify",
                 ),
                 "cli_reject_hint": work_task_command("--reject-tool", tool_call_id, "--reject-reason", "<reason>"),
             }
@@ -3411,6 +3421,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     approval["cli_override_approve_hint"] = f"{cli_blocked_approve_hint} --allow-unpaired-source-edit"
                     approval["approve_hint"] = ""
                     approval["cli_approve_hint"] = ""
+                    approval["defer_verify_hint"] = ""
+                    approval["cli_defer_verify_hint"] = ""
             pending_approvals.append(approval)
 
     approve_all_hint = ""
@@ -3745,6 +3757,8 @@ def format_work_session_resume(resume):
                     lines.append(f"  override approve: {approval.get('override_approve_hint')}")
             elif approval.get("approve_hint"):
                 lines.append(f"  approve: {approval.get('approve_hint')}")
+                if approval.get("defer_verify_hint"):
+                    lines.append(f"  defer verify: {approval.get('defer_verify_hint')}")
             if approval.get("reject_hint"):
                 lines.append(f"  reject: {approval.get('reject_hint')}")
             pairing = approval.get("pairing_status") or {}

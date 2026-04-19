@@ -8971,6 +8971,88 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_tool_can_defer_default_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                command = f"{sys.executable} -c \"raise SystemExit(23)\""
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                resume = build_work_session_resume(load_state()["work_sessions"][0])
+                approval = resume["pending_approvals"][0]
+                self.assertIn("mew work 1 --approve-tool 1 --allow-write", approval["cli_defer_verify_hint"])
+                self.assertIn("notes.md", approval["cli_defer_verify_hint"])
+                self.assertIn("--defer-verify", approval["cli_defer_verify_hint"])
+                self.assertIn("--defer-verify", approval["defer_verify_hint"])
+                self.assertIn("defer verify:", format_work_session_resume(resume))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--defer-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                self.assertTrue(approved["tool_call"]["parameters"]["defer_verify"])
+                self.assertTrue(approved["tool_call"]["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", approved["tool_call"]["result"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approve_reuses_default_verification_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -16015,6 +16097,81 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_reply_file_approve_can_defer_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                command = f"{sys.executable} -c \"raise SystemExit(23)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "approve", "tool_call_id": 1, "defer_verify": True}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("- approved tool #1", output)
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                session = load_state()["work_sessions"][0]
+                applied = session["tool_calls"][1]
+                self.assertTrue(applied["parameters"]["defer_verify"])
+                self.assertTrue(applied["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", applied["result"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_reply_file_without_active_session_fails(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -16069,6 +16226,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(any(action["type"] == "approve_all" for action in data["supported_actions"]))
                 self.assertTrue(any(action["type"] == "followup" for action in data["supported_actions"]))
                 self.assertTrue(any(action["type"] == "interrupt_submit" for action in data["supported_actions"]))
+                approve_action = next(action for action in data["supported_actions"] if action["type"] == "approve")
+                self.assertIn("defer_verify", approve_action["optional"])
             finally:
                 os.chdir(old_cwd)
 
@@ -16755,6 +16914,72 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(rejected["approval_status"], "rejected")
                 self.assertEqual(rejected["rejection_reason"], "not needed")
                 self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_chat_work_session_approve_can_defer_verification(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.commands import run_chat_slash_command
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                command = f"{sys.executable} -c \"raise SystemExit(23)\""
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        run_chat_slash_command("/work-session approve 1 --allow-write . --defer-verify", {}),
+                        "continue",
+                    )
+
+                self.assertIn("approved work tool #1 -> #2 [completed]", stdout.getvalue())
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                applied = load_state()["work_sessions"][0]["tool_calls"][1]
+                self.assertTrue(applied["parameters"]["defer_verify"])
+                self.assertTrue(applied["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", applied["result"])
             finally:
                 os.chdir(old_cwd)
 

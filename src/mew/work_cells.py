@@ -405,6 +405,10 @@ def approval_cell(session, call):
         f"mew work {task_ref} --approve-tool {call.get('id')} "
         f"--allow-write {write_root} {_verify_flags_text(session)}"
     )
+    defer_verify_approve_command = (
+        f"mew work {task_ref} --approve-tool {call.get('id')} "
+        f"--allow-write {write_root} --defer-verify"
+    )
     override_approve_command = f"{approve_command} --allow-unpaired-source-edit"
     reject_command = f"mew work {task_ref} --reject-tool {call.get('id')}"
     reject_feedback_command = f"{reject_command} --reject-reason <feedback>"
@@ -444,6 +448,7 @@ def approval_cell(session, call):
     else:
         cell["actions"] = {
             "approve_once": approve_command,
+            "approve_once_defer_verify": defer_verify_approve_command,
             "reject": reject_command,
             "reject_with_feedback": reject_feedback_command,
         }
@@ -477,6 +482,11 @@ def approval_cell(session, call):
             ),
             (
                 f"approve_once: {approve_command}"
+                if not unavailable and pairing_status.get("status") != "missing_test_edit"
+                else ""
+            ),
+            (
+                f"approve_once_defer_verify: {defer_verify_approve_command}"
                 if not unavailable and pairing_status.get("status") != "missing_test_edit"
                 else ""
             ),

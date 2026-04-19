@@ -20,7 +20,10 @@ The snapshot is a local contract for another model or UI. It includes:
   the tool finishes, the final command result replaces the running tail.
 - `pending_approvals`: top-level pending dry-run write approvals for observers
   with chat-style `approve_hint`/`reject_hint` and CLI-style
-  `cli_approve_hint`/`cli_reject_hint` when approval is currently allowed
+  `cli_approve_hint`/`cli_reject_hint` when approval is currently allowed.
+  Approvals also expose `defer_verify_hint` and `cli_defer_verify_hint` for
+  the test-first case where an observer needs to apply one part of a paired
+  change before the final verifier can pass.
   - each approval includes `diff_preview` for terminal display plus a capped
     `diff` for machine review. `diff_truncated` tells observers whether the
     diff hit `diff_max_chars`; when true, refresh/re-read the file before
@@ -138,6 +141,11 @@ Supported actions:
 Approval actions may include `allow_unpaired_source_edit: true` to explicitly
 override the default block on `src/mew/**` edits without a paired `tests/**`
 write/edit in the same work session.
+Single `approve` actions may include `defer_verify: true` to apply the write
+without running the session verifier immediately. Use this for test-first or
+other paired-change flows where a later approval or manual verify will run the
+complete check. `approve_all` already defers intermediate approvals and verifies
+after the final write.
 
 ## Task Helpers
 
@@ -177,7 +185,8 @@ Approval actions may include `allow_write`. If `allow_write` is omitted, mew
 reuses the work-session write gates and then falls back to the pending write
 path. Reply files cannot set verification commands; verification must come from
 the existing work-session defaults or explicit trusted CLI flags passed to
-`mew work --reply-file`.
+`mew work --reply-file`, unless a single approval explicitly uses
+`defer_verify: true`.
 
 `--reply-file` fails with a nonzero status when there is no matching active
 session, when `schema_version` is not `1`, or when

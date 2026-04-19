@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-19 20:45 JST.
+Last assessed: 2026-04-19 21:27 JST.
 
 Active milestone: Milestone 2, Interactive Parity.
 
@@ -29,12 +29,12 @@ Milestone 2 Done-when checklist:
 
 - Using mew for one focused coding task feels close to Claude Code / Codex CLI:
   partial. The cockpit has live/follow cells, scoped chat, approvals, ledgers,
-  and real dogfood evidence. The comparative task dogfood protocol surface now
-  exists as `mew dogfood --scenario m2-comparative`, but the actual comparative
-  run is still needed before treating the cockpit as parity-level: complete one
-  real coding task end-to-end in `mew code`, attempt the same task fresh in
-  Claude Code or Codex CLI, then log friction counts, resume behavior, and
-  whether the resident would have preferred to stay inside mew.
+  and real dogfood evidence. The first `mew dogfood --scenario m2-comparative`
+  paired run is recorded in `docs/M2_COMPARATIVE_DOGFOOD_2026-04-19.md`; it
+  preferred a fresh CLI for the small local task because mew hit a paired
+  source/test approval loop. A first mitigation now exposes explicit
+  single-approval `--defer-verify` controls for test-first or paired-change
+  flows, but this needs another paired dogfood run before claiming parity.
 - The model does not lose momentum while waiting for tool feedback: unmet.
   `./mew metrics --kind coding` at this assessment showed
   `first_tool_start_seconds p95=72.2s`, `model_resume_wait_seconds p95=32.3s`,
@@ -48,10 +48,11 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are either a real focused coding dogfood/bakeoff through
-`mew code <task-id>` or a targeted latency/friction slice chosen from
-`mew metrics --kind coding`. Polish, side projects, and later-milestone
-architecture are deferred unless they directly unblock this active criterion.
+Useful next choices are either rerunning the same focused coding dogfood/bakeoff
+through `mew code <task-id>` to test the deferred-verification mitigation, or a
+targeted latency/friction slice chosen from `mew metrics --kind coding`. Polish,
+side projects, and later-milestone architecture are deferred unless they
+directly unblock this active criterion.
 `docs/ADOPT_FROM_REFERENCES.md` remains advisory implementation evidence:
 §0.1 and §0.2 are durable adoption decisions, while §1-§5 cards are candidate
 levers chosen only when a measured active-milestone signal justifies them.

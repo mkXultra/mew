@@ -75,3 +75,22 @@ The next M2 slice should make paired source/test edits pass through the approval
 boundary as a unit, or support an explicit expected-failing test approval mode
 for resident TDD flows. This should reduce approval confusion and verification
 rollback without weakening the safety gate.
+
+## Mitigation
+
+Implemented after this run: single approval now exposes `--defer-verify` through
+CLI, `/work-session approve`, reply-file `approve` actions, pending approval
+resume hints, and work cells. This lets an observer apply a test-first or other
+paired-change write without running the session verifier until the companion
+change exists. `approve_all` keeps its existing batch behavior of deferring
+intermediate writes and verifying after the final approval.
+
+Validation:
+
+- `./mew dogfood --scenario work-session --json`
+- `./mew dogfood --scenario m2-comparative --workspace /tmp/mew-m2-comparative-smoke --json`
+- `uv run pytest -q tests/test_dogfood.py -k work_session`
+- `uv run pytest -q tests/test_work_session.py -k "defer_default_verification or approve_can_defer_verification or reply_schema_uses_active_session or approve_all_verifies_after_entire_batch or approve_all_applies_paired_test_before_promoted_source_verifier or resume_cli_controls_lead_with_pending_approvals or work_session_cells or source_edit_approval_surfaces_missing_test_pairing or follow_snapshot_surfaces_top_level_pending_approvals"`
+- `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k "approve or approval or reply_schema or follow_snapshot or cockpit_controls"`
+- `uv run python -m py_compile src/mew/cli.py src/mew/commands.py src/mew/work_session.py src/mew/work_cells.py src/mew/dogfood.py tests/test_work_session.py tests/test_dogfood.py`
+- `git diff --check`

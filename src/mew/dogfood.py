@@ -3907,6 +3907,59 @@ def run_work_session_scenario(workspace, env=None):
     write_json_file(state_path, state)
     done_resume_json_result = run(["work", "8", "--session", "--resume", "--json"])
 
+    defer_verify_task_result = run(["task", "add", "Deferred verification approval task", "--kind", "coding", "--json"])
+    defer_verify_task_data = _json_stdout(defer_verify_task_result)
+    defer_verify_task_id = (defer_verify_task_data.get("task") or {}).get("id") or 9
+    (workspace / "defer-verify.md").write_text("before\n", encoding="utf-8")
+    defer_verify_command = f"{sys.executable} -c \"raise SystemExit(23)\""
+    defer_verify_start_result = run(
+        [
+            "work",
+            str(defer_verify_task_id),
+            "--start-session",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            defer_verify_command,
+            "--json",
+        ]
+    )
+    defer_verify_write_result = run(
+        [
+            "work",
+            str(defer_verify_task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "defer-verify.md",
+            "--old",
+            "before",
+            "--new",
+            "after",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    defer_verify_write_data = _json_stdout(defer_verify_write_result)
+    defer_verify_tool_id = (defer_verify_write_data.get("tool_call") or {}).get("id")
+    defer_verify_resume_result = run(["work", str(defer_verify_task_id), "--session", "--resume", "--json"])
+    defer_verify_resume_data = _json_stdout(defer_verify_resume_result)
+    defer_verify_approve_result = run(
+        [
+            "work",
+            str(defer_verify_task_id),
+            "--approve-tool",
+            str(defer_verify_tool_id),
+            "--allow-write",
+            ".",
+            "--defer-verify",
+            "--json",
+        ]
+    )
+    defer_verify_approve_data = _json_stdout(defer_verify_approve_result)
+
     verification_command = f"{sys.executable} -c \"print('dogfood verify recovered')\""
     verification_task_result = run(["task", "add", "Interrupted verification task", "--kind", "coding", "--json"])
     verification_task_data = _json_stdout(verification_task_result)
@@ -4602,6 +4655,31 @@ raise SystemExit(0 if passed else 1)
             "approval": approve_all_data,
         },
         expected="approve-all applies multiple pending dry-run writes with one command",
+    )
+    defer_verify_approval = (((defer_verify_resume_data.get("resume") or {}).get("pending_approvals") or [{}])[0])
+    defer_verify_apply = defer_verify_approve_data.get("tool_call") or {}
+    defer_verify_apply_result = defer_verify_apply.get("result") or {}
+    _scenario_check(
+        checks,
+        "work_approve_tool_can_defer_verification",
+        defer_verify_task_result.get("exit_code") == 0
+        and defer_verify_start_result.get("exit_code") == 0
+        and defer_verify_write_result.get("exit_code") == 0
+        and defer_verify_resume_result.get("exit_code") == 0
+        and defer_verify_approve_result.get("exit_code") == 0
+        and ((defer_verify_write_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and "--defer-verify" in (defer_verify_approval.get("cli_defer_verify_hint") or "")
+        and defer_verify_apply_result.get("verification_deferred") is True
+        and "verification_exit_code" not in defer_verify_apply_result
+        and (workspace / "defer-verify.md").read_text(encoding="utf-8") == "after\n",
+        observed={
+            "tool_call_id": defer_verify_tool_id,
+            "cli_defer_verify_hint": defer_verify_approval.get("cli_defer_verify_hint"),
+            "verification_deferred": defer_verify_apply_result.get("verification_deferred"),
+            "verification_exit_code_present": "verification_exit_code" in defer_verify_apply_result,
+            "content": (workspace / "defer-verify.md").read_text(encoding="utf-8"),
+        },
+        expected="approve-tool --defer-verify applies one pending write without running the default verifier",
     )
     _scenario_check(
         checks,
