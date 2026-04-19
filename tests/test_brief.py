@@ -680,6 +680,60 @@ class BriefTests(unittest.TestCase):
         self.assertIn("model resume edit_file#2 task=#7", focus)
         self.assertIn("next_turn=#2", focus)
 
+    def test_coding_next_move_targets_recent_metrics_friction_when_idle(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Improve focus", status="done", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 9,
+                "task_id": 7,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:00:20Z",
+                "model_turns": [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:02Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "rejected",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "tests/test_brief.py", "reason": "Needs paired source."},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {"command": "uv run pytest -q tests/test_brief.py"},
+                        },
+                    },
+                ],
+            }
+        )
+
+        data = build_focus_data(state, kind="coding")
+
+        self.assertIn(
+            "Reduce M2 approval/verification friction from recent coding metrics",
+            data["next_move"],
+        )
+
     def test_focus_surfaces_active_work_session_reentry(self):
         state = default_state()
         add_task(state, task_id=7, title="Implement cockpit polish")

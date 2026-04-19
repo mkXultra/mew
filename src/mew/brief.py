@@ -1113,6 +1113,26 @@ def continuity_repair_summary(continuity):
     return str(recommendation.get("summary") or "").strip()
 
 
+def coding_self_improve_focus_from_friction(state, kind=None):
+    if kind != "coding" or not current_project_looks_like_mew():
+        return "Pick the next small mew improvement"
+    friction = recent_focus_friction(state, kind=kind, session_limit=20, sample_limit=5)
+    signal_ids = {signal.get("id") for signal in friction.get("signals") or []}
+    if {"approval_friction", "verification_friction"} <= signal_ids:
+        return "Reduce M2 approval/verification friction from recent coding metrics"
+    if "verification_friction" in signal_ids:
+        return "Reduce M2 verification friction from recent coding metrics"
+    if "approval_friction" in signal_ids:
+        return "Reduce M2 approval friction from recent coding metrics"
+    if "slow_model_resume" in signal_ids:
+        return "Reduce M2 model resume latency from recent coding metrics"
+    if "slow_first_tool" in signal_ids:
+        return "Reduce M2 first-tool latency from recent coding metrics"
+    if "high_idle_ratio" in signal_ids:
+        return "Reduce M2 idle-time friction from recent coding metrics"
+    return "Pick the next small mew improvement"
+
+
 def next_move(state, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     questions = filter_questions_for_tasks(
@@ -1207,9 +1227,10 @@ def next_move(state, kind=None):
                 "add a coding task with "
                 f"`{mew_command('task', 'add', '...', '--kind', 'coding', '--ready')}`"
             )
+        focus = coding_self_improve_focus_from_friction(state, kind=kind)
         return (
             "start a native self-improvement session with "
-            f"`{mew_command('self-improve', '--start-session', '--focus', 'Pick the next small mew improvement')}`"
+            f"`{mew_command('self-improve', '--start-session', '--focus', focus)}`"
         )
     return "wait for the next user request"
 
