@@ -239,6 +239,13 @@ Milestone 2 Done-when checklist:
   `verification_rollback=0.0`, and `ok: no obvious bottleneck`, while
   `mew focus --kind coding` no longer asks to reproduce the recovered `#277`
   approval/verification failures.
+  Task `#279` then removed the remaining generic idle self-improve fallback:
+  when the mew project has no active coding task and no measured metrics
+  blocker, `mew focus --kind coding` now suggests a native self-improve session
+  focused on closing the remaining M2 continuous coding cockpit parity gap,
+  while non-mew projects and non-coding scopes keep the generic fallback. This
+  preserves the active milestone gate during long sessions instead of inviting
+  open-ended polish.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.

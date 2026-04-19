@@ -1146,7 +1146,7 @@ def coding_self_improve_focus_from_friction(state, kind=None):
         return f"{action} M2 first-tool latency from recent coding metrics"
     if "high_idle_ratio" in signal_ids:
         return f"{action} M2 idle-time friction from recent coding metrics"
-    return "Pick the next small mew improvement"
+    return "Close the remaining M2 continuous coding cockpit parity gap"
 
 
 def next_move(state, kind=None):

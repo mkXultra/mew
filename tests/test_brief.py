@@ -3,7 +3,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mew.brief import build_brief, build_brief_data, build_focus_data, format_focus, next_move, review_runs_needing_followup
+from mew.brief import (
+    build_brief,
+    build_brief_data,
+    build_focus_data,
+    coding_self_improve_focus_from_friction,
+    format_focus,
+    next_move,
+    review_runs_needing_followup,
+)
 from mew.programmer import (
     create_follow_up_task_from_review,
     create_implementation_run_from_plan,
@@ -54,7 +62,7 @@ class BriefTests(unittest.TestCase):
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
         self.assertEqual(
             next_move(default_state(), kind="coding"),
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
         )
 
     def test_next_move_coding_filter_in_empty_project_suggests_task_creation(self):
@@ -74,6 +82,17 @@ class BriefTests(unittest.TestCase):
                 self.assertIn("Coding: add a coding task", format_focus(data))
             finally:
                 os.chdir(old_cwd)
+
+    def test_coding_self_improve_focus_keeps_generic_fallback_outside_mew(self):
+        with patch("mew.brief.current_project_looks_like_mew", return_value=False):
+            self.assertEqual(
+                coding_self_improve_focus_from_friction(default_state(), kind="coding"),
+                "Pick the next small mew improvement",
+            )
+        self.assertEqual(
+            coding_self_improve_focus_from_friction(default_state(), kind="research"),
+            "Pick the next small mew improvement",
+        )
 
     def test_next_move_prefers_open_question(self):
         state = default_state()
@@ -163,7 +182,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", data["next_move"])
         self.assertEqual(
             data["coding_next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
         )
         self.assertIn("Coding: start a native self-improvement session", focus)
 
@@ -1069,7 +1088,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(
             data["next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Pick the next small mew improvement'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Close the remaining M2 continuous coding cockpit parity gap'`",
         )
 
     def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
