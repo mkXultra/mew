@@ -48,6 +48,41 @@ class PassiveBundleTests(unittest.TestCase):
             heading_text = heading_result.path.read_text(encoding="utf-8")
             self.assertIn("- Journal: Morning", heading_text)
 
+    def test_generate_bundle_prioritizes_continuity_risk_reentry_hint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_report(
+                root,
+                ".mew/morning-paper/2026-04-17.md",
+                "\n".join(
+                    [
+                        "# Mew Morning Paper",
+                        "",
+                        "Top pick: Passive AI shells",
+                        "",
+                        "## Interests",
+                        "- agents",
+                        "",
+                        "## Continuity risks",
+                        "- work session #5 task #1: weak 6/9; repair: refresh working memory",
+                        "",
+                        "## Top picks",
+                        "",
+                        "### 1. Passive AI shells",
+                    ]
+                )
+                + "\n",
+            )
+
+            result = generate_bundle(root, root, explicit_date="2026-04-17")
+            text = result.path.read_text(encoding="utf-8")
+
+            self.assertIn(
+                "- Morning Paper: work session #5 task #1: weak 6/9; repair: refresh working memory",
+                text,
+            )
+            self.assertNotIn("- Morning Paper: Top pick: Passive AI shells", text)
+
     def test_bundle_command_prints_path_and_writes_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

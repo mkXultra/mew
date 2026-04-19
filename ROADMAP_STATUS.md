@@ -1841,6 +1841,9 @@ Next action:
 - `mew morning-paper` now includes a `continuity_risks` field and markdown
   section when active work sessions are weak or broken, so the first-look
   morning surface no longer hides unsafe reentry state.
+- Passive bundles now promote a Morning Paper `Continuity risks` item into
+  the top-level Reentry hints, preventing the composed daily report from
+  burying unsafe active-work state beneath ordinary article picks.
 
 ## Current Roadmap Focus
 

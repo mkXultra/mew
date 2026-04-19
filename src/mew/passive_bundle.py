@@ -76,6 +76,32 @@ def first_non_empty_line(markdown: str) -> str:
     return fallback_heading
 
 
+def first_line_in_section(markdown: str, heading: str) -> str:
+    wanted = heading.strip().casefold()
+    in_section = False
+    for line in strip_h1(markdown).splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("## "):
+            in_section = text.lstrip("#").strip().casefold() == wanted
+            continue
+        if text.startswith("#"):
+            if in_section:
+                break
+            continue
+        if not in_section:
+            continue
+        if text.startswith("- "):
+            text = text[2:].strip()
+        return text
+    return ""
+
+
+def reentry_hint(markdown: str) -> str:
+    return first_line_in_section(markdown, "Continuity risks") or first_non_empty_line(markdown)
+
+
 def collect_reports(root: Path, day: str) -> tuple[list[tuple[ReportSpec, Path, str]], list[ReportSpec]]:
     found = []
     missing = []
@@ -106,7 +132,7 @@ def render_bundle(day: str, found: list[tuple[ReportSpec, Path, str]], missing: 
     lines.extend(["", "## Reentry hints"])
     if found:
         for spec, path, content in found:
-            hint = first_non_empty_line(content)
+            hint = reentry_hint(content)
             lines.append(f"- {spec.title}: {hint or path}")
     else:
         lines.append("- No reports found; generate journal, mood, or morning-paper first")
