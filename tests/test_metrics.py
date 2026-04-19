@@ -157,9 +157,21 @@ class MetricsTests(unittest.TestCase):
                 ],
             }
         )
+        state["work_sessions"].append(
+            {
+                "id": 8,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:03:00Z",
+                "model_turns": [],
+                "tool_calls": [],
+            }
+        )
 
         metrics = build_observation_metrics(state, kind="coding")
 
+        self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["count"], 1)
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["wait_seconds"], 41.0)
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["next_model_turn_id"], 2)
         self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["session_id"], 7)

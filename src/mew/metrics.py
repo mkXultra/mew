@@ -238,6 +238,8 @@ def _session_idle_ratio(session, model_turns, tool_calls):
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
+    if active_seconds <= 0:
+        return None
     return max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
 
 
@@ -246,6 +248,8 @@ def _high_idle_session_sample(state, session, model_turns, tool_calls):
     if not wall_seconds:
         return None
     active_seconds = _session_activity_seconds(model_turns, tool_calls)
+    if active_seconds <= 0:
+        return None
     idle_ratio = max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
     if idle_ratio <= HIGH_IDLE_RATIO:
         return None
