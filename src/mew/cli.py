@@ -718,6 +718,10 @@ def build_parser():
         help="for m2-comparative, merge a JSON report from the paired fresh CLI run",
     )
     dogfood_parser.add_argument(
+        "--m3-comparison-report",
+        help="for m3-reentry-gate, merge a JSON report from the paired fresh CLI run",
+    )
+    dogfood_parser.add_argument(
         "--m2-task-shape",
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",

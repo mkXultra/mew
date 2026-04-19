@@ -1172,6 +1172,12 @@ Evidence:
   generated workspace and completed the README recovery with
   `manual_rebrief_needed=false`, `repository_only_compliance=true`, five
   reconstruction steps, verifier exit code 0, and `comparison_result.choice=parity`.
+- The M3 reentry gate can now merge a completed fresh-CLI comparison report
+  back into the scenario artifact via `--m3-comparison-report`. The merged
+  artifact records report status, source path, manual rebrief flag,
+  repository-only compliance, verifier exit code, comparison choice, and reason.
+  `/tmp/mew-m3-reentry-merge-fresh-report` passed using the fresh `codex-ultra`
+  report above and exposed `comparison_choice=parity` in JSON.
 - `mew dogfood --scenario resident-loop` now honors `--duration`,
   `--interval`, and `--poll-interval` for scenario runs and records the
   requested duration/interval in JSON artifacts. This turns the short
@@ -1192,9 +1198,9 @@ Missing proof:
   requested duration/interval, but there is still no long-running cadence proof
   across several hours or days.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
-  prompt/template and one fresh `codex-ultra` leg has run to parity, but that
-  comparison is still a tiny synthetic README task rather than a long-running
-  resident cadence proof.
+  prompt/template and merge the completed report, and one fresh `codex-ultra`
+  leg has run to parity, but that comparison is still a tiny synthetic README
+  task rather than a long-running resident cadence proof.
 
 Next action:
 

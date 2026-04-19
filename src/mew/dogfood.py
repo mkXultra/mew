@@ -3302,7 +3302,7 @@ def run_continuity_scenario(workspace, env=None):
     return _scenario_report("continuity", workspace, commands, checks)
 
 
-def run_m3_reentry_gate_scenario(workspace, env=None):
+def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=None):
     commands = []
     checks = []
 
@@ -3606,6 +3606,23 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
         + "\n",
         encoding="utf-8",
     )
+    fresh_cli_report = {"status": "not_loaded", "source": ""}
+    if comparison_report_path:
+        report_path = Path(comparison_report_path).expanduser()
+        if not report_path.is_absolute():
+            report_path = (Path.cwd() / report_path).resolve()
+        loaded_report = read_json_file(report_path, {})
+        comparison_result = loaded_report.get("comparison_result") or {}
+        fresh_cli_report = {
+            "status": "loaded",
+            "source": str(report_path),
+            "report_status": loaded_report.get("status"),
+            "manual_rebrief_needed": loaded_report.get("manual_rebrief_needed"),
+            "repository_only_compliance": loaded_report.get("repository_only_compliance"),
+            "verification_exit_code": loaded_report.get("verification_exit_code"),
+            "comparison_choice": comparison_result.get("choice"),
+            "comparison_reason": comparison_result.get("reason"),
+        }
 
     _scenario_check(
         checks,
@@ -3689,11 +3706,25 @@ def run_m3_reentry_gate_scenario(workspace, env=None):
         },
         expected="fresh CLI comparator prompt and report template preserve mew-side reentry evidence",
     )
+    if comparison_report_path:
+        _scenario_check(
+            checks,
+            "m3_reentry_gate_merges_fresh_cli_comparison_report",
+            fresh_cli_report.get("status") == "loaded"
+            and fresh_cli_report.get("report_status") in {"passed", "failed", "inconclusive", "blocked"}
+            and fresh_cli_report.get("comparison_choice")
+            in {"mew_preferred", "fresh_cli_preferred", "parity", "inconclusive", "blocked"}
+            and fresh_cli_report.get("manual_rebrief_needed") in {True, False}
+            and fresh_cli_report.get("repository_only_compliance") in {True, False},
+            observed=fresh_cli_report,
+            expected="fresh CLI comparison report is loaded into the M3 reentry gate artifact",
+        )
     report = _scenario_report("m3-reentry-gate", workspace, commands, checks)
     report["artifacts"] = {
         "fresh_cli_workspace": str(fresh_cli_workspace),
         "fresh_cli_report_template": str(fresh_cli_template_path),
         "fresh_cli_restart_prompt": str(fresh_cli_prompt_path),
+        "fresh_cli_report": fresh_cli_report,
         "mew_resume_evidence": mew_resume_evidence,
     }
     return report
@@ -7988,7 +8019,13 @@ def run_dogfood_scenario(args):
         elif name == "continuity":
             reports.append(run_continuity_scenario(scenario_workspace, env=env))
         elif name == "m3-reentry-gate":
-            reports.append(run_m3_reentry_gate_scenario(scenario_workspace, env=env))
+            reports.append(
+                run_m3_reentry_gate_scenario(
+                    scenario_workspace,
+                    env=env,
+                    comparison_report_path=getattr(args, "m3_comparison_report", None),
+                )
+            )
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":

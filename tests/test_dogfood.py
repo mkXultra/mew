@@ -97,7 +97,23 @@ class DogfoodTests(unittest.TestCase):
                     ]
                 )
 
-                self.assertEqual(args.m2_task_shape, shape)
+            self.assertEqual(args.m2_task_shape, shape)
+
+    def test_cli_dogfood_m3_comparison_report_parses(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "dogfood",
+                "--scenario",
+                "m3-reentry-gate",
+                "--m3-comparison-report",
+                "fresh-report.json",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(args.m3_comparison_report, "fresh-report.json")
 
     def test_dogfood_stop_timeout_covers_ai_model_timeout(self):
         args = SimpleNamespace(ai=True, stop_timeout=10.0, model_timeout=60.0)
@@ -506,6 +522,45 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn(str(fresh_cli_workspace), fresh_cli_prompt)
             self.assertIn("M3 gate complete", fresh_cli_prompt)
             self.assertNotIn("Approve the README.md dry-run edit", fresh_cli_prompt)
+
+    def test_run_dogfood_m3_reentry_gate_merges_fresh_cli_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "fresh-cli-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "manual_rebrief_needed": False,
+                        "repository_only_compliance": True,
+                        "verification_exit_code": 0,
+                        "comparison_result": {
+                            "choice": "parity",
+                            "reason": "fresh restart and mew reached the same next action",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m3-reentry-gate",
+                cleanup=False,
+                m3_comparison_report=str(report_path),
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            fresh_cli_report = scenario["artifacts"]["fresh_cli_report"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertIn("m3_reentry_gate_merges_fresh_cli_comparison_report", text)
+            self.assertEqual(fresh_cli_report["status"], "loaded")
+            self.assertEqual(fresh_cli_report["source"], str(report_path))
+            self.assertFalse(fresh_cli_report["manual_rebrief_needed"])
+            self.assertTrue(fresh_cli_report["repository_only_compliance"])
+            self.assertEqual(fresh_cli_report["comparison_choice"], "parity")
 
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
