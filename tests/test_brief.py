@@ -608,7 +608,7 @@ class BriefTests(unittest.TestCase):
                 "status": "closed",
                 "created_at": "2026-04-19T00:00:00Z",
                 "updated_at": "2026-04-19T00:01:00Z",
-                "notes": [{"text": "Recovered manually after rollback."}],
+                "notes": [{"created_at": "2026-04-19T00:00:12Z", "text": "Recovered manually after rollback."}],
                 "model_turns": [
                     {
                         "id": 1,

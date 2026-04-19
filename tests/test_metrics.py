@@ -15,7 +15,11 @@ class MetricsTests(unittest.TestCase):
                 "status": "closed",
                 "created_at": "2026-04-19T00:00:00Z",
                 "updated_at": "2026-04-19T00:00:20Z",
-                "notes": [{"text": "Recovered manually after rollback."}],
+                "notes": [
+                    {"created_at": "2026-04-19T00:00:14Z", "text": "Before the failed verification."},
+                    {"created_at": "2026-04-19T00:00:17Z", "text": "Recovered manually after rollback."},
+                    {"created_at": "2026-04-19T00:00:19Z", "text": "Later unrelated note."},
+                ],
                 "model_turns": [
                     {
                         "id": 1,
@@ -98,7 +102,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["command"], "uv run pytest -q tests/test_metrics.py")
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["session_status"], "closed")
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["task_status"], "ready")
-        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["note_count"], 1)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["note_count"], 3)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["related_note_count"], 1)
         self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["latest_note"], "Recovered manually after rollback.")
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["tool_call_id"], 2)
         self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["path"], "tests/test_metrics.py")

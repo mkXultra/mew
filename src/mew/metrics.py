@@ -355,11 +355,58 @@ def _sample_task(state, task_id):
     return {"task_id": task_id, "task_title": task.get("title") or "", "task_status": task.get("status") or ""}
 
 
+def _next_session_event_after(session, call, finished_at):
+    finished = parse_time(finished_at)
+    if not finished:
+        return None
+    candidates = []
+    call_id = call.get("id")
+    for collection_name in ("tool_calls", "model_turns"):
+        for item in session.get(collection_name) or []:
+            if not isinstance(item, dict):
+                continue
+            if collection_name == "tool_calls" and item.get("id") == call_id:
+                continue
+            started = parse_time(item.get("started_at"))
+            if not started:
+                continue
+            try:
+                if started > finished:
+                    candidates.append(started)
+            except TypeError:
+                continue
+    return min(candidates) if candidates else None
+
+
+def _verification_related_notes(session, call, finished_at):
+    notes = [note for note in session.get("notes") or [] if isinstance(note, dict)]
+    finished = parse_time(finished_at)
+    if not finished:
+        return notes
+    next_event = _next_session_event_after(session, call, finished_at)
+    related = []
+    for note in notes:
+        note_time = parse_time(note.get("created_at"))
+        if not note_time:
+            continue
+        try:
+            if note_time < finished:
+                continue
+            if next_event and note_time > next_event:
+                continue
+        except TypeError:
+            continue
+        related.append(note)
+    return related
+
+
 def _verification_sample(state, session, call):
     result = call.get("result") or {}
     verification = result.get("verification") or {}
     notes = [note for note in session.get("notes") or [] if isinstance(note, dict)]
-    latest_note = notes[-1] if notes else {}
+    finished_at = verification.get("finished_at") or call.get("finished_at") or ""
+    related_notes = _verification_related_notes(session, call, finished_at)
+    latest_note = related_notes[-1] if related_notes else {}
     sample = {
         "session_id": session.get("id"),
         "session_status": session.get("status") or "",
@@ -369,8 +416,9 @@ def _verification_sample(state, session, call):
         "exit_code": _verification_exit_code(call),
         "rolled_back": bool(result.get("rolled_back")),
         "command": verification.get("command") or result.get("verification_command") or "",
-        "finished_at": verification.get("finished_at") or call.get("finished_at") or "",
+        "finished_at": finished_at,
         "note_count": len(notes),
+        "related_note_count": len(related_notes),
         "latest_note": _clip_text(latest_note.get("text")),
     }
     sample.update(_sample_task(state, session.get("task_id")))
