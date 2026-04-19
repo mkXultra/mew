@@ -757,6 +757,10 @@ class DogfoodTests(unittest.TestCase):
                 fresh_cli_template["task_description"],
                 "Implement a synthetic M2 evidence path.",
             )
+            self.assertIn(
+                "./mew dogfood --scenario m2-comparative --mew-session-id latest --m2-comparison-report <report.json>",
+                fresh_cli_prompt,
+            )
             self.assertEqual(fresh_cli_template["verification"][0]["command"], "pytest -q")
             self.assertIn("M2 evidence task", fresh_cli_prompt)
             self.assertIn("Implement a synthetic M2 evidence path.", fresh_cli_prompt)

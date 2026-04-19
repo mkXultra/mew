@@ -116,7 +116,10 @@ Milestone 2 Done-when checklist:
   The same M2 comparative scenario now emits a `m2-fresh-cli-restart-prompt.md`
   and `m2-fresh-cli-report-template.json`, so the next external comparator can
   run from a new agent session and report restart context without hand-written
-  schema reconstruction.
+  schema reconstruction. A mew-native dogfood task then tightened that prompt:
+  when generated with `--mew-session-id`, it now preserves the same
+  `--mew-session-id` in the merge command and includes the task description,
+  reducing hidden rebrief risk for the true fresh-restart comparator.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
