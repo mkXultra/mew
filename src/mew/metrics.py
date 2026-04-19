@@ -195,6 +195,121 @@ def _merge_counts(target, source):
         target[key] = target.get(key, 0) + int(value or 0)
 
 
+def _rate(part, whole):
+    if not whole:
+        return None
+    return _round(float(part or 0) / float(whole))
+
+
+def _add_signal(signals, signal_id, severity, message, *, value=None, threshold=None):
+    signal = {
+        "id": signal_id,
+        "severity": severity,
+        "message": message,
+    }
+    if value is not None:
+        signal["value"] = value
+    if threshold is not None:
+        signal["threshold"] = threshold
+    signals.append(signal)
+
+
+def _build_signals(sessions, reliability, latency):
+    signals = []
+    if sessions.get("awaiting_approval", 0) > 0:
+        _add_signal(
+            signals,
+            "awaiting_approval",
+            "warn",
+            "active work is waiting for human approval",
+            value=sessions.get("awaiting_approval"),
+            threshold=0,
+        )
+    if sessions.get("stale_active", 0) > 0:
+        _add_signal(
+            signals,
+            "stale_active_sessions",
+            "info",
+            "some active sessions belong to done tasks",
+            value=sessions.get("stale_active"),
+            threshold=0,
+        )
+
+    completion_ratio = reliability.get("completion_ratio")
+    if completion_ratio is not None and completion_ratio < 0.95:
+        _add_signal(
+            signals,
+            "low_completion_ratio",
+            "warn",
+            "selected sessions have unfinished or stale work",
+            value=completion_ratio,
+            threshold=">=0.95",
+        )
+
+    approvals = reliability.get("approvals") or {}
+    approval_total = approvals.get("total", 0)
+    approval_rejection_rate = _rate(approvals.get("rejected", 0) + approvals.get("failed", 0), approval_total)
+    if approval_rejection_rate is not None and approval_rejection_rate >= 0.25:
+        _add_signal(
+            signals,
+            "approval_friction",
+            "info",
+            "write proposals are often rejected or fail approval",
+            value=approval_rejection_rate,
+            threshold="<0.25",
+        )
+
+    verification = reliability.get("verification") or {}
+    verification_total = verification.get("total", 0)
+    verification_failure_rate = _rate(verification.get("failed", 0), verification_total)
+    if verification_failure_rate is not None and verification_failure_rate >= 0.25:
+        _add_signal(
+            signals,
+            "verification_friction",
+            "warn",
+            "verification failures are frequent in selected sessions",
+            value=verification_failure_rate,
+            threshold="<0.25",
+        )
+
+    first_tool_p95 = (latency.get("first_tool_start_seconds") or {}).get("p95")
+    if first_tool_p95 is not None and first_tool_p95 > 60:
+        _add_signal(
+            signals,
+            "slow_first_tool",
+            "warn",
+            "first tool output is slow at p95",
+            value=first_tool_p95,
+            threshold="<=60s",
+        )
+
+    tool_to_next_model_p95 = (latency.get("tool_to_next_model_wait_seconds") or {}).get("p95")
+    if tool_to_next_model_p95 is not None and tool_to_next_model_p95 > 30:
+        _add_signal(
+            signals,
+            "slow_model_resume",
+            "warn",
+            "model resume after tool completion is slow at p95",
+            value=tool_to_next_model_p95,
+            threshold="<=30s",
+        )
+
+    idle_ratio_p95 = (latency.get("perceived_idle_ratio") or {}).get("p95")
+    if idle_ratio_p95 is not None and idle_ratio_p95 > 0.8:
+        _add_signal(
+            signals,
+            "high_idle_ratio",
+            "info",
+            "selected sessions spend most wall time outside recorded model/tool activity at p95",
+            value=idle_ratio_p95,
+            threshold="<=0.8",
+        )
+
+    if not signals:
+        _add_signal(signals, "no_obvious_bottleneck", "ok", "no obvious bottleneck in selected sessions")
+    return signals
+
+
 def _session_matches_kind(state, session, kind):
     if not kind:
         return True
@@ -260,24 +375,27 @@ def build_observation_metrics(state, *, kind=None, limit=None):
     completed_sessions = session_counts["closed"] or 0
     completion_ratio = (completed_sessions / session_counts["total"]) if session_counts["total"] else None
 
+    reliability = {
+        "completion_ratio": _round(completion_ratio),
+        "interventions": intervention_count,
+        "tool_calls": tool_counts,
+        "model_turns": turn_counts,
+        "approvals": approval_counts,
+        "verification": verification_counts,
+    }
+    latency = {
+        "first_tool_start_seconds": _summary(first_tool_starts),
+        "model_to_tool_wait_seconds": _summary(model_to_tool_waits),
+        "tool_to_next_model_wait_seconds": _summary(tool_to_next_model_waits),
+        "perceived_idle_ratio": _summary(idle_ratios),
+    }
     return {
         "kind": kind or "all",
         "session_limit": limit,
         "sessions": session_counts,
-        "reliability": {
-            "completion_ratio": _round(completion_ratio),
-            "interventions": intervention_count,
-            "tool_calls": tool_counts,
-            "model_turns": turn_counts,
-            "approvals": approval_counts,
-            "verification": verification_counts,
-        },
-        "latency": {
-            "first_tool_start_seconds": _summary(first_tool_starts),
-            "model_to_tool_wait_seconds": _summary(model_to_tool_waits),
-            "tool_to_next_model_wait_seconds": _summary(tool_to_next_model_waits),
-            "perceived_idle_ratio": _summary(idle_ratios),
-        },
+        "reliability": reliability,
+        "latency": latency,
+        "signals": _build_signals(session_counts, reliability, latency),
     }
 
 
@@ -322,4 +440,17 @@ def format_observation_metrics(data):
             f"{label}: count={summary.get('count', 0)} avg={summary.get('avg')} "
             f"median={summary.get('median')} p95={summary.get('p95')} max={summary.get('max')}"
         )
+    signals = data.get("signals") or []
+    if signals:
+        lines.append("signals:")
+        for signal in signals:
+            value = signal.get("value")
+            threshold = signal.get("threshold")
+            details = []
+            if value is not None:
+                details.append(f"value={value}")
+            if threshold is not None:
+                details.append(f"threshold={threshold}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(f"- {signal.get('severity')}: {signal.get('message')}{suffix}")
     return "\n".join(lines)

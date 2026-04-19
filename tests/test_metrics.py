@@ -86,11 +86,16 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["latency"]["model_to_tool_wait_seconds"]["avg"], 1.0)
         self.assertEqual(metrics["latency"]["tool_to_next_model_wait_seconds"]["avg"], 3.0)
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["avg"], 0.65)
+        signal_ids = {signal["id"] for signal in metrics["signals"]}
+        self.assertIn("approval_friction", signal_ids)
+        self.assertIn("verification_friction", signal_ids)
 
         text = format_observation_metrics(metrics)
         self.assertIn("Mew observation metrics", text)
         self.assertIn("interventions=3", text)
         self.assertIn("perceived_idle_ratio: count=1 avg=0.65 median=0.65 p95=0.65 max=0.65", text)
+        self.assertIn("signals:", text)
+        self.assertIn("verification failures are frequent", text)
 
 
 if __name__ == "__main__":
