@@ -793,10 +793,13 @@ Next action:
   agent-status projections in `status`/`brief`/session/chat kind-filtered
   views, and `fec0bfe` fixes running search/glob cockpit summaries so live
   cells show the requested query/pattern instead of `None` before results
-  land. Validation included repeated `uv run --with ruff ruff check` on
+  land; `2eaacea` preserves path-style `mew` launchers in `mew next --json`
+  command fields for external observers using `MEW_EXECUTABLE`. Validation
+  included repeated `uv run --with ruff ruff check` on
   changed files, focused command/brief/desk/work-session tests,
   `tests.test_work_session` (`339 tests`, pass), repeated full
-  `uv run python -m unittest` runs (latest: `1001 tests`, pass), and
+  `uv run python -m unittest` runs (latest: `1002 tests`, pass), direct
+  `MEW_EXECUTABLE=/tmp/.../mew ./mew next --json` checks, and
   repeated `./mew dogfood --all --cleanup --json` runs (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
