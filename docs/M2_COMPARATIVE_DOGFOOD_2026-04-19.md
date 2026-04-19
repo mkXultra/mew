@@ -278,3 +278,86 @@ mew dogfood --scenario m2-comparative \
   --mew-session-id <id> \
   --m2-comparison-report <fresh-cli-report.json>
 ```
+
+## Paired Coding Task: M2 Task Shape Option
+
+Task: add an explicit `--m2-task-shape` option to
+`mew dogfood --scenario m2-comparative` so interruption-shaped paired runs can
+set `task_shape.selected` without hand-editing the generated protocol.
+
+### mew
+
+- Entry: `mew self-improve --start-session --force ...`, then
+  `mew work 254 --live ... --max-steps 1` and
+  `mew work 254 --follow ... --max-steps 10`
+- Task/session: task `#254`, work sessions `#247` and `#248`
+- Result: did not complete the implementation inside mew
+- Resume behavior:
+  - `mew work 254 --session --resume --allow-read .` restored the work thread
+    without a user rebrief
+  - continuity was strong (`9/9`)
+  - the resume bundle preserved touched files, failed step, pending steer,
+    world state, active project memory, and a concrete next action
+- Blocking gap: the model correctly narrowed from `src/mew/dogfood.py` to
+  `src/mew/cli.py` after an interrupt-submit steer, then hit paired-test
+  steering and attempted to inspect `tests/test_cli.py`, which does not exist.
+  It stopped with no passing verification candidate.
+
+Mew-side gate evidence from the combined artifact:
+
+- `changed_or_pending_work=true`
+- `risk_or_interruption_preserved=true`
+- `runnable_next_action=true`
+- `continuity_usable=true`
+- `verification_after_resume_candidate=false`
+- `interruption_resume_gate.mew.status=not_proved`
+
+### fresh_cli
+
+- Entry: `codex-ultra` in detached worktree `/tmp/mew-fresh-task-shape`
+- Report: `/tmp/mew-fresh-task-shape-report.json`
+- Result: completed the small parser/protocol/test change directly
+- Verification:
+  - `uv run pytest -q tests/test_dogfood.py -k m2_comparative`
+  - `uv run pytest -q tests/test_dogfood.py -k "m2_comparative or m2_task_shape"`
+  - `uv run ruff check src/mew/dogfood.py src/mew/cli.py tests/test_dogfood.py`
+  - `uv run python -m py_compile src/mew/dogfood.py src/mew/cli.py tests/test_dogfood.py`
+  - `./mew dogfood --scenario m2-comparative --m2-task-shape interruption_resume --workspace /tmp/mew-fresh-task-shape/.tmp/m2-cli-smoke --json`
+- Summary: fresh CLI added the task-shape choices, CLI flag, dispatch wiring,
+  protocol selection, and focused tests with no approval or verification
+  confusion. However, this fresh run was not actually interrupted mid-task, so
+  it does not prove the interruption-resume gate either.
+
+### Combined Artifact
+
+Command:
+
+```bash
+./mew dogfood --scenario m2-comparative \
+  --workspace /tmp/mew-m2-task-shape-combined \
+  --mew-session-id 248 \
+  --m2-task-shape interruption_resume \
+  --m2-comparison-report /tmp/mew-fresh-task-shape-report.json \
+  --json
+```
+
+Artifact:
+
+- `/tmp/mew-m2-task-shape-combined/.mew/dogfood/m2-comparative-protocol.json`
+
+Result: pass. The generated protocol merged both mew-side work-session evidence
+and fresh CLI report evidence. The comparison status was `inconclusive`.
+
+Comparison result:
+
+- `comparison_result.status=inconclusive`
+- `resident_preference.choice=inconclusive`
+- mew was better at preserving resident continuity after interruption, but did
+  not complete the implementation or verification
+- fresh CLI completed the implementation smoothly, but did not exercise a real
+  interruption/resume path
+
+Follow-up: the next M2 comparison should be a true interrupted-resume trial on
+both sides, or mew should reduce the paired-test steering failure where it
+suggested a non-existent `tests/test_cli.py` instead of finding the existing
+`tests/test_dogfood.py` parser coverage.
