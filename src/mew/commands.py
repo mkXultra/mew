@@ -8445,6 +8445,26 @@ def format_context_report(context, current_time):
     return "\n".join(lines)
 
 
+def build_context_save_text(context, current_time, note):
+    report = format_context_report(context, current_time)
+    note = str(note or "").strip()
+    lines = [
+        f"Context save {current_time}",
+        f"Note: {note or '(empty)'}",
+        "",
+        "Diagnostics:",
+        report,
+        "",
+        "Suggested reentry:",
+        "- git status --short",
+        "- ./mew desk --kind coding --json",
+        "- ./mew focus --kind coding",
+        "- ./mew brief --kind coding",
+        "- ./mew memory --search 'next safe action context compression long session' --type project --json",
+    ]
+    return "\n".join(lines)
+
+
 def cmd_context(args):
     state = load_state()
     current_time = now_iso()
@@ -8473,6 +8493,34 @@ def cmd_context(args):
         verify_command="configured" if autonomy.get("verify_command_configured") else "",
         allow_write=bool(autonomy.get("allow_write")),
     )
+    save_note = getattr(args, "save", None)
+    if save_note is not None:
+        entry = FileMemoryBackend(".").write(
+            build_context_save_text(context, current_time, save_note),
+            scope="private",
+            memory_type="project",
+            name=args.name or f"Context save {current_time}",
+            description=args.description or "Saved by mew context --save for future reentry.",
+            created_at=current_time,
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "context": context,
+                        "saved_memory": entry_to_dict(entry),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(format_context_report(context, current_time))
+        print(f"saved_memory: {entry.scope}.{entry.memory_type}: {entry.name}")
+        if entry.path:
+            print(f"path: {entry.path}")
+        return 0
+
     if args.json:
         print(json.dumps(context, ensure_ascii=False, indent=2))
         return 0

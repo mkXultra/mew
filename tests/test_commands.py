@@ -4320,6 +4320,42 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_context_save_writes_typed_project_memory(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "context",
+                                "--save",
+                                "Long session checkpoint",
+                                "--name",
+                                "Dogfood context save",
+                                "--description",
+                                "Recover this after context compression.",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertIn("context_stats", data["context"])
+                self.assertEqual(data["saved_memory"]["name"], "Dogfood context save")
+                self.assertEqual(data["saved_memory"]["type"], "project")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--search", "Long session checkpoint", "--type", "project", "--json"]),
+                        0,
+                    )
+                matches = json.loads(stdout.getvalue())["matches"]
+                self.assertTrue(any(match.get("name") == "Dogfood context save" for match in matches))
+            finally:
+                os.chdir(old_cwd)
+
     def test_metrics_command_prints_observation_metrics(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

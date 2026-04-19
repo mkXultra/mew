@@ -587,6 +587,13 @@ def build_parser():
     )
     context_parser.add_argument("--send-message", dest="context_message", help="synthetic user message payload")
     context_parser.add_argument(
+        "--save",
+        metavar="NOTE",
+        help="save the context diagnostics plus a reentry note to typed project memory",
+    )
+    context_parser.add_argument("--name", help="typed memory name for --save")
+    context_parser.add_argument("--description", help="typed memory description for --save")
+    context_parser.add_argument(
         "--allowed-read-root",
         action="append",
         default=[],

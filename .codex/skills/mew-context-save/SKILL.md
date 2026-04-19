@@ -67,6 +67,16 @@ Before a user-approved long session, always save:
 
 For long sessions, prefer one concise `mew memory --add` planning note plus session notes on active work as it evolves.
 
+If the current context diagnostics themselves are useful, prefer the native checkpoint command:
+
+```bash
+./mew context --save "<current intent; exact next action; validation state; blockers; stop/report trigger>" \
+  --name "Long session checkpoint: <short name>" \
+  --description "Recover this after context compression or interruption."
+```
+
+Use `--json` only when you need the saved memory path programmatically; the JSON output includes the full context diagnostics and can be large.
+
 ## Pair With Load
 
 After saving, a future agent should be able to use `mew-planning-reentry` and recover:
