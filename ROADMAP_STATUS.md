@@ -9,21 +9,40 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | Milestone | Status | Short Assessment |
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
-| 2. Interactive Parity | `in_progress` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, and proved mew-side interruption/process-stop comparative gates; the remaining gap is a polished continuous REPL-style coding cockpit. |
+| 2. Interactive Parity | `final_gate` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, and stale follow-snapshot detection. Source-side parity work has plateaued; the remaining gap is a final comparative evidence gate. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, short passive native-work advancement, deterministic continuity dogfood, a day-scale reentry proof, and a scoped M3 reentry gate now exist; long-running resident cadence is still unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 05:00 JST.
+Last assessed: 2026-04-20 06:25 JST.
 
-Active milestone: Milestone 2, Interactive Parity.
+Active milestone: Milestone 2, Interactive Parity, narrowed to a final evidence gate.
 
 Rationale: Milestone 1 is closed. Milestones 3-5 have useful foundations, but
 they should not pull fresh implementation away from the earliest unfinished
-roadmap gate unless the user explicitly redirects the session or a concrete
-M2-blocking metric requires a supporting slice.
+roadmap gate unless the user explicitly redirects the session or the final M2
+evidence gate reveals a concrete failure. Recent scoped metrics are green and
+two self-improve investigations (#288/#289) found no further concrete source
+gap on the investigated accept-edits/follow-status surfaces. Codex-ultra and
+claude-ultra external reviews on 2026-04-20 both agreed that M2 should not keep
+absorbing broad polish; it should close or produce one measured blocker through
+one final paired comparative run.
+
+Final M2 evidence gate:
+
+- Run one real focused mew coding task through the current cockpit.
+- Interrupt or stop the mew leg mid-task, then resume from mew's own
+  follow-status/resume surfaces without rebriefing.
+- Complete verification and record the mew session in an M2 comparative
+  artifact.
+- Run a paired true fresh-CLI comparator, preferably with an interruption-shaped
+  fresh leg as well, and merge the report.
+- Close M2 if the artifact records `mew_preferred` or clear parity with
+  continuity advantage and no supervisor source edits, stale controls, or
+  manual rebrief. If it fails, keep M2 narrowed to the single measured failure
+  instead of returning to broad polish.
 
 Milestone 2 Done-when checklist:
 
