@@ -9,6 +9,8 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-testmon>=2.1",
+    "ruff>=0.11",
 ]
 
 [project.scripts]
@@ -16,6 +18,9 @@ mew = "mew.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
 
 [build-system]
 requires = ["hatchling"]

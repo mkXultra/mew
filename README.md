@@ -41,6 +41,18 @@ uv run mew next
 uv run mew next --kind coding
 ```
 
+Developer loop:
+
+```sh
+uv run pytest --testmon -q
+uv run pytest -q
+uv run ruff check .
+```
+
+`pytest --testmon` runs the affected-test subset for fast iteration; keep the
+plain full pytest command as the final verification before committing broad
+changes.
+
 `focus` and `daily` are the quiet daily views: they show the current next move,
 open questions, and the top tasks without the full operational brief. Tasks can
 be tagged with `--kind coding|research|personal|admin|unknown`; only coding

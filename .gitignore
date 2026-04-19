@@ -2,6 +2,7 @@
 auth.json
 .venv/
 __pycache__/
+.testmondata
 
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code

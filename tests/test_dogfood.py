@@ -481,7 +481,6 @@ class DogfoodTests(unittest.TestCase):
 
             report = run_dogfood_scenario(args)
             text = format_dogfood_scenario_report(report)
-            summary = summarize_dogfood_scenario_json(report)
             scenario = report["scenarios"][0]
             artifacts = scenario["artifacts"]
             protocol_path = Path(artifacts["json"])
