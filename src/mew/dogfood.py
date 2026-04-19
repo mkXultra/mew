@@ -2915,7 +2915,6 @@ def run_work_session_scenario(workspace, env=None):
         timeout=15,
         input_text="/work-session queue dogfood chat follow-up\n",
     )
-
     state_path = workspace / STATE_FILE
     state = migrate_state(read_json_file(state_path, default_state()))
     reconcile_next_ids(state)
@@ -3383,6 +3382,118 @@ def run_work_session_scenario(workspace, env=None):
         ]
     )
     running_output_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
+    run(["work", str(running_output_task_id), "--close-session", "--json"])
+
+    paired_steer_ai_script = workspace / "paired_steer_ai_check.py"
+    paired_steer_ai_script.write_text(
+        """
+import json
+import sys
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+from mew.cli import main
+from mew.state import load_state
+
+
+def run_main(args):
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        code = main(args)
+    return code, stdout.getvalue()
+
+
+Path("src/mew").mkdir(parents=True, exist_ok=True)
+Path("tests").mkdir(exist_ok=True)
+Path("src/mew/dogfood_ai_pairing.py").write_text("VALUE = 'old'\\n", encoding="utf-8")
+
+code, output = run_main(["task", "add", "Dogfood AI paired steer task", "--kind", "coding", "--json"])
+task_id = str(json.loads(output)["task"]["id"])
+run_main(["work", task_id, "--start-session"])
+
+model_outputs = [
+    {
+        "summary": "preview source edit first",
+        "action": {
+            "type": "edit_file",
+            "path": "src/mew/dogfood_ai_pairing.py",
+            "old": "old",
+            "new": "new",
+        },
+    },
+    {
+        "summary": "add paired test first",
+        "action": {
+            "type": "write_file",
+            "path": "tests/test_dogfood_ai_pairing.py",
+            "content": "def test_dogfood_ai_pairing():\\n    assert True\\n",
+            "create": True,
+            "dry_run": False,
+        },
+    },
+]
+verify_command = f"{sys.executable} -c \\"raise SystemExit(99)\\""
+with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+        code, output = run_main(
+            [
+                "work",
+                task_id,
+                "--ai",
+                "--auth",
+                "auth.json",
+                "--allow-read",
+                ".",
+                "--allow-write",
+                ".",
+                "--allow-verify",
+                "--verify-command",
+                verify_command,
+                "--max-steps",
+                "2",
+                "--act-mode",
+                "deterministic",
+                "--json",
+            ]
+        )
+
+report = json.loads(output)
+session = next(candidate for candidate in load_state()["work_sessions"] if str(candidate.get("task_id")) == task_id)
+tool_call = (session.get("tool_calls") or [{}])[-1]
+result = tool_call.get("result") or {}
+observed = {
+    "exit_code": code,
+    "stop_reason": report.get("stop_reason"),
+    "test_file_exists": Path("tests/test_dogfood_ai_pairing.py").exists(),
+    "tool": tool_call.get("tool"),
+    "path": (tool_call.get("parameters") or {}).get("path"),
+    "apply": (tool_call.get("parameters") or {}).get("apply"),
+    "dry_run": result.get("dry_run"),
+    "verification_exit_code": result.get("verification_exit_code"),
+    "coerced_dry_run_reason": (session.get("model_turns") or [{}])[-1].get("coerced_dry_run_reason"),
+}
+passed = (
+    code == 0
+    and observed["stop_reason"] == "pending_approval"
+    and observed["test_file_exists"] is False
+    and observed["tool"] == "write_file"
+    and observed["path"] == "tests/test_dogfood_ai_pairing.py"
+    and observed["apply"] is False
+    and observed["dry_run"] is True
+    and observed["verification_exit_code"] is None
+    and observed["coerced_dry_run_reason"] == "paired_test_steer"
+)
+print(json.dumps({"passed": passed, "observed": observed}, ensure_ascii=False))
+raise SystemExit(0 if passed else 1)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    paired_steer_ai_result = run_command([sys.executable, str(paired_steer_ai_script)], workspace, timeout=30, env=env)
+    paired_steer_ai_data = _json_stdout(paired_steer_ai_result)
+    if paired_steer_ai_result.get("exit_code") != 0 or not paired_steer_ai_data.get("passed"):
+        commands.append(paired_steer_ai_result)
 
     start_data = _json_stdout(start_result)
     task_add_json_data = _json_stdout(task_add_json_result)
@@ -3664,6 +3775,13 @@ def run_work_session_scenario(workspace, env=None):
         expected=(
             "src/mew dry-run edits surface a missing paired test advisory, same-surface audit, and verification confidence"
         ),
+    )
+    _scenario_check(
+        checks,
+        "work_ai_paired_test_steer_keeps_test_write_reviewable",
+        paired_steer_ai_result.get("exit_code") == 0 and bool(paired_steer_ai_data.get("passed")),
+        observed=paired_steer_ai_data.get("observed") or command_result_tail(paired_steer_ai_result, limit=5),
+        expected="paired-test steer coerces model-suggested tests/** apply writes into dry-run pending approval",
     )
     _scenario_check(
         checks,
