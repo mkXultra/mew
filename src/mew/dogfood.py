@@ -3673,12 +3673,25 @@ def run_work_session_scenario(workspace, env=None):
         encoding="utf-8",
     )
     (workspace / "src" / "mew" / "pairing.py").write_text("PAIRING = 'old'\n", encoding="utf-8")
+    (workspace / "src" / "mew" / "cli.py").write_text(
+        "def build_parser():\n"
+        "    return 'old parser'\n\n"
+        "def main():\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
     (workspace / "src" / "mew" / "dogfood_override.py").write_text("OVERRIDE = 'old'\n", encoding="utf-8")
     (workspace / "tests" / "test_pairing.py").write_text(
         "import unittest\n\n"
         "class PairingTests(unittest.TestCase):\n"
         "    def test_placeholder(self):\n"
         "        self.assertTrue(True)\n",
+        encoding="utf-8",
+    )
+    (workspace / "tests" / "test_dogfood.py").write_text(
+        "from mew.cli import build_parser\n\n"
+        "def test_cli_dogfood_parser():\n"
+        "    assert build_parser() == 'old parser'\n",
         encoding="utf-8",
     )
     (workspace / "large.py").write_text("x" * 120000 + "\nold_call()\n", encoding="utf-8")
@@ -4413,6 +4426,32 @@ def run_work_session_scenario(workspace, env=None):
     running_output_snapshot_data = read_json_file(workspace / STATE_DIR / "follow" / "latest.json", {})
     run(["work", str(running_output_task_id), "--close-session", "--json"])
 
+    discovery_task_result = run(
+        ["task", "add", "Existing paired-test discovery task", "--kind", "coding", "--json"]
+    )
+    discovery_task_data = _json_stdout(discovery_task_result)
+    discovery_task_id = str((discovery_task_data.get("task") or {}).get("id") or "")
+    discovery_start_result = run(["work", discovery_task_id, "--start-session", "--json"])
+    discovered_source_edit_result = run(
+        [
+            "work",
+            discovery_task_id,
+            "--tool",
+            "edit_file",
+            "--path",
+            "src/mew/cli.py",
+            "--old",
+            "old parser",
+            "--new",
+            "new parser",
+            "--allow-write",
+            ".",
+            "--json",
+        ]
+    )
+    discovery_resume_result = run(["work", discovery_task_id, "--session", "--resume", "--json"])
+    discovery_cells_result = run(["work", discovery_task_id, "--cells", "--json"])
+
     paired_steer_ai_script = workspace / "paired_steer_ai_check.py"
     paired_steer_ai_script.write_text(
         """
@@ -4639,6 +4678,9 @@ raise SystemExit(0 if passed else 1)
     large_edit_data = _json_stdout(large_edit_result)
     large_no_newline_edit_data = _json_stdout(large_no_newline_edit_result)
     source_edit_data = _json_stdout(source_edit_result)
+    discovered_source_edit_data = _json_stdout(discovered_source_edit_result)
+    discovery_resume_data = _json_stdout(discovery_resume_result)
+    discovery_cells_data = _json_stdout(discovery_cells_result)
     approve_data = _json_stdout(approve_result)
     approve_all_first_data = _json_stdout(approve_all_first_result)
     approve_all_second_data = _json_stdout(approve_all_second_result)
@@ -4687,15 +4729,29 @@ raise SystemExit(0 if passed else 1)
         normalized = str(value or "").replace("\\", "/")
         return normalized == "src/mew/pairing.py" or normalized.endswith("/src/mew/pairing.py")
 
+    def is_cli_discovery_path(value):
+        normalized = str(value or "").replace("\\", "/")
+        return normalized == "src/mew/cli.py" or normalized.endswith("/src/mew/cli.py")
+
     source_pairing_approvals = [
         approval
         for approval in (resume_data.get("resume") or {}).get("pending_approvals") or []
         if is_source_pairing_path(approval.get("path"))
     ]
+    cli_discovery_approvals = [
+        approval
+        for approval in (discovery_resume_data.get("resume") or {}).get("pending_approvals") or []
+        if is_cli_discovery_path(approval.get("path"))
+    ]
     source_pairing_cells = [
         cell
         for cell in cells
         if cell.get("kind") == "approval" and is_source_pairing_path(cell.get("target"))
+    ]
+    cli_discovery_cells = [
+        cell
+        for cell in discovery_cells_data.get("cells") or []
+        if cell.get("kind") == "approval" and is_cli_discovery_path(cell.get("target"))
     ]
     interrupted_items = ((interrupted_resume_data.get("resume") or {}).get("recovery_plan") or {}).get("items") or []
     interrupted_recovery = interrupted_recover_data.get("recovery") or {}
@@ -4910,6 +4966,34 @@ raise SystemExit(0 if passed else 1)
         },
         expected=(
             "src/mew dry-run edits surface a missing paired test advisory, same-surface audit, and verification confidence"
+        ),
+    )
+    cli_discovery_pairing = (
+        ((cli_discovery_approvals[0] or {}).get("pairing_status") or {}) if cli_discovery_approvals else {}
+    )
+    _scenario_check(
+        checks,
+        "work_source_edit_pairing_discovers_existing_test",
+        discovery_task_result.get("exit_code") == 0
+        and discovery_start_result.get("exit_code") == 0
+        and discovery_resume_result.get("exit_code") == 0
+        and discovery_cells_result.get("exit_code") == 0
+        and discovered_source_edit_result.get("exit_code") == 0
+        and ((discovered_source_edit_data.get("tool_call") or {}).get("result") or {}).get("dry_run") is True
+        and cli_discovery_pairing.get("status") == "missing_test_edit"
+        and cli_discovery_pairing.get("suggested_test_path") == "tests/test_dogfood.py"
+        and (cli_discovery_pairing.get("discovered_test_paths") or [""])[0] == "tests/test_dogfood.py"
+        and cli_discovery_pairing.get("suggested_test_path") != "tests/test_cli.py"
+        and "imports mew.cli" in (cli_discovery_pairing.get("suggestion_reason") or "")
+        and bool(cli_discovery_cells),
+        observed={
+            "tool_call_id": (discovered_source_edit_data.get("tool_call") or {}).get("id"),
+            "approval_path": (cli_discovery_approvals[0] or {}).get("path") if cli_discovery_approvals else None,
+            "pairing_status": cli_discovery_pairing,
+            "cell_preview": (cli_discovery_cells[0] or {}).get("preview") if cli_discovery_cells else None,
+        },
+        expected=(
+            "paired-test steering discovers existing parser coverage before falling back to nonexistent tests/test_cli.py"
         ),
     )
     _scenario_check(
