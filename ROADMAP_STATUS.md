@@ -1136,6 +1136,12 @@ Evidence:
   a weak continuity wording edit. This is not the long-running cadence proof
   yet, but it is concrete M3 evidence that mew can preserve and recover a
   resident investigation after interruption and a failed edit.
+- The deterministic `continuity` dogfood scenario now includes the same failed
+  edit recovery shape. It creates a coding task, triggers an old-text
+  `edit_file` failure, and verifies that resume text preserves the failure plus
+  the exact safe `read_file` reobserve action before retry. The focused test and
+  `/tmp/mew-continuity-failed-edit-reentry` scenario both passed; the full
+  `tests/test_dogfood.py` suite and `uv run pytest --no-testmon -q` also passed.
 
 Missing proof:
 

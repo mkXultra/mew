@@ -3042,6 +3042,79 @@ def run_continuity_scenario(workspace, env=None):
     )
     follow_status_result = run(["work", str(task_id), "--follow-status", "--json"], timeout=15)
 
+    failed_edit_task_result = run(
+        [
+            "task",
+            "add",
+            "Failed edit reentry task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--json",
+        ],
+        timeout=15,
+    )
+    failed_edit_task_data = _json_stdout(failed_edit_task_result)
+    failed_edit_task = (
+        failed_edit_task_data.get("task")
+        if isinstance(failed_edit_task_data.get("task"), dict)
+        else failed_edit_task_data
+    )
+    failed_edit_task_id = failed_edit_task.get("id") if isinstance(failed_edit_task, dict) else None
+    failed_edit_start_result = run(
+        [
+            "work",
+            str(failed_edit_task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-write",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    failed_edit_read_result = run(
+        [
+            "work",
+            str(failed_edit_task_id),
+            "--tool",
+            "read_file",
+            "--path",
+            "README.md",
+            "--allow-read",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    failed_edit_result = run(
+        [
+            "work",
+            str(failed_edit_task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "README.md",
+            "--old",
+            "this exact old text is absent",
+            "--new",
+            "replacement should not apply",
+            "--allow-write",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    failed_edit_resume_json_result = run(
+        ["work", str(failed_edit_task_id), "--session", "--resume", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    failed_edit_resume_text_result = run(
+        ["work", str(failed_edit_task_id), "--session", "--resume", "--allow-read", "."],
+        timeout=15,
+    )
+
     resume_data = _json_stdout(resume_json_result)
     failed_verify_data = _json_stdout(failed_verify_result)
     resume = resume_data.get("resume") or {}
@@ -3055,6 +3128,13 @@ def run_continuity_scenario(workspace, env=None):
         {},
     )
     follow_status_data = _json_stdout(follow_status_result)
+    failed_edit_data = _json_stdout(failed_edit_result)
+    failed_edit_resume_data = _json_stdout(failed_edit_resume_json_result)
+    failed_edit_resume = failed_edit_resume_data.get("resume") or {}
+    failed_edit_failures = failed_edit_resume.get("failures") or []
+    failed_edit_failure = failed_edit_failures[-1] if failed_edit_failures else {}
+    failed_edit_reobserve = failed_edit_failure.get("suggested_safe_reobserve") or {}
+    failed_edit_resume_text = failed_edit_resume_text_result.get("stdout") or ""
 
     state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
     weak_task_id = next_id(state, "task")
@@ -3171,6 +3251,28 @@ def run_continuity_scenario(workspace, env=None):
             "follow_status": follow_status_data.get("status"),
         },
         expected="observer snapshot and follow-status expose the same continuity score",
+    )
+    _scenario_check(
+        checks,
+        "continuity_failed_edit_reentry_surfaces_safe_reobserve",
+        failed_edit_task_result.get("exit_code") == 0
+        and failed_edit_start_result.get("exit_code") == 0
+        and failed_edit_read_result.get("exit_code") == 0
+        and failed_edit_result.get("exit_code") != 0
+        and (failed_edit_data.get("tool_call") or {}).get("status") == "failed"
+        and failed_edit_resume_json_result.get("exit_code") == 0
+        and failed_edit_resume_text_result.get("exit_code") == 0
+        and failed_edit_failure.get("tool") == "edit_file"
+        and failed_edit_reobserve.get("action") == "read_file"
+        and (failed_edit_reobserve.get("parameters") or {}).get("path") == "README.md"
+        and "old text was not found" in failed_edit_resume_text
+        and "reobserve: read_file path=README.md" in failed_edit_resume_text,
+        observed={
+            "failed_edit": failed_edit_data.get("tool_call"),
+            "failure": failed_edit_failure,
+            "resume_tail": failed_edit_resume_text[-1000:],
+        },
+        expected="failed edit reentry preserves the exact safe read needed before retry",
     )
     _scenario_check(
         checks,

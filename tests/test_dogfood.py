@@ -448,6 +448,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "continuity")
             self.assertIn("continuity_resume_scores_reentry_artifacts", text)
             self.assertIn("continuity_follow_snapshot_and_status_surface_score", text)
+            self.assertIn("continuity_failed_edit_reentry_surfaces_safe_reobserve", text)
 
     def test_run_dogfood_m3_reentry_gate_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
