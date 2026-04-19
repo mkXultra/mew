@@ -16,6 +16,7 @@ from .read_tools import (
 )
 from .state import next_id
 from .tasks import clip_output, find_task
+from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
 from .typed_memory import FileMemoryBackend, entry_to_dict
@@ -1989,18 +1990,40 @@ def _is_mew_source_path(path):
 
 
 def inferred_test_path_for_mew_source(path):
-    normalized = _normalized_work_path_text(path)
-    marker = "src/mew/"
-    if marker not in normalized or not normalized.endswith(".py"):
-        return ""
-    stem = Path(normalized.rsplit("/", 1)[-1]).stem
-    if not stem or stem == "__init__":
-        return ""
-    return f"tests/test_{stem}.py"
+    return convention_test_path_for_mew_source(path)
 
 
-def suggested_verify_command_for_call_path(source_path):
-    test_path = inferred_test_path_for_mew_source(source_path)
+def _test_discovery_hint_for_call(session, call):
+    values = []
+    for key in ("title", "description", "goal", "objective", "focus"):
+        value = (session or {}).get(key)
+        if value:
+            values.append(str(value))
+    for note in ((session or {}).get("notes") or [])[-5:]:
+        if note.get("text"):
+            values.append(str(note.get("text")))
+    for source in ((call or {}).get("parameters") or {}, (call or {}).get("result") or {}):
+        for key in ("path", "content", "old", "new", "diff", "summary"):
+            value = source.get(key)
+            if value:
+                values.append(str(value))
+    return "\n".join(values)
+
+
+def discovered_test_candidates_for_call(session, call, *, limit=5):
+    source_path = work_call_path(call)
+    if not source_path:
+        return []
+    return discover_tests_for_source(
+        source_path,
+        hint_text=_test_discovery_hint_for_call(session, call),
+        limit=limit,
+    )
+
+
+def suggested_verify_command_for_call_path(source_path, *, hint_text=""):
+    discovered = discover_tests_for_source(source_path, hint_text=hint_text, limit=1)
+    test_path = discovered[0]["path"] if discovered else inferred_test_path_for_mew_source(source_path)
     if not test_path or not Path(test_path).is_file():
         return {}
     test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".")
@@ -2008,7 +2031,11 @@ def suggested_verify_command_for_call_path(source_path):
         "source_path": source_path,
         "test_path": test_path,
         "command": f"uv run python -m unittest {test_module}",
-        "reason": "mew source edit has a matching test module",
+        "reason": (
+            "mew source edit has an existing discovered test module"
+            if discovered
+            else "mew source edit has a matching test module"
+        ),
     }
 
 
@@ -2025,7 +2052,10 @@ def suggested_verify_commands_for_calls(calls):
         ):
             continue
         source_path = work_call_path(call)
-        suggestion = suggested_verify_command_for_call_path(source_path)
+        suggestion = suggested_verify_command_for_call_path(
+            source_path,
+            hint_text=_test_discovery_hint_for_call(None, call),
+        )
         if suggestion:
             test_path = suggestion.get("test_path") or ""
             if test_path in seen_tests:
@@ -2324,7 +2354,15 @@ def work_write_pairing_status(session, call):
             "paired_tool_call_id": paired.get("id"),
             "paired_path": work_call_path(paired),
         }
-    suggested_test_path = inferred_test_path_for_mew_source(source_path)
+    discovered_tests = discovered_test_candidates_for_call(session, call)
+    suggested_test_path = (
+        discovered_tests[0]["path"] if discovered_tests else inferred_test_path_for_mew_source(source_path)
+    )
+    suggestion_reason = ""
+    if discovered_tests:
+        suggestion_reason = discovered_tests[0].get("reason") or "existing test file references this source"
+    elif suggested_test_path:
+        suggestion_reason = "no existing test reference found; convention fallback from the src/mew source filename"
     return {
         "status": "missing_test_edit",
         "source_path": source_path,
@@ -2332,11 +2370,8 @@ def work_write_pairing_status(session, call):
         "reason": "mew source edit has no paired test write/edit in the same work session",
         "advisory": True,
         "suggested_test_path": suggested_test_path,
-        "suggestion_reason": (
-            "inferred from the src/mew source filename; adjust if another test file owns this behavior"
-            if suggested_test_path
-            else ""
-        ),
+        "suggestion_reason": suggestion_reason,
+        "discovered_test_paths": [item["path"] for item in discovered_tests],
     }
 
 

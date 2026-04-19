@@ -691,6 +691,10 @@ Evidence:
   steer plus approval-verification rollback loop: the guard asked for a test
   edit first, while approval verification required that test-only edit to pass
   before the matching source edit existed.
+- Paired-test steering now discovers existing tests before falling back to a
+  convention path. This addresses the follow-up blocker from that dogfood where
+  `src/mew/cli.py` steered the resident toward nonexistent `tests/test_cli.py`
+  instead of the existing dogfood parser coverage in `tests/test_dogfood.py`.
 
 Missing proof:
 
@@ -701,16 +705,17 @@ Missing proof:
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
 - The first M2 comparative dogfood run favored fresh CLI for a small local
-  change; mew still needs a better paired source/test approval path before it
-  can claim interactive parity on this class of task.
+  change. The nonexistent paired-test path blocker is addressed, but mew still
+  needs a rerun of the same class of task and may still need a better paired
+  source/test approval path before it can claim interactive parity.
 - TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 
-- Fix the paired source/test approval flow exposed by the M2 comparative
-  dogfood: either approve paired source+test edits as a unit or add an explicit
-  expected-failing-test approval mode for resident TDD flows, then rerun the
-  same comparative task.
+- Rerun the M2 comparative paired task after the paired-test discovery fix. If
+  mew still loses momentum, fix the remaining paired source/test approval flow:
+  either approve paired source+test edits as a unit or add an explicit
+  expected-failing-test approval mode for resident TDD flows.
 
 ## Milestone 3: Persistent Advantage
 

@@ -3104,9 +3104,14 @@ def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parame
 def paired_test_steer_text(pairing):
     source_path = pairing.get("source_path") or "src/mew/**"
     suggested = pairing.get("suggested_test_path") or "the matching tests/** file"
+    discovered = [path for path in pairing.get("discovered_test_paths") or [] if path]
+    suggestion_label = "Suggested existing test path" if discovered else "Suggested first test path"
+    other_discovered = ""
+    if len(discovered) > 1:
+        other_discovered = f" Other discovered candidates: {', '.join(discovered[1:4])}."
     return (
         f"Before retrying the src/mew source edit for {source_path}, add or update a paired tests/** "
-        f"write/edit in this same work session. Suggested first test path: {suggested}. "
+        f"write/edit in this same work session. {suggestion_label}: {suggested}.{other_discovered} "
         "Use a narrow read_file/search_text/edit_file step on the test first; after the test edit exists, retry the source edit. "
         "Only use --allow-unpaired-source-edit if this source-only edit is intentional."
     )

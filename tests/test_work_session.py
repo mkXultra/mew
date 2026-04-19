@@ -1104,6 +1104,72 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("approve blocked: add a paired tests/** write/edit before approving", resume_text)
         self.assertIn("--allow-unpaired-source-edit", resume_text)
 
+    def test_resume_discovers_existing_test_before_convention_pairing_path(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/cli.py").write_text(
+                    "def build_parser():\n    return None\n\n"
+                    "def main():\n    return 0\n",
+                    encoding="utf-8",
+                )
+                Path("tests/test_dogfood.py").write_text(
+                    "from mew.cli import build_parser\n\n"
+                    "def test_cli_dogfood_m2_task_shape_choices():\n"
+                    "    parser = build_parser()\n"
+                    "    assert parser is not None\n",
+                    encoding="utf-8",
+                )
+                Path("tests/test_desk.py").write_text(
+                    "from mew.cli import main\n\n"
+                    "def test_desk_main_imports():\n"
+                    "    assert main() == 0\n",
+                    encoding="utf-8",
+                )
+                session = {
+                    "id": 9,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Add dogfood m2 task shape CLI option",
+                    "notes": [{"text": "The paired test should cover dogfood m2 task shape parser behavior."}],
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {
+                                "path": "src/mew/cli.py",
+                                "old": "old",
+                                "new": "new --m2-task-shape dogfood",
+                            },
+                            "result": {
+                                "path": "src/mew/cli.py",
+                                "dry_run": True,
+                                "changed": True,
+                                "diff": "+ dogfood m2_task_shape parser option\n",
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                approval = resume["pending_approvals"][0]
+                pairing = approval["pairing_status"]
+                text = format_work_session_resume(resume)
+
+                self.assertEqual(pairing["status"], "missing_test_edit")
+                self.assertEqual(pairing["suggested_test_path"], "tests/test_dogfood.py")
+                self.assertNotEqual(pairing["suggested_test_path"], "tests/test_cli.py")
+                self.assertEqual(pairing["discovered_test_paths"][0], "tests/test_dogfood.py")
+                self.assertIn("imports mew.cli", pairing["suggestion_reason"])
+                self.assertIn("suggested_test_path: tests/test_dogfood.py", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_resume_suggests_matching_verifier_for_mew_source_edit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
