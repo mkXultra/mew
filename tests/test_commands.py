@@ -31,6 +31,24 @@ class CommandTests(unittest.TestCase):
         self.assertIn("usage: mew", output)
         self.assertIn("start the runtime", output)
 
+    def test_help_subcommand_prints_command_help(self):
+        with redirect_stdout(StringIO()) as stdout:
+            code = main(["help", "self-improve"])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("usage: mew self-improve", output)
+        self.assertIn("Native work-session flow:", output)
+
+    def test_help_subcommand_prints_nested_command_help(self):
+        with redirect_stdout(StringIO()) as stdout:
+            code = main(["help", "task", "add"])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn("usage: mew task add", output)
+        self.assertIn("create the task in ready status", output)
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

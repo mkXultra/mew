@@ -104,7 +104,15 @@ from .tasks import TASK_KINDS
 
 
 def cmd_help(args):
-    build_parser().print_help()
+    parser = build_parser()
+    topic = getattr(args, "topic", None) or []
+    if topic:
+        try:
+            parser.parse_args([*topic, "--help"])
+        except SystemExit as exc:
+            return int(exc.code or 0)
+        return 0
+    parser.print_help()
     return 0
 
 
@@ -124,7 +132,8 @@ def build_parser():
 
     subparsers = parser.add_subparsers(dest="command")
 
-    help_parser = subparsers.add_parser("help", help="show top-level help")
+    help_parser = subparsers.add_parser("help", help="show top-level or command help")
+    help_parser.add_argument("topic", nargs="*", help="optional command path to show help for")
     help_parser.set_defaults(func=cmd_help)
 
     run_parser = subparsers.add_parser("run", help="start the runtime")
