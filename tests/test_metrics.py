@@ -131,6 +131,7 @@ class MetricsTests(unittest.TestCase):
                 "status": "closed",
                 "created_at": "2026-04-19T00:00:00Z",
                 "updated_at": "2026-04-19T00:02:00Z",
+                "notes": [{"text": "Manual implementation and verification happened outside recorded tools."}],
                 "model_turns": [
                     {
                         "id": 1,
@@ -179,12 +180,18 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["diagnostics"]["slow_model_resumes"][0]["next_model_turn_id"], 2)
         self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["session_id"], 7)
         self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["idle_ratio"], 0.975)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["tool_call_count"], 1)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["model_turn_count"], 2)
+        self.assertEqual(metrics["diagnostics"]["high_idle_sessions"][0]["note_count"], 1)
+        self.assertIn("Manual implementation", metrics["diagnostics"]["high_idle_sessions"][0]["latest_note"])
 
         text = format_observation_metrics(metrics)
         self.assertIn("slow_model_resumes:", text)
         self.assertIn("model_wait=41.0s raw_wait=41.0s", text)
         self.assertIn("high_idle_sessions:", text)
         self.assertIn("idle_ratio=0.975", text)
+        self.assertIn("tools=1 turns=2 notes=1", text)
+        self.assertIn("latest_note: Manual implementation", text)
 
     def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
         state = default_state()

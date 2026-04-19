@@ -297,12 +297,18 @@ def _high_idle_session_sample(state, session, model_turns, tool_calls):
     idle_ratio = max(0.0, min(1.0, (wall_seconds - active_seconds) / wall_seconds))
     if idle_ratio <= HIGH_IDLE_RATIO:
         return None
+    notes = [note for note in session.get("notes") or [] if isinstance(note, dict)]
+    latest_note = notes[-1] if notes else {}
     sample = {
         "session_id": session.get("id"),
         "status": session.get("status") or "",
         "idle_ratio": _round(idle_ratio),
         "wall_seconds": _round(wall_seconds),
         "active_seconds": _round(active_seconds),
+        "tool_call_count": len(tool_calls or []),
+        "model_turn_count": len(model_turns or []),
+        "note_count": len(notes),
+        "latest_note": _clip_text(latest_note.get("text")),
         "updated_at": session.get("updated_at") or "",
     }
     sample.update(_sample_task(state, session.get("task_id")))
@@ -796,6 +802,9 @@ def format_observation_metrics(data):
             lines.append(
                 f"- session=#{sample.get('session_id')}{task} status={sample.get('status')} "
                 f"idle_ratio={sample.get('idle_ratio')} wall={sample.get('wall_seconds')}s "
-                f"active={sample.get('active_seconds')}s"
+                f"active={sample.get('active_seconds')}s tools={sample.get('tool_call_count', 0)} "
+                f"turns={sample.get('model_turn_count', 0)} notes={sample.get('note_count', 0)}"
             )
+            if sample.get("latest_note"):
+                lines.append(f"  latest_note: {sample.get('latest_note')}")
     return "\n".join(lines)
