@@ -5213,6 +5213,25 @@ class WorkSessionTests(unittest.TestCase):
         ):
             self.assertNotIn(noisy, terms)
 
+    def test_active_memory_terms_ignore_negated_focus_terms(self):
+        terms = active_memory_terms(
+            task={
+                "title": "Improve mew itself",
+                "description": (
+                    "Move back to broader cockpit/recovery roadmap. "
+                    "Pick one small high-leverage Milestone 2 or 4 improvement "
+                    "from real current friction, not active memory."
+                ),
+                "kind": "coding",
+            }
+        )
+
+        self.assertIn("cockpit", terms)
+        self.assertIn("recovery", terms)
+        self.assertIn("friction", terms)
+        self.assertNotIn("active", terms)
+        self.assertNotIn("memory", terms)
+
     def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
         from mew.work_session import (
             build_work_session_resume,

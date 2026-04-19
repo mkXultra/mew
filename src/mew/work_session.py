@@ -194,6 +194,13 @@ ACTIVE_MEMORY_DESCRIPTION_CUTOFFS = (
     "\n\nTasks",
     "\n\nConstraints:",
 )
+ACTIVE_MEMORY_TERM_RE = re.compile(r"[a-z0-9_][a-z0-9_-]{2,}")
+ACTIVE_MEMORY_NEGATED_PHRASE_RE = re.compile(
+    r"\b(?:not|without|except)\s+("
+    r"[a-z0-9_][a-z0-9_-]{2,}"
+    r"(?:\s+[a-z0-9_][a-z0-9_-]{2,}){0,2}"
+    r")"
+)
 
 
 def diff_line_counts(diff):
@@ -298,6 +305,15 @@ def active_memory_source_text(value):
     return text[:earliest]
 
 
+def active_memory_negated_terms(text):
+    negated = set()
+    for match in ACTIVE_MEMORY_NEGATED_PHRASE_RE.finditer(text):
+        for term in ACTIVE_MEMORY_TERM_RE.findall(match.group(1)):
+            if term not in ACTIVE_MEMORY_STOP_WORDS:
+                negated.add(term)
+    return negated
+
+
 def active_memory_terms(session=None, task=None):
     parts = []
     for source in (task or {}, session or {}):
@@ -308,9 +324,10 @@ def active_memory_terms(session=None, task=None):
             if value:
                 parts.append(active_memory_source_text(value) if key in ("description", "goal") else str(value))
     text = " ".join(parts).casefold()
+    negated = active_memory_negated_terms(text)
     terms = []
-    for term in re.findall(r"[a-z0-9_][a-z0-9_-]{2,}", text):
-        if term in ACTIVE_MEMORY_STOP_WORDS or term in terms:
+    for term in ACTIVE_MEMORY_TERM_RE.findall(text):
+        if term in ACTIVE_MEMORY_STOP_WORDS or term in negated or term in terms:
             continue
         terms.append(term)
     return terms[:20]
