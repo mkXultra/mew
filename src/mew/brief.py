@@ -696,7 +696,7 @@ def filter_messages_for_tasks(messages, tasks, kind=None):
     ]
 
 
-def build_focus_data(state, limit=3, kind=None):
+def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False):
     generated_at = now_iso()
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     coding_next_move = next_move(state, kind="coding") if not kind else ""
@@ -718,6 +718,9 @@ def build_focus_data(state, limit=3, kind=None):
         "kind": kind or "",
         "unread_outbox_count": len(unread),
         "routine_unread_info_count": len(routine_unread),
+        "latest_context_checkpoint": latest_context_checkpoint()
+        if include_context_checkpoint
+        else {},
         "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "active_work_sessions": active_work_session_items(
@@ -868,6 +871,15 @@ def format_focus(data):
     routine_unread = data.get("routine_unread_info_count") or 0
     if routine_unread:
         lines.append(f"Routine info: {routine_unread} clear with `{mew_command('ack', '--routine')}`")
+    checkpoint = data.get("latest_context_checkpoint") or {}
+    if checkpoint:
+        note = " ".join(str(checkpoint.get("reentry_note") or "").split())
+        if len(note) > 280:
+            note = note[:277].rstrip() + "..."
+        lines.append(f"Checkpoint: {checkpoint.get('name') or checkpoint.get('key')} ({checkpoint.get('created_at')})")
+        if note:
+            lines.append(f"Checkpoint note: {note}")
+        lines.append(f"Checkpoint load: {mew_command('context', '--load', '--limit', '1')}")
 
     questions = data.get("open_questions") or []
     if questions:

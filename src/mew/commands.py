@@ -8114,7 +8114,12 @@ def cmd_brief(args):
 
 def cmd_focus(args):
     state = load_state()
-    data = build_focus_data(state, limit=args.limit, kind=getattr(args, "kind", None) or None)
+    data = build_focus_data(
+        state,
+        limit=args.limit,
+        kind=getattr(args, "kind", None) or None,
+        include_context_checkpoint=True,
+    )
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
@@ -13085,7 +13090,7 @@ def run_chat_slash_command(line, chat_state):
         if error:
             print(error)
         else:
-            print(format_focus(build_focus_data(load_state(), limit=3, kind=kind)))
+            print(format_focus(build_focus_data(load_state(), limit=3, kind=kind, include_context_checkpoint=True)))
         return "continue"
     if command == "brief":
         kind, error = chat_kind_filter(
