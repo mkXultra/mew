@@ -650,6 +650,32 @@ class BriefTests(unittest.TestCase):
         self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
         self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
 
+    def test_next_move_repairs_weak_active_work_continuity(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Recover continuity", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Recover continuity",
+                "goal": "Make reentry obvious.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        data = build_focus_data(state, limit=3, kind="coding")
+        focus = format_focus(data)
+
+        self.assertEqual(
+            data["next_move"],
+            "repair continuity for active work session #3: refresh working memory with a hypothesis, next step, or verified state via `./mew work 7 --session --resume`",
+        )
+        self.assertIn("continuity_next: refresh working memory", focus)
+
     def test_focus_surfaces_active_work_session_unresolved_risk(self):
         state = default_state()
         add_task(state, task_id=7, title="Recover verifier", kind="coding")
