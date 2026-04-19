@@ -59,6 +59,8 @@ Shape:
 - phase 2 resumed the same codex session and completed implementation from the
   handoff note and prior context
 - wrote `/tmp/mew-fresh-status-fallback-report.json`
+- comparator caveat: this proves a fresh CLI **same-session resume**, not a
+  true fresh CLI restart from no prior agent context
 
 Verification:
 
@@ -69,6 +71,8 @@ Evidence:
 
 - `interruption_resume_gate.fresh_cli.status: proved`
 - `manual_rebrief_needed: false`
+- `context_mode: same_session_resume`
+- `restart_comparator_status: not_proved`
 
 ## Combined Result
 
@@ -101,7 +105,11 @@ both sides exercised an interruption/resume path. mew did preserve the resident
 state and complete the task without rebriefing; that part of M2 is real.
 
 It still does not close M2. For this compact edit/test task, the fresh CLI
-resume flow remained preferable. The next M2 work should reduce the remaining
-cockpit/approval ceremony or improve the live coding loop enough that an
-interrupted resident would choose to stay in mew rather than restart or resume
-in a fresh coding CLI.
+same-session resume flow remained preferable, but that is not the same as the
+M2 Done-when comparator: "restart in a fresh coding CLI." Future M2 comparison
+reports now need to record `context_mode`, `session_resumed`,
+`handoff_note_used`, and `restart_comparator_status` so mew does not mistake a
+resumed external agent session for true fresh restart evidence. The next M2
+work should either run that true restart leg or reduce the remaining
+cockpit/approval ceremony enough that an interrupted resident would choose to
+stay in mew.

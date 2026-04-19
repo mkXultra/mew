@@ -107,7 +107,12 @@ Milestone 2 Done-when checklist:
   `comparison_result.status=fresh_cli_preferred`. A follow-up protocol fix now
   derives the top-level `interruption_resume_gate.status=proved` from those
   two child gates, so the artifact exposes both the resume success and the
-  resident-preference loss without manual interpretation.
+  resident-preference loss without manual interpretation. A later protocol
+  tightening distinguishes fresh CLI `same_session_resume` evidence from a true
+  `true_restart` comparator by recording `context_mode`, `session_resumed`,
+  `handoff_note_used`, and `restart_comparator_status`; the status-fallback
+  fresh leg is now documented as `same_session_resume`, so it should not be
+  treated as proof that mew lost against a no-prior-context fresh restart.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,
@@ -182,11 +187,12 @@ Milestone 2 Done-when checklist:
 
 Current decision rule: the next implementation task must close one unmet
 Milestone 2 Done-when criterion or reduce a measured blocker to that criterion.
-Useful next choices are now targeted M2 friction slices that explain why the
-proved interruption comparison still preferred fresh CLI, or a latency slice
-chosen from `mew metrics --kind coding` if it becomes active again. Polish,
-side projects, and later-milestone architecture are deferred unless they
-directly unblock this active criterion.
+Useful next choices are now either a true fresh-restart M2 comparison, targeted
+M2 friction slices that explain why the proved same-session-resume comparison
+still preferred fresh CLI, or a latency slice chosen from
+`mew metrics --kind coding` if it becomes active again. Polish, side projects,
+and later-milestone architecture are deferred unless they directly unblock this
+active criterion.
 The 2026-04-19 scoped M3 Reentry Gate is a supporting slice for this rule, not
 a milestone switch: after it is green, return to M2 by running or preparing a
 paired interruption-shaped comparative dogfood task.

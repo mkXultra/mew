@@ -67,6 +67,7 @@ M2_COMPARATIVE_TASK_SHAPES = (
     "process_stop",
     "write_heavy",
 )
+M2_FRESH_CLI_CONTEXT_MODES = ("true_restart", "same_session_resume", "unknown")
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
 DOGFOOD_OBSERVED_DICT_LIMIT = 40
@@ -6627,6 +6628,69 @@ def _m2_flat_fresh_cli_summary(report):
     return flat
 
 
+def _m2_report_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def _m2_normalize_fresh_cli_context_mode(value):
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "fresh_restart": "true_restart",
+        "fresh_session": "true_restart",
+        "new_session": "true_restart",
+        "restart": "true_restart",
+        "true_fresh": "true_restart",
+        "resumed_session": "same_session_resume",
+        "same_session": "same_session_resume",
+        "session_resume": "same_session_resume",
+        "resume": "same_session_resume",
+        "resumed": "same_session_resume",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in M2_FRESH_CLI_CONTEXT_MODES:
+        return normalized
+    return ""
+
+
+def _m2_fresh_cli_context_from_report(report):
+    if not isinstance(report, dict):
+        return {}
+    fresh_cli = report.get("fresh_cli") or report.get("fresh_cli_summary") or {}
+    if not isinstance(fresh_cli, dict):
+        fresh_cli = {}
+    values = {}
+    context_mode = _m2_normalize_fresh_cli_context_mode(
+        report.get("fresh_cli_context_mode") or fresh_cli.get("context_mode")
+    )
+    if context_mode:
+        values["context_mode"] = context_mode
+    if "fresh_cli_session_resumed" in report or "session_resumed" in fresh_cli:
+        values["session_resumed"] = _m2_report_bool(
+            report.get("fresh_cli_session_resumed", fresh_cli.get("session_resumed"))
+        )
+    if "fresh_cli_handoff_note_used" in report or "handoff_note_used" in fresh_cli:
+        values["handoff_note_used"] = _m2_report_bool(
+            report.get("fresh_cli_handoff_note_used", fresh_cli.get("handoff_note_used"))
+        )
+    restart_status = str(
+        report.get("fresh_cli_restart_comparator_status")
+        or fresh_cli.get("restart_comparator_status")
+        or ""
+    ).strip()
+    if restart_status:
+        values["restart_comparator_status"] = restart_status
+    return values
+
+
 def _m2_preference_choice_from_signal(signal):
     if signal == "mew_preferred":
         return "mew"
@@ -6743,6 +6807,18 @@ def _m2_apply_comparison_report(protocol, report, source_path=""):
             fresh_gate.setdefault("evidence_gap", [])
             if isinstance(fresh_gate["evidence_gap"], list):
                 fresh_gate["evidence_gap"].append(str(report.get("notes")))
+    fresh_cli_context = _m2_fresh_cli_context_from_report(report)
+    if fresh_cli_context:
+        fresh_gate = protocol.setdefault("interruption_resume_gate", {}).setdefault("fresh_cli", {})
+        _m2_merge_mapping(fresh_gate, fresh_cli_context)
+        if (
+            fresh_cli_context.get("context_mode") == "same_session_resume"
+            and not comparison.get("next_blocker")
+        ):
+            comparison["next_blocker"] = (
+                "Run a true fresh CLI restart leg or mark the restart comparator inconclusive; "
+                "current fresh_cli evidence came from the same external agent session."
+            )
     return protocol
 
 
@@ -6802,8 +6878,11 @@ def build_m2_comparative_protocol(
                 "id": "fresh_cli",
                 "entry": "Claude Code or Codex CLI fresh session",
                 "required_evidence": [
+                    "context_mode: true_restart or same_session_resume",
                     "tool_or_command_count",
                     "manual_rebrief_needed",
+                    "session_resumed",
+                    "handoff_note_used",
                     "verification_result",
                     "friction_counts",
                     "resident_preference",
@@ -6856,12 +6935,22 @@ def build_m2_comparative_protocol(
                 "the resident can advance to passing verification after reentry",
             ],
             "required_fresh_cli_evidence": [
+                "whether the comparison was a true fresh restart or a same-session resume",
                 "whether manual rebrief was needed after interruption",
+                "whether a handoff note or prior agent session context was used",
                 "whether files/risks/next action had to be reconstructed from scratch",
                 "whether the fresh CLI completed verification faster or with less supervision",
             ],
             "mew": {"status": "unknown", "evidence_gap": []},
-            "fresh_cli": {"status": "unknown", "evidence_gap": []},
+            "fresh_cli": {
+                "status": "unknown",
+                "context_mode": "unknown",
+                "allowed_context_modes": list(M2_FRESH_CLI_CONTEXT_MODES),
+                "session_resumed": None,
+                "handoff_note_used": None,
+                "restart_comparator_status": "unknown",
+                "evidence_gap": [],
+            },
         },
         "resident_preference": {
             "choice": "unknown",
@@ -7105,6 +7194,7 @@ def run_m2_comparative_scenario(
     comparison_status = comparison.get("status")
     task_shape = loaded.get("task_shape") or {}
     interruption_gate = loaded.get("interruption_resume_gate") or {}
+    fresh_cli_gate = interruption_gate.get("fresh_cli") or {}
 
     _scenario_check(
         checks,
@@ -7208,6 +7298,18 @@ def run_m2_comparative_scenario(
             "interruption_resume_gate": interruption_gate,
         },
         expected="protocol captures the M2 interruption-resume gate and evidence requirements for both runs",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_tracks_fresh_cli_restart_context",
+        "context_mode" in fresh_cli_gate
+        and "true_restart" in (fresh_cli_gate.get("allowed_context_modes") or [])
+        and "same_session_resume" in (fresh_cli_gate.get("allowed_context_modes") or [])
+        and "session_resumed" in fresh_cli_gate
+        and "handoff_note_used" in fresh_cli_gate
+        and "restart_comparator_status" in fresh_cli_gate,
+        observed={"fresh_cli": fresh_cli_gate},
+        expected="fresh CLI evidence records whether the comparator was a true restart or same-session resume",
     )
     _scenario_check(
         checks,

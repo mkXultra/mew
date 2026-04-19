@@ -536,6 +536,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m2_comparative_protocol_maps_to_m2_done_when", text)
             self.assertIn("m2_comparative_protocol_has_fillable_comparison_result", text)
             self.assertIn("m2_comparative_protocol_tracks_interruption_resume_gate", text)
+            self.assertIn("m2_comparative_protocol_tracks_fresh_cli_restart_context", text)
             self.assertTrue(protocol["generated_at"])
             self.assertEqual(
                 protocol["observer_tip"],
@@ -555,6 +556,13 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("process_stop", protocol["task_shape"]["allowed_values"])
             self.assertEqual(protocol["interruption_resume_gate"]["status"], "unknown")
             self.assertIn("proved", protocol["interruption_resume_gate"]["allowed_statuses"])
+            fresh_gate = protocol["interruption_resume_gate"]["fresh_cli"]
+            self.assertEqual(fresh_gate["context_mode"], "unknown")
+            self.assertIn("true_restart", fresh_gate["allowed_context_modes"])
+            self.assertIn("same_session_resume", fresh_gate["allowed_context_modes"])
+            self.assertIsNone(fresh_gate["session_resumed"])
+            self.assertIsNone(fresh_gate["handoff_note_used"])
+            self.assertEqual(fresh_gate["restart_comparator_status"], "unknown")
             self.assertIn("mew", protocol["comparison_result"]["run_summaries"])
             self.assertIn("fresh_cli", protocol["comparison_result"]["run_summaries"])
             self.assertIn("## Task Shape", runbook)
@@ -888,6 +896,10 @@ class DogfoodTests(unittest.TestCase):
                             "verification_result": "passed exit=0 command=pytest -q",
                             "friction_summary": "manual_status_probes=1 dead_waits_over_30s=0",
                             "preference_signal": "fast, but no durable resume bundle",
+                            "context_mode": "true_restart",
+                            "session_resumed": False,
+                            "handoff_note_used": True,
+                            "restart_comparator_status": "proved",
                         },
                         "friction_counts": {
                             "manual_status_probes": 1,
@@ -939,6 +951,13 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["task_shape"]["selected"], "interruption_resume")
             self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "not_proved")
             self.assertTrue(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
+            self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["context_mode"], "true_restart")
+            self.assertFalse(protocol["interruption_resume_gate"]["fresh_cli"]["session_resumed"])
+            self.assertTrue(protocol["interruption_resume_gate"]["fresh_cli"]["handoff_note_used"])
+            self.assertEqual(
+                protocol["interruption_resume_gate"]["fresh_cli"]["restart_comparator_status"],
+                "proved",
+            )
             self.assertIn("## Comparison Report", runbook)
             self.assertIn("manual_rebrief_needed", runbook)
             self.assertIn(str(report_path), runbook)
@@ -959,6 +978,10 @@ class DogfoodTests(unittest.TestCase):
                             }
                         ],
                         "manual_rebrief_needed": False,
+                        "fresh_cli_context_mode": "resumed_session",
+                        "fresh_cli_session_resumed": True,
+                        "fresh_cli_handoff_note_used": True,
+                        "fresh_cli_restart_comparator_status": "not_proved",
                         "interruption_resume_gate": "unknown",
                         "friction_summary": "no material friction",
                         "resident_preference": {
@@ -991,6 +1014,17 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["resident_preference"]["choice"], "fresh_cli")
             self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "unknown")
             self.assertFalse(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
+            self.assertEqual(
+                protocol["interruption_resume_gate"]["fresh_cli"]["context_mode"],
+                "same_session_resume",
+            )
+            self.assertTrue(protocol["interruption_resume_gate"]["fresh_cli"]["session_resumed"])
+            self.assertTrue(protocol["interruption_resume_gate"]["fresh_cli"]["handoff_note_used"])
+            self.assertEqual(
+                protocol["interruption_resume_gate"]["fresh_cli"]["restart_comparator_status"],
+                "not_proved",
+            )
+            self.assertIn("true fresh CLI restart", protocol["comparison_result"]["next_blocker"])
 
     def test_run_dogfood_m2_comparative_derives_interruption_gate_from_children(self):
         with tempfile.TemporaryDirectory() as tmp:
