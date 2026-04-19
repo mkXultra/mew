@@ -624,6 +624,13 @@ Evidence:
   protocol artifacts under `.mew/dogfood/`, requiring both a `mew code` run and
   a fresh Claude Code / Codex CLI run, friction counts, resume behavior,
   resident preference, and explicit mapping to all three M2 Done-when criteria.
+- The first recorded M2 paired dogfood is preserved in
+  `docs/M2_COMPARATIVE_DOGFOOD_2026-04-19.md`. For a small local protocol
+  edit, fresh `codex-ultra` in a detached worktree completed the change more
+  smoothly than mew. The mew leg found the right context but hit a paired-test
+  steer plus approval-verification rollback loop: the guard asked for a test
+  edit first, while approval verification required that test-only edit to pass
+  before the matching source edit existed.
 
 Missing proof:
 
@@ -633,16 +640,17 @@ Missing proof:
 - Large active-session growth is now visible and recent file reads are clipped in model context, but there is no global prompt budget enforcement or semantic compaction of noisy work-session history.
 - Live coding work session UX now has focused help, one-step `/continue` and `/c`, reusable options, chat work-mode with guarded blank repeats, bounded follow loops, inline guidance capture, boundary stop requests, interrupt and max-step reentry notes, recent-session reentry, compact chat controls, focused diff/test panes, scoped status/brief views, and global work-session ledgers, but it is still not a full REPL-style coding cockpit with polished reasoning/status flow.
 - `mew work --follow` now has stable cell anchors, running model/tool cells, and duplicate action/result suppression, but it still needs longer real task dogfood before treating the cell stream as the default cockpit contract.
-- The M2 comparative dogfood protocol exists, but it has not yet been used on
-  a real paired mew-vs-fresh-CLI coding task.
+- The first M2 comparative dogfood run favored fresh CLI for a small local
+  change; mew still needs a better paired source/test approval path before it
+  can claim interactive parity on this class of task.
 - TTY redraw, cell-level collapse/expand, and hard mid-stream cancellation are not implemented.
 
 Next action:
 
-- Use `mew dogfood --scenario m2-comparative` as the recording surface for a
-  real paired coding task, then decide from the friction counts whether to
-  tackle first-tool latency, model-resume latency, approval confusion, or
-  resume/rebrief gaps next.
+- Fix the paired source/test approval flow exposed by the M2 comparative
+  dogfood: either approve paired source+test edits as a unit or add an explicit
+  expected-failing-test approval mode for resident TDD flows, then rerun the
+  same comparative task.
 
 ## Milestone 3: Persistent Advantage
 

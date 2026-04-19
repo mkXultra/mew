@@ -5113,6 +5113,7 @@ raise SystemExit(0 if passed else 1)
 def build_m2_comparative_protocol():
     return {
         "name": "m2-comparative",
+        "generated_at": now_iso(),
         "roadmap_milestone": "M2 Interactive Parity",
         "purpose": (
             "Compare one focused coding task in mew against a fresh Claude Code "
@@ -5146,6 +5147,26 @@ def build_m2_comparative_protocol():
                 ],
             },
         ],
+        "comparison_result": {
+            "status": "unknown",
+            "allowed_statuses": ["mew_preferred", "fresh_cli_preferred", "inconclusive", "blocked"],
+            "next_blocker": "",
+            "notes": "",
+            "run_summaries": {
+                "mew": {
+                    "summary": "",
+                    "verification_result": "",
+                    "friction_summary": "",
+                    "preference_signal": "",
+                },
+                "fresh_cli": {
+                    "summary": "",
+                    "verification_result": "",
+                    "friction_summary": "",
+                    "preference_signal": "",
+                },
+            },
+        },
         "friction_counts": {
             "retyped_gate_flags": 0,
             "lost_context_or_rebriefs": 0,
@@ -5176,15 +5197,41 @@ def build_m2_comparative_protocol():
 
 
 def format_m2_comparative_protocol(protocol):
+    comparison = protocol.get("comparison_result") or {}
+    run_summaries = comparison.get("run_summaries") or {}
     lines = [
         "# M2 Comparative Dogfood Protocol",
+        "",
+        f"Generated at: {protocol.get('generated_at')}",
         "",
         f"Milestone: {protocol.get('roadmap_milestone')}",
         "",
         protocol.get("purpose") or "",
         "",
-        "## Runs",
+        "## Comparison Result",
+        f"- status: {comparison.get('status', 'unknown')}",
+        f"- allowed_statuses: {', '.join(comparison.get('allowed_statuses') or [])}",
+        f"- next_blocker: {comparison.get('next_blocker', '')}",
+        f"- notes: {comparison.get('notes', '')}",
+        "- run_summaries:",
     ]
+    for run_id in ("mew", "fresh_cli"):
+        summary = run_summaries.get(run_id) or {}
+        lines.extend(
+            [
+                f"  - {run_id}:",
+                f"    summary: {summary.get('summary', '')}",
+                f"    verification_result: {summary.get('verification_result', '')}",
+                f"    friction_summary: {summary.get('friction_summary', '')}",
+                f"    preference_signal: {summary.get('preference_signal', '')}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Runs",
+        ]
+    )
     for run in protocol.get("required_runs") or []:
         lines.append(f"- {run.get('id')}: `{run.get('entry')}`")
         evidence = ", ".join(run.get("required_evidence") or [])
@@ -5236,22 +5283,47 @@ def run_m2_comparative_scenario(workspace, env=None):
     friction_keys = set((loaded.get("friction_counts") or {}).keys())
     preference_values = set((loaded.get("resident_preference") or {}).get("allowed_values") or [])
     done_when = loaded.get("done_when_mapping") or []
+    comparison = loaded.get("comparison_result") or {}
+    comparison_run_summaries = comparison.get("run_summaries") or {}
 
     _scenario_check(
         checks,
         "m2_comparative_protocol_writes_json_record",
-        json_path.exists() and loaded.get("roadmap_milestone") == "M2 Interactive Parity",
-        observed={"path": str(json_path), "roadmap_milestone": loaded.get("roadmap_milestone")},
-        expected="JSON protocol record exists for M2 Interactive Parity",
+        json_path.exists()
+        and loaded.get("roadmap_milestone") == "M2 Interactive Parity"
+        and bool(loaded.get("generated_at")),
+        observed={
+            "path": str(json_path),
+            "roadmap_milestone": loaded.get("roadmap_milestone"),
+            "generated_at": loaded.get("generated_at"),
+        },
+        expected="JSON protocol record exists for M2 Interactive Parity with a generated timestamp",
     )
     _scenario_check(
         checks,
         "m2_comparative_protocol_writes_markdown_runbook",
         md_path.exists()
         and "M2 Comparative Dogfood Protocol" in markdown
+        and "## Comparison Result" in markdown
         and "Resident Preference" in markdown,
         observed={"path": str(md_path), "chars": len(markdown)},
-        expected="Markdown runbook exists with resident preference section",
+        expected="Markdown runbook exists with comparison result and resident preference sections",
+    )
+    _scenario_check(
+        checks,
+        "m2_comparative_protocol_has_fillable_comparison_result",
+        comparison.get("status") == "unknown"
+        and "blocked" in (comparison.get("allowed_statuses") or [])
+        and "mew" in comparison_run_summaries
+        and "fresh_cli" in comparison_run_summaries
+        and all(
+            {"summary", "verification_result", "friction_summary", "preference_signal"}.issubset(
+                (comparison_run_summaries.get(run_id) or {}).keys()
+            )
+            for run_id in ("mew", "fresh_cli")
+        ),
+        observed=comparison,
+        expected="comparison_result is directly fillable after paired dogfood runs",
     )
     _scenario_check(
         checks,
