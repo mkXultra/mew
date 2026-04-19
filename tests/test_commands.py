@@ -3614,6 +3614,98 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_status_surfaces_active_native_work_sessions(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import load_state, save_state, state_lock
+
+                with state_lock():
+                    state = load_state()
+                    state["tasks"].append(
+                        {
+                            "id": 1,
+                            "title": "Active coding",
+                            "kind": "coding",
+                            "description": "",
+                            "status": "ready",
+                            "priority": "normal",
+                            "notes": "",
+                            "command": "",
+                            "cwd": ".",
+                            "auto_execute": False,
+                            "created_at": "now",
+                            "updated_at": "now",
+                        }
+                    )
+                    state["work_sessions"].append(
+                        {
+                            "id": 3,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Active coding",
+                            "created_at": "now",
+                            "updated_at": "now",
+                            "tool_calls": [
+                                {
+                                    "id": 7,
+                                    "tool": "edit_file",
+                                    "status": "completed",
+                                    "parameters": {"path": "README.md"},
+                                    "result": {"dry_run": True, "changed": True},
+                                }
+                            ],
+                            "model_turns": [],
+                            "default_options": {"allow_read": ["."], "compact_live": True},
+                        }
+                    )
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-3.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 3,
+                            "task_id": 1,
+                            "heartbeat_at": "2000-01-01T00:00:00Z",
+                            "producer": {"pid": 99999},
+                            "step_count": 2,
+                            "pending_approvals": [{"id": 7}],
+                            "session_updated_at": "now",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["status", "--kind", "coding", "--json"]), 0)
+                status = json.loads(stdout.getvalue())
+                self.assertEqual(status["counts"]["active_work_sessions"], 1)
+                session = status["active_work_sessions"][0]
+                self.assertEqual(session["id"], 3)
+                self.assertEqual(session["task_id"], 1)
+                self.assertEqual(session["pending_approval_count"], 1)
+                self.assertEqual(session["follow_status_command"], "mew work 1 --follow-status --json")
+                self.assertTrue(session["follow_status"]["producer_alive"])
+                self.assertEqual(session["follow_status"]["producer_health"]["state"], "working")
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["status", "--kind", "coding"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("active_work_sessions: 1", output)
+                self.assertIn(
+                    "active_work_session: #3 task=#1 phase=awaiting_approval pending_approvals=1",
+                    output,
+                )
+                self.assertIn("status=mew work 1 --follow-status --json", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_status_and_brief_kind_filter_scope_next_move(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

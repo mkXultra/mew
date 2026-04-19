@@ -221,6 +221,7 @@ from .work_session import (
     WRITE_WORK_TOOLS,
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
+    work_session_phase,
     work_recovery_read_root,
     work_call_path,
     work_session_runtime_command,
@@ -4296,6 +4297,44 @@ def active_work_sessions_for_kind(state, kind=None):
     ]
 
 
+def active_work_session_status_items(state, kind=None):
+    items = []
+    for session in active_work_sessions_for_kind(state, kind=kind):
+        task_id = session.get("task_id")
+        calls = session.get("tool_calls") or []
+        turns = session.get("model_turns") or []
+        pending_ids = _pending_approval_tool_ids(session)
+        status_command = (
+            mew_command(
+                "work",
+                task_id,
+                "--follow-status",
+                "--json",
+            )
+            if task_id is not None
+            else mew_command("work", "--follow-status", "--json")
+        )
+        snapshot_path = STATE_DIR / "follow" / f"session-{session.get('id')}.json"
+        follow_status = _work_follow_status_from_snapshot(snapshot_path, task_id=task_id, session=session)
+        items.append(
+            {
+                "id": session.get("id"),
+                "task_id": task_id,
+                "status": session.get("status") or "",
+                "phase": work_session_phase(session, calls, turns, pending_ids),
+                "title": session.get("title") or "",
+                "updated_at": session.get("updated_at") or "",
+                "pending_approval_count": len(pending_ids),
+                "follow_status": follow_status,
+                "follow_status_command": status_command,
+                "resume_command": (
+                    mew_command("work", task_id, "--session", "--resume") if task_id is not None else ""
+                ),
+            }
+        )
+    return items
+
+
 def _latest_work_session_for_task(state, task_id):
     latest = None
     for candidate in reversed(state.get("work_sessions", [])):
@@ -7348,6 +7387,7 @@ def cmd_status(args):
     running_agents = [run for run in state["agent_runs"] if run.get("status") in ("created", "running")]
     if kind:
         running_agents = [run for run in running_agents if str(run.get("task_id")) in task_ids]
+    active_native_work = active_work_session_status_items(state, kind=kind)
     if args.json:
         print(
             json.dumps(
@@ -7367,9 +7407,11 @@ def cmd_status(args):
                         "open_questions": len(questions),
                         "open_attention": len(attention),
                         "running_agent_runs": len(running_agents),
+                        "active_work_sessions": len(active_native_work),
                         "unread_outbox": len(unread),
                         "routine_unread_info": len(routine_unread),
                     },
+                    "active_work_sessions": active_native_work,
                     "top_attention": attention[0] if attention else None,
                     "latest_summary": (
                         state.get("memory", {}).get("shallow", {}).get("current_context")
@@ -7432,6 +7474,19 @@ def cmd_status(args):
     print(f"open_questions: {len(questions)}")
     print(f"open_attention: {len(attention)}")
     print(f"running_agent_runs: {len(running_agents)}")
+    print(f"active_work_sessions: {len(active_native_work)}")
+    for session in active_native_work:
+        follow = session.get("follow_status") or {}
+        health = follow.get("producer_health") or {}
+        print(
+            "active_work_session: "
+            f"#{session.get('id')} task=#{session.get('task_id')} "
+            f"phase={session.get('phase')} "
+            f"pending_approvals={session.get('pending_approval_count')} "
+            f"producer={health.get('state') or follow.get('status') or 'unknown'} "
+            f"alive={bool(follow.get('producer_alive'))} "
+            f"status={session.get('follow_status_command')}"
+        )
     if attention:
         top = attention[0]
         print(f"top_attention: #{top['id']} {top.get('title')}: {top.get('reason')}")
