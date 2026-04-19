@@ -1185,6 +1185,12 @@ Evidence:
   the scenario. `/tmp/mew-resident-loop-duration-probe-v2` passed with
   `requested_duration_seconds=12.0`, `requested_interval_seconds=3.0`,
   `passive_events=3`, and `passive_gaps_seconds=[3.0, 3.0]`.
+- The first half-hour resident-loop cadence proof passed. Running
+  `resident-loop` for 1800 seconds with a 60 second interval at
+  `/tmp/mew-resident-loop-30min-20260420-0811` processed 30 events, including
+  29 passive ticks, with 28 passive gaps that were all 60 seconds except one
+  61 second gap. The durable summary is in
+  `docs/M3_RESIDENT_LOOP_30MIN_2026-04-20.md`.
 
 Missing proof:
 
@@ -1195,8 +1201,8 @@ Missing proof:
 - Watcher-driven passive output now has controlled, real-repo one-shot,
   short resident-loop, native-work-start, and real API native-work-advance
   proofs, and resident-loop JSON now carries explicit cadence counts plus
-  requested duration/interval, but there is still no long-running cadence proof
-  across several hours or days.
+  requested duration/interval. A half-hour resident-loop proof exists, but
+  there is still no several-hour or multi-day cadence proof.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
   prompt/template and merge the completed report, and one fresh `codex-ultra`
   leg has run to parity, but that comparison is still a tiny synthetic README
