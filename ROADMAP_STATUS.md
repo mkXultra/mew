@@ -51,6 +51,11 @@ The same repair signal now reaches `mew next`: when an active work session has
 weak or broken continuity, the top-level next move points at a live continuity
 repair action instead of blindly entering the coding cockpit, while usable
 sessions still route to the normal cockpit.
+Codex-ultra re-review of that fix passed in session
+`019da3ff-e521-7351-a5de-3943ae3d81b8`: focused probes confirmed usable
+continuity routes to `mew code`, broken continuity routes to
+`mew work ... --live --max-steps 1`, and `mew next --json` returns the live
+repair command.
 
 Milestone 2 is the active focus. The latest Claude Code / Codex CLI reference
 investigation is preserved in `docs/COCKPIT_REFERENCE_NOTES.md`; it does not
