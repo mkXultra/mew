@@ -2010,6 +2010,7 @@ def compact_work_cli_control_items(items):
         "add paired test",
         "add paired tests",
         "approve",
+        "apply tool",
         "auto-recover",
         "override unpaired",
         "reject",

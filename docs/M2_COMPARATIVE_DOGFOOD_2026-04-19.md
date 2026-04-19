@@ -131,7 +131,7 @@ Friction counts:
 - dead_waits_over_30s: 1
 - restart_or_recovery_steps: 0
 
-Remaining UI note: the compact follow stop output did not surface the
+Resolved UI note: the compact follow stop output originally did not surface the
 deferred-verification control as clearly as `mew work --session --resume` and
-`mew work --cells` did. The capability works, but the first stop surface may
-still be less obvious than the resident cockpit needs.
+`mew work --cells` did. Compact `Next CLI controls` now keep
+`apply tool #... and defer verification` when pending approvals exist.

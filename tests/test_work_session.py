@@ -6422,6 +6422,44 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("interrupt and submit:", controls)
         self.assertNotIn("pause at boundary:", controls)
 
+    def test_compact_work_cli_controls_keep_defer_verify_approval(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Review pending write",
+            "default_options": {
+                "allow_read": ["."],
+                "allow_write": ["."],
+                "verify_command": "true",
+                "compact_live": True,
+            },
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "notes.md", "old": "before", "new": "after"},
+                    "result": {
+                        "path": "notes.md",
+                        "dry_run": True,
+                        "changed": True,
+                        "diff": "--- notes.md\n+++ notes.md\n@@\n-before\n+after\n",
+                    },
+                }
+            ],
+            "model_turns": [],
+        }
+        args = SimpleNamespace(live=False)
+
+        controls = format_work_cli_controls(session, args, compact=True)
+
+        self.assertIn("approve tool #3:", controls)
+        self.assertIn("apply tool #3 and defer verification:", controls)
+        self.assertIn("mew work 1 --approve-tool 3 --allow-write notes.md --defer-verify", controls)
+        self.assertIn("reject tool #3:", controls)
+        self.assertLess(controls.index("apply tool #3 and defer verification"), controls.index("one live step"))
+
     def test_work_session_recovers_interrupted_read_tool(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
