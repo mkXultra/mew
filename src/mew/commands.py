@@ -9188,17 +9188,24 @@ def cmd_self_improve(args):
         print("review_prompt:")
         print(plan.get("review_prompt") or "")
     if run:
-        if args.dry_run:
-            print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
-            print(" ".join(run["command"]))
-        else:
-            print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
-            if run.get("status") != "running":
-                detail = clip_output(run.get("stderr") or run.get("result") or "", 500)
-                suffix = f": {detail}" if detail else ""
-                print(f"mew: self-improve run #{run['id']} status={run.get('status')}{suffix}")
-                return 1
+        return print_self_improve_run_status(run, dry_run=args.dry_run, plan=plan)
     return 0
+
+
+def print_self_improve_run_status(run, *, dry_run=False, plan=None):
+    if dry_run:
+        plan_id = (plan or {}).get("id") or run.get("plan_id")
+        print(f"created dry-run self-improve run #{run['id']} from plan #{plan_id}")
+        print(" ".join(run["command"]))
+        return 0
+    print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
+    if run.get("status") != "running":
+        detail = clip_output(run.get("stderr") or run.get("result") or "", 500)
+        suffix = f": {detail}" if detail else ""
+        print(f"mew: self-improve run #{run['id']} status={run.get('status')}{suffix}")
+        return 1
+    return 0
+
 
 def _create_self_improve_implementation_run(args):
     state = load_state()
@@ -12866,15 +12873,7 @@ def chat_self_improve(rest):
         print("review_prompt:")
         print(plan.get("review_prompt") or "")
     if run:
-        if dry_run:
-            print(f"created dry-run self-improve run #{run['id']} from plan #{plan['id']}")
-            print(" ".join(run["command"]))
-        else:
-            print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
-            if run.get("status") != "running":
-                detail = clip_output(run.get("stderr") or run.get("result") or "", 500)
-                suffix = f": {detail}" if detail else ""
-                print(f"mew: self-improve run #{run['id']} status={run.get('status')}{suffix}")
+        print_self_improve_run_status(run, dry_run=dry_run, plan=plan)
 
 
 def run_chat_slash_command(line, chat_state):
