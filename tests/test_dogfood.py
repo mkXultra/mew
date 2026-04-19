@@ -72,6 +72,15 @@ class DogfoodTests(unittest.TestCase):
         self.assertTrue(args.all_scenarios)
         self.assertIsNone(args.scenario)
 
+    def test_cli_dogfood_scenario_timing_defaults_are_unspecified(self):
+        parser = build_parser()
+
+        args = parser.parse_args(["dogfood", "--scenario", "resident-loop", "--json"])
+
+        self.assertFalse(hasattr(args, "duration"))
+        self.assertFalse(hasattr(args, "interval"))
+        self.assertFalse(hasattr(args, "poll_interval"))
+
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
 

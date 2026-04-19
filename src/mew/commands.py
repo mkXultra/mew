@@ -9197,8 +9197,20 @@ def cmd_dogfood(args):
         if getattr(args, "scenario", ""):
             report = run_dogfood_scenario(args)
         elif getattr(args, "cycles", 1) and args.cycles > 1:
+            if not hasattr(args, "duration"):
+                args.duration = 45.0
+            if not hasattr(args, "interval"):
+                args.interval = 10.0
+            if not hasattr(args, "poll_interval"):
+                args.poll_interval = 0.5
             report = run_dogfood_loop(args)
         else:
+            if not hasattr(args, "duration"):
+                args.duration = 45.0
+            if not hasattr(args, "interval"):
+                args.interval = 10.0
+            if not hasattr(args, "poll_interval"):
+                args.poll_interval = 0.5
             report = run_dogfood(args)
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)

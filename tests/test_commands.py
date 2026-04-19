@@ -4533,6 +4533,35 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--all cannot be combined with --scenario", stderr.getvalue())
 
+    def test_dogfood_command_applies_runtime_timing_defaults_when_omitted(self):
+        report = {
+            "generated_at": "now",
+            "workspace": "/tmp/dog",
+            "command": ["mew", "run"],
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+            "events": {"processed": 1, "total": 1, "by_type": {"startup": 1}},
+            "model_phases": {"think_ok": 0, "think_error": 0, "act_ok": 0, "act_error": 0},
+            "outbox": {"total": 0, "unread": 0, "by_type": {}},
+            "actions": {},
+            "tasks": {},
+            "verification_runs": 0,
+            "write_runs": 0,
+            "dropped_threads": {"thought_count": 0, "latest": []},
+            "recent_activity": [],
+            "next_move": "ask the user what to track next",
+            "log_tail": [],
+        }
+        with patch("mew.commands.run_dogfood", return_value=report) as runner:
+            with redirect_stdout(StringIO()):
+                code = main(["dogfood"])
+
+        self.assertEqual(code, 0)
+        args = runner.call_args.args[0]
+        self.assertEqual(args.duration, 45.0)
+        self.assertEqual(args.interval, 10.0)
+        self.assertEqual(args.poll_interval, 0.5)
+
     def test_dogfood_command_can_write_report_file(self):
         report = {
             "generated_at": "now",

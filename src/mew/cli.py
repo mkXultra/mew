@@ -722,9 +722,9 @@ def build_parser():
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",
     )
-    dogfood_parser.add_argument("--duration", type=float, default=45.0, help="seconds to run the runtime")
-    dogfood_parser.add_argument("--interval", type=float, default=10.0, help="passive wake interval in seconds")
-    dogfood_parser.add_argument("--poll-interval", type=float, default=0.5, help="runtime poll interval in seconds")
+    dogfood_parser.add_argument("--duration", type=float, default=argparse.SUPPRESS, help="seconds to run the runtime")
+    dogfood_parser.add_argument("--interval", type=float, default=argparse.SUPPRESS, help="passive wake interval in seconds")
+    dogfood_parser.add_argument("--poll-interval", type=float, default=argparse.SUPPRESS, help="runtime poll interval in seconds")
     dogfood_parser.add_argument("--cycles", type=int, default=1, help="number of dogfood runtime cycles")
     dogfood_parser.add_argument("--cycle-gap", type=float, default=0.0, help="seconds to wait between cycles")
     dogfood_parser.add_argument("--startup-timeout", type=float, default=15.0, help="seconds to wait for startup")
