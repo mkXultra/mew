@@ -283,7 +283,6 @@ class DeskTests(unittest.TestCase):
             mew_command(
                 "self-improve",
                 "--start-session",
-                "--ready",
                 "--focus",
                 "Pick the next small mew improvement",
             ),

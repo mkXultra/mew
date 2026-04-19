@@ -414,7 +414,6 @@ def native_self_improve_action_item() -> dict[str, Any]:
             "command": mew_command(
                 "self-improve",
                 "--start-session",
-                "--ready",
                 "--focus",
                 "Pick the next small mew improvement",
             ),

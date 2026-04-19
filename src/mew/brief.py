@@ -983,7 +983,7 @@ def next_move(state, kind=None):
             )
         return (
             "start a native self-improvement session with "
-            f"`{mew_command('self-improve', '--start-session', '--ready', '--focus', 'Pick the next small mew improvement')}`"
+            f"`{mew_command('self-improve', '--start-session', '--focus', 'Pick the next small mew improvement')}`"
         )
     return "wait for the next user request"
 
