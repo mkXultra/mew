@@ -7810,7 +7810,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("command: python mutate.py", text)
         self.assertIn("path: README.md", text)
         controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
-        self.assertIn("./mew work 1 --session --resume --allow-read .", controls)
+        self.assertIn("Recovery\n- ./mew work 1 --session --resume --allow-read .", controls)
 
     def test_work_recovery_plan_keeps_interrupted_apply_on_review_path(self):
         from mew.work_session import build_work_session_resume

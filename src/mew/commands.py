@@ -11337,6 +11337,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
 
     recovery_command = work_cockpit_recovery_command(resume, task_id=task_id)
     if recovery_command:
+        lines.append("Recovery")
         lines.append(f"- {recovery_command}")
     _append_work_cockpit_approval_lines(lines, resume)
 
