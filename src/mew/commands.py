@@ -10810,6 +10810,7 @@ def format_work_cockpit_controls(state=None, session=None, continue_options="", 
                 lines.append("- /c --allow-read .")
                 lines.append("- /follow --allow-read . --max-steps 10")
                 lines.append("- /continue --allow-read .")
+                lines.append('- /continue --allow-read . --work-guidance "focus ..."')
         _append_work_cockpit_approval_lines(lines, resume)
         lines.append(f"- /work-session resume{task_suffix}")
         lines.append("- /work-session details")

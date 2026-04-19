@@ -5393,6 +5393,13 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("- /c --allow-read src --max-steps 1", controls)
                 self.assertIn("- /follow --allow-read src --max-steps 10", controls)
 
+                uncached_controls = format_work_cockpit_controls(
+                    state=state,
+                    session=session,
+                    continue_options="",
+                )
+                self.assertIn('- /continue --allow-read . --work-guidance "focus ..."', uncached_controls)
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session"]), 0)
                 controls_block = stdout.getvalue().split("Next CLI controls", 1)[1]
