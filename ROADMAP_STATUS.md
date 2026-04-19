@@ -104,7 +104,10 @@ Milestone 2 Done-when checklist:
   note. The combined artifact at `/tmp/mew-m2-status-fallback-combined` has
   both `interruption_resume_gate.mew.status=proved` and
   `interruption_resume_gate.fresh_cli.status=proved`, but still records
-  `comparison_result.status=fresh_cli_preferred`.
+  `comparison_result.status=fresh_cli_preferred`. A follow-up protocol fix now
+  derives the top-level `interruption_resume_gate.status=proved` from those
+  two child gates, so the artifact exposes both the resume success and the
+  resident-preference loss without manual interpretation.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

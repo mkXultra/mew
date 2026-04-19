@@ -992,6 +992,54 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "unknown")
             self.assertFalse(protocol["interruption_resume_gate"]["fresh_cli"]["manual_rebrief_needed"])
 
+    def test_run_dogfood_m2_comparative_derives_interruption_gate_from_children(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "fresh-cli-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "task_shape": {"selected": "interruption_resume"},
+                        "fresh_cli": {
+                            "summary": "fresh CLI interruption gate proved",
+                            "verification_result": "not relevant for this fixture",
+                            "friction_summary": "manual_rebrief_needed=False",
+                            "preference_signal": "fixture",
+                        },
+                        "interruption_resume_gate": {
+                            "mew": {"status": "proved", "evidence_gap": []},
+                            "fresh_cli": {
+                                "status": "proved",
+                                "manual_rebrief_needed": False,
+                                "evidence_gap": [],
+                            },
+                        },
+                        "resident_preference": {
+                            "choice": "inconclusive",
+                            "reason": "this fixture only verifies aggregate gate status",
+                            "blocking_gap": "",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m2-comparative",
+                cleanup=False,
+                m2_comparison_report=str(report_path),
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(protocol["interruption_resume_gate"]["status"], "proved")
+            self.assertEqual(protocol["interruption_resume_gate"]["mew"]["status"], "proved")
+            self.assertEqual(protocol["interruption_resume_gate"]["fresh_cli"]["status"], "proved")
+
     def test_summarize_dogfood_scenario_json_omits_passing_details(self):
         report = {
             "generated_at": "now",

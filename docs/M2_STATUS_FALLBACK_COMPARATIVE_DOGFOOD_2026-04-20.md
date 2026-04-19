@@ -75,16 +75,24 @@ Evidence:
 Combined protocol:
 
 - JSON:
-  `/tmp/mew-m2-status-fallback-combined/.mew/dogfood/m2-comparative-protocol.json`
+  `/tmp/mew-m2-status-fallback-combined-gate/.mew/dogfood/m2-comparative-protocol.json`
 - Markdown:
-  `/tmp/mew-m2-status-fallback-combined/.mew/dogfood/m2-comparative-protocol.md`
+  `/tmp/mew-m2-status-fallback-combined-gate/.mew/dogfood/m2-comparative-protocol.md`
 
 Result:
 
 - `comparison_result.status: fresh_cli_preferred`
 - `resident_preference.choice: fresh_cli`
+- top-level interruption gate: `proved`
 - mew interruption gate: `proved`
 - fresh interruption gate: `proved`
+
+Follow-up protocol fix:
+
+- `interruption_resume_gate.status` is now derived from child gate statuses
+  when both sides are known.
+- If either side is still `unknown`, the top-level gate remains `unknown`.
+- Explicit non-unknown top-level gate status is preserved.
 
 ## Interpretation
 

@@ -6647,6 +6647,34 @@ def _m2_comparison_status_from_preference_choice(choice):
     return ""
 
 
+def _m2_interruption_gate_status_from_children(gate):
+    gate = gate or {}
+    current = gate.get("status") or "unknown"
+    if current != "unknown":
+        return current
+    child_statuses = [
+        ((gate.get(run_id) or {}).get("status") or "unknown")
+        for run_id in ("mew", "fresh_cli")
+    ]
+    if any(status == "unknown" for status in child_statuses):
+        return current
+    if any(status == "blocked" for status in child_statuses):
+        return "blocked"
+    if all(status == "proved" for status in child_statuses):
+        return "proved"
+    if any(status == "not_proved" for status in child_statuses):
+        return "not_proved"
+    return current
+
+
+def _m2_refresh_interruption_gate_status(protocol):
+    gate = (protocol or {}).get("interruption_resume_gate") or {}
+    status = _m2_interruption_gate_status_from_children(gate)
+    if status in set(gate.get("allowed_statuses") or []) or status == "unknown":
+        gate["status"] = status
+    return protocol
+
+
 def _m2_apply_comparison_report(protocol, report, source_path=""):
     if source_path:
         protocol["comparison_report"] = {
@@ -6852,7 +6880,8 @@ def build_m2_comparative_protocol(
         comparison_report,
         source_path=comparison_report_source,
     )
-    return _m2_apply_mew_run_evidence(protocol, mew_run_evidence)
+    protocol = _m2_apply_mew_run_evidence(protocol, mew_run_evidence)
+    return _m2_refresh_interruption_gate_status(protocol)
 
 
 def format_m2_comparative_protocol(protocol):
