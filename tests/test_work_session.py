@@ -10838,6 +10838,85 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_live_accept_edits_paired_write_batch_shows_post_approval_resume(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing.py")
+                test_path = Path("tests/test_pairing.py")
+                source.write_text("VALUE = 'old'\n", encoding="utf-8")
+                test_path.write_text("assert 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "apply paired batch",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": str(test_path),
+                                "old": "'old'",
+                                "new": "'new'",
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": str(source),
+                                "old": "old",
+                                "new": "new",
+                            },
+                        ],
+                    },
+                }
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "assert 'new' in Path('src/mew/pairing.py').read_text(); "
+                    "assert 'new' in Path('tests/test_pairing.py').read_text()\""
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--live",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        verify_command,
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--compact-live",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                output = stdout.getvalue()
+                self.assertIn("inline_approval=auto_applied", output)
+                self.assertNotIn("pending_approval: yes", output)
+                self.assertIn("new", source.read_text(encoding="utf-8"))
+                self.assertIn("'new'", test_path.read_text(encoding="utf-8"))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_stops_multi_step_loop_for_pending_write_approval(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -11671,6 +11750,7 @@ class WorkSessionTests(unittest.TestCase):
                 output = stdout.getvalue()
                 self.assertIn("inline_approval=auto_applied", output)
                 self.assertIn("approval_status=completed", output)
+                self.assertNotIn("pending_approval: yes", output)
                 self.assertIn("stop=max_steps", output)
                 self.assertEqual(call_model.call_count, 1)
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")

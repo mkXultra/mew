@@ -3420,6 +3420,36 @@ def print_work_live_step_output(args, index, step, resume, session, task, seen_c
     return maybe_print_work_live_cells(args, session, task, index, seen_count)
 
 
+def _refresh_step_tool_call_after_approval(step, approved_tool_call):
+    approved_tool_call = approved_tool_call or {}
+    approved_id = approved_tool_call.get("id")
+    if approved_id is None:
+        return
+    if (step.get("tool_call") or {}).get("id") == approved_id:
+        step["tool_call"] = approved_tool_call
+    refreshed_calls = []
+    changed = False
+    for call in step.get("tool_calls") or []:
+        if (call or {}).get("id") == approved_id:
+            refreshed_calls.append(approved_tool_call)
+            changed = True
+        else:
+            refreshed_calls.append(call)
+    if changed:
+        step["tool_calls"] = refreshed_calls
+        pending_ids = [
+            call.get("id")
+            for call in refreshed_calls
+            if call
+            and call.get("tool") in WRITE_WORK_TOOLS
+            and (call.get("result") or {}).get("dry_run")
+            and (call.get("result") or {}).get("changed")
+            and not call.get("approval_status")
+        ]
+        step["pending_approval_ids"] = pending_ids
+        step["pending_approval"] = bool(pending_ids)
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -3898,31 +3928,42 @@ def cmd_work_ai(args):
                     progress(f"step #{index}: interrupted by user")
                 break
             report["steps"].append(batch_step)
-            if getattr(args, "live", False):
-                with state_lock():
-                    state = load_state()
-                    session = find_work_session(state, session_id)
-                    task = work_session_task(state, session)
-                resume = build_work_session_resume(session, task=task, state=state)
-                live_cells_seen = print_work_live_step_output(
-                    args,
-                    index,
-                    batch_step,
-                    resume,
-                    session,
-                    task,
-                    live_cells_seen,
-                )
-                if not getattr(effective_args, "compact_live", False):
-                    print("")
-                    print(f"Work live step #{index} resume")
-                    print(format_work_session_resume(resume))
             if batch_step.get("error"):
                 report["stop_reason"] = "tool_failed"
+                if getattr(args, "live", False):
+                    with state_lock():
+                        state = load_state()
+                        session = find_work_session(state, session_id)
+                        task = work_session_task(state, session)
+                    resume = build_work_session_resume(session, task=task, state=state)
+                    live_cells_seen = print_work_live_step_output(
+                        args,
+                        index,
+                        batch_step,
+                        resume,
+                        session,
+                        task,
+                        live_cells_seen,
+                    )
                 break
             if batch_step.get("stop_request"):
                 report["stop_reason"] = "stop_requested"
                 report["stop_request"] = batch_step.get("stop_request")
+                if getattr(args, "live", False):
+                    with state_lock():
+                        state = load_state()
+                        session = find_work_session(state, session_id)
+                        task = work_session_task(state, session)
+                    resume = build_work_session_resume(session, task=task, state=state)
+                    live_cells_seen = print_work_live_step_output(
+                        args,
+                        index,
+                        batch_step,
+                        resume,
+                        session,
+                        task,
+                        live_cells_seen,
+                    )
                 if batch_step.get("stop_request", {}).get("action") == "interrupt_submit" and index < max_steps:
                     report.setdefault("interrupt_submits", []).append(batch_step.get("stop_request"))
                     report["stop_reason"] = "max_steps"
@@ -3948,10 +3989,33 @@ def cmd_work_ai(args):
                     batch_step["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
                     batch_step["inline_approval_count"] = (approval_data or {}).get("count", 0)
                     batch_step["inline_approvals"] = (approval_data or {}).get("approved") or []
-                    if approval_code != 0:
-                        report["stop_reason"] = "tool_failed"
-                        break
+                    for approval in batch_step["inline_approvals"]:
+                        _refresh_step_tool_call_after_approval(batch_step, (approval or {}).get("approved_tool_call"))
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    batch_step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+                if not getattr(effective_args, "compact_live", False):
+                    print("")
+                    print(f"Work live step #{index} resume")
+                    print(format_work_session_resume(resume))
+            if batch_step.get("pending_approval"):
+                if batch_step.get("inline_approval") == "auto_applied":
                     continue
+                if batch_step.get("inline_approval") == "auto_failed":
+                    report["stop_reason"] = "tool_failed"
+                    break
                 report["stop_reason"] = "pending_approval"
                 if progress:
                     progress(f"step #{index}: pending batch write approval")
@@ -4323,6 +4387,27 @@ def cmd_work_ai(args):
             and result.get("changed")
             and not tool_call.get("approval_status")
         )
+        if pending_approval and work_auto_approve_edits_enabled(effective_args):
+            approve_args = SimpleNamespace(
+                task_id=task_id,
+                approve_tool=tool_call.get("id"),
+                allow_write=effective_args.allow_write or [],
+                allow_verify=effective_args.allow_verify,
+                verify_command=effective_args.verify_command or "",
+                verify_cwd=args.verify_cwd,
+                verify_timeout=effective_args.verify_timeout,
+                progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                json=False,
+                defer_verify=False,
+                allow_unpaired_source_edit=False,
+            )
+            approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
+            report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+            if approval_data:
+                _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
+                applied_tool = approval_data.get("tool_call") or {}
+                report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
+                report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
         if getattr(args, "live", False):
             with state_lock():
                 state = load_state()
@@ -4344,30 +4429,11 @@ def cmd_work_ai(args):
                 print(f"Work live step #{index} resume")
                 print(format_work_session_resume(resume))
         if pending_approval:
-            if work_auto_approve_edits_enabled(effective_args):
-                approve_args = SimpleNamespace(
-                    task_id=task_id,
-                    approve_tool=tool_call.get("id"),
-                    allow_write=effective_args.allow_write or [],
-                    allow_verify=effective_args.allow_verify,
-                    verify_command=effective_args.verify_command or "",
-                    verify_cwd=args.verify_cwd,
-                    verify_timeout=effective_args.verify_timeout,
-                    progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
-                    json=False,
-                    defer_verify=False,
-                    allow_unpaired_source_edit=False,
-                )
-                approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
-                report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
-                if approval_data:
-                    applied_tool = approval_data.get("tool_call") or {}
-                    report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
-                    report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
-                if approval_code != 0:
-                    report["stop_reason"] = "tool_failed"
-                    break
+            if report["steps"][-1].get("inline_approval") == "auto_applied":
                 continue
+            if report["steps"][-1].get("inline_approval") == "auto_failed":
+                report["stop_reason"] = "tool_failed"
+                break
             if live_approval_prompt_enabled(effective_args):
                 with state_lock():
                     state = load_state()
