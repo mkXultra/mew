@@ -504,6 +504,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("work_ai_accept_edits_auto_approves_paired_write_batch", text)
             self.assertIn("work_approve_tool_can_defer_verification", text)
             self.assertIn("work_unpaired_source_approval_requires_override", text)
+            self.assertIn("work_zero_test_pytest_invalid_verifier_confidence", text)
             command = report["scenarios"][0]["commands"][0]
             self.assertIn("stdout_tail", command)
             self.assertIn("stdout_chars", command)

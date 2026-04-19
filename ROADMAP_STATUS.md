@@ -157,6 +157,15 @@ Milestone 2 Done-when checklist:
   suite. The full `tests/test_work_session.py` suite passed, the work-session
   dogfood passed at `/tmp/mew-zero-test-pytest-selector-dogfood`, and
   `/tmp/mew-m2-zero-test-selector-evidence/.mew/dogfood/m2-comparative-protocol.json`
+  records the completed task-chain verifier as passed. Task `#274` then moved
+  that regression into the work-session dogfood scenario with a synthetic
+  resume built inside the dogfood workspace, so
+  `work_zero_test_pytest_invalid_verifier_confidence` now proves the invalid
+  low-confidence selector signal outside unit tests. The paired
+  `tests/test_dogfood.py` and `tests/test_work_session.py` suite passed, the
+  work-session dogfood passed at
+  `/tmp/mew-zero-test-selector-dogfood-coverage`, and
+  `/tmp/mew-m2-zero-test-dogfood-coverage-evidence/.mew/dogfood/m2-comparative-protocol.json`
   records the completed task-chain verifier as passed.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed

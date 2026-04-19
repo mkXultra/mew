@@ -5189,6 +5189,48 @@ raise SystemExit(0 if passed else 1)
     active_memory = (resume_data.get("resume") or {}).get("active_memory") or {}
     same_surface_audit = (resume_data.get("resume") or {}).get("same_surface_audit") or {}
     source_verification_confidence = (resume_data.get("resume") or {}).get("verification_confidence") or {}
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(workspace)
+        zero_test_verification_confidence = build_work_session_resume(
+            {
+                "id": 99,
+                "task_id": 1,
+                "status": "active",
+                "title": "Zero-test verifier confidence",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/pairing.py"},
+                        "result": {
+                            "path": "src/mew/pairing.py",
+                            "dry_run": False,
+                            "changed": True,
+                            "written": True,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {
+                            "command": "uv run pytest -q tests/test_pairing.py::MissingTests::test_missing"
+                        },
+                        "result": {
+                            "command": "uv run pytest -q tests/test_pairing.py::MissingTests::test_missing",
+                            "exit_code": 5,
+                            "stderr": "collected 0 items\n\nno tests ran in 0.02s\n",
+                            "narrow_verify_command": True,
+                        },
+                    },
+                ],
+                "model_turns": [],
+            }
+        ).get("verification_confidence") or {}
+    finally:
+        os.chdir(old_cwd)
     running_output_preferences = (running_output_snapshot_data.get("resume") or {}).get("user_preferences") or {}
     resume_commands = (resume_data.get("resume") or {}).get("commands") or []
     done_resume_next_action = ((done_resume_json_data.get("resume") or {}).get("next_action") or "")
@@ -6029,6 +6071,16 @@ raise SystemExit(0 if passed else 1)
             },
         },
         expected="recover-session can rerun an interrupted run_tests verifier with explicit read and verify gates",
+    )
+    _scenario_check(
+        checks,
+        "work_zero_test_pytest_invalid_verifier_confidence",
+        zero_test_verification_confidence.get("status") == "invalid"
+        and zero_test_verification_confidence.get("confidence") == "low"
+        and zero_test_verification_confidence.get("narrow_command") is True
+        and "broaden the selector" in str(zero_test_verification_confidence.get("reason") or ""),
+        observed={"verification_confidence": zero_test_verification_confidence},
+        expected="zero-test pytest verifier output is surfaced as invalid low-confidence verification needing a broader selector",
     )
     _scenario_check(
         checks,
