@@ -5200,6 +5200,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Active memory", text)
                 self.assertIn("Verification preference", text)
                 self.assertIn("Native hands recall", text)
+                self.assertIn("created_at=", text)
             finally:
                 os.chdir(old_cwd)
 

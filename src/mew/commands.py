@@ -174,6 +174,7 @@ from .work_session import (
     active_work_session,
     active_work_sessions,
     add_work_session_note,
+    active_memory_item_detail_parts,
     append_work_tool_running_output,
     attach_work_resume_world_state,
     build_work_active_memory,
@@ -9629,14 +9630,7 @@ def format_active_memory(active_memory, task=None, session=None):
     for item in items:
         label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
         name = item.get("name") or item.get("key") or "memory"
-        reason = item.get("reason") or "recalled"
-        matched = ", ".join(str(term) for term in item.get("matched_terms") or [])
-        score = item.get("score")
-        details = [reason]
-        if score is not None:
-            details.append(f"score={score}")
-        if matched:
-            details.append(f"matched={matched}")
+        details = active_memory_item_detail_parts(item, include_score=True, include_matches=True)
         lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({'; '.join(details)})")
     if active_memory.get("truncated"):
         lines.append(f"... {active_memory.get('total')} total active memories; older items omitted")

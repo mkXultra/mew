@@ -319,6 +319,7 @@ class MemoryTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("Active memory for task #1", text)
                 self.assertIn("Active recall debug route", text)
+                self.assertIn("created_at=", text)
                 self.assertIn("score=", text)
                 self.assertIn("matched=", text)
 

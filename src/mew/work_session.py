@@ -400,6 +400,19 @@ def active_work_session(state):
     return None
 
 
+def active_memory_item_detail_parts(item, include_score=False, include_matches=False):
+    details = [item.get("reason") or "recalled"]
+    if item.get("created_at"):
+        details.append(f"created_at={item.get('created_at')}")
+    if include_score and item.get("score") is not None:
+        details.append(f"score={item.get('score')}")
+    if include_matches:
+        matched = ", ".join(str(term) for term in item.get("matched_terms") or [])
+        if matched:
+            details.append(f"matched={matched}")
+    return details
+
+
 def active_work_sessions(state):
     sessions = []
     for session in state.get("work_sessions", []):
@@ -3870,8 +3883,8 @@ def format_work_session_resume(resume):
         for item in active_memory_items:
             label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
             name = item.get("name") or item.get("key") or "memory"
-            reason = item.get("reason") or "recalled"
-            lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({reason})")
+            details = active_memory_item_detail_parts(item)
+            lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({'; '.join(details)})")
         if active_memory.get("truncated"):
             lines.append(f"... {active_memory.get('total')} total active memories; older items omitted")
 
