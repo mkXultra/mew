@@ -57,6 +57,10 @@ Milestone 2 Done-when checklist:
   `mew focus --kind coding` as `first_tool_start_p95` plus concrete first-tool
   samples, so reentry can choose a latency slice without opening the metrics
   report first.
+  Native self-improve sessions started inside the mew project now also seed
+  `src/mew` and `tests` as write roots plus `uv run pytest -q` verification,
+  preventing the resident from dead-ending in read-only mode when the chosen M2
+  improvement needs a code change.
 - During a focused coding task, an interrupted resident can resume inside mew
   without user re-briefing and would not prefer to restart in a fresh coding
   CLI: partial. M1-level resume and M3 continuity foundations exist, but this

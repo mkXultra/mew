@@ -494,6 +494,31 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_start_session_seeds_mew_project_write_defaults(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src" / "mew").mkdir(parents=True)
+            (root / "tests").mkdir()
+            (root / "pyproject.toml").touch()
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--start-session", "--focus", "Start native work", "--json"])
+
+                self.assertEqual(code, 0)
+                data = json.loads(stdout.getvalue())
+                defaults = data["work_session"]["default_options"]
+                self.assertEqual(defaults["allow_read"], ["."])
+                self.assertEqual(defaults["allow_write"], ["src/mew", "tests"])
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "uv run pytest -q")
+                self.assertIn("--allow-write src/mew --allow-write tests", data["controls"]["follow"])
+                self.assertIn("--allow-verify --verify-command 'uv run pytest -q'", data["controls"]["follow"])
+                self.assertIn("--allow-write src/mew --allow-write tests", data["work_session"]["notes"][0]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_refreshes_reused_session_goal(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

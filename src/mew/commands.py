@@ -9214,6 +9214,25 @@ def native_self_improve_read_root(task):
     return resolved
 
 
+def native_self_improve_write_roots(task):
+    root = Path(resolved_task_cwd_text(task))
+    current = Path.cwd().resolve(strict=False)
+    roots = []
+    for relative in ("src/mew", "tests"):
+        candidate = root / relative
+        if not candidate.exists():
+            continue
+        roots.append(relative if root == current else str(candidate.resolve(strict=False)))
+    return roots
+
+
+def native_self_improve_verify_command(task):
+    root = Path(resolved_task_cwd_text(task))
+    if (root / "pyproject.toml").is_file() and (root / "tests").is_dir():
+        return "uv run pytest -q"
+    return ""
+
+
 def seed_native_self_improve_session_defaults(session, task):
     if not session:
         return
@@ -9224,6 +9243,17 @@ def seed_native_self_improve_session_defaults(session, task):
         if root and root not in allow_read:
             allow_read.append(root)
     defaults["allow_read"] = allow_read
+    write_roots = native_self_improve_write_roots(task)
+    if write_roots:
+        allow_write = []
+        for root in list(defaults.get("allow_write") or []) + write_roots:
+            if root and root not in allow_write:
+                allow_write.append(root)
+        defaults["allow_write"] = allow_write
+    verify_command = native_self_improve_verify_command(task)
+    if verify_command and not defaults.get("verify_command"):
+        defaults["allow_verify"] = True
+        defaults["verify_command"] = verify_command
     defaults["compact_live"] = True
     session["updated_at"] = now_iso()
 
