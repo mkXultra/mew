@@ -1263,6 +1263,8 @@ def build_parser():
     memory_parser.add_argument("--recent", type=int, default=5, help="number of recent shallow memory events")
     memory_parser.add_argument("--deep", action="store_true", help="include deep memory sections")
     memory_parser.add_argument("--search", help="search shallow and deep memory text")
+    memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")
+    memory_parser.add_argument("--task-id", help="task id used to select active typed memory")
     memory_parser.add_argument("--limit", type=int, default=20, help="maximum search matches")
     memory_parser.add_argument("--json", action="store_true", help="print structured search results")
     memory_parser.add_argument("--add", help="add a deep memory entry")

@@ -267,6 +267,65 @@ class MemoryTests(unittest.TestCase):
 
         self.assertIn("requires --type", stderr.getvalue())
 
+    def test_cli_memory_active_surfaces_injected_typed_memory(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "For Active Recall Debug, inspect README.md before finishing.",
+                                "--type",
+                                "project",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Active recall debug route",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "add",
+                                "Active Recall Debug",
+                                "--kind",
+                                "coding",
+                                "--description",
+                                "Check active typed memory injection.",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--active", "--task-id", "1", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                active_memory = data["active_memory"]
+                self.assertEqual(data["task"]["id"], 1)
+                self.assertTrue(
+                    any(item["name"] == "Active recall debug route" for item in active_memory["items"]),
+                    active_memory,
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--active", "--task-id", "1"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("Active memory for task #1", text)
+                self.assertIn("Active recall debug route", text)
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["memory", "--active", "--search", "debug"]), 1)
+                self.assertIn("cannot be combined", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

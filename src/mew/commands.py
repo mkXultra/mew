@@ -176,6 +176,7 @@ from .work_session import (
     add_work_session_note,
     append_work_tool_running_output,
     attach_work_resume_world_state,
+    build_work_active_memory,
     build_work_session_resume,
     close_work_session,
     compact_work_tool_summary,
@@ -9495,7 +9496,84 @@ def cmd_archive(args):
         print("Run `mew archive --apply` to write the archive and compact active state.")
     return 0
 
+
+def active_memory_target(state, task_id=None):
+    task = None
+    session = None
+    if task_id is not None:
+        task = find_task(state, task_id)
+        if not task:
+            raise ValueError(f"task not found: {task_id}")
+        for candidate in reversed(state.get("work_sessions") or []):
+            if str(candidate.get("task_id")) == str(task_id) and candidate.get("status") == "active":
+                session = candidate
+                break
+        return task, session
+    session = active_work_session(state)
+    task = work_session_task(state, session) if session else None
+    if task:
+        return task, session
+    open_items = open_tasks(state)
+    if open_items:
+        return open_items[0], None
+    return None, None
+
+
+def format_active_memory(active_memory, task=None, session=None):
+    lines = []
+    if task:
+        lines.append(f"Active memory for task #{task.get('id')}: {task.get('title') or ''}".rstrip())
+    elif session:
+        lines.append(f"Active memory for work session #{session.get('id')}")
+    else:
+        lines.append("Active memory")
+    terms = active_memory.get("terms") or []
+    if terms:
+        lines.append(f"terms: {', '.join(str(term) for term in terms)}")
+    items = active_memory.get("items") or []
+    if not items:
+        lines.append("No active typed memory.")
+        return "\n".join(lines)
+    for item in items:
+        label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
+        name = item.get("name") or item.get("key") or "memory"
+        reason = item.get("reason") or "recalled"
+        matched = ", ".join(str(term) for term in item.get("matched_terms") or [])
+        suffix = f"; matched={matched}" if matched else ""
+        lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({reason}{suffix})")
+    if active_memory.get("truncated"):
+        lines.append(f"... {active_memory.get('total')} total active memories; older items omitted")
+    return "\n".join(lines)
+
+
 def cmd_memory(args):
+    if args.active:
+        if args.add or args.search or args.compact:
+            print("mew: --active cannot be combined with --add, --search, or --compact", file=sys.stderr)
+            return 1
+        state = load_state()
+        try:
+            task, session = active_memory_target(state, task_id=args.task_id)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        active_memory = build_work_active_memory(session=session, task=task, limit=args.limit)
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "active_memory": active_memory,
+                        "task": task or {},
+                        "work_session": session or {},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        print(format_active_memory(active_memory, task=task, session=session))
+        return 0
+
     if args.add:
         if not args.memory_type and (args.scope or args.name or args.description):
             print("mew: typed memory metadata requires --type when adding memory", file=sys.stderr)

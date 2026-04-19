@@ -628,6 +628,9 @@ Evidence:
   inspect `README.md` first for the "Active Memory API Proof" task; the model
   selected `read_file README.md` and its decision summary explicitly cited the
   active project memory as the route.
+- `mew memory --active --task-id ...` now exposes the exact typed-memory bundle
+  that would be injected for a task/session, giving humans and observer agents
+  a debug surface for active recall without opening raw state files.
 - Recent read-file results are clipped for model context with a resume offset, so long-running sessions keep enough local detail to continue without repeatedly embedding large source files.
 - Work model context now enforces a budget by shrinking recent tool/turn windows and adding a `context_compaction` note when the work-session JSON grows too large.
 - Work model context now clips task notes by recent lines and tail length, so recent recommendations and corrections survive when old self-improvement notes have accumulated.
@@ -707,9 +710,9 @@ Missing proof:
 
 Next action:
 
-- Tighten active recall quality from dogfood: improve ranking/stop-words,
-  decide whether `mew memory recall` is needed as a human/debug surface, and
-  then move back to the broader cockpit/recovery roadmap.
+- Continue tuning active recall quality from dogfood, then move back to the
+  broader cockpit/recovery roadmap unless daily use shows the memory surface is
+  still too opaque.
 - After typed memory exists and the state/resume schema is less volatile,
   revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
   basis for longer resident cadence testing, but do not let that defer the

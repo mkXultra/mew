@@ -426,6 +426,19 @@ def run_memory_search_scenario(workspace, env=None):
             }
         ],
     }
+    state["tasks"].append(
+        {
+            "id": 1,
+            "title": "Dogfood Active Recall",
+            "description": "Check active typed memory injection.",
+            "status": "todo",
+            "priority": "normal",
+            "kind": "coding",
+            "notes": "",
+            "created_at": "now",
+            "updated_at": "now",
+        }
+    )
     write_json_file(workspace / STATE_FILE, state)
     FileMemoryBackend(workspace).write(
         "User prefers compact typed memory recall in dogfood output.",
@@ -434,6 +447,14 @@ def run_memory_search_scenario(workspace, env=None):
         name="Dogfood recall preference",
         description="Typed memory should stay separable from legacy state memory.",
         created_at="2026-04-19T00:00:00Z",
+    )
+    FileMemoryBackend(workspace).write(
+        "Dogfood Active Recall should surface this project memory in active memory output.",
+        scope="private",
+        memory_type="project",
+        name="Dogfood active recall project note",
+        description="Active memory debug output should include relevant project memory.",
+        created_at="2026-04-19T00:00:01Z",
     )
 
     def run(args, timeout=30):
@@ -445,12 +466,15 @@ def run_memory_search_scenario(workspace, env=None):
     json_result = run(["memory", "--search", "runtime", "--json"])
     snapshot_result = run(["memory", "--search", "dogfood anchor", "--json"])
     typed_result = run(["memory", "--search", "compact typed", "--type", "user", "--json"])
+    active_result = run(["memory", "--active", "--task-id", "1", "--json"])
     json_data = _json_stdout(json_result)
     matches = json_data.get("matches") or []
     snapshot_data = _json_stdout(snapshot_result)
     snapshot_matches = snapshot_data.get("matches") or []
     typed_data = _json_stdout(typed_result)
     typed_matches = typed_data.get("matches") or []
+    active_data = _json_stdout(active_result)
+    active_matches = (active_data.get("active_memory") or {}).get("items") or []
 
     _scenario_check(
         checks,
@@ -497,6 +521,18 @@ def run_memory_search_scenario(workspace, env=None):
         ),
         observed=typed_matches,
         expected="typed private user memory match from file-backed store",
+    )
+    _scenario_check(
+        checks,
+        "memory_active_json_surfaces_injected_typed_memory",
+        active_result.get("exit_code") == 0
+        and any(match.get("memory_type") == "user" for match in active_matches)
+        and any(match.get("name") == "Dogfood active recall project note" for match in active_matches),
+        observed=[
+            {"name": match.get("name"), "memory_type": match.get("memory_type"), "reason": match.get("reason")}
+            for match in active_matches
+        ],
+        expected="active typed memory includes always-on user memory and task-matched project memory",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
 
