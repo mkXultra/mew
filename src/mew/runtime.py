@@ -333,16 +333,41 @@ def previous_native_work_step_failure_unresolved(state, session, task=None):
     if last_step.get("task_id") is not None and str(last_step.get("task_id")) != str(task_id):
         return False
     failed_at = parse_time(last_step.get("finished_at"))
+    if failed_at and native_work_session_failed_runtime_recovery_after_failure(session, failed_at):
+        return True
     if failed_at and native_work_session_activity_after_failure(session, failed_at):
+        if work_session_has_unresolved_interruption(session) and not native_work_session_activity_after_failure(
+            session,
+            failed_at,
+            ignore_runtime_recovery=True,
+        ):
+            return True
         return False
     return True
 
 
-def native_work_session_activity_after_failure(session, failed_at):
+def work_session_has_unresolved_interruption(session):
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("status") == "interrupted" and not call.get("recovery_status"):
+            return True
+    for turn in (session or {}).get("model_turns") or []:
+        if turn.get("status") == "interrupted" and not turn.get("recovery_status"):
+            return True
+    return False
+
+
+def native_work_session_activity_after_failure(session, failed_at, *, ignore_runtime_recovery=False):
     for call in session.get("tool_calls") or []:
         for key in ("started_at", "finished_at", "updated_at"):
             timestamp = parse_time(call.get(key))
             if timestamp and timestamp > failed_at:
+                parameters = call.get("parameters") or {}
+                if (
+                    ignore_runtime_recovery
+                    and parameters.get("recovery_owner") == "runtime"
+                    and call.get("status") == "completed"
+                ):
+                    continue
                 return True
     for turn in session.get("model_turns") or []:
         for key in ("started_at", "finished_at", "updated_at"):
@@ -355,6 +380,18 @@ def native_work_session_activity_after_failure(session, failed_at):
         timestamp = parse_time(note.get("created_at") or note.get("updated_at"))
         if timestamp and timestamp > failed_at:
             return True
+    return False
+
+
+def native_work_session_failed_runtime_recovery_after_failure(session, failed_at):
+    for call in session.get("tool_calls") or []:
+        parameters = call.get("parameters") or {}
+        if parameters.get("recovery_owner") != "runtime" or call.get("status") == "completed":
+            continue
+        for key in ("started_at", "finished_at", "updated_at"):
+            timestamp = parse_time(call.get(key))
+            if timestamp and timestamp > failed_at:
+                return True
     return False
 
 
@@ -457,7 +494,31 @@ def runtime_recovery_commands_match(expected, requested):
         return False
 
 
-def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, current_time=None):
+def recovery_plan_item_index(recovery_plan, item):
+    for index, candidate in enumerate((recovery_plan or {}).get("items") or []):
+        if candidate is item:
+            return index
+    return None
+
+
+def select_runtime_work_recovery_plan_item(recovery_plan):
+    selected = select_work_recovery_plan_item(recovery_plan)
+    if not selected or selected.get("action") != "retry_tool":
+        return selected
+    selected_index = recovery_plan_item_index(recovery_plan, selected)
+    if selected_index is None:
+        return selected
+    newer_barriers = [
+        item
+        for index, item in enumerate((recovery_plan or {}).get("items") or [])
+        if index > selected_index and item.get("action") != "retry_tool"
+    ]
+    if newer_barriers:
+        return newer_barriers[-1]
+    return selected
+
+
+def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, current_time=None, safe_tool_only=False):
     runtime_status = state.setdefault("runtime_status", {})
     last_step = runtime_status.get("last_native_work_step") or {}
     if last_step.get("outcome") != "failed":
@@ -468,13 +529,18 @@ def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, cur
     task = work_session_task(state, session)
     if not previous_native_work_step_failure_unresolved(state, session, task):
         return None
+    failed_at = parse_time(last_step.get("finished_at"))
+    if failed_at and native_work_session_failed_runtime_recovery_after_failure(session, failed_at):
+        return None
     if work_session_has_pending_write_approval(session):
         return None
     recovery_plan = (build_work_session_resume(session, task=task, state=state) or {}).get("recovery_plan") or {}
-    selected_recovery = select_work_recovery_plan_item(recovery_plan)
+    selected_recovery = select_runtime_work_recovery_plan_item(recovery_plan)
     source_call = find_work_tool_call(session, selected_recovery.get("tool_call_id"))
     selected_action = selected_recovery.get("action")
     selected_tool = (source_call or {}).get("tool") or selected_recovery.get("tool") or ""
+    if safe_tool_only and not (selected_action == "retry_tool" and selected_tool in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS)):
+        return None
     recovery = {
         "at": current_time or now_iso(),
         "action": "auto_retry_tool_blocked",
@@ -579,6 +645,7 @@ def prepare_runtime_native_work_tool_recovery(state, args, *, event_id=None, cur
         recovery["reason"] = "runtime recovery only auto-runs the selected safe recovery-plan item"
         runtime_status["last_native_work_recovery"] = recovery
         return None
+    parameters["recovery_owner"] = "runtime"
     tool_call = start_work_tool_call(state, session, selected_tool, parameters)
     recovery.update(
         {
@@ -688,11 +755,59 @@ def run_runtime_native_work_recovery_step(step, args):
     }
 
 
+def run_runtime_native_work_recovery_steps(first_step, args, *, max_recoveries=5):
+    steps = []
+    results = []
+    step = first_step
+    limit = max(1, int(max_recoveries or 1))
+    for _ in range(limit):
+        steps.append(step)
+        result = run_runtime_native_work_recovery_step(step, args)
+        results.append(result)
+        if result.get("error") or step.get("recovery_kind") != "tool":
+            break
+        with state_lock():
+            state = load_state()
+            next_step = prepare_runtime_native_work_tool_recovery(
+                state,
+                args,
+                event_id=step.get("event_id"),
+                current_time=now_iso(),
+                safe_tool_only=True,
+            )
+            if next_step:
+                save_state(state)
+        if not next_step:
+            break
+        step = next_step
+
+    if len(steps) > 1:
+        completed = [item for item, result in zip(steps, results) if not result.get("error")]
+        with state_lock():
+            state = load_state()
+            runtime_status = state.setdefault("runtime_status", {})
+            recovery = dict(runtime_status.get("last_native_work_recovery") or {})
+            recovery.update(
+                {
+                    "batch": True,
+                    "batch_action": "auto_retry_tool_batch",
+                    "batch_status": "completed" if len(completed) == len(steps) else "failed",
+                    "count": len(completed),
+                    "source_tool_call_ids": [item.get("source_tool_call_id") for item in completed],
+                    "tool_call_ids": [item.get("tool_call_id") for item in completed],
+                }
+            )
+            runtime_status["last_native_work_recovery"] = recovery
+            save_state(state)
+
+    return {"steps": steps, "results": results}
+
+
 def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
     items = (recovery_plan or {}).get("items") or []
     if not items:
         return {}
-    item = select_work_recovery_plan_item(recovery_plan)
+    item = select_runtime_work_recovery_plan_item(recovery_plan)
     action = item.get("action") or ""
     command = item.get("hint") or item.get("auto_hint") or item.get("review_hint") or ""
     label = action.replace("_", " ") if action else "review"
@@ -1643,21 +1758,25 @@ def run_runtime(args):
                     f"session=#{native_recovery_step.get('session_id')} "
                     f"task=#{native_recovery_step.get('task_id')}"
                 )
-                recovery_result = run_runtime_native_work_recovery_step(native_recovery_step, args)
-                if recovery_result.get("error"):
-                    append_log(
-                        "- "
-                        f"{now_iso()}: native work tool recovery failed "
-                        f"session={native_recovery_step.get('session_id')} "
-                        f"error={recovery_result.get('error')!r}"
-                    )
-                else:
-                    append_log(
-                        "- "
-                        f"{now_iso()}: native work tool recovery completed "
-                        f"session={native_recovery_step.get('session_id')} "
-                        f"task={native_recovery_step.get('task_id')}"
-                    )
+                recovery_batch = run_runtime_native_work_recovery_steps(native_recovery_step, args)
+                for recovery_step, recovery_result in zip(
+                    recovery_batch.get("steps") or [],
+                    recovery_batch.get("results") or [],
+                ):
+                    if recovery_result.get("error"):
+                        append_log(
+                            "- "
+                            f"{now_iso()}: native work tool recovery failed "
+                            f"session={recovery_step.get('session_id')} "
+                            f"error={recovery_result.get('error')!r}"
+                        )
+                    else:
+                        append_log(
+                            "- "
+                            f"{now_iso()}: native work tool recovery completed "
+                            f"session={recovery_step.get('session_id')} "
+                            f"task={recovery_step.get('task_id')}"
+                        )
             if native_work_step:
                 print(
                     "advancing native work "

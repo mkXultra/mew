@@ -1991,8 +1991,10 @@ def run_passive_auto_recovery_read_scenario(workspace, env=None):
         commands.append(result)
         return result
 
-    target = Path(workspace) / "read-target.txt"
-    target.write_text("safe read recovery dogfood\n", encoding="utf-8")
+    target_a = Path(workspace) / "read-target-a.txt"
+    target_b = Path(workspace) / "read-target-b.txt"
+    target_a.write_text("first safe read recovery dogfood\n", encoding="utf-8")
+    target_b.write_text("second safe read recovery dogfood\n", encoding="utf-8")
     task_result = run(
         [
             "task",
@@ -2037,7 +2039,7 @@ def run_passive_auto_recovery_read_scenario(workspace, env=None):
         ),
         None,
     )
-    seeded_tool_call_id = None
+    seeded_tool_call_ids = []
     if runtime_session:
         before = "2026-04-18T05:00:00Z"
         failed_at = "2026-04-18T05:00:10Z"
@@ -2045,26 +2047,44 @@ def run_passive_auto_recovery_read_scenario(workspace, env=None):
         runtime_session["runtime_managed"] = True
         runtime_session["runtime_started_at"] = before
         runtime_session["runtime_started_event_id"] = 999
-        seeded_tool_call_id = next_id(state, "work_tool_call")
-        runtime_session.setdefault("tool_calls", []).append(
-            {
-                "id": seeded_tool_call_id,
-                "session_id": session_id,
-                "task_id": task_id,
-                "tool": "read_file",
-                "status": "interrupted",
-                "parameters": {
-                    "path": "read-target.txt",
-                    "max_chars": 50000,
+        seeded_tool_call_ids = [next_id(state, "work_tool_call"), next_id(state, "work_tool_call")]
+        runtime_session.setdefault("tool_calls", []).extend(
+            [
+                {
+                    "id": seeded_tool_call_ids[0],
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "tool": "read_file",
+                    "status": "interrupted",
+                    "parameters": {
+                        "path": "read-target-a.txt",
+                        "max_chars": 50000,
+                    },
+                    "result": None,
+                    "summary": "interrupted dogfood read",
+                    "error": "Interrupted before the read completed.",
+                    "started_at": before,
+                    "finished_at": before,
                 },
-                "result": None,
-                "summary": "interrupted dogfood read",
-                "error": "Interrupted before the read completed.",
-                "started_at": before,
-                "finished_at": before,
-            }
+                {
+                    "id": seeded_tool_call_ids[1],
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "tool": "read_file",
+                    "status": "interrupted",
+                    "parameters": {
+                        "path": "read-target-b.txt",
+                        "max_chars": 50000,
+                    },
+                    "result": None,
+                    "summary": "interrupted dogfood read",
+                    "error": "Interrupted before the read completed.",
+                    "started_at": before,
+                    "finished_at": before,
+                },
+            ]
         )
-        runtime_session["last_tool_call_id"] = seeded_tool_call_id
+        runtime_session["last_tool_call_id"] = seeded_tool_call_ids[-1]
         runtime_session["updated_at"] = before
         runtime_status = state.setdefault("runtime_status", {})
         runtime_status["last_native_work_step"] = {
@@ -2104,22 +2124,21 @@ def run_passive_auto_recovery_read_scenario(workspace, env=None):
         ),
         {},
     )
-    source_call = next(
-        (
-            call
-            for call in recovered_session.get("tool_calls") or []
-            if str(call.get("id")) == str(seeded_tool_call_id)
-        ),
-        {},
-    )
-    recovered_call = next(
-        (
-            call
-            for call in recovered_session.get("tool_calls") or []
-            if str(call.get("id")) == str(source_call.get("recovered_by_tool_call_id"))
-        ),
-        {},
-    )
+    source_calls = [
+        call
+        for call in recovered_session.get("tool_calls") or []
+        if call.get("id") in set(seeded_tool_call_ids)
+    ]
+    recovered_call_ids = {
+        call.get("recovered_by_tool_call_id")
+        for call in source_calls
+        if call.get("recovered_by_tool_call_id")
+    }
+    recovered_calls = [
+        call
+        for call in recovered_session.get("tool_calls") or []
+        if call.get("id") in recovered_call_ids
+    ]
     auto_recovery = (recovered_state.get("runtime_status") or {}).get("last_native_work_recovery") or {}
     recovery_questions = [
         question
@@ -2164,18 +2183,25 @@ def run_passive_auto_recovery_read_scenario(workspace, env=None):
         and start_result.get("exit_code") == 0
         and auto_recover_result.get("exit_code") == 0
         and auto_recovery.get("action") == "auto_retry_tool_completed"
-        and source_call.get("recovery_status") == "superseded"
-        and recovered_call.get("tool") == "read_file"
-        and recovered_call.get("status") == "completed"
-        and "safe read recovery dogfood" in ((recovered_call.get("result") or {}).get("text") or "")
+        and auto_recovery.get("batch") is True
+        and auto_recovery.get("count") == 2
+        and len(source_calls) == 2
+        and all(call.get("recovery_status") == "superseded" for call in source_calls)
+        and len(recovered_calls) == 2
+        and all(call.get("tool") == "read_file" for call in recovered_calls)
+        and all(call.get("status") == "completed" for call in recovered_calls)
+        and "first safe read recovery dogfood"
+        in "\n".join(((call.get("result") or {}).get("text") or "") for call in recovered_calls)
+        and "second safe read recovery dogfood"
+        in "\n".join(((call.get("result") or {}).get("text") or "") for call in recovered_calls)
         and not recovery_questions,
         observed={
             "last_native_work_recovery": auto_recovery,
-            "source_call": source_call,
-            "recovered_call": recovered_call,
+            "source_calls": source_calls,
+            "recovered_calls": recovered_calls,
             "questions": recovery_questions,
         },
-        expected="passive tick auto-recovers a runtime-owned interrupted safe read when gates match",
+        expected="passive tick auto-recovers runtime-owned interrupted safe reads when gates match",
     )
     _scenario_check(
         checks,

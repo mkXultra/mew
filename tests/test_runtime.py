@@ -17,6 +17,7 @@ from mew.runtime import (
     compact_agent_reflex_report,
     guidance_with_runtime_focus,
     native_work_skip_recovery_suggestion,
+    previous_native_work_step_failure_unresolved,
     record_runtime_native_work_step_skip,
     run_runtime_native_work_recovery_step,
     run_runtime_post_run_pipeline,
@@ -1375,6 +1376,453 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(recovery["tool"], "read_file")
                 self.assertEqual(recovery["source_tool_call_id"], 1)
                 self.assertEqual(recovery["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_batches_interrupted_safe_read_tools(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("target-a.txt").write_text("first safe read recovery\n", encoding="utf-8")
+                Path("target-b.txt").write_text("second safe read recovery\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="2026-04-18T05:00:00Z")
+                    session["default_options"] = {"allow_read": ["."], "allow_write": ["."], "allow_verify": False}
+                    session["tool_calls"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "read_file",
+                                "status": "interrupted",
+                                "parameters": {"path": "target-a.txt", "max_chars": 50000},
+                                "result": None,
+                                "summary": "interrupted read",
+                                "error": "Interrupted before the read completed.",
+                                "started_at": "2026-04-18T05:00:00Z",
+                                "finished_at": "2026-04-18T05:00:00Z",
+                            },
+                            {
+                                "id": 2,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "read_file",
+                                "status": "interrupted",
+                                "parameters": {"path": "target-b.txt", "max_chars": 50000},
+                                "result": None,
+                                "summary": "interrupted read",
+                                "error": "Interrupted before the read completed.",
+                                "started_at": "2026-04-18T05:00:01Z",
+                                "finished_at": "2026-04-18T05:00:01Z",
+                            },
+                        ]
+                    )
+                    session["last_tool_call_id"] = 2
+                    state["next_ids"]["work_tool_call"] = 3
+                    state.setdefault("runtime_status", {})["last_native_work_step"] = {
+                        "finished_at": "2026-04-18T05:00:10Z",
+                        "session_id": session.get("id"),
+                        "task_id": task.get("id"),
+                        "command": "mew work 1 --live --allow-read . --max-steps 1",
+                        "exit_code": 1,
+                        "timed_out": False,
+                        "outcome": "failed",
+                    }
+                    save_state(state)
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--allow-read",
+                                ".",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                native_runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertEqual(calls[1]["recovery_status"], "superseded")
+                self.assertEqual(calls[2]["recovery_status"], "superseded")
+                recovered_calls = [
+                    call
+                    for call in session["tool_calls"]
+                    if (call.get("parameters") or {}).get("recovered_from_tool_call_id")
+                ]
+                self.assertEqual(len(recovered_calls), 2)
+                self.assertCountEqual(
+                    [(call.get("parameters") or {}).get("recovered_from_tool_call_id") for call in recovered_calls],
+                    [1, 2],
+                )
+                self.assertTrue(all(call.get("status") == "completed" for call in recovered_calls))
+                recovered_text = "\n".join(((call.get("result") or {}).get("text") or "") for call in recovered_calls)
+                self.assertIn("first safe read recovery", recovered_text)
+                self.assertIn("second safe read recovery", recovered_text)
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "auto_retry_tool_completed")
+                self.assertTrue(recovery["batch"])
+                self.assertEqual(recovery["batch_action"], "auto_retry_tool_batch")
+                self.assertEqual(recovery["count"], 2)
+                self.assertCountEqual(recovery["source_tool_call_ids"], [1, 2])
+                self.assertCountEqual(recovery["tool_call_ids"], [3, 4])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_once_passive_now_does_not_batch_safe_reads_across_verifier(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"verify ok\")'"
+                Path("target-a.txt").write_text("first safe read recovery\n", encoding="utf-8")
+                Path("target-b.txt").write_text("second safe read recovery\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="2026-04-18T05:00:00Z")
+                    session["default_options"] = {
+                        "allow_read": ["."],
+                        "allow_verify": True,
+                        "verify_command": command,
+                    }
+                    session["tool_calls"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "read_file",
+                                "status": "interrupted",
+                                "parameters": {"path": "target-a.txt", "max_chars": 50000},
+                                "result": None,
+                                "summary": "interrupted read",
+                                "error": "Interrupted before the read completed.",
+                                "started_at": "2026-04-18T05:00:00Z",
+                                "finished_at": "2026-04-18T05:00:00Z",
+                            },
+                            {
+                                "id": 2,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "run_tests",
+                                "status": "interrupted",
+                                "parameters": {"command": command, "cwd": "."},
+                                "result": {"command": command, "cwd": "."},
+                                "summary": "interrupted verifier",
+                                "error": "Interrupted before verification completed.",
+                                "started_at": "2026-04-18T05:00:01Z",
+                                "finished_at": "2026-04-18T05:00:01Z",
+                            },
+                            {
+                                "id": 3,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "read_file",
+                                "status": "interrupted",
+                                "parameters": {"path": "target-b.txt", "max_chars": 50000},
+                                "result": None,
+                                "summary": "interrupted read",
+                                "error": "Interrupted before the read completed.",
+                                "started_at": "2026-04-18T05:00:02Z",
+                                "finished_at": "2026-04-18T05:00:02Z",
+                            },
+                        ]
+                    )
+                    session["last_tool_call_id"] = 3
+                    state["next_ids"]["work_tool_call"] = 4
+                    state.setdefault("runtime_status", {})["last_native_work_step"] = {
+                        "finished_at": "2026-04-18T05:00:10Z",
+                        "session_id": session.get("id"),
+                        "task_id": task.get("id"),
+                        "command": "mew work 1 --live --allow-read . --max-steps 1",
+                        "exit_code": 1,
+                        "timed_out": False,
+                        "outcome": "failed",
+                    }
+                    save_state(state)
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--passive-now",
+                                "--autonomous",
+                                "--autonomy-level",
+                                "act",
+                                "--allow-native-advance",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                native_runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertNotIn("recovery_status", calls[1])
+                self.assertNotIn("recovery_status", calls[2])
+                self.assertEqual(calls[3]["recovery_status"], "superseded")
+                self.assertEqual(calls[3]["recovered_by_tool_call_id"], 4)
+                self.assertEqual(calls[4]["tool"], "read_file")
+                self.assertEqual(calls[4]["status"], "completed")
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "auto_retry_tool_completed")
+                self.assertNotIn("batch", recovery)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_previous_native_work_failure_treats_manual_recovery_as_activity(self):
+        state = default_state()
+        task = {
+            "id": 1,
+            "title": "Improve mew",
+            "description": "",
+            "status": "ready",
+            "kind": "coding",
+            "plans": [],
+            "runs": [],
+        }
+        state["tasks"].append(task)
+        session, _ = create_work_session(state, task)
+        state.setdefault("runtime_status", {})["last_native_work_step"] = {
+            "finished_at": "2026-04-18T05:00:10Z",
+            "session_id": session.get("id"),
+            "task_id": task.get("id"),
+            "exit_code": 1,
+            "outcome": "failed",
+        }
+        session["tool_calls"].extend(
+            [
+                {
+                    "id": 1,
+                    "session_id": session.get("id"),
+                    "task_id": task.get("id"),
+                    "tool": "read_file",
+                    "status": "interrupted",
+                    "parameters": {"path": "target.txt"},
+                    "started_at": "2026-04-18T05:00:00Z",
+                    "finished_at": "2026-04-18T05:00:00Z",
+                },
+                {
+                    "id": 2,
+                    "session_id": session.get("id"),
+                    "task_id": task.get("id"),
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "target.txt", "recovered_from_tool_call_id": 99},
+                    "started_at": "2026-04-18T05:00:20Z",
+                    "finished_at": "2026-04-18T05:00:20Z",
+                },
+            ]
+        )
+
+        self.assertFalse(previous_native_work_step_failure_unresolved(state, session, task))
+
+    def test_run_once_passive_now_failed_runtime_recovery_blocks_more_auto_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                command = f"{shlex.quote(sys.executable)} -c 'import sys; sys.exit(7)'"
+                Path("target.txt").write_text("older safe read recovery\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = {
+                        "id": 1,
+                        "title": "Improve mew",
+                        "description": "",
+                        "status": "ready",
+                        "kind": "coding",
+                        "plans": [],
+                        "runs": [],
+                    }
+                    state["tasks"].append(task)
+                    session, _ = create_work_session(state, task)
+                    mark_work_session_runtime_owned(session, event_id=99, current_time="2026-04-18T05:00:00Z")
+                    session["default_options"] = {
+                        "allow_read": ["."],
+                        "allow_verify": True,
+                        "verify_command": command,
+                    }
+                    session["tool_calls"].extend(
+                        [
+                            {
+                                "id": 1,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "read_file",
+                                "status": "interrupted",
+                                "parameters": {"path": "target.txt", "max_chars": 50000},
+                                "result": None,
+                                "summary": "interrupted read",
+                                "error": "Interrupted before the read completed.",
+                                "started_at": "2026-04-18T05:00:00Z",
+                                "finished_at": "2026-04-18T05:00:00Z",
+                            },
+                            {
+                                "id": 2,
+                                "session_id": session.get("id"),
+                                "task_id": task.get("id"),
+                                "tool": "run_tests",
+                                "status": "interrupted",
+                                "parameters": {"command": command, "cwd": "."},
+                                "result": {"command": command, "cwd": "."},
+                                "summary": "interrupted verifier",
+                                "error": "Interrupted before verification completed.",
+                                "started_at": "2026-04-18T05:00:01Z",
+                                "finished_at": "2026-04-18T05:00:01Z",
+                            },
+                        ]
+                    )
+                    session["last_tool_call_id"] = 2
+                    state["next_ids"]["work_tool_call"] = 3
+                    state.setdefault("runtime_status", {})["last_native_work_step"] = {
+                        "finished_at": "2026-04-18T05:00:10Z",
+                        "session_id": session.get("id"),
+                        "task_id": task.get("id"),
+                        "command": "mew work 1 --live --allow-read . --allow-verify --max-steps 1",
+                        "exit_code": 1,
+                        "timed_out": False,
+                        "outcome": "failed",
+                    }
+                    save_state(state)
+
+                common_args = [
+                    "run",
+                    "--once",
+                    "--passive-now",
+                    "--autonomous",
+                    "--autonomy-level",
+                    "act",
+                    "--allow-native-advance",
+                    "--allow-read",
+                    ".",
+                    "--allow-verify",
+                    "--verify-command",
+                    command,
+                    "--poll-interval",
+                    "0.01",
+                ]
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now", "decisions": []},
+                            {"summary": "passive now", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        self.assertEqual(main(common_args), 0)
+
+                native_runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertNotIn("recovery_status", calls[1])
+                self.assertEqual(calls[2]["recovery_status"], "retry_failed")
+                self.assertEqual(calls[3]["tool"], "run_tests")
+                self.assertEqual(calls[3]["status"], "failed")
+                self.assertEqual(state["runtime_status"]["last_native_work_recovery"]["action"], "auto_retry_verification_failed")
+
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "passive now again", "decisions": []},
+                            {"summary": "passive now again", "actions": []},
+                        ),
+                    ),
+                    patch("mew.runtime.run_command_record") as native_runner,
+                ):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        self.assertEqual(main(common_args), 0)
+
+                native_runner.assert_not_called()
+                with state_lock():
+                    state = load_state()
+                session = state["work_sessions"][0]
+                calls = {call["id"]: call for call in session["tool_calls"]}
+                self.assertNotIn("recovery_status", calls[1])
+                self.assertEqual(len(session["tool_calls"]), 3)
+                recovery = state["runtime_status"]["last_native_work_recovery"]
+                self.assertEqual(recovery["action"], "ask_user_seeded_question")
+                self.assertTrue(
+                    [
+                        question
+                        for question in state.get("questions") or []
+                        if str(question.get("related_task_id")) == "1"
+                    ]
+                )
             finally:
                 os.chdir(old_cwd)
 
