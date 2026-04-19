@@ -62,10 +62,15 @@ Before a user-approved long session, always save:
 
 - planned time budget and start time
 - the chosen objective for the session
+- non-goals for the session
+- task selection rules, including what evidence is required before changing direction
+- authoritative docs or decision memories that future reentry must consult
 - what should happen if context compresses
 - how to know the session should stop or report back
 
-For long sessions, prefer one concise `mew memory --add` planning note plus session notes on active work as it evolves.
+For long sessions, prefer one concise `mew memory --add` planning note named like `Long session charter: <short name>` plus session notes on active work as it evolves.
+
+Write the charter separately from progress checkpoints. Checkpoints record what just happened; the charter records what should continue to govern task selection after context compression.
 
 If the current context diagnostics themselves are useful, prefer the native checkpoint command:
 
@@ -87,6 +92,7 @@ After compression or interruption, recover saved checkpoints with:
 
 After saving, a future agent should be able to use `mew-planning-reentry` and recover:
 
+- the session charter and decision precedence
 - current work
 - durable decisions
 - deferred work and reasons

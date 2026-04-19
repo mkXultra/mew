@@ -7,7 +7,19 @@ description: Re-enter mew planning or long-session work after context compressio
 
 Use this skill when resuming mew work after context compression, a long session, an interruption, or when deciding what to do next.
 
-Goal: rebuild the current plan from mew itself, not from stale chat memory.
+Goal: rebuild the current plan from mew itself, not from stale chat memory, and avoid drifting from the long-session charter after context compression.
+
+## Decision Precedence
+
+When deciding what to do next, apply this order:
+
+1. The user's newest explicit instruction.
+2. The long-session charter or plan saved before the session started.
+3. Durable project decisions in mew memory and project docs such as `docs/ADOPT_FROM_REFERENCES.md`.
+4. Current active task/session state and the latest context checkpoint.
+5. `mew focus`, latest friction, and recent model recommendations.
+
+Do not let a fresh active task, latest checkpoint, or external model comment override the session charter unless the user explicitly changed direction.
 
 ## Reentry Checklist
 
@@ -16,6 +28,8 @@ Run the smallest useful set:
 ```bash
 date '+%Y-%m-%d %H:%M:%S %Z'
 git status --short
+./mew memory --search "long session plan session charter objective non-goals task selection decision precedence ADOPT" --type project --json
+./mew memory --search "observation before structural skeletons ADOPT references memory scope active recall cockpit recovery" --type project --json
 ./mew desk --kind coding --json
 ./mew focus --kind coding
 ./mew brief --kind coding
@@ -28,6 +42,12 @@ If these do not explain deferred structural work, add a targeted project-memory 
 
 ```bash
 ./mew memory --search "structural snapshot mailbox streaming trust reliability latency self-improve dogfood" --type project --json
+```
+
+If the next action may involve reference-derived architecture, inspect the adoption decision before selecting a task:
+
+```bash
+sed -n '1,180p' docs/ADOPT_FROM_REFERENCES.md
 ```
 
 If an active work session or task is visible, inspect it before acting:
@@ -44,12 +64,23 @@ If roadmap status is the question, use `mew-roadmap-status` after this reentry c
 
 Summarize only:
 
+- the session charter: objective, non-goals, task selection rule, stop/report trigger, and authoritative docs/decisions
 - current active work or confirmation there is none
 - durable product decisions from mew memory
 - deferred work and why it is deferred
 - pending approvals, recovery paths, or stale sessions
 - latest known validation and whether it is current
 - next safest action
+
+## Drift Check
+
+Before starting or continuing a self-improve task, compare it against the session charter and durable decisions:
+
+- If the active task matches the charter, continue normally.
+- If it was created from a recent model suggestion but does not match the charter, pause it or mark it blocked before doing implementation work.
+- If the charter says to wait for concrete signal, do not start structural skeletons just because a reference review mentioned them.
+- If `docs/ADOPT_FROM_REFERENCES.md` and a later memory decision disagree, prefer the newer explicit decision memory and mention the conflict.
+- If the next step is chosen from `mew focus`, explain why it is compatible with the charter instead of treating focus as authoritative.
 
 Validation rule: report validation visible in `brief`, task notes, or work-session resume as "last observed". Do not rerun full validation unless the user asked for validation or you changed files in this turn.
 
@@ -59,6 +90,7 @@ Before context may compress or after each meaningful chunk, leave a durable trai
 
 - record task/session notes for active work
 - save product or roadmap decisions with `./mew memory --add ... --type project --scope private`
+- save charter changes separately from progress checkpoints; progress checkpoints should not silently replace the charter
 - include exact next action, validation state, and blockers
 - do not rely on chat transcript alone for long-lived decisions
 
