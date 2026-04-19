@@ -70,7 +70,10 @@ Milestone 2 Done-when checklist:
   The deterministic work-session dogfood now includes
   `work_ai_accept_edits_auto_applies_preview`, and
   `docs/M2_ACCEPT_EDITS_DOGFOOD_2026-04-20.md` records the focused validation
-  and passing `/tmp/mew-accept-edits-work-session-dogfood` run.
+  and passing `/tmp/mew-accept-edits-work-session-dogfood` run. M2 comparative
+  artifacts now also serialize the mew-side `approval_mode` and default
+  permission posture, so future fresh-CLI comparisons can tell whether
+  `accept-edits` was actually used.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

@@ -6162,6 +6162,7 @@ def build_m2_mew_run_evidence(state, session_id):
     task = find_task(state, session.get("task_id"))
     calls = list(session.get("tool_calls") or [])
     turns = list(session.get("model_turns") or [])
+    defaults = session.get("default_options") or {}
     resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
     effort = build_work_session_effort(session) or {}
     approval_counts = _m2_approval_counts(calls)
@@ -6185,6 +6186,13 @@ def build_m2_mew_run_evidence(state, session_id):
         "updated_at": session.get("updated_at") or "",
         "model_turns": len(turns),
         "tool_calls": len(calls),
+        "approval_mode": defaults.get("approval_mode") or "default",
+        "default_permission_posture": {
+            "allow_read": bool(defaults.get("allow_read")),
+            "allow_write": bool(defaults.get("allow_write")),
+            "allow_shell": bool(defaults.get("allow_shell")),
+            "allow_verify": bool(defaults.get("allow_verify")),
+        },
         "effort": {
             "wall_elapsed_seconds": effort.get("wall_elapsed_seconds"),
             "observed_active_seconds": effort.get("observed_active_seconds"),
@@ -6626,6 +6634,8 @@ def format_m2_comparative_protocol(protocol):
                 f"- task_title: {evidence.get('task_title', '')}",
                 f"- session_status: {evidence.get('session_status', '')}",
                 f"- phase: {evidence.get('phase', '')}",
+                f"- approval_mode: {evidence.get('approval_mode', 'default')}",
+                f"- default_permission_posture: {evidence.get('default_permission_posture') or {}}",
                 f"- elapsed: wall={effort.get('wall_elapsed_seconds')}s active={effort.get('observed_active_seconds')}s",
                 (
                     f"- verification: {verification.get('status')} exit={verification.get('exit_code')} "

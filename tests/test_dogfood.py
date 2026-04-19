@@ -590,7 +590,14 @@ class DogfoodTests(unittest.TestCase):
                     "phase": "done",
                     "created_at": "2026-04-19T10:00:00Z",
                     "updated_at": "2026-04-19T10:05:00Z",
-                    "default_options": {"verify_command": "pytest -q"},
+                    "default_options": {
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_shell": False,
+                        "allow_verify": True,
+                        "approval_mode": "accept-edits",
+                        "verify_command": "pytest -q",
+                    },
                     "working_memory": {
                         "current_goal": "prefill M2 evidence",
                         "next_action": "Run the matching fresh CLI comparison.",
@@ -671,6 +678,18 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(protocol["mew_run_evidence"]["status"], "found")
             self.assertEqual(protocol["mew_run_evidence"]["work_session_id"], 7)
             self.assertEqual(protocol["mew_run_evidence"]["verification"]["status"], "passed")
+            self.assertEqual(protocol["mew_run_evidence"]["approval_mode"], "accept-edits")
+            self.assertEqual(
+                protocol["mew_run_evidence"]["default_permission_posture"],
+                {
+                    "allow_read": True,
+                    "allow_write": True,
+                    "allow_shell": False,
+                    "allow_verify": True,
+                },
+            )
+            self.assertIn("- approval_mode: accept-edits", runbook)
+            self.assertIn("- default_permission_posture:", runbook)
             self.assertEqual(protocol["mew_run_evidence"]["approval_counts"]["applied"], 1)
             self.assertEqual(protocol["mew_run_evidence"]["resume_gate"]["status"], "not_proved")
             self.assertTrue(protocol["mew_run_evidence"]["resume_gate"]["changed_or_pending_work"])
