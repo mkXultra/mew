@@ -667,9 +667,12 @@ def _format_workbench_reentry(resume, task):
             lines.extend(_format_stale_working_memory_source_lines(memory))
         for key in ("hypothesis", "next_step", "last_verified_state"):
             value = memory.get(key)
-            if value:
-                label = "stale_next_step" if key == "next_step" and stale_memory else key
-                lines.append(f"{label}: {clip_inline_text(value, 360)}")
+            if not value:
+                continue
+            if stale_memory and key != "next_step":
+                continue
+            label = "stale_next_step" if key == "next_step" and stale_memory else key
+            lines.append(f"{label}: {clip_inline_text(value, 360)}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append(f"open_questions: {clip_inline_text('; '.join(str(item) for item in questions), 360)}")
