@@ -821,6 +821,13 @@ Next action:
   approval-order papercut: `approve-all` tried the pending failing test before
   the source fix, so future paired test+source batches should keep improving
   verifier sequencing.
+- Follow-up task #200 fixed the concrete pairing bug behind that papercut:
+  `c3aa584` no longer lets failed or rolled-back test writes satisfy `src/mew`
+  source-edit paired-test checks when the failed tool lacks an explicit
+  `approval_status`. Validation included ruff on changed files, the focused
+  pairing regression test, `tests.test_work_session` (`340 tests`, pass), full
+  `uv run python -m unittest` (`1004 tests`, pass), and
+  `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
