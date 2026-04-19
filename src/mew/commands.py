@@ -1929,6 +1929,13 @@ def work_cli_control_items(session, args, task=None):
                 }
             )
         else:
+            if task_id is not None:
+                controls.append(
+                    {
+                        "label": "mark task done",
+                        "command": mew_command("task", "update", task_id, "--status", "done"),
+                    }
+                )
             controls.append({"label": "start a new session", "command": mew_command("work", task_id, "--start-session")})
         return controls
     controls = []
@@ -2024,6 +2031,7 @@ def compact_work_cli_control_items(items):
     keep_labels = {
         "start a work session",
         "review closed session",
+        "mark task done",
         "reopen task",
         "start a new session",
         "submit pending interrupt",

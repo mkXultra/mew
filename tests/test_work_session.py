@@ -13091,6 +13091,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("phase: closed", output)
                 self.assertIn("Next CLI controls", output)
                 self.assertIn("mew work 1 --session --resume", output)
+                self.assertIn("mark task done: mew task update 1 --status done", output)
                 self.assertIn("Work session finished: finished live", load_state()["tasks"][0]["notes"])
                 self.assertEqual(load_state()["tasks"][0]["status"], "todo")
             finally:
@@ -13378,6 +13379,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work resume #1 [closed] task=#1", resume_text)
                 self.assertIn("read result observed", resume_text)
                 self.assertIn("review this closed work session", resume_text)
+                self.assertIn("mark task done: mew task update 1 --status done", resume_text)
                 self.assertIn("mew work 1 --start-session", resume_text)
                 self.assertNotIn("mew work --ai", resume_text)
             finally:
@@ -15018,6 +15020,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("mew work ai: 2/10 step(s) stop=finish", output)
                 self.assertNotIn("Work live step #1 resume", output)
                 self.assertIn("Next CLI controls", output)
+                self.assertIn("mark task done: mew task update 1 --status done", output)
                 self.assertNotIn("short live burst:", output)
                 self.assertNotIn("interrupt and submit:", output)
                 self.assertNotIn("pause at boundary:", output)

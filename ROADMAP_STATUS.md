@@ -2329,6 +2329,9 @@ Next action:
 - `work --follow-status` text now prints `stop_reason` when the follow snapshot
   has one, keeping the human-readable cockpit surface aligned with the JSON
   status used for reentry and completed producer diagnosis.
+- Closed-but-not-done work sessions now include a `mark task done` command in
+  Next CLI controls, so a resident that finishes or no-changes a coding task
+  has a direct cockpit path to close the task instead of leaving it `ready`.
 - Latest validation for the 2026-04-19 recovery/control slice:
   `uv run pytest -q` passed with 1044 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,
