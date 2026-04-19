@@ -3424,6 +3424,13 @@ model_outputs = [
         },
     },
     {
+        "summary": "read before editing paired test",
+        "action": {
+            "type": "read_file",
+            "path": "src/mew/dogfood_ai_pairing.py",
+        },
+    },
+    {
         "summary": "add paired test first",
         "action": {
             "type": "write_file",
@@ -3452,7 +3459,7 @@ with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                 "--verify-command",
                 verify_command,
                 "--max-steps",
-                "2",
+                "3",
                 "--act-mode",
                 "deterministic",
                 "--json",

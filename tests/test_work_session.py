@@ -9613,6 +9613,13 @@ class WorkSessionTests(unittest.TestCase):
                         },
                     },
                     {
+                        "summary": "read before editing paired test",
+                        "action": {
+                            "type": "read_file",
+                            "path": "src/mew/pairing.py",
+                        },
+                    },
+                    {
                         "summary": "add paired test first",
                         "action": {
                             "type": "write_file",
@@ -9643,7 +9650,7 @@ class WorkSessionTests(unittest.TestCase):
                                         "--verify-command",
                                         verify_command,
                                         "--max-steps",
-                                        "2",
+                                        "3",
                                         "--act-mode",
                                         "deterministic",
                                         "--json",
@@ -9656,13 +9663,15 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(report["stop_reason"], "pending_approval")
                 self.assertFalse(Path("tests/test_pairing.py").exists())
                 session = load_state()["work_sessions"][0]
-                self.assertEqual(len(session["tool_calls"]), 1)
-                call = session["tool_calls"][0]
+                self.assertEqual(len(session["tool_calls"]), 2)
+                self.assertEqual(session["tool_calls"][0]["tool"], "read_file")
+                call = session["tool_calls"][1]
                 self.assertEqual(call["parameters"]["path"], "tests/test_pairing.py")
                 self.assertFalse(call["parameters"]["apply"])
                 self.assertTrue(call["result"]["dry_run"])
                 self.assertNotIn("verification_exit_code", call["result"])
-                self.assertEqual(session["model_turns"][1]["coerced_dry_run_reason"], "paired_test_steer")
+                self.assertEqual(session["model_turns"][2]["coerced_dry_run_reason"], "paired_test_steer")
+                self.assertNotIn("pending_steer", session)
             finally:
                 os.chdir(old_cwd)
 

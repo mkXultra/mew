@@ -2918,13 +2918,17 @@ def pending_work_session_steer(session):
     return pending
 
 
-def complete_work_session_steer(session, steer, step_index):
+def complete_work_session_steer(session, steer, step_index, action_type=None, action=None):
     expected = steer or {}
     current = pending_work_session_steer(session)
     if not current:
         return False
     for key in ("text", "source", "created_at"):
         if str(current.get(key) or "") != str(expected.get(key) or ""):
+            return False
+    if current.get("source") == "paired_test_steer":
+        path = (action or {}).get("path")
+        if action_type not in WRITE_WORK_TOOLS or not _work_path_is_tests_path(path):
             return False
     session.pop("pending_steer", None)
     add_work_session_note(
@@ -3601,7 +3605,11 @@ def cmd_work_ai(args):
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
-            steer_consumed = complete_work_session_steer(session, pending_steer, index) if pending_steer else False
+            steer_consumed = (
+                complete_work_session_steer(session, pending_steer, index, action_type=action_type, action=action)
+                if pending_steer
+                else False
+            )
             followup_consumed = (
                 complete_work_session_followup(session, pending_followup, index) if pending_followup else False
             )
