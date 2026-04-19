@@ -9194,6 +9194,9 @@ def cmd_self_improve(args):
         else:
             print(f"started self-improve run #{run['id']} status={run.get('status')} pid={run.get('external_pid')}")
             if run.get("status") != "running":
+                detail = clip_output(run.get("stderr") or run.get("result") or "", 500)
+                suffix = f": {detail}" if detail else ""
+                print(f"mew: self-improve run #{run['id']} status={run.get('status')}{suffix}")
                 return 1
     return 0
 

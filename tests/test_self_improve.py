@@ -203,6 +203,31 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_dispatch_surfaces_failed_start_detail(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                def fail_start(_state, run):
+                    run["status"] = "failed"
+                    run["stderr"] = "spawn failed"
+
+                with (
+                    patch("mew.commands.start_agent_run", side_effect=fail_start),
+                    redirect_stdout(StringIO()) as stdout,
+                ):
+                    code = main(["self-improve", "--focus", "Failing implementation run", "--dispatch"])
+
+                self.assertEqual(code, 1)
+                output = stdout.getvalue()
+                self.assertIn("started self-improve run #1 status=failed", output)
+                self.assertIn("mew: self-improve run #1 status=failed: spawn failed", output)
+                state = load_state()
+                self.assertEqual(state["agent_runs"][0]["status"], "failed")
+                self.assertEqual(state["agent_runs"][0]["stderr"], "spawn failed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_prompt_prints_generated_prompts(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
