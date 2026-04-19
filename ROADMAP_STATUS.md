@@ -16,7 +16,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 06:45 JST.
+Last assessed: 2026-04-20 06:55 JST.
 
 Active milestone: Milestone 2, Interactive Parity, narrowed to a final evidence gate.
 
@@ -2369,6 +2369,19 @@ Next action:
   `stale_follow_snapshot_surfaces_session_state_newer` proves stale snapshots
   point observers back to current resume state. This makes the #290 resident
   failure a tracked M2 blocker instead of a one-off repair.
+- A second final-gate run, task `#291` / session `#274`, exercised the intended
+  stop-and-reentry shape on a no-change/invalid-premise metrics task. Mew
+  stopped after initial inspection, `follow-status` reported `continuity: 9/9`,
+  and resume preserved the next action without rebrief. The resident then
+  attempted an over-broad done-task approval-friction retirement, verification
+  failed, rollback preserved the tree, and the resident correctly finished by
+  saying the edit should not be approved. A true-restart `codex-ultra`
+  comparator concluded no source change was warranted, verified the focused
+  metrics/brief suite, and the combined artifact at
+  `/tmp/mew-m2-metrics-friction-291-combined-v2/.mew/dogfood/m2-comparative-protocol.json`
+  records `fresh_cli_preferred`. This keeps M2 in `final_gate`: reentry is
+  usable, but the resident still over-edits ambiguous no-change tasks compared
+  with a fresh CLI.
 - Latest validation for the 2026-04-20 final-gate control coverage slice:
   focused `tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`
   passed, full `tests/test_dogfood.py` passed with 59 tests and 6 subtests,
