@@ -194,7 +194,7 @@ def edit_file(
     before = _read_text_if_exists(resolved)
     count = before.count(old)
     if count == 0:
-        raise ValueError("old text was not found")
+        raise ValueError("old text was not found; confirm the exact existing text before retrying")
     if count > 1 and not replace_all:
         raise ValueError(f"old text matched {count} times; pass --replace-all to replace all matches")
 

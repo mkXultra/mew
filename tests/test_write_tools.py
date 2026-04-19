@@ -42,7 +42,7 @@ class WriteToolsTests(unittest.TestCase):
             path = Path(tmp) / "notes.md"
             path.write_text("hello mew\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "old text was not found"):
+            with self.assertRaisesRegex(ValueError, "old text was not found; confirm the exact existing text before retrying"):
                 edit_file(str(path), "missing", "shell", [tmp])
 
     def test_edit_refuses_multiple_matches_without_replace_all(self):
