@@ -16055,6 +16055,12 @@ class WorkSessionTests(unittest.TestCase):
                             "producer": {"pid": os.getpid()},
                             "pending_approvals": [{"tool_call_id": 3}],
                             "resume": {
+                                "phase": "idle",
+                                "next_action": "Inspect latest snapshot.",
+                                "working_memory": {
+                                    "next_step": "Refresh from source.",
+                                    "stale_after_tool_call_id": 9,
+                                },
                                 "verification_coverage_warning": {
                                     "command": "uv run python -m unittest tests.test_work_session",
                                     "source_path": "src/mew/commands.py",
@@ -16080,6 +16086,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["producer_health"]["state"], "fresh")
                 self.assertEqual(data["suggested_recovery"], {})
                 self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(data["phase"], "idle")
+                self.assertEqual(data["next_action"], "Inspect latest snapshot.")
+                self.assertTrue(data["working_memory_stale"])
                 self.assertEqual(
                     data["verification_coverage_warning"]["expected_command"],
                     "uv run python -m unittest tests.test_commands",
@@ -16090,6 +16099,9 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "--follow-status"]), 0)
                 text = stdout.getvalue()
+                self.assertIn("phase: idle", text)
+                self.assertIn("working_memory: stale", text)
+                self.assertIn("next_action: Inspect latest snapshot.", text)
                 self.assertIn("verification_warning:", text)
                 self.assertIn("did not cover src/mew/commands.py", text)
                 self.assertIn("expected uv run python -m unittest tests.test_commands", text)

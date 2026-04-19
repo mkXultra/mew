@@ -5614,6 +5614,10 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         session=session,
     )
     resume = data.get("resume") or {}
+    working_memory = resume.get("working_memory") or {}
+    working_memory_stale = bool(
+        working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
+    )
     return {
         "snapshot_path": str(path),
         "status": status,
@@ -5627,6 +5631,9 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "producer_pid": producer_pid,
         "producer_alive": producer_alive,
         "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
+        "phase": resume.get("phase") or data.get("phase") or "",
+        "next_action": resume.get("next_action") or "",
+        "working_memory_stale": working_memory_stale,
         "suggested_recovery": suggested_recovery,
         "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
         "verification_confidence": resume.get("verification_confidence") or {},
@@ -5660,8 +5667,13 @@ def format_work_follow_status(data):
             f"heartbeat: {data.get('heartbeat_at') or '-'} age={age_text}",
             f"producer: pid={data.get('producer_pid') or '-'} alive={bool(data.get('producer_alive'))}",
             f"pending_approvals: {data.get('pending_approval_count', 0)}",
+            f"phase: {data.get('phase') or '-'}",
         ]
     )
+    if data.get("working_memory_stale"):
+        lines.append("working_memory: stale")
+    if data.get("next_action"):
+        lines.append(f"next_action: {data.get('next_action')}")
     recovery = data.get("suggested_recovery") or {}
     if recovery:
         lines.append(f"recovery: {recovery.get('kind') or '-'}")
