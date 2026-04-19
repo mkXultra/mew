@@ -891,6 +891,113 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertIn("- evidence_mode: task_chain", runbook)
 
+    def test_run_dogfood_m2_comparative_uses_task_level_verification_for_task_chain(self):
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            state_dir = root / STATE_DIR
+            state_dir.mkdir(parents=True)
+            state = default_state()
+            state["tasks"].append(
+                {
+                    "id": 3,
+                    "title": "M2 supervisor completion task",
+                    "description": "Complete a task after a failed mew source attempt.",
+                    "status": "done",
+                    "priority": "high",
+                    "kind": "coding",
+                    "notes": "Supervisor finished after the session failed verification.",
+                }
+            )
+            state["work_sessions"].append(
+                {
+                    "id": 7,
+                    "task_id": 3,
+                    "status": "closed",
+                    "phase": "closed",
+                    "created_at": "2026-04-19T10:00:00Z",
+                    "updated_at": "2026-04-19T10:05:00Z",
+                    "working_memory": {
+                        "current_goal": "preserve M2 merge command evidence",
+                        "next_action": "review the supervisor-completed fix",
+                    },
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "started_at": "2026-04-19T10:00:00Z",
+                            "finished_at": "2026-04-19T10:01:00Z",
+                        }
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": 11,
+                            "tool": "edit_file",
+                            "status": "failed",
+                            "approval_status": "rejected",
+                            "started_at": "2026-04-19T10:02:00Z",
+                            "finished_at": "2026-04-19T10:03:00Z",
+                            "parameters": {"path": "src/mew/dogfood.py"},
+                            "result": {
+                                "dry_run": False,
+                                "changed": True,
+                                "verification": {
+                                    "command": "uv run pytest --no-testmon -q tests/test_dogfood.py -k m2_comparative",
+                                    "exit_code": 1,
+                                },
+                                "verification_exit_code": 1,
+                            },
+                        }
+                    ],
+                }
+            )
+            state["verification_runs"].append(
+                {
+                    "id": 99,
+                    "event_id": None,
+                    "task_id": 3,
+                    "reason": "user-reported completion verification",
+                    "command": "user-reported",
+                    "argv": [],
+                    "cwd": ".",
+                    "exit_code": 0,
+                    "stdout": "Supervisor ran uv run pytest --no-testmon -q tests/test_dogfood.py; result: passed.",
+                    "stderr": "",
+                    "started_at": "2026-04-19T10:06:00Z",
+                    "finished_at": "2026-04-19T10:06:00Z",
+                    "created_at": "2026-04-19T10:06:00Z",
+                    "updated_at": "2026-04-19T10:06:00Z",
+                }
+            )
+            (root / STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
+            try:
+                os.chdir(root)
+                args = SimpleNamespace(
+                    workspace=str(root / "dog"),
+                    scenario="m2-comparative",
+                    cleanup=False,
+                    mew_session_id="task:3",
+                )
+
+                report = run_dogfood_scenario(args)
+            finally:
+                os.chdir(previous_cwd)
+
+            scenario = report["scenarios"][0]
+            protocol_path = Path(scenario["artifacts"]["json"])
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            evidence = protocol["mew_run_evidence"]
+            gate = protocol["interruption_resume_gate"]["mew"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(evidence["verification"]["status"], "passed")
+            self.assertEqual(evidence["verification"]["source"], "task_verification")
+            self.assertEqual(evidence["verification"]["verification_run_id"], 99)
+            self.assertEqual(gate["status"], "proved")
+            self.assertEqual(gate["verification_run_ids"], [99])
+            self.assertNotIn("no passing verification was recorded after a risk session", gate["evidence_gap"])
+
     def test_run_dogfood_m2_task_shape_sets_selected_from_cli(self):
         for shape in ("test_discovery", "approval_pairing", "process_stop"):
             with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:

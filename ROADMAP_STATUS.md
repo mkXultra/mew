@@ -119,7 +119,16 @@ Milestone 2 Done-when checklist:
   schema reconstruction. A mew-native dogfood task then tightened that prompt:
   when generated with `--mew-session-id`, it now preserves the same
   `--mew-session-id` in the merge command and includes the task description,
-  reducing hidden rebrief risk for the true fresh-restart comparator.
+  reducing hidden rebrief risk for the true fresh-restart comparator. The
+  first actual true-restart `codex-ultra` comparator then ran in a detached
+  worktree at `a1f6732` and produced
+  `/tmp/mew-fresh-restart-session-arg-report.json`; after M2 evidence was
+  tightened to include task-level user-reported verification, the combined
+  artifact in `/tmp/mew-m2-true-restart-combined-task-verification` records
+  `comparison_result.status=mew_preferred`, `mew.status=proved`, and
+  `fresh_cli.restart_comparator_status=proved`. The top-level interruption
+  gate remains `not_proved` because the fresh restart leg was not itself an
+  interrupted fresh CLI resume.
 - The model does not lose momentum while waiting for tool feedback: partial.
   `./mew metrics --kind coding --limit 20` at this assessment showed
   `first_tool_start_seconds p95=30.15s`, `model_resume_wait_seconds p95=25.25s`,

@@ -6140,6 +6140,50 @@ def _m2_latest_verification(calls):
     return {"status": "unknown", "exit_code": None, "command": "", "tool_call_id": None, "source": "", "finished_at": ""}
 
 
+def _m2_verification_from_task_run(run):
+    if not isinstance(run, dict):
+        return None
+    exit_code = run.get("exit_code")
+    status = "passed" if exit_code == 0 else "failed"
+    return {
+        "status": status,
+        "exit_code": exit_code,
+        "command": run.get("command") or "",
+        "tool_call_id": None,
+        "verification_run_id": run.get("id"),
+        "source": "task_verification",
+        "reason": run.get("reason") or "",
+        "finished_at": run.get("finished_at") or run.get("updated_at") or "",
+    }
+
+
+def _m2_latest_task_verification(state, task_id):
+    task_id_text = str(task_id or "")
+    if not task_id_text:
+        return None
+    for run in reversed((state or {}).get("verification_runs") or []):
+        if str(run.get("task_id") or "") == task_id_text:
+            return _m2_verification_from_task_run(run)
+    return None
+
+
+def _m2_verification_finished_at(verification):
+    return str((verification or {}).get("finished_at") or "")
+
+
+def _m2_choose_m2_verification(work_verification, task_verification):
+    work_verification = work_verification or {}
+    if not task_verification:
+        return work_verification
+    if (work_verification.get("status") or "unknown") == "unknown":
+        return task_verification
+    if task_verification.get("status") == "passed" and work_verification.get("status") != "passed":
+        return task_verification
+    if _m2_verification_finished_at(task_verification) >= _m2_verification_finished_at(work_verification):
+        return task_verification
+    return work_verification
+
+
 def _m2_call_has_failure_or_interruption(call):
     if not isinstance(call, dict):
         return False
@@ -6281,7 +6325,7 @@ def _m2_paired_write_batch_evidence(turns, calls):
     return {"status": "not_observed"}
 
 
-def _m2_task_chain_resume_gate_evidence(session_infos, resume_command):
+def _m2_task_chain_resume_gate_evidence(session_infos, resume_command, task_verification=None):
     session_infos = list(session_infos or [])
     if not session_infos:
         return {
@@ -6298,9 +6342,10 @@ def _m2_task_chain_resume_gate_evidence(session_infos, resume_command):
         for index, info in enumerate(session_infos)
         if (info.get("verification") or {}).get("status") == "passed"
     ]
+    task_verification_passed = (task_verification or {}).get("status") == "passed"
     verification_after_resume = any(
         passed_index >= risk_index for risk_index in risk_indices for passed_index in passed_indices
-    )
+    ) or (bool(risk_indices) and task_verification_passed)
     approval_total = sum((info.get("approval_counts") or {}).get("total", 0) for info in session_infos)
     gate = {
         "status": "unknown",
@@ -6318,6 +6363,11 @@ def _m2_task_chain_resume_gate_evidence(session_infos, resume_command):
         "evidence_mode": "task_chain",
         "risk_session_ids": [session_infos[index].get("session_id") for index in risk_indices],
         "verification_session_ids": [session_infos[index].get("session_id") for index in passed_indices],
+        "verification_run_ids": (
+            [task_verification.get("verification_run_id")]
+            if task_verification_passed and task_verification.get("verification_run_id") is not None
+            else []
+        ),
         "evidence_gap": [],
     }
     gap_labels = {
@@ -6374,9 +6424,11 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         key: sum((info.get("approval_counts") or {}).get(key, 0) for info in session_infos)
         for key in ("total", "pending", "applied", "rejected", "failed", "indeterminate")
     }
-    verification = _m2_latest_verification(combined_calls)
+    work_verification = _m2_latest_verification(combined_calls)
     paired_write_batch = _m2_paired_write_batch_evidence(combined_turns, combined_calls)
     task_id_value = latest_session.get("task_id") or (task or {}).get("id") or task_id_text
+    task_verification = _m2_latest_task_verification(state, task_id_value)
+    verification = _m2_choose_m2_verification(work_verification, task_verification)
     resume_command = f"mew work {task_id_value} --session --resume --allow-read ."
     return {
         "status": "found",
@@ -6407,7 +6459,11 @@ def build_m2_mew_task_chain_evidence(state, task_id):
         "paired_write_batch": paired_write_batch,
         "verification": verification,
         "resume_command": resume_command,
-        "resume_gate": _m2_task_chain_resume_gate_evidence(session_infos, resume_command),
+        "resume_gate": _m2_task_chain_resume_gate_evidence(
+            session_infos,
+            resume_command,
+            task_verification=task_verification,
+        ),
         "continuity": {
             "score": continuity.get("score") or "",
             "status": continuity.get("status") or "",
@@ -6438,10 +6494,12 @@ def build_m2_mew_run_evidence(state, session_id):
     resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
     effort = build_work_session_effort(session) or {}
     approval_counts = _m2_approval_counts(calls)
-    verification = _m2_latest_verification(calls)
+    work_verification = _m2_latest_verification(calls)
+    task_id = session.get("task_id") or (task or {}).get("id")
+    task_verification = _m2_latest_task_verification(state, task_id)
+    verification = _m2_choose_m2_verification(work_verification, task_verification)
     continuity = resume.get("continuity") or {}
     paired_write_batch = _m2_paired_write_batch_evidence(turns, calls)
-    task_id = session.get("task_id") or (task or {}).get("id")
     resume_command = (
         f"mew work {task_id} --session --resume --allow-read ."
         if task_id
