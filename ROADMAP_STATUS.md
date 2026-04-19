@@ -785,6 +785,19 @@ Next action:
 
 ## Latest Validation
 
+- 2026-04-19 continuation dogfood kept Milestone 2 as the active focus and
+  landed several small cockpit/reentry fixes from real mew use: `64a5381`
+  and `7f6bcc8` make no-active work-session read tools point at one-shot
+  `mew tool ...` alternatives, `7b0b5c8` removes redundant `--ready` from
+  empty coding-queue self-improve start suggestions, `d9723ba` scopes
+  agent-status projections in `status`/`brief`/session/chat kind-filtered
+  views, and `fec0bfe` fixes running search/glob cockpit summaries so live
+  cells show the requested query/pattern instead of `None` before results
+  land. Validation included repeated `uv run --with ruff ruff check` on
+  changed files, focused command/brief/desk/work-session tests,
+  `tests.test_work_session` (`339 tests`, pass), repeated full
+  `uv run python -m unittest` runs (latest: `1001 tests`, pass), and
+  repeated `./mew dogfood --all --cleanup --json` runs (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
