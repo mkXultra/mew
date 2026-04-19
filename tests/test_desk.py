@@ -128,9 +128,18 @@ class DeskTests(unittest.TestCase):
             "effort=low steps=2/30 failures=0",
         )
         self.assertEqual(
+            typing["details"]["active_work_sessions"][0]["continuity_summary"],
+            "continuity: 8/9 status=usable missing=working_memory_survived",
+        )
+        self.assertIn(
+            "refresh working memory",
+            typing["details"]["active_work_sessions"][0]["continuity_next"],
+        )
+        self.assertEqual(
             typing["details"]["active_work_sessions"][0]["command"],
             mew_command("work", "--session", "--resume", "--allow-read", "."),
         )
+        self.assertIn("continuity: 8/9 status=usable", format_desk_view(typing))
 
     def test_build_desk_view_model_dedupes_sessions_and_skips_done_task_session(self):
         view = build_desk_view_model(

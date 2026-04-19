@@ -1835,6 +1835,9 @@ Next action:
 - `mew mood` now treats weak or broken active work-session continuity as worry
   and signal output, so the passive emotional/status surface reflects when a
   resident would struggle to resume after compression.
+- `mew desk` active work-session details now carry the same continuity score
+  and repair hint, making the pet/status surface a viable quick reentry view
+  instead of only a task/session counter.
 
 ## Current Roadmap Focus
 
