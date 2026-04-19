@@ -810,6 +810,17 @@ Next action:
   ruff on `tests/test_commands.py`, the focused chat self-improve unittest,
   `tests.test_commands` (`170 tests`, pass), full `uv run python -m unittest`
   (`1003 tests`, pass), and `./mew dogfood --all --cleanup --json` (pass).
+- Native self-improve task #199 / work session #205 then targeted the resident
+  over-search friction seen during dogfood. `d03040e` dedupes repeated
+  pipe-split `search_text` queries while preserving first occurrence order and
+  the existing five unique-query cap, with coverage beside the existing
+  split/flatten/truncation tests. Validation included ruff on changed files,
+  focused search-split tests, `tests.test_work_session` (`340 tests`, pass),
+  full `uv run python -m unittest` (`1004 tests`, pass), and
+  `./mew dogfood --all --cleanup --json` (pass). This dogfood also exposed an
+  approval-order papercut: `approve-all` tried the pending failing test before
+  the source fix, so future paired test+source batches should keep improving
+  verifier sequencing.
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
