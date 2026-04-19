@@ -916,7 +916,7 @@ def run_runtime_focus_scenario(workspace, env=None):
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
 
-def run_resident_loop_scenario(workspace, env=None):
+def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, poll_interval=0.1):
     commands = []
     checks = []
 
@@ -940,8 +940,8 @@ def run_resident_loop_scenario(workspace, env=None):
     )
     task_data = _json_stdout(task_result)
     runtime_args = SimpleNamespace(
-        interval=2.0,
-        poll_interval=0.1,
+        interval=float(interval),
+        poll_interval=float(poll_interval),
         autonomy_level="propose",
         model_timeout=20.0,
         ai=False,
@@ -964,7 +964,7 @@ def run_resident_loop_scenario(workspace, env=None):
         startup_timeout=5.0,
         message_timeout=5.0,
         send_message=[],
-        duration=6.0,
+        duration=float(duration),
         cleanup=False,
         stop_timeout=10.0,
         wait_agent_runs=0.0,
@@ -1073,6 +1073,8 @@ def run_resident_loop_scenario(workspace, env=None):
     )
     report = _scenario_report("resident-loop", workspace, commands, checks)
     report["artifacts"] = {
+        "requested_duration_seconds": float(duration),
+        "requested_interval_seconds": float(interval),
         "processed_events": len(processed_events),
         "passive_events": len(passive_events),
         "passive_gaps_seconds": passive_gaps,
@@ -7958,7 +7960,15 @@ def run_dogfood_scenario(args):
         elif name == "runtime-focus":
             reports.append(run_runtime_focus_scenario(scenario_workspace, env=env))
         elif name == "resident-loop":
-            reports.append(run_resident_loop_scenario(scenario_workspace, env=env))
+            reports.append(
+                run_resident_loop_scenario(
+                    scenario_workspace,
+                    env=env,
+                    duration=getattr(args, "duration", 6.0),
+                    interval=getattr(args, "interval", 2.0),
+                    poll_interval=getattr(args, "poll_interval", 0.1),
+                )
+            )
         elif name == "native-work":
             reports.append(run_native_work_scenario(scenario_workspace, env=env))
         elif name == "self-improve-controls":

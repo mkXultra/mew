@@ -296,6 +296,9 @@ class DogfoodTests(unittest.TestCase):
                 workspace=str(Path(tmp) / "dog"),
                 scenario="resident-loop",
                 cleanup=False,
+                duration=7.0,
+                interval=2.0,
+                poll_interval=0.1,
             )
 
             report = run_dogfood_scenario(args)
@@ -312,6 +315,8 @@ class DogfoodTests(unittest.TestCase):
                 if check["name"] == "resident_loop_processes_multiple_events"
             )
             self.assertGreaterEqual(cadence_check["observed"]["passive_events"], 2)
+            self.assertEqual(scenario["artifacts"]["requested_duration_seconds"], 7.0)
+            self.assertEqual(scenario["artifacts"]["requested_interval_seconds"], 2.0)
             self.assertGreaterEqual(scenario["artifacts"]["passive_events"], 2)
 
     def test_run_dogfood_native_work_scenario(self):

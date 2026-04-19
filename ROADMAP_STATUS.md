@@ -1172,6 +1172,13 @@ Evidence:
   generated workspace and completed the README recovery with
   `manual_rebrief_needed=false`, `repository_only_compliance=true`, five
   reconstruction steps, verifier exit code 0, and `comparison_result.choice=parity`.
+- `mew dogfood --scenario resident-loop` now honors `--duration`,
+  `--interval`, and `--poll-interval` for scenario runs and records the
+  requested duration/interval in JSON artifacts. This turns the short
+  resident-loop proof into a knob for longer cadence evidence without editing
+  the scenario. `/tmp/mew-resident-loop-duration-probe-v2` passed with
+  `requested_duration_seconds=12.0`, `requested_interval_seconds=3.0`,
+  `passive_events=3`, and `passive_gaps_seconds=[3.0, 3.0]`.
 
 Missing proof:
 
@@ -1181,8 +1188,9 @@ Missing proof:
 - There is no semantic compaction strategy for noisy long-running work-session history beyond archive retention, explicit `remember` notes, automatic working-memory digests, older-tool digests, read-result clipping, and budgeted recent-window compaction.
 - Watcher-driven passive output now has controlled, real-repo one-shot,
   short resident-loop, native-work-start, and real API native-work-advance
-  proofs, and short resident-loop JSON now carries explicit cadence counts, but
-  there is still no long-running cadence proof across several hours or days.
+  proofs, and resident-loop JSON now carries explicit cadence counts plus
+  requested duration/interval, but there is still no long-running cadence proof
+  across several hours or days.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
   prompt/template and one fresh `codex-ultra` leg has run to parity, but that
   comparison is still a tiny synthetic README task rather than a long-running
