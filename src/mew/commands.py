@@ -3352,7 +3352,7 @@ def cmd_work_ai(args):
     }
     if max_steps == 0:
         report["stop_reason"] = "snapshot_refresh"
-        if getattr(args, "live", False):
+        if getattr(args, "live", False) or getattr(args, "follow", False):
             with state_lock():
                 state = load_state()
                 session = find_work_session(state, session_id)

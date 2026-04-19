@@ -16353,6 +16353,30 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("work 1 --follow --max-steps 0 --quiet", data["suggested_recovery"]["command"])
                 self.assertIn(f"--allow-read {read_root}", data["suggested_recovery"]["command"])
                 self.assertIn("--compact-live", data["suggested_recovery"]["command"])
+
+                self.assertEqual(
+                    main(
+                        [
+                            "work",
+                            "1",
+                            "--follow",
+                            "--max-steps",
+                            "0",
+                            "--quiet",
+                            "--allow-read",
+                            read_root,
+                            "--compact-live",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertTrue(Path(".mew/follow/session-7.json").exists())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "fresh")
+                self.assertEqual(data["stop_reason"], "snapshot_refresh")
             finally:
                 os.chdir(old_cwd)
 
