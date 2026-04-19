@@ -803,6 +803,13 @@ Next action:
   `1003 tests`, pass), direct `MEW_EXECUTABLE=/tmp/.../mew ./mew next --json`
   checks, short Codex Web API dogfood with `injected_messages processed=1/1`,
   and repeated `./mew dogfood --all --cleanup --json` runs (pass).
+- The same 2026-04-19 session then dogfooded native self-improve task #198 /
+  work session #204 with Codex Web API. The resident found a small contract gap
+  in chat `/self start`: `a59a1a8` now asserts that the created native work
+  session is `active`, matching the existing CLI behavior. Verification included
+  ruff on `tests/test_commands.py`, the focused chat self-improve unittest,
+  `tests.test_commands` (`170 tests`, pass), full `uv run python -m unittest`
+  (`1003 tests`, pass), and `./mew dogfood --all --cleanup --json` (pass).
 - Task #175 verification-confidence pass: this slice adds structured
   `verification_confidence` to work-session resume/live/follow/follow-status
   and dogfood coverage for `src/mew/**` source-edit confidence. Validation:
