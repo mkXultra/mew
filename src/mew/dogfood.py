@@ -467,6 +467,18 @@ def run_memory_search_scenario(workspace, env=None):
     snapshot_result = run(["memory", "--search", "dogfood anchor", "--json"])
     typed_result = run(["memory", "--search", "compact typed", "--type", "user", "--json"])
     active_result = run(["memory", "--active", "--task-id", "1", "--json"])
+    context_save_result = run(
+        [
+            "context",
+            "--save",
+            "Dogfood checkpoint next safe action: continue memory-search scenario.",
+            "--name",
+            "Dogfood context checkpoint",
+            "--description",
+            "Dogfood context checkpoint should load after compression.",
+        ]
+    )
+    context_load_result = run(["context", "--load", "--query", "Dogfood context checkpoint", "--limit", "1"])
     json_data = _json_stdout(json_result)
     matches = json_data.get("matches") or []
     snapshot_data = _json_stdout(snapshot_result)
@@ -533,6 +545,17 @@ def run_memory_search_scenario(workspace, env=None):
             for match in active_matches
         ],
         expected="active typed memory includes always-on user memory and task-matched project memory",
+    )
+    _scenario_check(
+        checks,
+        "context_checkpoint_save_load_round_trips",
+        context_save_result.get("exit_code") == 0
+        and context_load_result.get("exit_code") == 0
+        and "recommended: Dogfood context checkpoint" in (context_load_result.get("stdout") or "")
+        and "Dogfood checkpoint next safe action" in (context_load_result.get("stdout") or "")
+        and "current_git_status:" in (context_load_result.get("stdout") or ""),
+        observed=command_result_tail(context_load_result),
+        expected="context --save checkpoint is recoverable through context --load",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
 
