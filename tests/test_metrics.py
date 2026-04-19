@@ -509,6 +509,193 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
         self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
 
+    def test_observation_metrics_retire_same_task_done_validation_note(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Manual recovery",
+                "kind": "coding",
+                "status": "done",
+                "notes": "Validation: focused dogfood passed; tests/test_brief.py passed; committed.",
+                "updated_at": "2026-04-19T00:02:00Z",
+            }
+        )
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "notes": [
+                    {"text": "Recovered manually after rollback."},
+                    {"text": "Validated and committed in follow-up task chain."},
+                ],
+                "model_turns": [],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "failed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_brief.py",
+                                "stdout": "FAILED tests/test_brief.py::BriefTests::old",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertIsNone(metrics["reliability"]["rates"]["approval_rejection"])
+        self.assertIsNone(metrics["reliability"]["rates"]["verification_failure"])
+        self.assertEqual(metrics["diagnostics"]["approval_friction"], [])
+        self.assertEqual(metrics["diagnostics"]["verification_failures"], [])
+        self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
+
+    def test_observation_metrics_retire_same_task_done_task_chain_verification(self):
+        state = default_state()
+        state["tasks"].append({"id": 1, "title": "Manual recovery", "kind": "coding", "status": "done"})
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "failed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_brief.py",
+                                "stdout": "FAILED tests/test_brief.py::BriefTests::old",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+        state["verification_runs"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "reason": "task-chain verification",
+                "command": "user-reported",
+                "exit_code": 0,
+                "stdout": "Focused recovery checks passed.",
+                "finished_at": "2026-04-19T00:02:00Z",
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertIsNone(metrics["reliability"]["rates"]["approval_rejection"])
+        self.assertIsNone(metrics["reliability"]["rates"]["verification_failure"])
+        self.assertEqual(metrics["diagnostics"]["approval_friction"], [])
+        self.assertEqual(metrics["diagnostics"]["verification_failures"], [])
+        self.assertEqual(metrics["diagnostics"]["retired_approval_friction"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["retired_verification_failures"][0]["tool_call_id"], 2)
+
+    def test_observation_metrics_keep_done_task_friction_without_validation_note(self):
+        state = default_state()
+        state["tasks"].append(
+            {
+                "id": 1,
+                "title": "Manual recovery",
+                "kind": "coding",
+                "status": "done",
+                "notes": "Closed after discussion; validation not run.",
+                "updated_at": "2026-04-19T00:02:00Z",
+            }
+        )
+        state["work_sessions"].append(
+            {
+                "id": 1,
+                "task_id": 1,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:00Z",
+                "model_turns": [],
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "failed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:05Z",
+                        "finished_at": "2026-04-19T00:00:06Z",
+                        "parameters": {"path": "src/mew/brief.py"},
+                        "result": {
+                            "dry_run": False,
+                            "verification_exit_code": 1,
+                            "rolled_back": True,
+                            "verification": {
+                                "command": "uv run pytest -q tests/test_brief.py",
+                                "stdout": "FAILED tests/test_brief.py::BriefTests::old",
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertEqual(metrics["reliability"]["rates"]["approval_rejection"], 1.0)
+        self.assertEqual(metrics["reliability"]["rates"]["verification_failure"], 1.0)
+        self.assertEqual(metrics["diagnostics"]["approval_friction"][0]["tool_call_id"], 1)
+        self.assertEqual(metrics["diagnostics"]["verification_failures"][0]["tool_call_id"], 2)
+
     def test_observation_metrics_split_approval_bound_waits_from_model_resume(self):
         state = default_state()
         state["tasks"].append({"id": 1, "title": "Observe approval waits", "kind": "coding", "status": "ready"})

@@ -227,6 +227,18 @@ Milestone 2 Done-when checklist:
   Passing user-reported completion verification now also retires older
   approval/verification friction from the same task, so manually recovered
   work-session failures do not keep driving `mew focus` after the task is done.
+  Task `#278` tightened that behavior after task `#277` exposed another stale
+  focus loop: done-task friction is now retired when the same task has explicit
+  validation/recovery evidence in its task note or a later task-chain
+  verification run, not merely because an arbitrary note exists. Resident
+  session `#263` implemented the first narrow fix and passed the paired
+  verifier; supervisor review narrowed the evidence gate and added focused
+  positive/negative tests. After the change,
+  `./mew metrics --kind coding --limit 20` reports
+  `approval_rejection=None`, `verification_failure=0.0`,
+  `verification_rollback=0.0`, and `ok: no obvious bottleneck`, while
+  `mew focus --kind coding` no longer asks to reproduce the recovered `#277`
+  approval/verification failures.
   Covered historical dry-run approvals are also excluded from approval-bound
   wait metrics, so rejected stale proposals no longer reappear as
   `approval_bound_p95` after later verification proves the same surface healthy.

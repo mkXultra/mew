@@ -524,6 +524,20 @@ def _command_test_paths(command):
     return paths
 
 
+def _task_done_recovery_note(task):
+    if not isinstance(task, dict) or task.get("status") != "done":
+        return ""
+    text = _clip_text(task.get("notes"), 600)
+    lowered = text.casefold()
+    if not lowered or "not verified" in lowered or "validation not run" in lowered:
+        return ""
+    verification_terms = ("validation", "validated", "verification", "verified", "verifier", "dogfood")
+    success_terms = ("passed", "green", "exit=0", "exit 0", "committed", "ready to commit")
+    if any(term in lowered for term in verification_terms) and any(term in lowered for term in success_terms):
+        return text
+    return ""
+
+
 def _path_related_to_test_path(path, test_path):
     if not path or not test_path:
         return False
@@ -537,8 +551,14 @@ def _path_related_to_test_path(path, test_path):
 
 
 def _success_covers_call(success, call, *, task_id=None):
-    if success.get("user_reported_task_verification") and task_id is not None:
-        return str(success.get("task_id")) == str(task_id)
+    if task_id is not None and str(success.get("task_id")) == str(task_id):
+        if success.get("user_reported_task_verification"):
+            return True
+        if success.get("task_status") == "done" and (
+            success.get("task_recovery_note")
+            or success.get("task_chain_verified")
+        ):
+            return True
     command = _verification_command(call)
     success_command = success.get("command") or ""
     if command and command == success_command:
@@ -553,6 +573,9 @@ def _success_covers_call(success, call, *, task_id=None):
 
 def _successful_verifications(state):
     successes = []
+    tasks_by_id = {
+        str(task.get("id")): task for task in state.get("tasks") or [] if isinstance(task, dict) and task.get("id") is not None
+    }
     for session in state.get("work_sessions") or []:
         if not isinstance(session, dict):
             continue
@@ -581,6 +604,8 @@ def _successful_verifications(state):
         if exit_code != 0:
             continue
         command = run.get("command") or ""
+        task = tasks_by_id.get(str(run.get("task_id")))
+        reason = run.get("reason") or ""
         successes.append(
             {
                 "finished_at": run.get("finished_at") or "",
@@ -589,7 +614,28 @@ def _successful_verifications(state):
                 "test_paths": _command_test_paths(command),
                 "task_id": run.get("task_id"),
                 "session_id": run.get("work_session_id"),
-                "user_reported_task_verification": run.get("reason") == "user-reported completion verification",
+                "task_status": (task or {}).get("status") or "",
+                "task_recovery_note": _task_done_recovery_note(task),
+                "task_chain_verified": "task-chain" in reason.casefold() or "task chain" in reason.casefold(),
+                "user_reported_task_verification": reason == "user-reported completion verification",
+            }
+        )
+    for task in tasks_by_id.values():
+        recovery_note = _task_done_recovery_note(task)
+        if not recovery_note:
+            continue
+        successes.append(
+            {
+                "finished_at": task.get("updated_at") or "",
+                "finished": parse_time(task.get("updated_at")),
+                "command": "",
+                "test_paths": _command_test_paths(recovery_note),
+                "task_id": task.get("id"),
+                "session_id": None,
+                "task_status": task.get("status") or "",
+                "task_recovery_note": recovery_note,
+                "task_chain_verified": False,
+                "user_reported_task_verification": False,
             }
         )
     return successes
