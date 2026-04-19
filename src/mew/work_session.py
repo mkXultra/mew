@@ -132,25 +132,52 @@ ACTIVE_MEMORY_STOP_WORDS = {
     "before",
     "build",
     "but",
+    "calling",
     "can",
     "coding",
+    "code",
+    "change",
+    "commits",
+    "completed",
+    "constraints",
+    "covered",
+    "current",
+    "documentation",
+    "done",
     "exercise",
+    "focus",
     "for",
     "from",
+    "git",
     "has",
     "have",
+    "improve",
+    "improvement",
     "into",
+    "itself",
+    "keep",
+    "mew",
     "not",
     "one",
     "our",
+    "out",
+    "pick",
+    "recently",
+    "repeat",
+    "reviewable",
     "run",
+    "same",
     "session",
     "should",
+    "small",
+    "topics",
     "task",
     "that",
     "this",
     "the",
     "then",
+    "through",
+    "use",
     "was",
     "were",
     "whether",
@@ -160,6 +187,13 @@ ACTIVE_MEMORY_STOP_WORDS = {
     "you",
     "your",
 }
+ACTIVE_MEMORY_DESCRIPTION_CUTOFFS = (
+    "\n\nRecently completed git commits",
+    "\n\nCurrent coding focus:",
+    "\n\nActive work sessions",
+    "\n\nTasks",
+    "\n\nConstraints:",
+)
 
 
 def diff_line_counts(diff):
@@ -254,6 +288,16 @@ def build_work_user_preferences(state, limit=DEFAULT_RESUME_USER_PREFERENCES_LIM
     }
 
 
+def active_memory_source_text(value):
+    text = str(value or "")
+    earliest = len(text)
+    for marker in ACTIVE_MEMORY_DESCRIPTION_CUTOFFS:
+        index = text.find(marker)
+        if index >= 0:
+            earliest = min(earliest, index)
+    return text[:earliest]
+
+
 def active_memory_terms(session=None, task=None):
     parts = []
     for source in (task or {}, session or {}):
@@ -262,7 +306,7 @@ def active_memory_terms(session=None, task=None):
         for key in ("title", "description", "kind", "goal"):
             value = source.get(key)
             if value:
-                parts.append(str(value))
+                parts.append(active_memory_source_text(value) if key in ("description", "goal") else str(value))
     text = " ".join(parts).casefold()
     terms = []
     for term in re.findall(r"[a-z0-9_][a-z0-9_-]{2,}", text):

@@ -29,6 +29,7 @@ from mew.work_cells import build_work_session_cells, format_work_session_cells
 from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
     DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
+    active_memory_terms,
     append_work_tool_running_output,
     build_work_continuity_score,
     build_work_session_effort,
@@ -5176,6 +5177,41 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Native hands recall", text)
             finally:
                 os.chdir(old_cwd)
+
+    def test_active_memory_terms_filter_self_improve_boilerplate(self):
+        terms = active_memory_terms(
+            task={
+                "title": "Improve mew itself",
+                "description": (
+                    "Improve mew through one small, reviewable code or documentation change.\n\n"
+                    "Focus:\nUse active memory dogfood to pick and execute the next small mew improvement\n\n"
+                    "Recently completed git commits. Do not repeat these topics:\n"
+                    "a4310dd Expose active memory debug view\n\n"
+                    "Constraints:\n- Keep the change small.\n"
+                ),
+                "kind": "coding",
+            }
+        )
+
+        self.assertIn("active", terms)
+        self.assertIn("memory", terms)
+        self.assertIn("dogfood", terms)
+        self.assertIn("execute", terms)
+        for noisy in (
+            "improve",
+            "mew",
+            "itself",
+            "through",
+            "small",
+            "reviewable",
+            "recently",
+            "completed",
+            "a4310dd",
+            "expose",
+            "view",
+            "constraints",
+        ):
+            self.assertNotIn(noisy, terms)
 
     def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
         from mew.work_session import (
