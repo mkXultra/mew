@@ -3360,7 +3360,12 @@ def record_max_steps_reentry_note(session_id, report, mode="follow"):
 def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
     if not (getattr(args, "follow", False) or getattr(args, "cells", False)):
         return seen_count
-    cells = build_work_session_cells(session, limit=None, tail_max_lines=getattr(args, "cell_tail_lines", None))
+    cells = build_work_session_cells(
+        session,
+        limit=None,
+        tail_max_lines=getattr(args, "cell_tail_lines", None),
+        include_startup_status=False,
+    )
     new_cells = cells[seen_count:] if seen_count < len(cells) else []
     if not new_cells:
         return len(cells)
@@ -3394,7 +3399,12 @@ def maybe_print_work_live_cells(args, session, task, index, seen_count=0):
 def maybe_print_work_active_cell(args, session, task, index, source, source_id):
     if not getattr(args, "follow", False):
         return
-    for cell in build_work_session_cells(session, limit=None, tail_max_lines=getattr(args, "cell_tail_lines", None)):
+    for cell in build_work_session_cells(
+        session,
+        limit=None,
+        tail_max_lines=getattr(args, "cell_tail_lines", None),
+        include_startup_status=False,
+    ):
         if (
             cell.get("source") == source
             and str(cell.get("source_id")) == str(source_id)
@@ -3598,7 +3608,7 @@ def cmd_work_ai(args):
         print(f"mew: {exc}", file=sys.stderr)
         return 1
 
-    live_cells_seen = len(build_work_session_cells(session, limit=None))
+    live_cells_seen = len(build_work_session_cells(session, limit=None, include_startup_status=False))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
         report["stop_reason"] = "missing_gates"
         if progress:

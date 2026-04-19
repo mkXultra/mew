@@ -611,6 +611,36 @@ def cells_for_tool_call(session, call, tail_max_lines=None):
     return cells
 
 
+def startup_status_cell(session):
+    memory = (session or {}).get("startup_memory") or {}
+    if not isinstance(memory, dict) or not memory:
+        return None
+    title = (session or {}).get("title") or "work session"
+    cell = _cell_base(
+        session,
+        "work_session",
+        "status",
+        "startup",
+        (session or {}).get("status"),
+        (session or {}).get("created_at"),
+        "",
+        f"startup memory: {title}",
+    )
+    lines = []
+    goal = (session or {}).get("goal") or memory.get("goal") or ""
+    if goal:
+        lines.append(f"goal: {clip_inline_text(goal, 240)}")
+    if memory.get("hypothesis"):
+        lines.append(f"memory_hypothesis: {clip_inline_text(memory.get('hypothesis'), 240)}")
+    if memory.get("next_step"):
+        lines.append(f"memory_next: {clip_inline_text(memory.get('next_step'), 240)}")
+    task_id = (session or {}).get("task_id")
+    task_part = f" {task_id}" if task_id is not None else ""
+    lines.append(f"resume: mew work{task_part} --session --resume")
+    cell["detail"] = "\n".join(lines)
+    return cell
+
+
 def _cell_sort_key(index, cell):
     return (
         cell.get("started_at") or cell.get("finished_at") or "",
@@ -618,7 +648,7 @@ def _cell_sort_key(index, cell):
     )
 
 
-def build_work_session_cells(session, limit=20, tail_max_lines=None):
+def build_work_session_cells(session, limit=20, tail_max_lines=None, include_startup_status=True):
     if not session:
         return []
     cells = []
@@ -632,6 +662,10 @@ def build_work_session_cells(session, limit=20, tail_max_lines=None):
             cells.append((order, cell))
     cells.sort(key=lambda item: _cell_sort_key(item[0], item[1]))
     rendered = [cell for _order, cell in cells]
+    if include_startup_status and not rendered:
+        startup_cell = startup_status_cell(session)
+        if startup_cell:
+            rendered.append(startup_cell)
     if limit is None:
         return rendered
     count = max(0, int(limit))

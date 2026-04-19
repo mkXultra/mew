@@ -2330,6 +2330,35 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_cells_show_startup_memory_when_no_steps_exist(self):
+        session = {
+            "id": 4,
+            "task_id": 2,
+            "status": "active",
+            "title": "Fresh cockpit",
+            "goal": "Start with a useful status pane.",
+            "created_at": "2026-04-18T00:00:00Z",
+            "updated_at": "2026-04-18T00:00:00Z",
+            "model_turns": [],
+            "tool_calls": [],
+            "startup_memory": {
+                "hypothesis": "Start task #2: Fresh cockpit",
+                "next_step": "continue the work session with one bounded model/tool step",
+                "source": "session_startup",
+                "goal": "Start with a useful status pane.",
+            },
+        }
+
+        cells = build_work_session_cells(session, limit=None)
+        text = format_work_session_cells(session, limit=None)
+
+        self.assertEqual([cell["kind"] for cell in cells], ["status"])
+        self.assertEqual(cells[0]["id"], "s4:status:startup")
+        self.assertIn("startup memory: Fresh cockpit", cells[0]["preview"])
+        self.assertIn("memory_hypothesis: Start task #2: Fresh cockpit", text)
+        self.assertIn("memory_next: continue the work session", text)
+        self.assertNotIn("(none)", text)
+
     def test_work_session_command_cell_marks_no_output(self):
         session = {
             "id": 4,
@@ -5575,6 +5604,34 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(resume["working_memory"], {})
         self.assertNotIn("Working memory", format_work_session_resume(resume))
+
+    def test_work_start_session_seeds_startup_working_memory(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    task = state["tasks"][0]
+                    resume = build_work_session_resume(session, task=task, state=state)
+
+                memory = resume["working_memory"]
+                self.assertEqual(memory["source"], "session_startup")
+                self.assertIn("Start task #1", memory["hypothesis"])
+                self.assertIn("continue the work session", memory["next_step"])
+                self.assertEqual(resume["continuity"]["score"], "9/9")
+                self.assertNotIn("working_memory_survived", resume["continuity"]["missing"])
+            finally:
+                os.chdir(old_cwd)
 
     def test_work_session_stop_request_is_consumed_before_model_step(self):
         old_cwd = os.getcwd()

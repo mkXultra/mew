@@ -673,11 +673,27 @@ def create_work_session(state, task, current_time=None, inherit_defaults=True):
         "last_model_turn_id": None,
         "tool_calls": [],
         "model_turns": [],
+        "startup_memory": startup_working_memory(task),
     }
     if inherit_defaults and latest and latest.get("default_options"):
         session["default_options"] = json.loads(json.dumps(latest.get("default_options") or {}))
     state.setdefault("work_sessions", []).append(session)
     return session, True
+
+
+def startup_working_memory(task):
+    task = task or {}
+    task_id = task.get("id")
+    title = str(task.get("title") or "work session").strip()
+    goal = str(task.get("description") or title).strip()
+    task_ref = f"task #{task_id}" if task_id is not None else "the selected task"
+    return {
+        "hypothesis": f"Start {task_ref}: {title}",
+        "next_step": "continue the work session with one bounded model/tool step, then verify or record the next blocker",
+        "open_questions": [],
+        "source": "session_startup",
+        "goal": goal,
+    }
 
 
 def safe_work_write_roots(roots):
@@ -3599,6 +3615,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         calls,
         pending_approvals,
     )
+    if not working_memory and isinstance(session.get("startup_memory"), dict):
+        working_memory = dict(session.get("startup_memory") or {})
     if phase == "idle":
         next_action = refresh_stale_memory_next_action(next_action, working_memory)
     user_preferences = build_work_user_preferences(state, limit=limit)

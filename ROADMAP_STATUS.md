@@ -306,6 +306,11 @@ Latest native self-improvement dogfood then polished the self-improve entry
 help, aligned historical diff JSON with the text `recorded_at` label, and made
 batch action summaries show read-window fields so compact cockpit output better
 matches the model's actual tool plan.
+Current M2 cockpit dogfood exposed an empty-startup reentry gap: a freshly
+created work session had no working memory, and `mew work --cells` rendered
+`(none)`. New sessions now seed a compact task-derived startup memory, resume
+continuity is strong before the first model step, and cells render a status pane
+with goal, memory, and resume command instead of an empty cockpit.
 `codex-ultra` human-role dogfood on current HEAD then found three concrete
 cockpit papercuts that are now fixed: unclipped diff stats for huge single-line
 edits, explicit cleanup-skipped reporting for user-provided dogfood workspaces,
