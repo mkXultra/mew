@@ -17487,6 +17487,7 @@ class WorkSessionTests(unittest.TestCase):
                             "task_id": 1,
                             "heartbeat_at": now_iso(),
                             "producer": {"pid": os.getpid()},
+                            "stop_reason": "snapshot_refresh",
                             "step_count": 7,
                             "pending_approvals": [{"tool_call_id": 3}],
                             "resume": {
@@ -17537,6 +17538,7 @@ class WorkSessionTests(unittest.TestCase):
                 text = stdout.getvalue()
                 self.assertIn("phase: idle", text)
                 self.assertIn("steps: 7", text)
+                self.assertIn("stop_reason: snapshot_refresh", text)
                 self.assertIn("producer_health: fresh", text)
                 self.assertIn("working_memory: stale", text)
                 self.assertIn("next_action: Inspect latest snapshot.", text)

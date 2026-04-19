@@ -2326,6 +2326,9 @@ Next action:
   context: the recovery question names the failed recovery tool/result and
   suppresses misleading lower-priority safe-read suggestions until that failure
   is inspected.
+- `work --follow-status` text now prints `stop_reason` when the follow snapshot
+  has one, keeping the human-readable cockpit surface aligned with the JSON
+  status used for reentry and completed producer diagnosis.
 - Latest validation for the 2026-04-19 recovery/control slice:
   `uv run pytest -q` passed with 1044 tests and 30 subtests,
   `./mew dogfood --all --cleanup --json` passed all scenarios,

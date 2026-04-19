@@ -6046,6 +6046,8 @@ def format_work_follow_status(data):
             f"steps: {data.get('step_count') if data.get('step_count') is not None else '-'}",
         ]
     )
+    if data.get("stop_reason"):
+        lines.append(f"stop_reason: {data.get('stop_reason')}")
     producer_health = data.get("producer_health") or {}
     if producer_health:
         health_line = f"producer_health: {producer_health.get('state') or '-'}"
