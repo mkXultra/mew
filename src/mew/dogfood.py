@@ -2033,6 +2033,8 @@ def run_m6_daemon_loop_scenario(
 ):
     commands = []
     checks = []
+    watched = workspace / "daemon-loop-watch.txt"
+    watched.write_text("before daemon loop\n", encoding="utf-8")
     scenario_env = dogfood_time_dilation_env(env, time_dilation)
     multiplier = effective_time_dilation(scenario_env)
 
@@ -2040,6 +2042,16 @@ def run_m6_daemon_loop_scenario(
         result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=scenario_env)
         commands.append(result)
         return result
+
+    def wait_for(predicate, timeout=5.0, interval=0.05):
+        deadline = time.monotonic() + timeout
+        latest = None
+        while time.monotonic() < deadline:
+            latest = predicate()
+            if latest:
+                return latest
+            time.sleep(interval)
+        return latest
 
     task_result = run(
         [
@@ -2068,6 +2080,8 @@ def run_m6_daemon_loop_scenario(
             str(interval),
             "--poll-interval",
             str(poll_interval),
+            "--watch-path",
+            watched.name,
             "--autonomous",
             "--autonomy-level",
             "propose",
@@ -2076,7 +2090,42 @@ def run_m6_daemon_loop_scenario(
         timeout=10,
     )
     started = start_result.get("exit_code") == 0
-    time.sleep(max(0.0, float(duration)))
+    remaining_duration = max(0.0, float(duration))
+    initial_sleep = min(remaining_duration, max(0.2, min(1.0, float(interval))))
+    if initial_sleep:
+        time.sleep(initial_sleep)
+        remaining_duration -= initial_sleep
+
+    watcher_ready_state = wait_for(
+        lambda: (
+            data
+            if (data := read_json_file(workspace / STATE_FILE, {})).get("watchers", {}).get("active_count", 0) >= 1
+            else None
+        ),
+        timeout=5.0,
+    ) or {}
+    watched.write_text("after daemon loop change\n", encoding="utf-8")
+    processed_watcher_event = wait_for(
+        lambda: next(
+            (
+                event
+                for event in (read_json_file(workspace / STATE_FILE, {}).get("inbox") or [])
+                if event.get("type") == "file_change"
+                and event.get("source") == "daemon_watch"
+                and event.get("processed_at")
+            ),
+            None,
+        ),
+        timeout=5.0,
+    )
+    pause_result = run(["daemon", "pause", "--json", "dogfood loop proof"], timeout=5)
+    pause_json = _json_stdout(pause_result)
+    inspect_result = run(["daemon", "inspect", "--json"], timeout=5)
+    inspect_json = _json_stdout(inspect_result)
+    resume_result = run(["daemon", "resume", "--json"], timeout=5)
+    resume_json = _json_stdout(resume_result)
+    if remaining_duration:
+        time.sleep(remaining_duration)
     active_status = _json_stdout(run(["daemon", "status", "--json"], timeout=5))
     stop_result = run(["daemon", "stop", "--timeout", "10", "--poll-interval", "0.05"], timeout=15) if started else {"exit_code": None}
     final_status = _json_stdout(run(["daemon", "status", "--json"], timeout=5))
@@ -2087,6 +2136,7 @@ def run_m6_daemon_loop_scenario(
     processed_events = [event for event in state.get("inbox", []) if event.get("processed_at")]
     passive_events = [event for event in processed_events if event.get("type") == "passive_tick"]
     passive_effects = [effect for effect in state.get("runtime_effects", []) if effect.get("reason") == "passive_tick"]
+    external_effects = [effect for effect in state.get("runtime_effects", []) if effect.get("reason") == "external_event"]
     passive_times = [
         parsed
         for parsed in (
@@ -2112,6 +2162,7 @@ def run_m6_daemon_loop_scenario(
         and started
         and active_status.get("state") == "running"
         and active_status.get("uptime_seconds") is not None
+        and (active_status.get("watchers") or {}).get("active_count", 0) >= 1
         and stop_result.get("exit_code") == 0
         and final_status.get("state") == "stopped",
         observed={
@@ -2121,7 +2172,36 @@ def run_m6_daemon_loop_scenario(
             "stop": command_result_tail(stop_result),
             "final_status": final_status,
         },
-        expected="daemon starts, reports uptime while running, and stops cleanly",
+        expected="daemon starts, reports uptime and watcher state while running, and stops cleanly",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_watcher_processes_file_event",
+        bool(processed_watcher_event)
+        and processed_watcher_event.get("source") == "daemon_watch"
+        and bool(external_effects),
+        observed={
+            "watcher_ready": watcher_ready_state.get("watchers"),
+            "processed_event": processed_watcher_event,
+            "external_effect": external_effects[-1] if external_effects else None,
+        },
+        expected="long daemon proof includes a real watcher file_change processed through external_event",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_controls_pause_inspect_resume",
+        pause_result.get("exit_code") == 0
+        and inspect_result.get("exit_code") == 0
+        and resume_result.get("exit_code") == 0
+        and (pause_json.get("safety") or {}).get("autonomy_paused") is True
+        and inspect_json.get("state") == "running"
+        and (resume_json.get("safety") or {}).get("autonomy_paused") is False,
+        observed={
+            "pause": pause_json,
+            "inspect_state": inspect_json.get("state"),
+            "resume": resume_json,
+        },
+        expected="pause, inspect, and resume controls work against a running daemon",
     )
     _scenario_check(
         checks,
@@ -2170,6 +2250,13 @@ def run_m6_daemon_loop_scenario(
         "passive_events": len(passive_events),
         "passive_span_seconds": passive_span_seconds,
         "passive_gaps_seconds": passive_gaps,
+        "watched_path": str(watched),
+        "watcher_event_id": (processed_watcher_event or {}).get("id"),
+        "controls": {
+            "pause_exit_code": pause_result.get("exit_code"),
+            "inspect_exit_code": inspect_result.get("exit_code"),
+            "resume_exit_code": resume_result.get("exit_code"),
+        },
     }
     return report
 

@@ -468,9 +468,12 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "m6-daemon-loop")
+            self.assertIn("m6_daemon_loop_watcher_processes_file_event", text)
+            self.assertIn("m6_daemon_loop_controls_pause_inspect_resume", text)
             self.assertIn("m6_daemon_loop_processes_multiple_passive_ticks", text)
             self.assertIn("m6_daemon_loop_reentry_focus_surfaces_task", text)
             self.assertGreaterEqual(report["scenarios"][0]["artifacts"]["passive_events"], 2)
+            self.assertIsNotNone(report["scenarios"][0]["artifacts"]["watcher_event_id"])
 
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
