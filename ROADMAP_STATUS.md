@@ -1695,6 +1695,12 @@ Evidence:
   the supervisor only approved the preview. `mew self-improve --audit 311`
   reports verification passed, `no_rescue_review_recorded`, and
   `candidate_no_rescue_reviewed_pending_m3`.
+- Task `#312` added `mew self-improve --audit-sequence 307 308 309 310 311`,
+  which summarizes the sequence as `candidate_sequence_ready` when all tasks
+  are found, consecutive, done, closed, verification-passed,
+  no-rescue-reviewed, and candidate-credited. This task is not no-rescue credit:
+  the resident inspected the audit surfaces but stopped before editing, and the
+  supervisor implemented the command manually.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1753,8 +1759,8 @@ Next action:
 
 - Keep the M3 4h proof as background-only until task `#300` can collect and
   summarize it. After that, review the `#307`-`#311` no-rescue candidate
-  sequence as a set before changing the M5 milestone status; do not declare M5
-  closed while M3 remains open.
+  sequence as a set with `mew self-improve --audit-sequence 307 308 309 310
+  311`; do not declare M5 closed while M3 remains open.
 
 ## Latest Validation
 

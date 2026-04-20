@@ -5,6 +5,7 @@ from .timeutil import now_iso
 
 
 M5_AUDIT_SCHEMA_VERSION = 1
+M5_CANDIDATE_CREDIT_STATUS = "candidate_no_rescue_reviewed_pending_m3"
 
 RESCUE_INTERVENTION_MARKERS = (
     "supervisor rescue",
@@ -111,6 +112,13 @@ def self_improve_audit_controls(task):
     return {
         "audit": mew_command("self-improve", "--audit", task_id),
         "audit_json": mew_command("self-improve", "--audit", task_id, "--json"),
+    }
+
+
+def self_improve_audit_sequence_controls(task_refs):
+    return {
+        "audit_sequence": mew_command("self-improve", "--audit-sequence", *task_refs),
+        "audit_sequence_json": mew_command("self-improve", "--audit-sequence", *task_refs, "--json"),
     }
 
 
@@ -221,7 +229,7 @@ def classify_human_intervention(session):
         m5_credit = "not_counted_due_to_rescue"
     elif no_rescue_review_recorded:
         no_rescue_review_status = "no_rescue_review_recorded"
-        m5_credit = "candidate_no_rescue_reviewed_pending_m3"
+        m5_credit = M5_CANDIDATE_CREDIT_STATUS
     else:
         no_rescue_review_status = "pending_human_review"
         m5_credit = "not_counted_until_human_review_confirms_no_rescue_edits"
@@ -291,6 +299,64 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
     return bundle
 
 
+def _audit_sequence_entry(bundle):
+    task = bundle.get("task") or {}
+    session = bundle.get("work_session") or {}
+    intervention = bundle.get("human_intervention") or {}
+    verification = bundle.get("verification") or {}
+    return {
+        "task_id": task.get("id"),
+        "task_status": task.get("status"),
+        "work_session_id": session.get("id"),
+        "work_session_status": session.get("status"),
+        "verification_status": verification.get("status"),
+        "rescue_edit_status": intervention.get("rescue_edit_status"),
+        "no_rescue_review_status": intervention.get("no_rescue_review_status"),
+        "m5_credit": intervention.get("m5_credit"),
+        "loop_credit_status": bundle.get("loop_credit_status"),
+    }
+
+
+def _consecutive_ints(values):
+    if not values:
+        return False
+    if any(not isinstance(value, int) for value in values):
+        return False
+    return values == list(range(values[0], values[0] + len(values)))
+
+
+def build_m5_self_improve_audit_sequence(state, task_refs):
+    task_refs = [str(ref) for ref in (task_refs or [])]
+    bundles = [build_m5_self_improve_audit_bundle(state, ref) for ref in task_refs]
+    entries = [_audit_sequence_entry(bundle) for bundle in bundles]
+    task_ids = [entry.get("task_id") for entry in entries]
+    checks = {
+        "all_found": bool(entries) and all(bundle.get("status") == "ready" for bundle in bundles),
+        "consecutive_task_ids": _consecutive_ints(task_ids),
+        "all_tasks_done": bool(entries) and all(entry.get("task_status") == "done" for entry in entries),
+        "all_sessions_closed": bool(entries) and all(entry.get("work_session_status") == "closed" for entry in entries),
+        "all_verification_passed": bool(entries) and all(entry.get("verification_status") == "passed" for entry in entries),
+        "all_no_rescue_reviewed": bool(entries)
+        and all(entry.get("no_rescue_review_status") == "no_rescue_review_recorded" for entry in entries),
+        "all_candidate_credit": bool(entries)
+        and all(
+            entry.get("m5_credit") == M5_CANDIDATE_CREDIT_STATUS
+            and entry.get("loop_credit_status") == M5_CANDIDATE_CREDIT_STATUS
+            for entry in entries
+        ),
+    }
+    ready = all(checks.values())
+    return {
+        "schema_version": M5_AUDIT_SCHEMA_VERSION,
+        "status": "candidate_sequence_ready" if ready else "needs_review",
+        "task_refs": task_refs,
+        "count": len(entries),
+        "checks": checks,
+        "entries": entries,
+        "controls": self_improve_audit_sequence_controls(task_refs),
+    }
+
+
 def format_m5_self_improve_audit_bundle(bundle):
     task = bundle.get("task") or {}
     session = bundle.get("work_session") or {}
@@ -343,4 +409,37 @@ def format_m5_self_improve_audit_bundle(bundle):
     controls = bundle.get("controls") or {}
     if controls.get("audit_json"):
         lines.append(f"audit_json: {controls['audit_json']}")
+    return "\n".join(lines)
+
+
+def format_m5_self_improve_audit_sequence(sequence):
+    checks = sequence.get("checks") or {}
+    lines = [
+        "M5 self-improve audit sequence",
+        f"status: {sequence.get('status')}",
+        f"count: {sequence.get('count')}",
+        (
+            "checks: "
+            f"found={checks.get('all_found')} "
+            f"consecutive={checks.get('consecutive_task_ids')} "
+            f"done={checks.get('all_tasks_done')} "
+            f"closed={checks.get('all_sessions_closed')} "
+            f"verification={checks.get('all_verification_passed')} "
+            f"no_rescue_review={checks.get('all_no_rescue_reviewed')} "
+            f"candidate_credit={checks.get('all_candidate_credit')}"
+        ),
+    ]
+    for entry in sequence.get("entries") or []:
+        lines.append(
+            (
+                f"- #{entry.get('task_id')} task={entry.get('task_status')} "
+                f"session=#{entry.get('work_session_id')}[{entry.get('work_session_status')}] "
+                f"verification={entry.get('verification_status')} "
+                f"no_rescue_review={entry.get('no_rescue_review_status')} "
+                f"credit={entry.get('loop_credit_status')}"
+            )
+        )
+    controls = sequence.get("controls") or {}
+    if controls.get("audit_sequence_json"):
+        lines.append(f"audit_sequence_json: {controls['audit_sequence_json']}")
     return "\n".join(lines)

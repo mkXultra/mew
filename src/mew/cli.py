@@ -1290,6 +1290,11 @@ def build_parser():
         const="latest",
         help="show the M5 audit bundle for a self-improvement task id, or latest when omitted",
     )
+    self_improve_parser.add_argument(
+        "--audit-sequence",
+        nargs="+",
+        help="show an M5 audit summary for a sequence of self-improvement task ids",
+    )
     self_improve_parser.add_argument("--dispatch", action="store_true", help="start an implementation run immediately")
     self_improve_parser.add_argument("--dry-run", action="store_true", help="create the run record without starting ai-cli")
     self_improve_parser.add_argument(

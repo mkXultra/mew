@@ -645,6 +645,68 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_audit_sequence_summarizes_candidates(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for index in range(2):
+                    with redirect_stdout(StringIO()):
+                        code = main(["self-improve", "--start-session", "--force", "--focus", f"Loop {index}"])
+                    self.assertEqual(code, 0)
+                    state = load_state()
+                    task = state["tasks"][-1]
+                    session = state["work_sessions"][-1]
+                    task["status"] = "done"
+                    session["status"] = "closed"
+                    session["notes"].append(
+                        {
+                            "created_at": now_iso(),
+                            "source": "user",
+                            "text": "No supervisor file patch was used; approvals only.",
+                        }
+                    )
+                    session["tool_calls"].append(
+                        {
+                            "id": 50 + index,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "result": {
+                                "verification": {
+                                    "command": "uv run pytest -q",
+                                    "exit_code": 0,
+                                    "started_at": now_iso(),
+                                    "finished_at": now_iso(),
+                                }
+                            },
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["self-improve", "--audit-sequence", "1", "2", "--json"])
+
+                self.assertEqual(code, 0)
+                sequence = json.loads(stdout.getvalue())
+                self.assertEqual(sequence["status"], "candidate_sequence_ready")
+                self.assertEqual(sequence["count"], 2)
+                self.assertTrue(sequence["checks"]["consecutive_task_ids"])
+                self.assertTrue(sequence["checks"]["all_no_rescue_reviewed"])
+                self.assertTrue(sequence["checks"]["all_candidate_credit"])
+                self.assertEqual(sequence["entries"][0]["task_id"], 1)
+                self.assertEqual(sequence["entries"][1]["loop_credit_status"], "candidate_no_rescue_reviewed_pending_m3")
+
+                with redirect_stdout(StringIO()) as text_stdout:
+                    text_code = main(["self-improve", "--audit-sequence", "1", "2"])
+
+                self.assertEqual(text_code, 0)
+                output = text_stdout.getvalue()
+                self.assertIn("status: candidate_sequence_ready", output)
+                self.assertIn("consecutive=True", output)
+                self.assertIn("- #1 task=done", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_audit_missing_task_text_is_concise(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

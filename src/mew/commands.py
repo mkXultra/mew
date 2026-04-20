@@ -116,7 +116,9 @@ from .repair import (
 from .self_improve import DEFAULT_SELF_IMPROVE_TITLE, create_self_improve_task, ensure_self_improve_plan
 from .self_improve_audit import (
     build_m5_self_improve_audit_bundle,
+    build_m5_self_improve_audit_sequence,
     format_m5_self_improve_audit_bundle,
+    format_m5_self_improve_audit_sequence,
     seed_m5_self_improve_audit,
 )
 from .self_memory import (
@@ -10180,7 +10182,7 @@ def self_improve_native_validation_error(
 
 
 def cmd_self_improve(args):
-    if getattr(args, "audit", None) is not None:
+    if getattr(args, "audit", None) is not None or getattr(args, "audit_sequence", None):
         return cmd_self_improve_audit(args)
     native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
     if args.prompt and args.no_plan:
@@ -10296,6 +10298,14 @@ def cmd_self_improve(args):
 def cmd_self_improve_audit(args):
     with state_lock():
         state = load_state()
+        if getattr(args, "audit_sequence", None):
+            sequence = build_m5_self_improve_audit_sequence(state, getattr(args, "audit_sequence", None))
+            save_state(state)
+            if args.json:
+                print(json.dumps(sequence, ensure_ascii=False, indent=2))
+            else:
+                print(format_m5_self_improve_audit_sequence(sequence))
+            return 0 if sequence.get("status") != "needs_review" else 1
         bundle = build_m5_self_improve_audit_bundle(state, getattr(args, "audit", None))
         save_state(state)
     if args.json:
