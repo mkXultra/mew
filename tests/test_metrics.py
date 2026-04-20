@@ -35,6 +35,7 @@ class MetricsTests(unittest.TestCase):
                             "act": {"prompt_chars": 222, "elapsed_seconds": 2.0, "mode": "model"},
                             "total_model_seconds": 9.5,
                             "reasoning_effort": "medium",
+                            "prompt_context_mode": "compact_memory",
                         },
                     },
                     {
@@ -133,6 +134,7 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["self_hosting"]["act_prompt_chars"]["avg"], 222.0)
         self.assertEqual(metrics["self_hosting"]["total_model_seconds"]["avg"], 9.5)
         self.assertEqual(metrics["self_hosting"]["reasoning_efforts"], {"medium": 1})
+        self.assertEqual(metrics["self_hosting"]["prompt_context_modes"], {"compact_memory": 1})
         signal_ids = {signal["id"] for signal in metrics["signals"]}
         self.assertIn("approval_friction", signal_ids)
         self.assertIn("verification_friction", signal_ids)
@@ -144,6 +146,7 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("perceived_idle_ratio: count=1 avg=0.588 median=0.588 p95=0.588 max=0.588", text)
         self.assertIn("self_hosting:", text)
         self.assertIn("reasoning_efforts: medium=1", text)
+        self.assertIn("prompt_context_modes: compact_memory=1", text)
         self.assertIn("first_think_latency_seconds: count=1 avg=7.5", text)
         self.assertIn("first_edit_proposal_seconds: count=1 avg=11.0", text)
         self.assertIn("context_chars: count=1 avg=12345.0", text)

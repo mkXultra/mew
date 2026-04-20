@@ -27,7 +27,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 20:07 JST.
+Last assessed: 2026-04-20 20:11 JST.
 
 Active work: **M6.5 Self-Hosting Speed** while the M6 enhanced proof runs in
 parallel.
@@ -60,11 +60,11 @@ Current next action:
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Build the next M6.5 slice: a small implementation prompt/context path that
-   avoids injecting the full resident memory bundle.
-4. Rerun a #320-class self-hosting task and compare first useful output,
+3. Rerun a #320-class self-hosting task and compare first useful output,
    selected reasoning effort, prompt/context size, and edit-proposal latency
    against the failed attempt.
+4. If the rerun still stalls, reduce context further before adding new M7
+   features.
 5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
    without dropping the M6.5 active focus.
 6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
@@ -383,6 +383,12 @@ Evidence:
   defaults to `low`, small implementation/verification to `medium`, and
   roadmap/recovery/safety/daemon/auth/policy work to `high`, with
   `MEW_CODEX_REASONING_EFFORT` as an explicit override.
+- Non-high-risk work turns now use a compact prompt context for active memory:
+  memory bodies are omitted from THINK/ACT prompts and replaced by
+  id/path/name/description pointers, while full resume output remains available
+  to humans.
+- `mew metrics` now summarizes prompt context modes so self-hosting reports can
+  prove whether a task used full or compact resident memory injection.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
@@ -390,8 +396,6 @@ Evidence:
 
 Missing proof:
 
-- No small implementation prompt mode or differential/pointer context path
-  exists yet.
 - No post-instrumentation real Codex work session has populated the new
   `self_hosting` metrics yet.
 - The #320-class task has not yet been rerun successfully after speed changes.
@@ -412,9 +416,8 @@ Done when:
 
 Next action:
 
-- Add a small implementation prompt/context path, then rerun a #320-class
-  self-hosting task and compare the new `self_hosting` metrics against the
-  failed attempt.
+- Rerun a #320-class self-hosting task and compare the new `self_hosting`
+  metrics against the failed attempt.
 
 ### M7: Senses - Inbound Signals
 
@@ -522,8 +525,6 @@ The acceptable near-term work is:
 
 - collecting the running M6 enhanced Docker proof when it finishes;
 - self-hosting speed metrics for native work sessions;
-- a small implementation prompt/context path that avoids injecting the full
-  resident memory bundle;
 - rerunning a #320-class mew-as-implementer dogfood task and comparing latency
   to the failed attempt;
 - roadmap/status maintenance that preserves the active decision across context

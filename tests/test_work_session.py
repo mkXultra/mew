@@ -5566,6 +5566,22 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("User prefers narrow verification", prompt)
                 self.assertIn("Typed recall belongs in resident startup context.", prompt)
 
+                compact_context = build_work_model_context(
+                    state,
+                    session,
+                    task,
+                    "now",
+                    prompt_context_mode="compact_memory",
+                )
+                compact_active_memory = compact_context["work_session"]["resume"]["active_memory"]
+                self.assertTrue(compact_active_memory["compacted_for_prompt"])
+                self.assertTrue(compact_active_memory["items"])
+                self.assertNotIn("text", compact_active_memory["items"][0])
+                compact_prompt = build_work_think_prompt(compact_context)
+                self.assertIn("active_memory.compacted_for_prompt", compact_prompt)
+                self.assertIn("Typed recall belongs in resident startup context.", compact_prompt)
+                self.assertNotIn("Native hands work should surface active typed memory", compact_prompt)
+
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
                 resume = json.loads(stdout.getvalue())["resume"]
@@ -6031,6 +6047,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertGreaterEqual(metrics.get("think", {}).get("elapsed_seconds", -1), 0)
                 self.assertEqual(metrics.get("reasoning_effort"), "low")
                 self.assertEqual(metrics.get("reasoning_policy", {}).get("work_type"), "exploration")
+                self.assertEqual(metrics.get("prompt_context_mode"), "compact_memory")
                 self.assertEqual(metrics.get("act", {}).get("mode"), "deterministic")
                 self.assertEqual(metrics.get("act", {}).get("prompt_chars"), 0)
             finally:

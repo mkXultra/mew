@@ -1065,6 +1065,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     act_prompt_chars = []
     total_model_seconds = []
     reasoning_efforts = {}
+    prompt_context_modes = {}
     successful_verifications = _successful_verifications(state)
 
     for session in sessions:
@@ -1133,6 +1134,9 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
             reasoning_effort = _model_metric(turn, "reasoning_effort")
             if reasoning_effort:
                 reasoning_efforts[str(reasoning_effort)] = reasoning_efforts.get(str(reasoning_effort), 0) + 1
+            prompt_context_mode = _model_metric(turn, "prompt_context_mode")
+            if prompt_context_mode:
+                prompt_context_modes[str(prompt_context_mode)] = prompt_context_modes.get(str(prompt_context_mode), 0) + 1
 
     intervention_count = (
         tool_counts["failed"]
@@ -1185,6 +1189,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "act_prompt_chars": _summary(act_prompt_chars),
         "total_model_seconds": _summary(total_model_seconds),
         "reasoning_efforts": reasoning_efforts,
+        "prompt_context_modes": prompt_context_modes,
     }
     return {
         "kind": kind or "all",
@@ -1253,6 +1258,12 @@ def format_observation_metrics(data):
     effort_counts = self_hosting.get("reasoning_efforts") or {}
     if effort_counts:
         lines.append("reasoning_efforts: " + " ".join(f"{name}={value}" for name, value in sorted(effort_counts.items())))
+    context_mode_counts = self_hosting.get("prompt_context_modes") or {}
+    if context_mode_counts:
+        lines.append(
+            "prompt_context_modes: "
+            + " ".join(f"{name}={value}" for name, value in sorted(context_mode_counts.items()))
+        )
     for label, key in (
         ("first_think_latency_seconds", "first_think_latency_seconds"),
         ("first_edit_proposal_seconds", "first_edit_proposal_seconds"),

@@ -306,11 +306,74 @@ def _round_seconds(value):
 def _active_memory_metrics(context):
     resume = ((context or {}).get("work_session") or {}).get("resume") or {}
     active_memory = resume.get("active_memory") or []
-    entries = len(active_memory) if isinstance(active_memory, list) else 0
+    if isinstance(active_memory, dict):
+        entries = len(active_memory.get("items") or [])
+    else:
+        entries = len(active_memory) if isinstance(active_memory, list) else 0
     return {
         "active_memory_chars": _json_size(active_memory),
         "active_memory_entries": entries,
     }
+
+
+def compact_active_memory_for_prompt(active_memory, *, mode="compact_memory"):
+    active_memory = active_memory if isinstance(active_memory, dict) else {}
+    items = []
+    for item in active_memory.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        compact = {
+            key: item.get(key)
+            for key in (
+                "id",
+                "scope",
+                "memory_scope",
+                "type",
+                "memory_type",
+                "key",
+                "name",
+                "description",
+                "created_at",
+                "storage",
+                "path",
+                "score",
+                "reason",
+                "matched_terms",
+            )
+            if item.get(key) not in (None, "", [], {})
+        }
+        if item.get("text"):
+            compact["text_omitted"] = True
+        items.append(compact)
+    return {
+        "source": active_memory.get("source") or ".mew/memory",
+        "terms": active_memory.get("terms") or [],
+        "items": items,
+        "total": active_memory.get("total") or len(items),
+        "truncated": bool(active_memory.get("truncated")),
+        "compacted_for_prompt": True,
+        "prompt_context_mode": mode,
+        "note": "Memory bodies are omitted in this prompt mode; use id/path as pointers and verify facts with tools.",
+    }
+
+
+def compact_resume_for_prompt(resume, *, mode="compact_memory"):
+    compacted = dict(resume or {})
+    compacted["active_memory"] = compact_active_memory_for_prompt(
+        compacted.get("active_memory"),
+        mode=mode,
+    )
+    compacted["prompt_context"] = {
+        "mode": mode,
+        "active_memory_body_injection": "omitted",
+    }
+    return compacted
+
+
+def work_prompt_context_mode(reasoning_policy):
+    if (reasoning_policy or {}).get("work_type") == "high_risk":
+        return "full"
+    return "compact_memory"
 
 
 def build_work_session_context(
@@ -389,6 +452,7 @@ def build_work_model_context(
     allow_verify=False,
     verify_command="",
     guidance="",
+    prompt_context_mode="full",
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
@@ -399,6 +463,8 @@ def build_work_model_context(
         file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
     )
     resume = attach_work_resume_world_state(resume, world_state)
+    if prompt_context_mode != "full":
+        resume = compact_resume_for_prompt(resume, mode=prompt_context_mode)
     work_context = build_budgeted_work_session_context(
         session,
         task,
@@ -517,7 +583,7 @@ def build_work_think_prompt(context):
         "Fields named guidance_snapshot under prior turns or resume decisions are historical audit records, not current instructions. "
         "Treat the capabilities object as current and authoritative; if a read/write/verify root or command is allowed there, do not ask the user to pass the same flag again. "
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
-        "Use work_session.resume.active_memory as durable typed recall about the user, project, feedback, or references; treat it as relevant context, but verify project facts with tools before relying on them for code changes. "
+        "Use work_session.resume.active_memory as durable typed recall about the user, project, feedback, or references; treat it as relevant context, but verify project facts with tools before relying on them for code changes. If active_memory.compacted_for_prompt is true, memory bodies were intentionally omitted; use id/path/name/description as pointers and read only the narrow source you need. "
         "Use work_session.effort as operational pressure. If effort.pressure is high, avoid broad exploration and prefer finish, remember, or ask_user with a concise state summary and a concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
@@ -915,6 +981,21 @@ def plan_work_model_turn(
     progress_model_deltas=True,
 ):
     current_time = now_iso()
+    capabilities = {
+        "tools": sorted(WORK_TOOLS),
+        "control_actions": sorted(WORK_CONTROL_ACTIONS),
+        "allowed_read_roots": allowed_read_roots or [],
+        "allowed_write_roots": allowed_write_roots or [],
+        "allow_shell": bool(allow_shell),
+        "allow_verify": bool(allow_verify),
+        "verify_command_configured": bool(verify_command),
+    }
+    reasoning_policy = select_work_reasoning_policy(
+        task,
+        guidance=guidance,
+        capabilities=capabilities,
+    )
+    prompt_context_mode = work_prompt_context_mode(reasoning_policy)
     context = build_work_model_context(
         state,
         session,
@@ -926,11 +1007,7 @@ def plan_work_model_turn(
         allow_verify=allow_verify,
         verify_command=verify_command,
         guidance=guidance,
-    )
-    reasoning_policy = select_work_reasoning_policy(
-        task,
-        guidance=guidance,
-        capabilities=context.get("capabilities") or {},
+        prompt_context_mode=prompt_context_mode,
     )
     stream_deltas = []
 
@@ -969,6 +1046,7 @@ def plan_work_model_turn(
         },
         "reasoning_policy": reasoning_policy,
         "reasoning_effort": reasoning_policy.get("effort") or "",
+        "prompt_context_mode": prompt_context_mode,
     }
     if act_mode == "deterministic":
         action = normalize_work_model_action(decision_plan, verify_command=verify_command)
