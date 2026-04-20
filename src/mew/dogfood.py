@@ -56,6 +56,7 @@ DOGFOOD_SCENARIOS = (
     "day-reentry",
     "continuity",
     "m3-reentry-gate",
+    "m3-source-reentry",
     "chat-cockpit",
     "work-session",
     "m2-comparative",
@@ -3863,6 +3864,321 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
         "fresh_cli_restart_prompt": str(fresh_cli_prompt_path),
         "fresh_cli_report": fresh_cli_report,
         "mew_resume_evidence": mew_resume_evidence,
+    }
+    return report
+
+
+def run_m3_source_reentry_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, input_text=None):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env, input_text=input_text)
+        commands.append(result)
+        return result
+
+    source = Path(workspace) / "mew_status.py"
+    test_file = Path(workspace) / "test_mew_status.py"
+    source.write_text(
+        'def status():\n'
+        '    return "pending"\n',
+        encoding="utf-8",
+    )
+    test_file.write_text(
+        "import unittest\n\n"
+        "from mew_status import status\n\n\n"
+        "class StatusTests(unittest.TestCase):\n"
+        "    def test_status_is_complete(self):\n"
+        "        self.assertEqual(status(), \"complete\")\n\n\n"
+        "if __name__ == \"__main__\":\n"
+        "    unittest.main()\n",
+        encoding="utf-8",
+    )
+    verify_command = f"{sys.executable} -m unittest test_mew_status.py"
+    task_result = run(
+        [
+            "task",
+            "add",
+            "M3 source reentry coding task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            ".",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=15,
+    )
+    read_result = run(
+        ["work", str(task_id), "--tool", "read_file", "--path", "mew_status.py", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    read_test_result = run(
+        ["work", str(task_id), "--tool", "read_file", "--path", "test_mew_status.py", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    edit_result = run(
+        [
+            "work",
+            str(task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "mew_status.py",
+            "--old",
+            'return "pending"',
+            "--new",
+            'return "complete"',
+            "--allow-write",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+    )
+    edit_data = _json_stdout(edit_result)
+    edit_tool_id = (edit_data.get("tool_call") or {}).get("id")
+    failed_verify_result = run(
+        [
+            "work",
+            str(task_id),
+            "--tool",
+            "run_tests",
+            "--command",
+            verify_command,
+            "--allow-verify",
+            "--json",
+        ],
+        timeout=15,
+    )
+    note_result = run(
+        [
+            "work",
+            str(task_id),
+            "--session-note",
+            "Source reentry boundary: resume must preserve the pending mew_status.py edit, failed unittest, and approve-then-verify next step.",
+            "--json",
+        ],
+        timeout=15,
+    )
+    queue_result = run(
+        [
+            "work",
+            str(task_id),
+            "--queue-followup",
+            "After reentry, approve the mew_status.py edit with deferred verification, then run unittest.",
+            "--json",
+        ],
+        timeout=15,
+    )
+
+    state_path = Path(workspace) / STATE_FILE
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    start_data = _json_stdout(start_result)
+    session_id = (start_data.get("work_session") or {}).get("id")
+    for candidate in state.get("work_sessions") or []:
+        if str(candidate.get("id")) != str(session_id):
+            continue
+        timestamp = now_iso()
+        turn_id = next_id(state, "work_model_turn")
+        candidate.setdefault("model_turns", []).append(
+            {
+                "id": turn_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "status": "completed",
+                "decision_plan": {
+                    "summary": "preserve source reentry gate after context compression",
+                    "working_memory": {
+                        "hypothesis": "Mew is worth staying inside when source edits, test failures, and next actions survive reentry.",
+                        "next_step": (
+                            "Approve the mew_status.py dry-run edit with deferred verification, "
+                            "then run unittest."
+                        ),
+                        "open_questions": ["Does resume show the pending source edit and failed unittest?"],
+                        "last_verified_state": "unittest failed before the pending source edit was applied.",
+                    },
+                },
+                "action_plan": {},
+                "action": {"type": "finish", "reason": "pause for M3 source reentry"},
+                "summary": "Captured M3 source reentry working memory.",
+                "started_at": timestamp,
+                "finished_at": timestamp,
+            }
+        )
+        candidate["updated_at"] = timestamp
+        break
+    write_json_file(state_path, state)
+
+    resume_json_result = run(
+        ["work", str(task_id), "--session", "--resume", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+    resume_text_result = run(
+        ["work", str(task_id), "--session", "--resume", "--allow-read", "."],
+        timeout=15,
+    )
+    follow_snapshot_result = run(
+        [
+            "work",
+            str(task_id),
+            "--follow",
+            "--max-steps",
+            "0",
+            "--allow-read",
+            ".",
+            "--quiet",
+            "--json",
+        ],
+        timeout=15,
+    )
+    approve_result = run(
+        [
+            "work",
+            str(task_id),
+            "--approve-tool",
+            str(edit_tool_id),
+            "--allow-write",
+            ".",
+            "--defer-verify",
+            "--json",
+        ],
+        timeout=15,
+    )
+    post_verify_result = run(
+        [
+            "work",
+            str(task_id),
+            "--tool",
+            "run_tests",
+            "--command",
+            verify_command,
+            "--allow-verify",
+            "--json",
+        ],
+        timeout=15,
+    )
+    post_resume_json_result = run(
+        ["work", str(task_id), "--session", "--resume", "--allow-read", ".", "--json"],
+        timeout=15,
+    )
+
+    resume_data = _json_stdout(resume_json_result)
+    resume = resume_data.get("resume") or {}
+    resume_text = resume_text_result.get("stdout") or ""
+    continuity = resume.get("continuity") or {}
+    pending_approvals = resume.get("pending_approvals") or []
+    unresolved_failure = resume.get("unresolved_failure") or {}
+    world_state = resume.get("world_state") or {}
+    failed_verify_data = _json_stdout(failed_verify_result)
+    follow_snapshot_file_data = read_json_file(
+        Path(workspace) / STATE_DIR / "follow" / f"session-{session_id}.json",
+        {},
+    )
+    follow_snapshot_resume = follow_snapshot_file_data.get("resume") or {}
+    follow_snapshot_continuity = follow_snapshot_file_data.get("continuity") or (
+        follow_snapshot_resume.get("continuity") or {}
+    )
+    approve_data = _json_stdout(approve_result)
+    post_verify_data = _json_stdout(post_verify_result)
+    post_resume_data = _json_stdout(post_resume_json_result)
+    post_resume = post_resume_data.get("resume") or {}
+    post_commands = post_resume.get("commands") or []
+
+    _scenario_check(
+        checks,
+        "m3_source_reentry_resume_has_source_edit_test_risk_next_action",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and read_result.get("exit_code") == 0
+        and read_test_result.get("exit_code") == 0
+        and edit_result.get("exit_code") == 0
+        and (failed_verify_data.get("tool_call") or {}).get("status") == "failed"
+        and note_result.get("exit_code") == 0
+        and queue_result.get("exit_code") == 0
+        and resume_json_result.get("exit_code") == 0
+        and resume_text_result.get("exit_code") == 0
+        and bool(pending_approvals)
+        and pending_approvals[0].get("tool_call_id") == edit_tool_id
+        and 'return "complete"' in (pending_approvals[0].get("diff_preview") or "")
+        and unresolved_failure.get("tool") == "run_tests"
+        and unresolved_failure.get("exit_code") != 0
+        and "Approve the mew_status.py dry-run edit" in ((resume.get("working_memory") or {}).get("next_step") or "")
+        and "Pending approvals" in resume_text
+        and "Failures" in resume_text,
+        observed={
+            "continuity": continuity,
+            "pending_approvals": pending_approvals,
+            "unresolved_failure": unresolved_failure,
+            "working_memory": resume.get("working_memory"),
+        },
+        expected="resume preserves pending source edit, failed unittest, and next action",
+    )
+    _scenario_check(
+        checks,
+        "m3_source_reentry_world_state_and_follow_snapshot_preserve_resume",
+        follow_snapshot_result.get("exit_code") == 0
+        and any(str(record.get("path") or "").endswith("mew_status.py") and record.get("exists") for record in world_state.get("files") or [])
+        and any(str(record.get("path") or "").endswith("test_mew_status.py") and record.get("exists") for record in world_state.get("files") or [])
+        and follow_snapshot_resume.get("session_id") == session_id
+        and follow_snapshot_continuity.get("status") in {"strong", "usable"},
+        observed={
+            "world_state": world_state,
+            "snapshot_resume": follow_snapshot_resume,
+            "snapshot_continuity": follow_snapshot_continuity,
+        },
+        expected="world state and observer snapshot preserve source/test reentry context",
+    )
+    _scenario_check(
+        checks,
+        "m3_source_reentry_can_advance_to_passing_unittest",
+        approve_result.get("exit_code") == 0
+        and (approve_data.get("tool_call") or {}).get("status") == "completed"
+        and ((approve_data.get("tool_call") or {}).get("result") or {}).get("applied") is True
+        and ((approve_data.get("tool_call") or {}).get("result") or {}).get("written") is True
+        and post_verify_result.get("exit_code") == 0
+        and (post_verify_data.get("tool_call") or {}).get("status") == "completed"
+        and ((post_verify_data.get("tool_call") or {}).get("result") or {}).get("exit_code") == 0
+        and 'return "complete"' in source.read_text(encoding="utf-8")
+        and any(command.get("exit_code") == 0 and command.get("command") == verify_command for command in post_commands),
+        observed={
+            "approve": approve_data.get("tool_call"),
+            "post_verify": post_verify_data.get("tool_call"),
+            "post_resume_commands": post_commands,
+            "source": source.read_text(encoding="utf-8"),
+        },
+        expected="after reentry, the pending source edit can be applied and unittest passes",
+    )
+    report = _scenario_report("m3-source-reentry", workspace, commands, checks)
+    report["artifacts"] = {
+        "task_id": task_id,
+        "work_session_id": session_id,
+        "continuity_status": continuity.get("status"),
+        "continuity_score": continuity.get("score"),
+        "pending_approval_count": len(pending_approvals),
+        "unresolved_failure_tool": unresolved_failure.get("tool"),
+        "unresolved_failure_exit_code": unresolved_failure.get("exit_code"),
+        "source_file": "mew_status.py",
+        "test_file": "test_mew_status.py",
+        "verify_command": verify_command,
     }
     return report
 
@@ -8164,6 +8480,8 @@ def run_dogfood_scenario(args):
                     comparison_report_path=getattr(args, "m3_comparison_report", None),
                 )
             )
+        elif name == "m3-source-reentry":
+            reports.append(run_m3_source_reentry_scenario(scenario_workspace, env=env))
         elif name == "chat-cockpit":
             reports.append(run_chat_cockpit_scenario(scenario_workspace, env=env))
         elif name == "work-session":

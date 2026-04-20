@@ -622,6 +622,28 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertTrue(fresh_cli_report["persistent_advantage_signal"]["mew_saved_reconstruction"])
 
+    def test_run_dogfood_m3_source_reentry_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m3-source-reentry",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m3-source-reentry")
+            self.assertEqual(artifacts["continuity_status"], "strong")
+            self.assertEqual(artifacts["pending_approval_count"], 1)
+            self.assertEqual(artifacts["unresolved_failure_tool"], "run_tests")
+            self.assertEqual(artifacts["source_file"], "mew_status.py")
+            self.assertIn("m3_source_reentry_resume_has_source_edit_test_risk_next_action", text)
+            self.assertIn("m3_source_reentry_can_advance_to_passing_unittest", text)
+
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
