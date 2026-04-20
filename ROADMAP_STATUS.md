@@ -387,8 +387,15 @@ Evidence:
   memory bodies are omitted from THINK/ACT prompts and replaced by
   id/path/name/description pointers, while full resume output remains available
   to humans.
+- Compact prompt context now also uses tighter tool-call, model-turn, task,
+  goal, and resume limits. On the active #320 session this reduced measured
+  context from about `95k` chars to about `28k` chars, and THINK prompt from
+  about `129k` chars to about `43k` chars before another real Codex rerun.
 - `mew metrics` now summarizes prompt context modes so self-hosting reports can
   prove whether a task used full or compact resident memory injection.
+- `mew metrics` now breaks down self-hosting prompt size into work-session,
+  resume, tool-context, and model-turn context chars so future reruns can show
+  which part still dominates.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
@@ -416,8 +423,9 @@ Done when:
 
 Next action:
 
-- Rerun a #320-class self-hosting task and compare the new `self_hosting`
-  metrics against the failed attempt.
+- Rerun a #320-class self-hosting task and compare first useful output,
+  edit-proposal latency, and the new `self_hosting` prompt-size breakdown
+  against the failed attempt.
 
 ### M7: Senses - Inbound Signals
 

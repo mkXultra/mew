@@ -29,6 +29,10 @@ class MetricsTests(unittest.TestCase):
                         "finished_at": "2026-04-19T00:00:03Z",
                         "model_metrics": {
                             "context_chars": 12345,
+                            "work_session_chars": 10000,
+                            "resume_chars": 1000,
+                            "tool_context_chars": 8000,
+                            "model_turn_context_chars": 500,
                             "active_memory_chars": 456,
                             "active_memory_entries": 2,
                             "think": {"prompt_chars": 111, "elapsed_seconds": 7.5},
@@ -128,6 +132,10 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["self_hosting"]["first_think_latency_seconds"]["avg"], 7.5)
         self.assertEqual(metrics["self_hosting"]["first_edit_proposal_seconds"]["avg"], 11.0)
         self.assertEqual(metrics["self_hosting"]["context_chars"]["avg"], 12345.0)
+        self.assertEqual(metrics["self_hosting"]["work_session_chars"]["avg"], 10000.0)
+        self.assertEqual(metrics["self_hosting"]["resume_chars"]["avg"], 1000.0)
+        self.assertEqual(metrics["self_hosting"]["tool_context_chars"]["avg"], 8000.0)
+        self.assertEqual(metrics["self_hosting"]["model_turn_context_chars"]["avg"], 500.0)
         self.assertEqual(metrics["self_hosting"]["active_memory_chars"]["avg"], 456.0)
         self.assertEqual(metrics["self_hosting"]["active_memory_entries"]["avg"], 2.0)
         self.assertEqual(metrics["self_hosting"]["think_prompt_chars"]["avg"], 111.0)
@@ -150,6 +158,7 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("first_think_latency_seconds: count=1 avg=7.5", text)
         self.assertIn("first_edit_proposal_seconds: count=1 avg=11.0", text)
         self.assertIn("context_chars: count=1 avg=12345.0", text)
+        self.assertIn("tool_context_chars: count=1 avg=8000.0", text)
         self.assertIn("signals:", text)
         self.assertIn("verification failures are frequent", text)
         self.assertIn("diagnostics:", text)

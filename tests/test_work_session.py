@@ -13255,6 +13255,52 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(result["next_offset"], 200 + WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
         self.assertLess(len(result["text"]), len(text))
 
+    def test_work_model_context_compact_prompt_uses_tighter_tool_context(self):
+        from mew.work_loop import (
+            WORK_COMPACT_CONTEXT_BUDGET,
+            WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT,
+            build_work_model_context,
+        )
+
+        text = "x" * (WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT + 1000)
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Compact recent read context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": index + 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": f"file{index}.py", "offset": 0},
+                    "result": {"path": f"file{index}.py", "text": text, "offset": 0, "truncated": False},
+                    "summary": f"read file{index}",
+                }
+                for index in range(8)
+            ],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Compact", "description": "Compact recent read context.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_memory",
+        )["work_session"]
+        result = work_context["tool_calls"][0]["result"]
+
+        self.assertTrue(work_context["context_compaction"]["prompt_context_compacted"])
+        self.assertEqual(work_context["context_compaction"]["prompt_context_mode"], "compact_memory")
+        self.assertTrue(work_context["tool_calls"][0]["prompt_context_compacted"])
+        self.assertTrue(result["context_truncated"])
+        self.assertEqual(result["visible_chars"], WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT)
+        self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_COMPACT_CONTEXT_BUDGET)
+
     def test_work_model_context_under_budget_keeps_recent_window(self):
         from mew.work_loop import build_work_model_context
 

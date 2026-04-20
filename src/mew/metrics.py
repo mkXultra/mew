@@ -1059,6 +1059,10 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     first_think_latencies = []
     first_edit_proposal_times = []
     context_chars = []
+    work_session_chars = []
+    resume_chars = []
+    tool_context_chars = []
+    model_turn_context_chars = []
     active_memory_chars = []
     active_memory_entries = []
     think_prompt_chars = []
@@ -1126,6 +1130,10 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         first_edit_proposal_times.append(_first_edit_proposal_seconds(session, model_turns, tool_calls))
         for turn in model_turns:
             context_chars.append(_numeric_model_metric(turn, "context_chars"))
+            work_session_chars.append(_numeric_model_metric(turn, "work_session_chars"))
+            resume_chars.append(_numeric_model_metric(turn, "resume_chars"))
+            tool_context_chars.append(_numeric_model_metric(turn, "tool_context_chars"))
+            model_turn_context_chars.append(_numeric_model_metric(turn, "model_turn_context_chars"))
             active_memory_chars.append(_numeric_model_metric(turn, "active_memory_chars"))
             active_memory_entries.append(_numeric_model_metric(turn, "active_memory_entries"))
             think_prompt_chars.append(_numeric_model_metric(turn, "think", "prompt_chars"))
@@ -1183,6 +1191,10 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "first_think_latency_seconds": _summary(first_think_latencies),
         "first_edit_proposal_seconds": _summary(first_edit_proposal_times),
         "context_chars": _summary(context_chars),
+        "work_session_chars": _summary(work_session_chars),
+        "resume_chars": _summary(resume_chars),
+        "tool_context_chars": _summary(tool_context_chars),
+        "model_turn_context_chars": _summary(model_turn_context_chars),
         "active_memory_chars": _summary(active_memory_chars),
         "active_memory_entries": _summary(active_memory_entries),
         "think_prompt_chars": _summary(think_prompt_chars),
@@ -1268,6 +1280,10 @@ def format_observation_metrics(data):
         ("first_think_latency_seconds", "first_think_latency_seconds"),
         ("first_edit_proposal_seconds", "first_edit_proposal_seconds"),
         ("context_chars", "context_chars"),
+        ("work_session_chars", "work_session_chars"),
+        ("resume_chars", "resume_chars"),
+        ("tool_context_chars", "tool_context_chars"),
+        ("model_turn_context_chars", "model_turn_context_chars"),
         ("active_memory_chars", "active_memory_chars"),
         ("active_memory_entries", "active_memory_entries"),
         ("think_prompt_chars", "think_prompt_chars"),

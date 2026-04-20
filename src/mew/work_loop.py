@@ -33,6 +33,17 @@ WORK_LIST_CONTEXT_ITEM_LIMIT = 100
 WORK_CONTEXT_RECENT_TOOL_CALLS = 12
 WORK_CONTEXT_BUDGET = 120000
 WORK_CONTEXT_WINDOW_CANDIDATES = ((12, 8), (8, 6), (6, 4), (4, 2), (2, 2))
+WORK_COMPACT_RESULT_TEXT_LIMIT = 4000
+WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT = 1200
+WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT = 300
+WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT = 20
+WORK_COMPACT_CONTEXT_BUDGET = 25000
+WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES = ((6, 4), (4, 2), (2, 2), (1, 1))
+WORK_COMPACT_TASK_TEXT_LIMIT = 1200
+WORK_COMPACT_RESUME_TEXT_LIMIT = 600
+WORK_COMPACT_RESUME_ITEM_LIMIT = 6
+WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
+WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
@@ -62,34 +73,59 @@ def _json_clip(value, limit=WORK_RESULT_TEXT_LIMIT):
     return clip_output(text, limit)
 
 
-def _compact_context_value(value, text_limit=WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT):
+def _compact_context_value(
+    value,
+    text_limit=WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT,
+    item_limit=WORK_LIST_CONTEXT_ITEM_LIMIT,
+):
     if isinstance(value, str):
         return clip_output(value, text_limit)
     if isinstance(value, list):
-        return [_compact_context_value(item, text_limit=text_limit) for item in value[:WORK_LIST_CONTEXT_ITEM_LIMIT]]
+        return [
+            _compact_context_value(item, text_limit=text_limit, item_limit=item_limit)
+            for item in value[:item_limit]
+        ]
     if isinstance(value, dict):
-        return {key: _compact_context_value(item, text_limit=text_limit) for key, item in value.items()}
+        return {
+            key: _compact_context_value(item, text_limit=text_limit, item_limit=item_limit)
+            for key, item in value.items()
+        }
     return value
 
 
-def _compact_context_items(items):
+def _compact_context_items(
+    items,
+    text_limit=WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT,
+    item_limit=WORK_LIST_CONTEXT_ITEM_LIMIT,
+):
     items = items if isinstance(items, list) else []
-    return [_compact_context_value(item) for item in items[:WORK_LIST_CONTEXT_ITEM_LIMIT]]
+    return [
+        _compact_context_value(item, text_limit=text_limit, item_limit=item_limit)
+        for item in items[:item_limit]
+    ]
 
 
-def _compact_tool_result(tool, result):
+def _compact_tool_result(
+    tool,
+    result,
+    *,
+    read_file_text_limit=WORK_READ_FILE_CONTEXT_TEXT_LIMIT,
+    result_text_limit=WORK_RESULT_TEXT_LIMIT,
+    list_item_text_limit=WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT,
+    list_item_limit=WORK_LIST_CONTEXT_ITEM_LIMIT,
+):
     result = result or {}
     if tool == "read_file":
         if result.get("line_start") is not None:
             text = result.get("text") or ""
-            context_truncated = len(text) > WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+            context_truncated = len(text) > read_file_text_limit
             return {
                 "path": result.get("path"),
                 "line_start": result.get("line_start"),
                 "line_end": result.get("line_end"),
                 "next_line": result.get("next_line"),
-                "text": clip_output(text, WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
-                "visible_chars": min(len(text), WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+                "text": clip_output(text, read_file_text_limit),
+                "visible_chars": min(len(text), read_file_text_limit),
                 "source_text_chars": len(text),
                 "context_truncated": context_truncated,
                 "source_truncated": bool(result.get("truncated")),
@@ -97,8 +133,8 @@ def _compact_tool_result(tool, result):
             }
         offset = result.get("offset") or 0
         text = result.get("text") or ""
-        context_truncated = len(text) > WORK_READ_FILE_CONTEXT_TEXT_LIMIT
-        visible_chars = min(len(text), WORK_READ_FILE_CONTEXT_TEXT_LIMIT)
+        context_truncated = len(text) > read_file_text_limit
+        visible_chars = min(len(text), read_file_text_limit)
         next_offset = result.get("next_offset")
         if context_truncated:
             next_offset = offset + visible_chars
@@ -121,15 +157,27 @@ def _compact_tool_result(tool, result):
         }
         if "entries" in result:
             entries = result.get("entries") or []
-            compact["entries"] = _compact_context_items(entries)
+            compact["entries"] = _compact_context_items(
+                entries,
+                text_limit=list_item_text_limit,
+                item_limit=list_item_limit,
+            )
             compact["entries_context_truncated"] = len(entries) > len(compact["entries"])
         if "matches" in result:
             matches = result.get("matches") or []
-            compact["matches"] = _compact_context_items(matches)
+            compact["matches"] = _compact_context_items(
+                matches,
+                text_limit=list_item_text_limit,
+                item_limit=list_item_limit,
+            )
             compact["matches_context_truncated"] = len(matches) > len(compact["matches"])
         if "snippets" in result:
             snippets = result.get("snippets") or []
-            compact["snippets"] = _compact_context_items(snippets)
+            compact["snippets"] = _compact_context_items(
+                snippets,
+                text_limit=list_item_text_limit,
+                item_limit=list_item_limit,
+            )
             compact["snippets_context_truncated"] = len(snippets) > len(compact["snippets"])
         return compact
     if tool in ("run_command", "run_tests", "git_status", "git_diff", "git_log"):
@@ -137,8 +185,8 @@ def _compact_tool_result(tool, result):
             "command": result.get("command"),
             "cwd": result.get("cwd"),
             "exit_code": result.get("exit_code"),
-            "stdout": clip_output(result.get("stdout") or "", WORK_RESULT_TEXT_LIMIT),
-            "stderr": clip_output(result.get("stderr") or "", WORK_RESULT_TEXT_LIMIT),
+            "stdout": clip_output(result.get("stdout") or "", result_text_limit),
+            "stderr": clip_output(result.get("stderr") or "", result_text_limit),
         }
     if tool in WRITE_WORK_TOOLS:
         return {
@@ -150,16 +198,16 @@ def _compact_tool_result(tool, result):
             "rolled_back": result.get("rolled_back"),
             "verification_exit_code": result.get("verification_exit_code"),
             "rollback_error": result.get("rollback_error"),
-            "diff": clip_output(result.get("diff") or "", WORK_RESULT_TEXT_LIMIT),
+            "diff": clip_output(result.get("diff") or "", result_text_limit),
         }
     return {"raw": _json_clip(result)}
 
 
-def _compact_parameters(parameters):
+def _compact_parameters(parameters, *, text_limit=1000):
     compact = {}
     for key, value in dict(parameters or {}).items():
         if isinstance(value, str):
-            compact[key] = clip_output(value, 1000)
+            compact[key] = clip_output(value, text_limit)
         else:
             compact[key] = value
     return compact
@@ -183,27 +231,54 @@ def compact_turn_reasoning(turn):
     return clip_output("\n".join(parts), 4000)
 
 
-def work_tool_call_for_model(call):
+def work_tool_call_for_model(call, *, prompt_context_mode="full"):
     tool = call.get("tool") or ""
+    compact_prompt = prompt_context_mode != "full"
+    result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
+    read_file_text_limit = (
+        WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+    )
+    list_item_text_limit = (
+        WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
+    )
+    list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
     item = {
         "id": call.get("id"),
         "tool": tool,
         "status": call.get("status"),
-        "parameters": _compact_parameters(call.get("parameters") or {}),
-        "summary": clip_output(call.get("summary") or "", WORK_RESULT_TEXT_LIMIT),
-        "error": clip_output(call.get("error") or "", WORK_RESULT_TEXT_LIMIT),
-        "result": _compact_tool_result(tool, call.get("result") or {}),
+        "parameters": _compact_parameters(
+            call.get("parameters") or {},
+            text_limit=400 if compact_prompt else 1000,
+        ),
+        "summary": clip_output(call.get("summary") or "", result_text_limit),
+        "error": clip_output(call.get("error") or "", result_text_limit),
+        "result": _compact_tool_result(
+            tool,
+            call.get("result") or {},
+            read_file_text_limit=read_file_text_limit,
+            result_text_limit=result_text_limit,
+            list_item_text_limit=list_item_text_limit,
+            list_item_limit=list_item_limit,
+        ),
         "started_at": call.get("started_at"),
         "finished_at": call.get("finished_at"),
     }
+    if compact_prompt:
+        item["prompt_context_compacted"] = True
     if call.get("repeat_guard"):
-        item["repeat_guard"] = _compact_context_value(call.get("repeat_guard"))
+        item["repeat_guard"] = _compact_context_value(
+            call.get("repeat_guard"),
+            text_limit=list_item_text_limit,
+            item_limit=list_item_limit,
+        )
     return item
 
 
-def work_model_turn_for_model(turn):
+def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
     action = turn.get("action") or {}
-    return {
+    compact_prompt = prompt_context_mode != "full"
+    text_limit = 1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT
+    item = {
         "id": turn.get("id"),
         "status": turn.get("status"),
         "action": {
@@ -211,15 +286,18 @@ def work_model_turn_for_model(turn):
             for key, value in action.items()
             if key in ("type", "tool", "path", "query", "pattern", "reason", "summary", "note", "text", "question")
         },
-        "guidance_snapshot": work_turn_guidance_snapshot(turn),
+        "guidance_snapshot": clip_output(work_turn_guidance_snapshot(turn), text_limit),
         "tool_call_id": turn.get("tool_call_id"),
         "tool_call_ids": turn.get("tool_call_ids") or [],
-        "summary": clip_output(turn.get("summary") or "", WORK_RESULT_TEXT_LIMIT),
-        "reasoning": compact_turn_reasoning(turn),
-        "error": clip_output(turn.get("error") or "", WORK_RESULT_TEXT_LIMIT),
+        "summary": clip_output(turn.get("summary") or "", text_limit),
+        "reasoning": clip_output(compact_turn_reasoning(turn), text_limit),
+        "error": clip_output(turn.get("error") or "", text_limit),
         "started_at": turn.get("started_at"),
         "finished_at": turn.get("finished_at"),
     }
+    if compact_prompt:
+        item["prompt_context_compacted"] = True
+    return item
 
 
 def _count_items(value, key):
@@ -316,10 +394,17 @@ def _active_memory_metrics(context):
     }
 
 
-def compact_active_memory_for_prompt(active_memory, *, mode="compact_memory"):
+def compact_active_memory_for_prompt(
+    active_memory,
+    *,
+    mode="compact_memory",
+    item_limit=WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT,
+    terms_limit=WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT,
+):
     active_memory = active_memory if isinstance(active_memory, dict) else {}
     items = []
-    for item in active_memory.get("items") or []:
+    source_items = active_memory.get("items") or []
+    for item in source_items[:item_limit]:
         if not isinstance(item, dict):
             continue
         compact = {
@@ -347,9 +432,10 @@ def compact_active_memory_for_prompt(active_memory, *, mode="compact_memory"):
         items.append(compact)
     return {
         "source": active_memory.get("source") or ".mew/memory",
-        "terms": active_memory.get("terms") or [],
+        "terms": list(active_memory.get("terms") or [])[:terms_limit],
         "items": items,
         "total": active_memory.get("total") or len(items),
+        "shown": len(items),
         "truncated": bool(active_memory.get("truncated")),
         "compacted_for_prompt": True,
         "prompt_context_mode": mode,
@@ -363,9 +449,38 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         compacted.get("active_memory"),
         mode=mode,
     )
+    for key in (
+        "goal",
+        "working_memory",
+        "recovery_plan",
+        "recent_decisions",
+        "compressed_prior_think",
+        "same_surface_audit",
+        "continuity",
+        "effort",
+        "notes",
+        "low_yield_observations",
+        "failures",
+        "unresolved_failure",
+        "recurring_failures",
+        "suggested_safe_reobserve",
+        "world_state",
+        "files_touched",
+        "queued_followups",
+        "pending_steer",
+        "next_action",
+    ):
+        if key in compacted:
+            compacted[key] = _compact_context_value(
+                compacted.get(key),
+                text_limit=WORK_COMPACT_RESUME_TEXT_LIMIT,
+                item_limit=WORK_COMPACT_RESUME_ITEM_LIMIT,
+            )
     compacted["prompt_context"] = {
         "mode": mode,
         "active_memory_body_injection": "omitted",
+        "resume_text_limit": WORK_COMPACT_RESUME_TEXT_LIMIT,
+        "resume_item_limit": WORK_COMPACT_RESUME_ITEM_LIMIT,
     }
     return compacted
 
@@ -386,11 +501,16 @@ def build_work_session_context(
     recent_tool_count=WORK_CONTEXT_RECENT_TOOL_CALLS,
     recent_turn_count=8,
     compacted=False,
+    prompt_context_mode="full",
 ):
+    prompt_compacted = prompt_context_mode != "full"
+    goal = session.get("goal")
+    if prompt_compacted:
+        goal = clip_output(goal or "", WORK_COMPACT_TASK_TEXT_LIMIT)
     work_context = {
         "id": session.get("id"),
         "status": session.get("status"),
-        "goal": session.get("goal"),
+        "goal": goal,
         "created_at": session.get("created_at"),
         "updated_at": session.get("updated_at"),
         "effort": (resume or {}).get("effort") or {},
@@ -398,30 +518,48 @@ def build_work_session_context(
         "world_state": world_state,
         "session_knowledge": build_session_knowledge(tool_calls, recent_count=recent_tool_count),
         "tool_calls": [
-            work_tool_call_for_model(call)
+            work_tool_call_for_model(call, prompt_context_mode=prompt_context_mode)
             for call in tool_calls[-recent_tool_count:]
         ],
         "model_turns": [
-            work_model_turn_for_model(turn)
+            work_model_turn_for_model(turn, prompt_context_mode=prompt_context_mode)
             for turn in model_turns[-recent_turn_count:]
         ],
     }
-    if compacted:
+    if compacted or prompt_compacted:
         work_context["context_compaction"] = {
-            "compacted": True,
-            "budget_chars": WORK_CONTEXT_BUDGET,
+            "compacted": bool(compacted),
+            "prompt_context_compacted": prompt_compacted,
+            "prompt_context_mode": prompt_context_mode,
+            "budget_chars": WORK_COMPACT_CONTEXT_BUDGET if prompt_compacted else WORK_CONTEXT_BUDGET,
             "recent_tool_calls": recent_tool_count,
             "recent_model_turns": recent_turn_count,
             "total_tool_calls": len(tool_calls),
             "total_model_turns": len(model_turns),
-            "note": "Recent work context was compacted due to session size; use remember for durable observations.",
+            "note": (
+                "Recent work context uses compact prompt limits; read one narrow source window if exact text is needed."
+                if prompt_compacted
+                else "Recent work context was compacted due to session size; use remember for durable observations."
+            ),
         }
     return work_context
 
 
-def build_budgeted_work_session_context(session, task, tool_calls, model_turns, resume, world_state):
+def build_budgeted_work_session_context(
+    session,
+    task,
+    tool_calls,
+    model_turns,
+    resume,
+    world_state,
+    *,
+    prompt_context_mode="full",
+):
     chosen = None
-    for index, (recent_tool_count, recent_turn_count) in enumerate(WORK_CONTEXT_WINDOW_CANDIDATES):
+    prompt_compacted = prompt_context_mode != "full"
+    budget = WORK_COMPACT_CONTEXT_BUDGET if prompt_compacted else WORK_CONTEXT_BUDGET
+    candidates = WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES if prompt_compacted else WORK_CONTEXT_WINDOW_CANDIDATES
+    for index, (recent_tool_count, recent_turn_count) in enumerate(candidates):
         candidate = build_work_session_context(
             session,
             task,
@@ -432,13 +570,22 @@ def build_budgeted_work_session_context(session, task, tool_calls, model_turns, 
             recent_tool_count=recent_tool_count,
             recent_turn_count=recent_turn_count,
             compacted=index > 0,
+            prompt_context_mode=prompt_context_mode,
         )
-        if _json_size(candidate) <= WORK_CONTEXT_BUDGET:
+        if _json_size(candidate) <= budget:
             return candidate
         chosen = candidate
     if chosen is not None:
         chosen["context_compaction"]["final_size_chars"] = _json_size(chosen)
-    return chosen or build_work_session_context(session, task, tool_calls, model_turns, resume, world_state)
+    return chosen or build_work_session_context(
+        session,
+        task,
+        tool_calls,
+        model_turns,
+        resume,
+        world_state,
+        prompt_context_mode=prompt_context_mode,
+    )
 
 
 def build_work_model_context(
@@ -472,16 +619,22 @@ def build_work_model_context(
         model_turns,
         resume,
         world_state,
+        prompt_context_mode=prompt_context_mode,
     )
+    task_description = task.get("description") if task else session.get("goal")
+    task_notes = (task or {}).get("notes") or ""
+    if prompt_context_mode != "full":
+        task_description = clip_output(task_description or "", WORK_COMPACT_TASK_TEXT_LIMIT)
+        task_notes = clip_work_task_notes(task_notes, WORK_COMPACT_TASK_TEXT_LIMIT)
     return {
         "date": {"now": current_time},
         "task": {
             "id": task.get("id") if task else session.get("task_id"),
             "title": task.get("title") if task else session.get("title"),
-            "description": task.get("description") if task else session.get("goal"),
+            "description": task_description,
             "status": task.get("status") if task else "",
             "kind": task.get("kind") if task else "",
-            "notes": clip_work_task_notes((task or {}).get("notes") or "", WORK_RESULT_TEXT_LIMIT),
+            "notes": clip_work_task_notes(task_notes, WORK_RESULT_TEXT_LIMIT),
             "cwd": (task or {}).get("cwd") or ".",
         },
         "work_session": work_context,
@@ -1037,8 +1190,13 @@ def plan_work_model_turn(
     think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
+    work_session_context = (context or {}).get("work_session") or {}
     model_metrics = {
         "context_chars": _json_size(context),
+        "work_session_chars": _json_size(work_session_context),
+        "resume_chars": _json_size(work_session_context.get("resume")),
+        "tool_context_chars": _json_size(work_session_context.get("tool_calls")),
+        "model_turn_context_chars": _json_size(work_session_context.get("model_turns")),
         **_active_memory_metrics(context),
         "think": {
             "prompt_chars": len(think_prompt),
