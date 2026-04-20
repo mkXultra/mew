@@ -589,6 +589,10 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(text_code, 0)
                 self.assertIn("verification: passed exit_code=0", text_stdout.getvalue())
                 self.assertIn("no_rescue_review=no_rescue_review_recorded", text_stdout.getvalue())
+                self.assertIn(
+                    "loop_credit_status: candidate_no_rescue_reviewed_pending_m3",
+                    text_stdout.getvalue(),
+                )
 
                 state = load_state()
                 state["work_sessions"][0]["notes"].append(
