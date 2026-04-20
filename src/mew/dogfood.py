@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import timedelta
 from types import SimpleNamespace
 
 from .brief import recent_activity, next_move
@@ -2762,13 +2763,23 @@ def run_day_reentry_scenario(workspace, env=None):
 
     state_path = Path(workspace) / STATE_FILE
     state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
-    note_at = "2026-04-16T08:32:00Z"
-    tool_at = "2026-04-16T08:34:00Z"
-    memory_at = "2026-04-16T08:36:00Z"
+    reference_time = parse_time(now_iso())
+    aged_start = reference_time - timedelta(days=8) if reference_time else None
+
+    def aged_at(minutes):
+        if not aged_start:
+            return now_iso()
+        return (aged_start + timedelta(minutes=minutes)).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    session_created_at = aged_at(0)
+    note_at = aged_at(32)
+    tool_at = aged_at(34)
+    risk_at = aged_at(35)
+    memory_at = aged_at(36)
     for candidate in state.get("work_sessions") or []:
         if str(candidate.get("id")) != str(session_id):
             continue
-        candidate["created_at"] = "2026-04-16T08:00:00Z"
+        candidate["created_at"] = session_created_at
         candidate["updated_at"] = memory_at
         candidate["goal"] = "Prove a next-day reentry surface for active work."
         candidate.setdefault("notes", []).append(
@@ -2806,8 +2817,8 @@ def run_day_reentry_scenario(workspace, env=None):
                 "result": {"command": verify_command, "exit_code": 1, "stderr": "dogfood verifier failed\n"},
                 "error": "day-scale verifier still needs recovery",
                 "summary": "Verifier failed before day-scale reentry.",
-                "started_at": "2026-04-16T08:35:00Z",
-                "finished_at": "2026-04-16T08:35:00Z",
+                "started_at": risk_at,
+                "finished_at": risk_at,
             }
         )
         memory_turn_id = next_id(state, "work_model_turn")
@@ -2872,11 +2883,11 @@ def run_day_reentry_scenario(workspace, env=None):
         and focus_json_result.get("exit_code") == 0
         and focus_session.get("id") == session_id
         and focus_session.get("task_id") == task_id
-        and (focus_session.get("inactive_hours") or 0) >= 24.0
+        and (focus_session.get("inactive_hours") or 0) >= 168.0
         and bool(focus_session.get("inactive_for"))
         and "day-scale verifier still needs recovery" in (focus_session.get("risk") or ""),
         observed=focus_session,
-        expected="focus --json surfaces the active session with day-scale inactive age and unresolved risk",
+        expected="focus --json surfaces the active session with week-scale inactive age and unresolved risk",
     )
     _scenario_check(
         checks,
@@ -2917,7 +2928,14 @@ def run_day_reentry_scenario(workspace, env=None):
         observed=activity_data,
         expected="activity --kind coding preserves old turn, tool, and note events for reentry audit",
     )
-    return _scenario_report("day-reentry", workspace, commands, checks)
+    report = _scenario_report("day-reentry", workspace, commands, checks)
+    report["artifacts"] = {
+        "synthetic_age_days": 7,
+        "session_created_at": session_created_at,
+        "session_updated_at": memory_at,
+        "observed_inactive_hours": focus_session.get("inactive_hours"),
+    }
+    return report
 
 
 def run_continuity_scenario(workspace, env=None):
