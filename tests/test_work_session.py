@@ -13759,6 +13759,75 @@ class WorkSessionTests(unittest.TestCase):
             3217,
         )
 
+    def test_work_model_context_merges_same_file_recent_read_windows_for_edit_preparation(self):
+        from mew.work_loop import build_work_model_context
+
+        def make_read_file(call_id, path, line_start, line_end, summary):
+            text = "".join(f"{path}:{line}\n" for line in range(line_start, line_end + 1))
+            return {
+                "id": call_id,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": path, "line_start": line_start, "line_count": line_end - line_start + 1},
+                "result": {
+                    "path": path,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "text": text,
+                    "truncated": False,
+                },
+                "summary": summary,
+            }
+
+        tool_calls = [
+            make_read_file(1, "src/mew/work_session.py", 3217, 3248, "read compressed prior"),
+            make_read_file(2, "src/mew/work_session.py", 3859, 3874, "read recent decisions"),
+            make_read_file(3, "src/mew/work_session.py", 4350, 4397, "read formatter"),
+            make_read_file(4, "tests/test_work_session.py", 460, 475, "read compressed prior test"),
+            make_read_file(5, "tests/test_work_session.py", 5440, 5494, "read recent decisions test"),
+            make_read_file(6, "src/mew/work_session.py", 3870, 3881, "read recent decisions repair"),
+            make_read_file(7, "src/mew/work_session.py", 4398, 4417, "read formatter repair"),
+        ]
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Merge overlapping or adjacent recent line windows for same-file edits.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Merged recent windows",
+            "description": "Keep enough exact same-file windows for edit preparation.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+        windows = work_context["recent_read_file_windows"]
+
+        self.assertEqual(len(windows), 5)
+        self.assertEqual([item["tool_call_id"] for item in windows], [7, 6, 5, 4, 1])
+        self.assertEqual(windows[0]["path"], "src/mew/work_session.py")
+        self.assertEqual(windows[0]["line_start"], 4350)
+        self.assertEqual(windows[0]["line_end"], 4417)
+        self.assertEqual(
+            windows[0]["text"],
+            "".join(f"src/mew/work_session.py:{line}\n" for line in range(4350, 4418)),
+        )
+        self.assertEqual(windows[1]["path"], "src/mew/work_session.py")
+        self.assertEqual(windows[1]["line_start"], 3859)
+        self.assertEqual(windows[1]["line_end"], 3881)
+        self.assertEqual(
+            windows[1]["text"],
+            "".join(f"src/mew/work_session.py:{line}\n" for line in range(3859, 3882)),
+        )
+        self.assertEqual(windows[4]["line_start"], 3217)
+        self.assertEqual(windows[4]["line_end"], 3248)
+
     def test_work_model_context_clips_large_search_matches(self):
         from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context
 

@@ -697,6 +697,25 @@ Evidence:
   `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
   and `git diff --check` passed. This is product progress aimed at the #337
   blocker, not mew-side evidence.
+- M6.6 task #338 / session #325 then retried the next fresh
+  `src/mew/work_session.py` same-file multi-span slice for
+  `working_memory.open_questions`. The native loop reached a paired dry-run
+  edit proposal, but that batch covered only the `recent_decisions` path and
+  missed the matching `compressed_prior_think` changes, so it was correctly
+  rejected. The follow-up turns then kept rereading overlapping and adjacent
+  `src/mew/work_session.py` exact spans instead of reusing already-known
+  context, which showed that the remaining blocker was not only window count:
+  same-path overlapping/adjacent recent read windows were displacing each
+  other. This is blocker evidence, not no-rescue mew-side evidence.
+- A direct supervisor patch then changed `build_recent_read_file_windows()` to
+  merge same-path overlapping or adjacent line windows instead of spending
+  separate slots on each repair reread, with a focused regression in
+  `tests/test_work_session.py` proving that the merged windows retain the full
+  `4350-4417` and `3859-3881` exact spans while still preserving the paired
+  test windows and the older `3217-3248` source window under the five-window
+  cap. Focused `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress aimed
+  at the #338 blocker, not mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -734,11 +753,13 @@ Missing proof:
   #332 one steer to stop repeated same-symbol search before the exact read. The
   blocked #333, direct-patch #334, and blocked/direct-patch #335 follow-ups
   show where exact old-text retention failed before #336. The #336 blocker
-  reduction improves same-session exact window reuse, but #337 shows that
-  same-file multi-span exact-old-text reuse inside `src/mew/work_session.py`
-  still is not proven under medium context pressure. The recent-window limit
-  patch should help, but it has not yet been proven by a fresh no-rescue
-  work-session task, so the native loop is not yet self-sufficient.
+  reduction improves same-session exact window reuse, but #337 and blocked
+  #338 showed that same-file multi-span exact-old-text reuse inside
+  `src/mew/work_session.py` still was not proven under medium context pressure:
+  overlapping/adjacent same-path repairs displaced each other even after the
+  five-window limit patch. The merged-window patch should reduce that failure
+  mode, but it has not yet been proven by a fresh no-rescue work-session task,
+  so the native loop is not yet self-sufficient.
 
 Done when:
 

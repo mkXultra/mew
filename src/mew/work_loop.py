@@ -372,6 +372,58 @@ def build_session_knowledge(calls, recent_count=WORK_CONTEXT_RECENT_TOOL_CALLS):
     return entries
 
 
+def _recent_read_line_window_map(window):
+    if not isinstance(window, dict) or window.get("context_truncated"):
+        return None
+    path = window.get("path")
+    line_start = window.get("line_start")
+    line_end = window.get("line_end")
+    text = window.get("text")
+    if not path or text is None or not isinstance(line_start, int) or not isinstance(line_end, int):
+        return None
+    if line_end < line_start:
+        return None
+    pieces = str(text).splitlines(keepends=True)
+    expected = line_end - line_start + 1
+    if len(pieces) != expected:
+        return None
+    return {line_start + index: piece for index, piece in enumerate(pieces)}
+
+
+def _merge_recent_read_line_window(existing, candidate, *, text_limit):
+    if not isinstance(existing, dict) or not isinstance(candidate, dict):
+        return False
+    if existing.get("path") != candidate.get("path"):
+        return False
+    existing_start = existing.get("line_start")
+    existing_end = existing.get("line_end")
+    candidate_start = candidate.get("line_start")
+    candidate_end = candidate.get("line_end")
+    if not all(isinstance(value, int) for value in (existing_start, existing_end, candidate_start, candidate_end)):
+        return False
+    if candidate_start > existing_end + 1 or existing_start > candidate_end + 1:
+        return False
+    existing_map = _recent_read_line_window_map(existing)
+    candidate_map = _recent_read_line_window_map(candidate)
+    if existing_map is None or candidate_map is None:
+        return False
+    merged_start = min(existing_start, candidate_start)
+    merged_end = max(existing_end, candidate_end)
+    expected_lines = list(range(merged_start, merged_end + 1))
+    merged_map = dict(candidate_map)
+    merged_map.update(existing_map)
+    if sorted(merged_map) != expected_lines:
+        return False
+    merged_text = "".join(merged_map[line] for line in expected_lines)
+    existing["line_start"] = merged_start
+    existing["line_end"] = merged_end
+    existing["text"] = clip_output(merged_text, text_limit)
+    existing["visible_chars"] = min(len(merged_text), text_limit)
+    existing["source_text_chars"] = len(merged_text)
+    existing["context_truncated"] = len(merged_text) > text_limit
+    return True
+
+
 def build_recent_read_file_windows(
     calls,
     *,
@@ -380,8 +432,6 @@ def build_recent_read_file_windows(
 ):
     windows = []
     for call in reversed(list(calls or [])):
-        if len(windows) >= limit:
-            break
         if call.get("tool") != "read_file" or call.get("status") != "completed":
             continue
         result = call.get("result") or {}
@@ -389,19 +439,24 @@ def build_recent_read_file_windows(
         if not text:
             continue
         clipped = clip_output(text, text_limit)
-        windows.append(
-            {
-                "tool_call_id": call.get("id"),
-                "path": result.get("path") or (call.get("parameters") or {}).get("path"),
-                "line_start": result.get("line_start"),
-                "line_end": result.get("line_end"),
-                "offset": result.get("offset"),
-                "text": clipped,
-                "visible_chars": min(len(text), text_limit),
-                "source_text_chars": len(text),
-                "context_truncated": len(text) > text_limit,
-            }
-        )
+        candidate = {
+            "tool_call_id": call.get("id"),
+            "path": result.get("path") or (call.get("parameters") or {}).get("path"),
+            "line_start": result.get("line_start"),
+            "line_end": result.get("line_end"),
+            "offset": result.get("offset"),
+            "text": clipped,
+            "visible_chars": min(len(text), text_limit),
+            "source_text_chars": len(text),
+            "context_truncated": len(text) > text_limit,
+        }
+        merged = False
+        for existing in windows:
+            if _merge_recent_read_line_window(existing, candidate, text_limit=text_limit):
+                merged = True
+                break
+        if not merged and len(windows) < limit:
+            windows.append(candidate)
     return windows
 
 
