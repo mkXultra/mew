@@ -75,7 +75,7 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "hello")
         self.assertEqual(deltas, ["hel", "lo"])
 
-    def test_call_codex_web_api_sends_default_xhigh_reasoning_effort(self):
+    def test_call_codex_web_api_sends_default_high_reasoning_effort(self):
         captured = {}
 
         def fake_urlopen(request, timeout):
@@ -96,4 +96,4 @@ class CodexApiTests(unittest.TestCase):
                 )
 
         self.assertEqual(text, "ok")
-        self.assertEqual(captured["body"]["reasoning"], {"effort": "xhigh"})
+        self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
