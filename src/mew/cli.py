@@ -729,6 +729,12 @@ def build_parser():
     dogfood_parser.add_argument("--duration", type=float, default=argparse.SUPPRESS, help="seconds to run the runtime")
     dogfood_parser.add_argument("--interval", type=float, default=argparse.SUPPRESS, help="passive wake interval in seconds")
     dogfood_parser.add_argument("--poll-interval", type=float, default=argparse.SUPPRESS, help="runtime poll interval in seconds")
+    dogfood_parser.add_argument(
+        "--time-dilation",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="resident-loop only: multiply logical mew timestamps while real scheduling stays unchanged",
+    )
     dogfood_parser.add_argument("--cycles", type=int, default=1, help="number of dogfood runtime cycles")
     dogfood_parser.add_argument("--cycle-gap", type=float, default=0.0, help="seconds to wait between cycles")
     dogfood_parser.add_argument("--startup-timeout", type=float, default=15.0, help="seconds to wait for startup")
@@ -1726,6 +1732,7 @@ def main(argv=None):
     require_positive_float(parser, args, "interval", "--interval")
     require_positive_float(parser, args, "poll_interval", "--poll-interval")
     require_positive_float(parser, args, "message_poll_interval", "--poll-interval")
+    require_positive_float(parser, args, "time_dilation", "--time-dilation")
 
     if args.message and args.command is None:
         args.wait = args.message_wait

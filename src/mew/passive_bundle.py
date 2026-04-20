@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 import re
 
 from .report_io import write_generated_report
+from .timeutil import now_date_iso
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ def validate_date(value: str) -> str:
 def resolve_bundle_date(explicit_date: str | None = None) -> str:
     if explicit_date:
         return validate_date(explicit_date)
-    return validate_date(datetime.now().date().isoformat())
+    return validate_date(now_date_iso())
 
 
 def bundle_path(output_dir: Path, day: str) -> Path:

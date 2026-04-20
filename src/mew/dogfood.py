@@ -250,6 +250,28 @@ def dogfood_runtime_env(extra_env=None):
     return env
 
 
+def dogfood_time_dilation_env(env=None, time_dilation=None):
+    scenario_env = dict(env or dogfood_subprocess_env())
+    if time_dilation is None:
+        return scenario_env
+    multiplier = float(time_dilation)
+    if multiplier <= 0:
+        raise ValueError("time_dilation must be positive")
+    scenario_env["MEW_TIME_DILATION"] = str(multiplier)
+    return scenario_env
+
+
+def effective_time_dilation(env=None):
+    raw = (env or {}).get("MEW_TIME_DILATION")
+    if raw is None:
+        return 1.0
+    try:
+        multiplier = float(raw)
+    except ValueError:
+        return 1.0
+    return multiplier if multiplier > 0 else 1.0
+
+
 def run_command(command, workspace, timeout=30, env=None, input_text=None):
     try:
         result = subprocess.run(
@@ -916,12 +938,14 @@ def run_runtime_focus_scenario(workspace, env=None):
     return _scenario_report("runtime-focus", workspace, commands, checks)
 
 
-def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, poll_interval=0.1):
+def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, poll_interval=0.1, time_dilation=None):
     commands = []
     checks = []
+    scenario_env = dogfood_time_dilation_env(env, time_dilation)
+    multiplier = effective_time_dilation(scenario_env)
 
     def run(args, timeout=30):
-        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=scenario_env)
         commands.append(result)
         return result
 
@@ -973,6 +997,7 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         runtime_args,
         workspace,
         created_temp=False,
+        env=scenario_env,
     )
     commands.append(
         {
@@ -1075,6 +1100,7 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
     report["artifacts"] = {
         "requested_duration_seconds": float(duration),
         "requested_interval_seconds": float(interval),
+        "time_dilation": multiplier,
         "processed_events": len(processed_events),
         "passive_events": len(passive_events),
         "passive_gaps_seconds": passive_gaps,
@@ -8026,6 +8052,7 @@ def run_dogfood_scenario(args):
                     duration=getattr(args, "duration", 6.0),
                     interval=getattr(args, "interval", 2.0),
                     poll_interval=getattr(args, "poll_interval", 0.1),
+                    time_dilation=getattr(args, "time_dilation", None),
                 )
             )
         elif name == "native-work":

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .desk import active_work_sessions_for_desk, open_tasks_for_desk
 from .report_io import write_generated_report
 from .self_memory import collect_self_learnings, normalize_text, task_title_by_id
+from .timeutil import now_date_iso
 from .work_session import build_work_session_resume
 
 
@@ -24,7 +24,7 @@ def validate_date(value: str) -> str:
 def resolve_dream_date(explicit_date: str | None = None) -> str:
     if explicit_date:
         return validate_date(explicit_date)
-    return validate_date(datetime.now().date().isoformat())
+    return validate_date(now_date_iso())
 
 
 def dream_path(output_dir: Path, day: str) -> Path:

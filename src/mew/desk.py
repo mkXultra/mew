@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,7 @@ from .cli_command import mew_command
 from .context_checkpoint import current_git_reentry_state, latest_context_checkpoint
 from .state import open_questions as canonical_open_questions
 from .tasks import task_kind
-from .timeutil import now_iso, parse_time
+from .timeutil import now_date_iso, now_iso, parse_time
 from .work_session import (
     build_work_session_effort,
     build_work_session_resume,
@@ -36,7 +35,7 @@ def validate_date(value: str) -> str:
 def resolve_desk_date(explicit_date: str | None = None) -> str:
     if explicit_date:
         return validate_date(explicit_date)
-    return validate_date(datetime.now().date().isoformat())
+    return validate_date(now_date_iso())
 
 
 def normalize_text(value: Any) -> str:

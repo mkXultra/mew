@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .mood import active_work_continuity_issues
 from .report_io import write_generated_report
+from .timeutil import now_date_iso
 
 
 MAX_ITEMS = 8
@@ -45,7 +45,7 @@ def validate_date(value: str) -> str:
 def resolve_paper_date(explicit_date: str | None = None) -> str:
     if explicit_date:
         return validate_date(explicit_date)
-    return validate_date(datetime.now().date().isoformat())
+    return validate_date(now_date_iso())
 
 
 def morning_paper_path(output_dir: Path, day: str) -> Path:

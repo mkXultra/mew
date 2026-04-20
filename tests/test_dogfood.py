@@ -19,8 +19,10 @@ from mew.dogfood import (
     build_runtime_command,
     copy_source_workspace,
     dogfood_subprocess_env,
+    dogfood_time_dilation_env,
     dogfood_stop_timeout,
     dogfood_runtime_env,
+    effective_time_dilation,
     format_dogfood_loop_report,
     format_dogfood_report,
     format_dogfood_scenario_report,
@@ -57,6 +59,13 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(env["KEEP"], "override")
         self.assertEqual(env["EXTRA"], "1")
 
+    def test_dogfood_time_dilation_env_sets_multiplier(self):
+        env = dogfood_time_dilation_env({"KEEP": "base"}, 168)
+
+        self.assertEqual(env["KEEP"], "base")
+        self.assertEqual(env["MEW_TIME_DILATION"], "168.0")
+        self.assertEqual(effective_time_dilation(env), 168.0)
+
     def test_cli_dogfood_scenario_choices_follow_registered_scenarios(self):
         parser = build_parser()
 
@@ -80,6 +89,14 @@ class DogfoodTests(unittest.TestCase):
         self.assertFalse(hasattr(args, "duration"))
         self.assertFalse(hasattr(args, "interval"))
         self.assertFalse(hasattr(args, "poll_interval"))
+        self.assertFalse(hasattr(args, "time_dilation"))
+
+    def test_cli_dogfood_time_dilation_parses(self):
+        parser = build_parser()
+
+        args = parser.parse_args(["dogfood", "--scenario", "resident-loop", "--time-dilation", "168", "--json"])
+
+        self.assertEqual(args.time_dilation, 168.0)
 
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
@@ -324,6 +341,7 @@ class DogfoodTests(unittest.TestCase):
                 duration=7.0,
                 interval=2.0,
                 poll_interval=0.1,
+                time_dilation=24.0,
             )
 
             report = run_dogfood_scenario(args)
@@ -342,6 +360,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertGreaterEqual(cadence_check["observed"]["passive_events"], 2)
             self.assertEqual(scenario["artifacts"]["requested_duration_seconds"], 7.0)
             self.assertEqual(scenario["artifacts"]["requested_interval_seconds"], 2.0)
+            self.assertEqual(scenario["artifacts"]["time_dilation"], 24.0)
             self.assertGreaterEqual(scenario["artifacts"]["passive_events"], 2)
 
     def test_run_dogfood_native_work_scenario(self):
