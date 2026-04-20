@@ -29,7 +29,7 @@ Codex + claude-ultra の相談後の採用判断：
 - 5.1 Streaming Tool Executor は、実際の痛みが「cockpit が Codex CLI / Claude Code より遅い」になった時の M2 最優先。現時点では inhabitation 目的の最初の 1 枚ではない。
 - 5.8 Agent Frontmatter / 5.9 Skill Manifest は M5 まで待つ。拡張性より先に、記憶・再開・受動実行の芯を固める。
 - 2026-04-19 実装メモ：5.12 の MVP は `mew memory --add --type ... --scope ...` と file-backed recall として入り始めた。`work_session.resume.active_memory` として resident THINK prompt にも渡るようになり、`mew memory --active --task-id ...` で注入内容を確認できる。この active-memory 確認コマンドは native self-improve controls にも入った。実 Codex Web API dogfood でも active project memory を理由に `README.md` を読む行動が選ばれた。
-- 2026-04-20 実装メモ：M3 が active になり、fresh restart comparator と reentry-burden 証拠が出た後、5.11 は最小 skeleton として着手した。`src/mew/snapshot.py` は `.mew/sessions/<session_id>/snapshot.json` に work-session snapshot を保存/読込し、state hash drift を `partial` として検出する。`mew work --close-session` と chat `/work-session close` は snapshot を保存する。まだ resume 主経路は差し替えない。
+- 2026-04-20 実装メモ：M3 が active になり、fresh restart comparator と reentry-burden 証拠が出た後、5.11 は最小 skeleton として着手した。`src/mew/snapshot.py` は `.mew/sessions/<session_id>/snapshot.json` に work-session snapshot を保存/読込し、state hash drift を `partial` として検出する。`mew work --close-session` と chat `/work-session close` は snapshot を保存し、resume 表示は snapshot status を見せる。まだ resume 主経路は差し替えない。
 
 ### 0.2 2026-04-19 post-MVP drift guard
 

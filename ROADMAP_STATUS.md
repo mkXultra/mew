@@ -1205,8 +1205,10 @@ Evidence:
   active-memory refs, `last_effect_id`, and a state hash. Loading detects
   state drift and returns a partial/usable result instead of silently trusting
   stale state. `mew work --close-session` and chat `/work-session close` now
-  save a snapshot. This is still a foundation slice: resume does not yet load
-  from snapshots as its primary source.
+  save a snapshot, and `mew work --session --resume` / chat resume surface the
+  snapshot as `usable`, `partial`, `absent`, or `error`. This is still a
+  foundation slice: resume does not yet load from snapshots as its primary
+  source.
 - `mew dogfood --scenario resident-loop` now honors `--duration`,
   `--interval`, and `--poll-interval` for scenario runs and records the
   requested duration/interval in JSON artifacts. This turns the short

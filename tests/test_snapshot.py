@@ -152,6 +152,12 @@ class SnapshotTests(unittest.TestCase):
                 self.assertIsNotNone(loaded)
                 self.assertTrue(loaded.usable)
                 self.assertEqual(loaded.snapshot.closed_at, data["work_session"]["updated_at"])
+
+                with redirect_stdout(StringIO()) as resume_stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume_data = json.loads(resume_stdout.getvalue())
+                self.assertEqual(resume_data["snapshot"]["status"], "usable")
+                self.assertEqual(resume_data["snapshot"]["path"], data["snapshot_path"])
             finally:
                 os.chdir(old_cwd)
 
