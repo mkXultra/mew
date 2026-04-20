@@ -10,13 +10,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, day-scale reentry, a scoped M3 reentry gate with fresh-restart comparison merge, a richer reentry-burden comparator where fresh `codex-ultra` chose `mew_preferred`, and a half-hour resident cadence proof now exist; several-hour and multi-day resident cadence remain unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, day-scale reentry, a scoped M3 reentry gate with fresh-restart comparison merge, a richer reentry-burden comparator where fresh `codex-ultra` chose `mew_preferred`, work-session close snapshots, and a half-hour resident cadence proof now exist; several-hour and multi-day resident cadence remain unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 09:20 JST.
+Last assessed: 2026-04-20 09:30 JST.
 
 Active milestone: Milestone 3, Persistent Advantage.
 
@@ -37,10 +37,11 @@ then, M3 gained a scoped fresh-restart comparator prompt/template, a merge path
 for completed fresh reports, one parity fresh `codex-ultra` comparator leg on
 the synthetic M3 reentry gate, a richer reentry-burden comparator where fresh
 `codex-ultra` chose `mew_preferred`, and a half-hour resident-loop cadence
-proof. This is enough to make M3 materially stronger, but not enough to close
-it: the remaining bar is still several-hour or multi-day cadence and richer
-context-reconstruction comparisons on less synthetic task shapes, not only
-ceremony.
+proof. The 5.11 AgentMemorySnapshot path is now started as a minimal save/load
+skeleton for closed work sessions. This is enough to make M3 materially
+stronger, but not enough to close it: the remaining bar is still several-hour
+or multi-day cadence and richer context-reconstruction comparisons on less
+synthetic task shapes, not only ceremony.
 
 Closed M2 evidence gate:
 
@@ -1197,6 +1198,15 @@ Evidence:
   `comparison_result.choice=mew_preferred` because mew preserved the decisive
   pending edit / verifier sequence. The durable summary is in
   `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
+- The 5.11 AgentMemorySnapshot path now has a minimal implementation:
+  `src/mew/snapshot.py` can take, save, and load work-session snapshots at
+  `.mew/sessions/<session_id>/snapshot.json`, preserving working memory,
+  touched files, pending approvals, continuity score/status/recommendation,
+  active-memory refs, `last_effect_id`, and a state hash. Loading detects
+  state drift and returns a partial/usable result instead of silently trusting
+  stale state. `mew work --close-session` and chat `/work-session close` now
+  save a snapshot. This is still a foundation slice: resume does not yet load
+  from snapshots as its primary source.
 - `mew dogfood --scenario resident-loop` now honors `--duration`,
   `--interval`, and `--poll-interval` for scenario runs and records the
   requested duration/interval in JSON artifacts. This turns the short
@@ -1227,6 +1237,9 @@ Missing proof:
   has run to parity and one richer burden leg has run to `mew_preferred`, but
   both comparisons are still tiny synthetic README tasks rather than larger
   coding tasks or long-running resident cadence proof.
+- AgentMemorySnapshot can now save/load closed-session snapshots, but snapshot
+  load is not yet part of the primary resume path and has not been dogfooded
+  against a stale or drifted real session.
 
 Next action:
 
@@ -1237,10 +1250,10 @@ Next action:
   model behavior, or passive next-action refinement. Treat M2 comparative
   runbook polish as supporting work only unless it directly produces a M3
   reentry-vs-fresh artifact.
-- After typed memory exists and the state/resume schema is less volatile,
-  revisit 5.11 AgentMemorySnapshot. Use the day-scale reentry proof as the
-  basis for longer resident cadence testing, but do not let that defer active
-  M3 evidence work.
+- Use the day-scale reentry proof as the basis for longer resident cadence
+  testing, but do not let that defer active M3 evidence work. Only promote
+  AgentMemorySnapshot from save/load skeleton to primary resume path after a
+  dogfood case shows snapshot load beats rebuilding from current state.
 
 ## Milestone 4: True Recovery
 

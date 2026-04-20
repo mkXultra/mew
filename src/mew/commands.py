@@ -150,6 +150,7 @@ from .state import (
     state_digest,
     state_lock,
 )
+from .snapshot import save_snapshot, take_snapshot
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
 from .read_tools import (
@@ -5458,6 +5459,7 @@ def cmd_work_show_session(args):
 
 
 def cmd_work_close_session(args):
+    snapshot_file = None
     with state_lock():
         state = load_state()
         session = active_work_session(state)
@@ -5472,10 +5474,12 @@ def cmd_work_close_session(args):
             return 0
         close_work_session(session)
         save_state(state)
+        snapshot_file = save_snapshot(take_snapshot(session["id"], state=state))
     if args.json:
-        print(json.dumps({"work_session": session}, ensure_ascii=False, indent=2))
+        print(json.dumps({"work_session": session, "snapshot_path": str(snapshot_file)}, ensure_ascii=False, indent=2))
     else:
         print(f"closed work session #{session['id']}")
+        print(f"snapshot saved: {snapshot_file}")
     return 0
 
 
@@ -12127,6 +12131,7 @@ def chat_work_session(rest, chat_state=None):
         return
 
     if action == "close":
+        snapshot_file = None
         with state_lock():
             state = load_state()
             session = active_work_session_for_kind(state, scope_kind)
@@ -12141,7 +12146,9 @@ def chat_work_session(rest, chat_state=None):
                 return
             close_work_session(session)
             save_state(state)
+            snapshot_file = save_snapshot(take_snapshot(session["id"], state=state))
         print(f"closed work session #{session['id']}")
+        print(f"snapshot saved: {snapshot_file}")
         return
 
     if action == "stop":

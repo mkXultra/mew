@@ -29,6 +29,7 @@ Codex + claude-ultra の相談後の採用判断：
 - 5.1 Streaming Tool Executor は、実際の痛みが「cockpit が Codex CLI / Claude Code より遅い」になった時の M2 最優先。現時点では inhabitation 目的の最初の 1 枚ではない。
 - 5.8 Agent Frontmatter / 5.9 Skill Manifest は M5 まで待つ。拡張性より先に、記憶・再開・受動実行の芯を固める。
 - 2026-04-19 実装メモ：5.12 の MVP は `mew memory --add --type ... --scope ...` と file-backed recall として入り始めた。`work_session.resume.active_memory` として resident THINK prompt にも渡るようになり、`mew memory --active --task-id ...` で注入内容を確認できる。この active-memory 確認コマンドは native self-improve controls にも入った。実 Codex Web API dogfood でも active project memory を理由に `README.md` を読む行動が選ばれた。
+- 2026-04-20 実装メモ：M3 が active になり、fresh restart comparator と reentry-burden 証拠が出た後、5.11 は最小 skeleton として着手した。`src/mew/snapshot.py` は `.mew/sessions/<session_id>/snapshot.json` に work-session snapshot を保存/読込し、state hash drift を `partial` として検出する。`mew work --close-session` と chat `/work-session close` は snapshot を保存する。まだ resume 主経路は差し替えない。
 
 ### 0.2 2026-04-19 post-MVP drift guard
 
@@ -37,7 +38,7 @@ Codex + claude-ultra の相談後の採用判断：
 - `Decision: prevent long-session drift` と `Decision: observation before structural skeletons` が mew memory にある場合、この doc の古い sprint recommendation より優先する。次の構造 card を選ぶ前に、session charter と durable decision memory を読むこと。
 - 5.12 MVP は landed と扱う。含まれるもの：`mew memory --add --type/--scope`、file-backed recall、`mew memory --active`、native work THINK への `active_memory` 注入、native self-improve controls、実 Codex Web API dogfood での active project memory 起点行動。
 - 5.12 の次は「さらに storage surface を足す」ではなく、recall 品質と日常利用価値を観測する。候補：legacy journal/dream/mood/self-memory の typed memory 移行、active recall hit rate、recall latency、unknown type の扱い。
-- 5.1 / 5.11 / 5.13 / 5.14 などの構造 card は、metrics/dogfood の具体 signal が残った時に採る。現時点では unused skeleton を置かない。
+- 5.1 / 5.11 / 5.13 / 5.14 などの構造 card は、metrics/dogfood の具体 signal が残った時に採る。現時点では unused skeleton を置かない。5.11 は 2026-04-20 に M3 の具体 signal として最小 snapshot save/load skeleton まで採用済み。次は load を resume 主経路にする実痛が出るまで待つ。
 - 直近 metrics signal の例：verification failure / rollback が高い、first tool output p95 が遅い、model resume p95 が遅い、stale active sessions が残る。次タスクはこの signal から選び、`mew focus` や外部 model コメントだけで選ばない。
 
 ---
@@ -1069,7 +1070,7 @@ src/plugins/                                     plugin discovery/registry code
 
 **今のスプリントで 1 つだけ採るなら**: まず session charter と durable decision memory を読む。`Decision: observation before structural skeletons` が有効な間は、5.1/5.11/5.13 などの skeleton 実装ではなく metrics/dogfood の signal を優先する。**5.1 Streaming Tool Executor** は、M2 cockpit latency が他の friction より支配的だと metrics で確認された後に採る。
 
-**今のスプリントで 2 つ採れるなら**: 1 つ目は観測で残った最大 friction を小さく潰す。2 つ目も同じ signal に紐づける。**5.11 AgentMemorySnapshot** は continuity score / resume shape が落ち着き、実際に snapshot load が必要になったタイミングに入れる。
+**今のスプリントで 2 つ採れるなら**: 1 つ目は観測で残った最大 friction を小さく潰す。2 つ目も同じ signal に紐づける。**5.11 AgentMemorySnapshot** は 2026-04-20 に最小 save/load skeleton まで入ったため、次に触るなら「snapshot load が resume 主経路より明確に良い」dogfood 証拠を先に要求する。
 
 **3 つ以上は同時着手しない**。各 item が要する dogfood サイクルを考えると、並走させるほど信号が弱くなる。
 
