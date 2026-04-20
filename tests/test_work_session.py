@@ -13080,6 +13080,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
+        self.assertIn("do not rerun that same search_text", prompt)
+        self.assertIn("switch to a narrow read_file on the anchored window instead", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)

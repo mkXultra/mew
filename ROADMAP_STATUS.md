@@ -847,6 +847,18 @@ Evidence:
   `interrupt_submit` steer to stop drifting off the prompt/test surfaces and
   pin the correct line windows first, so carry #345 as product progress rather
   than fresh no-rescue mew-side evidence.
+- M6.6 task #346 / session #334 then retried the same prompt surface with a
+  fresh no-steer `target_paths` hygiene slice. The native loop found the
+  correct `build_work_think_prompt` test block and eventually read the exact
+  `src/mew/work_loop.py` target-path guidance window without supervisor hints,
+  but it still repeated the same `search_text src/mew/work_loop.py
+  query=target_paths` once before first edit, so the run does not count as
+  no-rescue evidence. A direct supervisor prompt patch then taught
+  `build_work_think_prompt()` not to rerun the same `search_text` when the
+  latest result already provides the needed line anchor, and to switch to a
+  narrow `read_file` instead. Focused pytest, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is blocker evidence plus product progress,
+  not mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -917,7 +929,11 @@ Missing proof:
   open. #345 showed the landed targeted-reread guidance can be converted into a
   successful paired edit/verify/finish run once the exact source/test windows
   are pinned, but normal-case exact-surface selection for prompt/test slices is
-  still not proven without supervisor hints.
+  still not proven without supervisor hints. #346 improved that diagnosis:
+  exact prompt/test surface discovery now works without steer, but search
+  results are still not always converted into the anchored `read_file` step on
+  the first try. The new search-to-read guidance patch now needs a fresh
+  no-steer rerun.
 
 Done when:
 
@@ -964,13 +980,14 @@ Next action:
   interrupt steer.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native no-steer proof task on the `src/mew/work_loop.py` +
-  `tests/test_work_session.py` prompt surface that exercises the landed
-  targeted-reread, `plan_items`, and `open_questions` guidance together. Mew
-  should choose the correct prompt assertion block without supervisor hints,
-  propose a paired dry-run edit, verify with the focused unittest command, and
-  finish cleanly. If it drifts again, patch exact-surface selection or prompt
-  recall directly before returning to broader multi-file slices. Do not return
-  to comparator work until the mew-side implementation set is frozen.
+  `tests/test_work_session.py` prompt surface that specifically exercises the
+  new search-to-read conversion rule after #346. Mew should choose the correct
+  prompt assertion block, avoid rerunning the same `search_text`, convert the
+  latest anchored search result into a narrow `read_file`, propose a paired
+  dry-run edit, verify with the focused unittest command, and finish cleanly.
+  If it still repeats same-path search instead of reading, patch exact-surface
+  conversion directly before returning to broader multi-file slices. Do not
+  return to comparator work until the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
