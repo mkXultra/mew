@@ -1,0 +1,13 @@
+.git
+.mew
+.pytest_cache
+.ruff_cache
+.testmondata
+.uv-cache
+.venv
+__pycache__
+auth.json
+proof-artifacts
+proof-workspace
+references
+reports

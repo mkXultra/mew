@@ -1250,6 +1250,15 @@ Evidence:
   compaction to `repeat_count=3`, and one duplicate-free deep-memory
   self-review entry. The durable summary is in
   `docs/M3_DILATED_SELF_REVIEW_COMPACTION_2026-04-20.md`.
+- Proof isolation now has a local Docker foundation. `Dockerfile.proof`,
+  `.dockerignore`, and `scripts/run_proof_docker.sh` can build a proof image and
+  run resident-loop cadence proof in a detached container with mounted
+  workspace/artifact directories. This is the low-cost first step from
+  `docs/REVIEW_2026-04-20_M3_PROOF_ISOLATION.md`; VPS proof remains a separate
+  human-controlled cost/security decision. Docker build passed, and a detached
+  high-dilation validation container `mew-proof-validation-nosync` passed with
+  `time_dilation=3600.0` and no runtime dependency sync. The durable summary is in
+  `docs/M3_PROOF_ISOLATION_DOCKER_2026-04-20.md`.
 
 Missing proof:
 
@@ -1263,8 +1272,8 @@ Missing proof:
   requested duration/interval/time-dilation metadata. A half-hour resident-loop
   proof exists and the time-dilation foundation can accelerate aged timestamp
   proof runs. A high-dilation run also proved duplicate passive self-review
-  compaction, but there is still no isolated several-hour or multi-day
-  real-time cadence proof.
+  compaction, and Docker proof isolation exists, but there is still no isolated
+  several-hour or multi-day real-time cadence proof.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
   prompt/template and merge the completed report. One fresh `codex-ultra` leg
   has run to parity and one richer burden leg has run to `mew_preferred`, but
@@ -1287,6 +1296,11 @@ Next action:
   testing, but do not let that defer active M3 evidence work. Only promote
   AgentMemorySnapshot from save/load skeleton to primary resume path after a
   dogfood case shows snapshot load beats rebuilding from current state.
+- Use `scripts/run_proof_docker.sh` for the next isolated resident-loop run.
+  A good next local proof is `MEW_PROOF_DURATION=21600 MEW_PROOF_INTERVAL=60`
+  for 6h real cadence, or `MEW_PROOF_DURATION=3600 MEW_PROOF_TIME_DILATION=168`
+  for a 1h real / 1 week logical run. Do not count either as a VPS-class
+  real-week uptime proof.
 
 ## Milestone 4: True Recovery
 
