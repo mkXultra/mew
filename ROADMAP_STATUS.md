@@ -186,6 +186,10 @@ Evidence:
   review the audit visibility and auto-approval escalation slices; decision:
   approve. This proves the review shape is usable, but not yet as part of a
   mew-native self-improvement loop.
+- Self-improvement `run_command` / `run_tests` actions now block known
+  external-visible side-effect commands before execution. A regression test
+  verifies a proposed `git push origin main` records `safety_blocked`, never
+  reaches tool execution, and leaves a work-session note.
 - Validation: the targeted accept-edits work-session tests passed with
   `--no-testmon`.
 
@@ -194,8 +198,9 @@ Missing proof:
 - The adversarial verifier exists and has been used manually, but it has not yet
   reviewed a later mew-native self-improvement loop.
 - Hook-based safety boundaries now escalate governance/policy edits away from
-  automatic approval, but external-visible side effects, budget exhaustion, and
-  ambiguous recovery are not yet fully blocked across every execution path.
+  automatic approval and block known external-visible command side effects
+  before execution. Budget exhaustion and ambiguous recovery are not yet fully
+  enforced across every execution path.
 - No M5.1 loop has yet exercised both adversarial review and mechanical safety
   hooks in one readable audit bundle.
 

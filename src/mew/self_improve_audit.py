@@ -447,6 +447,30 @@ def m5_self_improve_auto_approval_blocker(task, source_call):
     return ""
 
 
+def m5_self_improve_tool_execution_blocker(task, action_type, parameters):
+    if not is_self_improve_task_record(task):
+        return ""
+    if action_type not in {"run_command", "run_tests"}:
+        return ""
+    single_call_session = {
+        "tool_calls": [
+            {
+                "tool": action_type,
+                "parameters": parameters or {},
+                "result": {},
+            }
+        ]
+    }
+    external_side_effects = _external_visible_side_effect_records(single_call_session)
+    if not external_side_effects:
+        return ""
+    marker = external_side_effects[0].get("marker") or "external-visible side effect"
+    return (
+        "M5 safety boundary blocks self-improvement command before execution "
+        f"because it appears externally visible ({marker})"
+    )
+
+
 def classify_human_intervention(session):
     notes = session.get("notes") or []
     human_notes = [

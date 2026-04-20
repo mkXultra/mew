@@ -120,6 +120,7 @@ from .self_improve_audit import (
     format_m5_self_improve_audit_bundle,
     format_m5_self_improve_audit_sequence,
     m5_self_improve_auto_approval_blocker,
+    m5_self_improve_tool_execution_blocker,
     seed_m5_self_improve_audit,
 )
 from .self_memory import (
@@ -4302,6 +4303,56 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: continuing after interrupt submit")
                 continue
+            break
+        safety_blocker = m5_self_improve_tool_execution_blocker(task, action_type, parameters)
+        if safety_blocker:
+            safety_action = {"type": "wait", "reason": safety_blocker}
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session) or find_task(state, task_id)
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    safety_action,
+                )
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
+                if turn is not None:
+                    turn["safety_blocker"] = safety_blocker
+                    turn["summary"] = clip_output(safety_blocker, 4000)
+                add_work_session_note(session, f"M5 safety blocked tool execution: {safety_blocker}", source="system")
+                save_state(state)
+            step = {
+                "index": index,
+                "status": "blocked",
+                "action": safety_action,
+                "model_turn": turn,
+                "safety_blocker": safety_blocker,
+                "summary": safety_blocker,
+            }
+            report["steps"].append(step)
+            report["stop_reason"] = "safety_blocked"
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                write_work_follow_snapshot(args, report, session, task, resume, step=step)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+            if progress:
+                progress(f"step #{index}: safety blocked")
             break
         pairing_status = planned_unpaired_source_write_pairing_status(
             session,

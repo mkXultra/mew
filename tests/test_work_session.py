@@ -12628,6 +12628,63 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_self_improve_blocks_external_visible_command_before_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["title"] = "Improve mew itself"
+                    task["description"] = "Created by mew self-improve"
+                    save_state(state)
+
+                model_output = {
+                    "summary": "try an external side effect",
+                    "action": {
+                        "type": "run_command",
+                        "command": "git push origin main",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch(
+                            "mew.commands.execute_work_tool_with_output",
+                            side_effect=AssertionError("external command should not execute"),
+                        ):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--live",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--max-steps",
+                                            "1",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                output = stdout.getvalue()
+                self.assertIn("stop=safety_blocked", output)
+                self.assertIn("M5 safety boundary blocks self-improvement command", output)
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"], [])
+                self.assertTrue(
+                    any("M5 safety blocked tool execution" in (note.get("text") or "") for note in session["notes"])
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_accept_edits_mode_keeps_stdout_parseable(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
