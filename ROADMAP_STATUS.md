@@ -1689,6 +1689,12 @@ Evidence:
   proposed the corrected test-only regression. The supervisor only approved the
   preview. `mew self-improve --audit 310` reports verification passed,
   `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
+- Task `#311` produced the fifth consecutive reviewed no-rescue candidate from
+  `#307` through `#311`. The resident independently inspected pending
+  `loop_credit_status` coverage, proposed a focused test-only regression, and
+  the supervisor only approved the preview. `mew self-improve --audit 311`
+  reports verification passed, `no_rescue_review_recorded`, and
+  `candidate_no_rescue_reviewed_pending_m3`.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1731,23 +1737,24 @@ Missing proof:
   closed against comparable fresh CLI restarts.
 - Milestone 4 is done for the M5 entry gate; broader opaque shell/runtime
   side-effect auto-retry is a deliberate non-goal rather than an M5 blocker.
-- mew has not yet produced five consecutive closed self-improvement loops with
-  native/delegated implementation, verification, review, and passing readable
-  audit bundles. The audit-bundle seed exists, but the loop proof does not.
+- mew has produced five consecutive reviewed self-improvement candidates
+  (`#307`-`#311`) with native resident work, verification, human review, and
+  passing readable audit bundles. This sequence is still candidate evidence
+  rather than M5 closure because M3 remains open and the proof should be
+  reviewed as a set before changing milestone status.
 - No M5 proof loop has yet exercised interruption or failure recovery through
   Milestone 4 surfaces without manual reconstruction.
-- Existing self-improvement dogfood still includes supervisor rescue edits and
-  manual completion work, so it does not satisfy the no-rescue gate.
+- Earlier self-improvement dogfood includes supervisor rescue edits and manual
+  completion work, but the latest `#307`-`#311` sequence satisfies the narrow
+  no-supervisor-file-patch candidate condition.
 - Roadmap/status files are governance support, not proof of autonomous self-improvement.
 
 Next action:
 
 - Keep the M3 4h proof as background-only until task `#300` can collect and
-  summarize it. In parallel, run another deliberately small M5 entry-rehearsal
-  loop and try to close it without supervisor file patches. Because rescued task
-  `#306` interrupts the sequence, the next useful target is one more candidate
-  after `#310`, giving five consecutive reviewed candidates from `#307` through
-  `#311` if it passes with no supervisor file patch.
+  summarize it. After that, review the `#307`-`#311` no-rescue candidate
+  sequence as a set before changing the M5 milestone status; do not declare M5
+  closed while M3 remains open.
 
 ## Latest Validation
 

@@ -547,6 +547,10 @@ class SelfImproveTests(unittest.TestCase):
                     "not_counted_until_human_review_confirms_no_rescue_edits",
                 )
                 self.assertEqual(
+                    bundle["loop_credit_status"],
+                    "not_counted_until_human_review_confirms_no_rescue_edits",
+                )
+                self.assertEqual(
                     bundle["human_intervention"]["no_rescue_review_status"],
                     "pending_human_review",
                 )
