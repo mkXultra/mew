@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:40 JST.
+Last assessed: 2026-04-20 18:44 JST.
 
 Active work: **M6 Body**.
 
@@ -263,10 +263,19 @@ Evidence:
 - Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
   `ruff`, `./mew daemon status --json`, `./mew help daemon status`,
   `./mew daemon logs --lines 3`, and `git diff --check` passed.
+- `mew run --watch-path <path>` now scans file/directory snapshots inside the
+  runtime loop and queues `file_change` external events with provenance when a
+  watched path changes.
+- The watcher event uses the existing `external_event` runtime path, so the
+  same THINK/ACT and audit machinery handles it before waiting for the next
+  passive tick.
+- Validation: targeted watcher/runtime pytest, targeted `ruff`,
+  `./mew daemon status --json`, and `git diff --check` passed.
 
 Missing proof:
 
-- No real file/git watcher has triggered a passive turn yet.
+- No long-running daemon proof has shown the watcher firing in a resident
+  background process; current proof is deterministic and single-cycle.
 - No daemon restart proof has shown reattachment without user rebrief.
 - No multi-hour resident proof has run through the daemon path.
 - Pause/inspect/repair/resume controls still reuse existing commands rather

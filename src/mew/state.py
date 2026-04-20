@@ -107,6 +107,9 @@ def default_state():
         "work_sessions": [],
         "step_runs": [],
         "thought_journal": [],
+        "watchers": {
+            "items": [],
+        },
         "autonomy": {
             "enabled": False,
             "level": "off",
@@ -360,6 +363,8 @@ def migrate_state(state):
     state.setdefault("work_sessions", [])
     state.setdefault("step_runs", [])
     state.setdefault("thought_journal", [])
+    state.setdefault("watchers", {"items": []})
+    state["watchers"].setdefault("items", [])
 
     for name in (
         "question",

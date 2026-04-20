@@ -165,6 +165,12 @@ def build_parser():
         help="inbox poll interval in seconds; default 1",
     )
     run_parser.add_argument(
+        "--watch-path",
+        action="append",
+        default=[],
+        help="watch a file or directory path and queue file_change external events when it changes",
+    )
+    run_parser.add_argument(
         "--echo-outbox",
         action="store_true",
         help="print newly created outbox messages in the runtime terminal",
