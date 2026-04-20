@@ -424,6 +424,14 @@ def _merge_recent_read_line_window(existing, candidate, *, text_limit):
         return False
     if existing.get("path") != candidate.get("path"):
         return False
+    if (
+        not existing.get("context_truncated")
+        and int(existing.get("source_text_chars") or 0) > text_limit
+    ) or (
+        not candidate.get("context_truncated")
+        and int(candidate.get("source_text_chars") or 0) > text_limit
+    ):
+        return False
     existing_start = existing.get("line_start")
     existing_end = existing.get("line_end")
     candidate_start = candidate.get("line_start")
@@ -453,6 +461,18 @@ def _merge_recent_read_line_window(existing, candidate, *, text_limit):
     return True
 
 
+def _recent_read_window_text_limit(call, *, default):
+    if (call or {}).get("tool") != "read_file":
+        return default
+    parameters = (call or {}).get("parameters") or {}
+    result = (call or {}).get("result") or {}
+    if parameters.get("line_start") is None or parameters.get("line_count") is None:
+        return default
+    if result.get("truncated"):
+        return default
+    return max(default, _line_window_auto_max_chars(parameters))
+
+
 def build_recent_read_file_windows(
     calls,
     *,
@@ -467,7 +487,8 @@ def build_recent_read_file_windows(
         text = result.get("text") or ""
         if not text:
             continue
-        clipped = clip_output(text, text_limit)
+        window_text_limit = _recent_read_window_text_limit(call, default=text_limit)
+        clipped = clip_output(text, window_text_limit)
         candidate = {
             "tool_call_id": call.get("id"),
             "path": result.get("path") or (call.get("parameters") or {}).get("path"),
@@ -475,9 +496,9 @@ def build_recent_read_file_windows(
             "line_end": result.get("line_end"),
             "offset": result.get("offset"),
             "text": clipped,
-            "visible_chars": min(len(text), text_limit),
+            "visible_chars": min(len(text), window_text_limit),
             "source_text_chars": len(text),
-            "context_truncated": len(text) > text_limit,
+            "context_truncated": len(text) > window_text_limit,
         }
         merged = False
         for existing in windows:
@@ -877,7 +898,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
-        "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. "
+        "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
         "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple hunks, collapse them into one edit_file or write_file against the most recent exact window for that path. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "

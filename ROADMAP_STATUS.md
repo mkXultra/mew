@@ -778,6 +778,27 @@ Evidence:
   tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
   passed. This is product progress aimed at the #340 blocker, not mew-side
   evidence.
+- M6.6 task #341 / session #328 then retried the same `last_verified_state`
+  slice after commit `ad55c17`. The native loop improved further: it moved
+  from batched searches to one bridged source read (`tool_call #2503` with
+  `max_chars=50000`, `result.truncated=False`, `result_text_len=26421`) plus a
+  cached paired test window, and it no longer claimed the bridge was missing at
+  the tool layer. But the run still closed as blocker evidence, not no-rescue
+  credit: after one interrupt steer, mew said the exact bridged old text was
+  present in `tool_calls[#2503]` yet still not reusable because
+  `recent_read_file_windows` kept only a truncated cache for that same span, so
+  it treated the single-file edit boundary as unresolved and chose a no-change
+  finish.
+- A direct supervisor patch then aligned the cache with that #341 evidence:
+  `build_recent_read_file_windows()` now preserves full text for explicit
+  line-window reads when the source result is untruncated and the effective
+  `max_chars` ceiling allows it, while keeping the older 6k cap for normal
+  offset reads and oversized results. The THINK prompt now explicitly says that
+  if `recent_read_file_windows` is truncated, mew may fall back to the matching
+  `tool_calls[*].result.text` before declaring old text unrecoverable. Focused
+  recent-window/context tests plus `ruff`, `py_compile`, and broader
+  `uv run python -m unittest tests.test_work_session` passed. This is product
+  progress aimed at the #341 blocker, not mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -834,9 +855,16 @@ Missing proof:
   could not form the consolidated src edit because the needed bridging
   line-window text was clipped by the 12k default read budget and prompt
   display cap. A direct follow-up patch now auto-scales explicit line-window
-  reads and preserves those larger windows in full prompt context. Those
-  reductions still have not yet been proven by a fresh no-rescue work-session
-  task. The native loop is therefore improved but not yet self-sufficient.
+  reads and preserves those larger windows in full prompt context. #341 then
+  showed one more contradiction: the full bridged text was visible in
+  `tool_calls[#2503]`, but `recent_read_file_windows` still stored only a
+  truncated cache, so the model treated the single-file boundary as
+  unrecoverable and finished. A direct follow-up patch now preserves full text
+  in `recent_read_file_windows` for these explicit untruncated line-window
+  reads and tells THINK to fall back to matching `tool_calls` text before
+  declaring old text unrecoverable. Those reductions still have not yet been
+  proven by a fresh no-rescue work-session task. The native loop is therefore
+  improved but not yet self-sufficient.
 
 Done when:
 
@@ -882,12 +910,14 @@ Next action:
   native proof task that exercises the landed blocker-reduction set:
   merged recent windows, partial-write refusal, stale-approval invalidation,
   duplicate same-path write rejection, and auto-scaled bridging line-window
-  reads. Choose one narrow `src/mew/work_session.py` paired source/test slice
-  that needs one consolidated source edit across two nearby surfaces, and
-  verify that mew now requests or reuses a large enough exact line window,
-  proposes a stable consolidated dry-run batch, and avoids the same-span reread
-  loop seen before #340. Do not return to comparator work until the mew-side
-  implementation set is frozen.
+  reads plus full recent-window retention for those explicit bridges. Choose
+  one narrow `src/mew/work_session.py` paired source/test slice that needs one
+  consolidated source edit across two nearby surfaces, and verify that mew now
+  reuses the exact bridged source text from `recent_read_file_windows` or the
+  matching `tool_calls` result, proposes a stable consolidated dry-run batch,
+  and avoids the same-span reread / no-change finish seen in #340 and #341. Do
+  not return to comparator work until the mew-side implementation set is
+  frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

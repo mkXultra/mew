@@ -12960,6 +12960,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("guidance_snapshot", prompt)
         self.assertIn("recent_read_file_windows", prompt)
         self.assertIn("reuse that recent window instead of issuing another same-span read_file", prompt)
+        self.assertIn("fall back to the matching read_file tool_calls result text", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("work_session.resume.active_memory", prompt)
@@ -13833,6 +13834,51 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(work_context["recent_read_file_windows"][0]["line_end"], 760)
         self.assertEqual(work_context["recent_read_file_windows"][0]["text"], exact_text)
         self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
+
+    def test_work_model_context_keeps_full_auto_scaled_recent_line_window(self):
+        from mew.work_loop import build_work_model_context
+
+        exact_text = "bridged line window for consolidated edit\n" * 650
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep a large explicit line window reusable for edit preparation.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 3868, "line_count": 523, "max_chars": 50000},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 3868,
+                        "line_end": 4390,
+                        "text": exact_text,
+                        "truncated": False,
+                    },
+                    "summary": "read bridged source window",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Bridged window",
+            "description": "Preserve one large exact line window in recent reads.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+        window = work_context["recent_read_file_windows"][0]
+
+        self.assertEqual(window["tool_call_id"], 1)
+        self.assertEqual(window["text"], exact_text)
+        self.assertEqual(window["visible_chars"], len(exact_text))
+        self.assertFalse(window["context_truncated"])
 
     def test_work_model_context_keeps_five_recent_read_windows_for_edit_preparation(self):
         from mew.work_loop import build_work_model_context
