@@ -41,6 +41,27 @@ Codex + claude-ultra の相談後の採用判断：
 - 5.1 / 5.11 / 5.13 / 5.14 などの構造 card は、metrics/dogfood の具体 signal が残った時に採る。現時点では unused skeleton を置かない。5.11 は 2026-04-20 に M3 の具体 signal として最小 snapshot save/load skeleton まで採用済み。次は load を resume 主経路にする実痛が出るまで待つ。
 - 直近 metrics signal の例：verification failure / rollback が高い、first tool output p95 が遅い、model resume p95 が遅い、stale active sessions が残る。次タスクはこの signal から選び、`mew focus` や外部 model コメントだけで選ばない。
 
+### 0.3 2026-04-20 M5 accelerator timing decision
+
+`docs/REVIEW_2026-04-20_M5_ACCELERATORS.md` は採用候補として有用だが、
+**現在の M5 done gate は変更しない**。
+
+- 現在の documented gate では、`#307`-`#311` の live audit sequence が
+  `candidate_sequence_ready` かつ `recovery=True` を返している。
+- ここで adversarial verifier / hooks / guardian cache / plan mode /
+  sub-agent spawning を retroactive に必須化すると、M5 が閉じかけるたび
+  条件を増やす goalpost moving になる。
+- Post-M5 / M5.1 の最初の採用候補は次の 2 つ：
+  1. `mew-adversarial-verifier` skill: future self-improve loop の review
+     quality を上げる。
+  2. Hook-based Safety: M5 safety boundary を prompt ではなく機械的に
+     強制する。
+- Guardian + Approval Cache、Plan Mode、Sub-Agent Spawning は M5.1 の実測
+  friction が出てから判断する。
+
+この判断は claude-ultra と相談済み。`Decision: M5 accelerators timing`
+として mew project memory にも保存済み。
+
 ---
 
 ## 1. 一言 decision tree

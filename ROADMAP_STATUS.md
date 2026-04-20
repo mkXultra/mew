@@ -1800,6 +1800,10 @@ Missing proof:
 - Earlier self-improvement dogfood includes supervisor rescue edits and manual
   completion work, but the latest `#307`-`#311` sequence satisfies the narrow
   no-supervisor-file-patch candidate condition.
+- `docs/REVIEW_2026-04-20_M5_ACCELERATORS.md` is accepted as post-M5/M5.1
+  improvement input, not as a retroactive M5 gate change. The next likely
+  post-M5 adoption candidates are an adversarial verifier skill and hook-based
+  safety boundaries.
 - Roadmap/status files are governance support, not proof of autonomous self-improvement.
 
 Next action:
