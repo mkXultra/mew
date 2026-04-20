@@ -16,9 +16,9 @@ M5 was archived losslessly in
 | 3. Persistent Advantage | `done` | M3 close gate passed with strict reentry/comparator evidence plus half-hour, one-hour, four-hour, week-scale, and ten-day proof shapes. |
 | 4. True Recovery | `done` | Crashed/interrupted runtime and work-session effects can be classified, safely retried/requeued when deterministic, or surfaced for durable review. |
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
-| 5.1 Trust & Safety Close-Out | `in_progress` | Post-M5 hardening only. Add adversarial review and enforceable safety hooks without moving the M5 gate. |
-| 6. Body: Daemon & Persistent Presence | `not_started` | Make mew a resident process rather than a CLI that exists only when summoned. |
-| 7. Senses: Inbound Signals | `not_started` | Let the resident notice audited external signals, not only its own state. |
+| 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
+| 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates and journaling have started while M6 proof runs. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -26,32 +26,46 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 17:45 JST.
+Last assessed: 2026-04-20 19:10 JST.
 
-Active work: **M5.1 Trust & Safety Close-Out**, then open **M6 Body**.
+Active work: **M6 Body**.
 
 Reasoning:
 
 - M1-M5 are closed. M5 closure was explicitly approved by the user on
   2026-04-20 after M3 and M4 were already closed.
-- M5.1 is not a new destination. It is a bounded close-out patch that should
-  make future self-improvement safer without retroactively changing the M5 done
-  gate.
+- M5.1 closed as a bounded patch that makes future self-improvement safer
+  without retroactively changing the M5 done gate.
 - `claude-ultra` was consulted in session
   `831f34ca-4610-4c9b-9d10-b99f467d5f5f` and argued that the next real
   inhabitation milestone should be a persistent body: daemon, restart, and
   passive event handling. Codex agrees.
 - Broad refactor work is not a milestone. Refactor only where it directly
-  enables M5.1 safety or M6 daemon work.
+  enables M6 daemon work or a directly observed blocker.
 
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
-2. Implement M5.1 in small slices:
-   - `mew-adversarial-verifier` for future self-improve review quality;
-   - hook-based safety boundaries for the M5 safety rules;
-   - only the refactor-readiness needed to make those changes safe.
-3. After M5.1 is bounded and recorded, open M6 Body.
+2. Let the enhanced M6 Docker proof finish, collect it, and run
+   `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
+3. If that strict proof passes with the expected cadence and all seven checks,
+   write the M6 close gate and move active focus to M7 Senses.
+4. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+   self-improvement loop violates the documented safety hooks.
+
+Human-role transition rule:
+
+- M5.1 dogfooded the first small slice with **mew as implementer** and Codex
+  acting as the human reviewer/approver. The rescue was recorded honestly, so
+  it did not count as autonomy credit.
+- Treat rescue edits by Codex as a signal that mew is not ready to own that
+  class of task yet. Record the blocker instead of silently fixing around it.
+- Low- and medium-risk implementation should now default to mew as primary
+  implementer. Codex should increasingly act as requester, reviewer, approver,
+  and product judge.
+- Keep Codex as direct implementer for daemon, safety-hook, permission,
+  recovery, roadmap/evaluator, and other high-risk architecture until M6 Body
+  proves durable resident operation.
 
 ## Milestone Evidence
 
@@ -140,7 +154,75 @@ Missing proof:
 
 ### M5.1: Trust & Safety Close-Out
 
-Status: `in_progress`.
+Status: `done`.
+
+Evidence:
+
+- `docs/M5_1_CLOSE_GATE_2026-04-20.md` records `Status: passed`.
+- Task `#319` / work session `#299` created
+  `.codex/skills/mew-adversarial-verifier/SKILL.md` through a mew-native
+  self-improvement loop. Codex acted as human reviewer/approver and did not
+  directly edit the file.
+- Verification passed with
+  `rg -n 'product-goal drift|safety boundaries|evidence quality|missing verification|hidden rescue|approve|reject|revise' .codex/skills/mew-adversarial-verifier/SKILL.md`.
+- This is useful M5.1 implementation evidence but not autonomy credit:
+  `./mew self-improve --audit 319` reports
+  `loop_credit_status: not_counted_due_to_rescue` because reviewer steer was
+  needed for a missing new-file read, missing `create=true`, and an invalid
+  shell-style verifier.
+- `mew self-improve --audit` now includes an audit-only `safety_boundaries`
+  report for permission-context drift, governance/policy-path edits, external
+  visible side-effect commands, budget-exhaustion policy, and ambiguous-recovery
+  policy. Current task `#319` surfaces `safety_boundaries: needs_review` because
+  it touched `.codex/skills` and changed its permission context.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`,
+  `uv run ruff check src/mew/self_improve_audit.py tests/test_self_improve.py`,
+  `git diff --check`, and `./mew self-improve --audit 319`.
+- `accept-edits` auto-approval now refuses to auto-apply self-improvement
+  governance/policy edits and leaves them as pending approvals requiring
+  explicit `mew work --approve-tool`. A regression test covers
+  `ROADMAP_STATUS.md`: auto-approval is `safety_blocked`, the file stays
+  unchanged, and explicit approval still applies the edit.
+- The `mew-adversarial-verifier` criteria were applied manually by Codex to
+  review the audit visibility and auto-approval escalation slices; decision:
+  approve. This proves the review shape is usable, but not yet as part of a
+  mew-native self-improvement loop.
+- Self-improvement `run_command` / `run_tests` actions now block known
+  external-visible side-effect commands before execution. A regression test
+  verifies a proposed `git push origin main` records `safety_blocked`, never
+  reaches tool execution, and leaves a work-session note.
+- `mew self-improve --audit` now includes safety-blocked work-session events as
+  `safety_boundaries.blocked_events`, so a blocked external side-effect attempt
+  is visible in the readable audit bundle.
+- Validation: the targeted accept-edits work-session tests passed with
+  `--no-testmon`.
+- Deterministic dogfood scenario `m5-safety-hooks` now exercises both hook
+  families through real `mew work --live` paths with mocked model output:
+  governance edits are held as pending approval under `accept-edits`, and
+  `git push origin main` is blocked before tool execution and surfaced in the
+  self-improve audit bundle.
+- Validation: `./mew dogfood --scenario m5-safety-hooks --json` passed, and
+  `uv run pytest -q tests/test_dogfood.py --no-testmon` passed.
+- `mew self-improve --audit` now surfaces budget-exhaustion notes and ambiguous
+  recovery states as safety-boundary findings. Budget events produce
+  `needs_review`; interrupted/unrecovered or indeterminate recovery states
+  produce `blocked`.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`
+  passed.
+- `claude-ultra` close-readiness review in ACM session
+  `0a0a8006-0753-471d-a1e3-a8f257089e1d` asked for combined verifier+hook
+  evidence, budget/recovery interpretation, and a close-gate document. Those
+  artifacts are now recorded in the close-gate doc.
+- The `mew-adversarial-verifier` criteria were applied to the
+  `/tmp/mew-m5-safety-hooks-proof` audit bundles for task `#1` and task `#2`;
+  decision: `approve`. The governance audit produced `needs_review`; the
+  external side-effect audit produced `blocked`.
+
+Missing proof:
+
+- None for the documented M5.1 gate. Future self-improvement loops should use
+  the verifier routinely, and later milestones can harden the command-risk
+  marker list and budget/recovery policy actions.
 
 Goal:
 
@@ -162,33 +244,119 @@ Done when:
 
 Next action:
 
-- Start with the adversarial verifier because it improves decision quality
-  without large runtime risk. Then implement hook-based enforcement.
+- Move to M6 Body.
 
 ### M6: Body - Daemon & Persistent Presence
 
-Status: `not_started`.
+Status: `in_progress`.
 
 Goal:
 
 - Turn mew from a summonable CLI into a durable resident process.
 
+Evidence:
+
+- `mew daemon status|start|stop|logs` now provides a daemon-shaped control
+  surface over the existing runtime.
+- `mew daemon status --json` reports runtime state, pid, uptime, lock state,
+  current cycle, last tick, watcher counts/items, safety/autonomy state, output
+  path, and repair/start/stop/log controls.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, `./mew daemon status --json`, `./mew help daemon status`,
+  `./mew daemon logs --lines 3`, and `git diff --check` passed.
+- `mew run --watch-path <path>` now scans file/directory snapshots inside the
+  runtime loop and queues `file_change` external events with provenance when a
+  watched path changes.
+- The watcher event uses the existing `external_event` runtime path, so the
+  same THINK/ACT and audit machinery handles it before waiting for the next
+  passive tick.
+- Validation: targeted watcher/runtime pytest, targeted `ruff`,
+  `./mew daemon status --json`, and `git diff --check` passed.
+- Dogfood scenario `m6-daemon-watch` now starts a background daemon with
+  `--watch-path`, observes active watcher status and uptime via
+  `mew daemon status --json`, modifies the watched file, verifies a processed
+  `file_change` event through the `external_event` runtime path, and stops the
+  daemon with watcher state returning to idle.
+- Validation: `m6-daemon-watch` dogfood passed in
+  `/tmp/mew-m6-daemon-watch-proof`, along with the focused dogfood pytest.
+- Dogfood scenario `m6-daemon-restart` now starts a daemon, baselines a watcher,
+  stops cleanly, changes the watched file while stopped, starts again, and
+  verifies the restarted daemon compares against the previous process snapshot
+  and processes the file change through `external_event`.
+- Validation: `m6-daemon-restart` dogfood passed in
+  `/tmp/mew-m6-daemon-restart-proof`, along with the focused dogfood pytest.
+- `mew daemon pause|resume|inspect|repair` now exposes daemon-specific control
+  verbs. Pause/resume update the same autonomy gate used by the runtime, inspect
+  reports the daemon status surface, and repair delegates to the existing repair
+  path under the daemon namespace.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, and `./mew daemon inspect` passed.
+- Dogfood scenario `m6-daemon-loop` now starts a background daemon, lets it run
+  repeated passive ticks, processes a real watched file change through
+  `external_event`, exercises `pause`, `inspect`, and `resume` against the
+  running daemon, stops cleanly, checks applied passive effects and daemon
+  output logs, and verifies `mew focus` can reenter the stopped daemon state.
+- Validation: `m6-daemon-loop` passed in `/tmp/mew-m6-daemon-loop-proof` with
+  `duration=6`, `interval=2`, `processed_events=4`, `passive_events=3`, and
+  passive gaps `[2.0, 2.0]`; the focused dogfood pytest also passed.
+- Docker proof tooling now supports `m6-daemon-loop` duration/interval args and
+  writes `/proof/artifacts/report.json`. `mew proof-summary` prefers that
+  report, surfaces the source path, and rejects weak long proofs whose passive
+  event count is far below the requested cadence.
+- Validation: `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_m6_daemon_loop_scenario --no-testmon`,
+  targeted `ruff`, `bash -n scripts/run_proof_docker.sh`, `git diff --check`,
+  and short Docker smoke
+  `proof-artifacts/mew-proof-m6-daemon-loop-smoke-20260420-1913` all passed.
+- Enhanced multi-hour Docker proof is running detached:
+  `mew-proof-m6-daemon-loop-enhanced-20260420-1910`, scenario
+  `m6-daemon-loop`, duration `14400`, interval `60`, poll interval `0.2`.
+  On completion, collect with
+  `scripts/collect_proof_docker.sh mew-proof-m6-daemon-loop-enhanced-20260420-1910`.
+
+Missing proof:
+
+- The enhanced multi-hour resident proof is running but not complete yet.
+- M6 should not close until the collected Docker artifacts pass
+  `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`
+  with actual passive counts near the requested 4h/60s cadence.
+
 Done when:
 
-- `mew daemon status` reports uptime and active watchers.
+- `mew daemon status` reports uptime, active watchers, last tick, last event,
+  current task, and safety state.
 - A real file or git event triggers a passive turn end to end without manual
   polling.
 - A restart after terminal close, process stop, or reboot reattaches without
   user rebrief.
+- A multi-hour resident proof runs through the daemon path, not only a direct
+  foreground loop.
 - The daemon can be paused, inspected, repaired, and resumed from CLI/chat.
 
 ### M7: Senses - Inbound Signals
 
-Status: `not_started`.
+Status: `foundation`.
 
 Goal:
 
 - Give the resident audited read-only signals from the user's working world.
+
+Evidence:
+
+- `mew signals enable|disable|sources|record|journal` now provides an explicit
+  gate and journal for inbound signal sources. A source has a kind, reason,
+  daily budget, enabled/disabled state, config, and durable journal entries.
+- `mew signals record` refuses unknown, disabled, or budget-exhausted sources.
+  Successful observations can queue a `signal_observed` runtime event with
+  provenance, while `--no-queue` records without waking the runtime.
+- Validation: `uv run pytest -q tests/test_signals.py --no-testmon`,
+  targeted `ruff`, `./mew help signals record`, and `git diff --check` passed.
+
+Missing proof:
+
+- No real non-file-system source fetcher exists yet. RSS/calendar/mail/etc. can
+  now plug into the registry, but one source still needs an actual collector.
+- No real-day unsolicited observation has been collected from signal evidence.
 
 Done when:
 
@@ -262,18 +430,19 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M5.1 Trust & Safety Close-Out**.
+Active focus: **M6 Body**.
 
 The next long session should not drift into broad polish or general refactor.
-The only acceptable near-term work is:
+The acceptable near-term work is:
 
-- adversarial verification for future self-improvement loops;
-- hook-based enforcement of M5 safety boundaries;
-- minimal refactor-readiness directly required by those two changes;
+- daemon status and resident lifecycle controls;
+- a supervised passive tick loop that survives ordinary CLI session boundaries;
+- one real file or git watcher-triggered passive turn;
+- pause, inspect, repair, and resume controls for the resident;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-After M5.1 closes, move to **M6 Body**.
+Keep M5.1 as the closed safety baseline while M6 work begins.
 
 ## Maintenance Rule
 

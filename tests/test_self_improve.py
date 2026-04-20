@@ -723,6 +723,163 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_audit_surfaces_safety_boundary_findings(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    code = main(["self-improve", "--start-session", "--focus", "Create a verifier skill"])
+                self.assertEqual(code, 0)
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                session["default_options"]["allow_write"] = [".codex/skills"]
+                session["tool_calls"].append(
+                    {
+                        "id": 60,
+                        "tool": "write_file",
+                        "status": "completed",
+                        "approval_status": "applied",
+                        "parameters": {"path": ".codex/skills/mew-adversarial-verifier/SKILL.md"},
+                        "result": {
+                            "path": str(Path(tmp) / ".codex" / "skills" / "mew-adversarial-verifier" / "SKILL.md"),
+                            "changed": True,
+                            "dry_run": True,
+                            "written": False,
+                        },
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    audit_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(audit_code, 0)
+                bundle = json.loads(stdout.getvalue())
+                safety = bundle["safety_boundaries"]
+                self.assertEqual(safety["status"], "needs_review")
+                self.assertTrue(safety["permission_context_drift"])
+                self.assertIn("permission_context_drift", safety["findings"])
+                self.assertIn("governance_or_policy_edit", safety["findings"])
+                self.assertEqual(len(safety["governance_or_policy_edits"]), 1)
+                edit = safety["governance_or_policy_edits"][0]
+                self.assertEqual(edit["tool_call_id"], 60)
+                self.assertEqual(edit["category"], "skill")
+                self.assertEqual(edit["path"], ".codex/skills/mew-adversarial-verifier/SKILL.md")
+                self.assertEqual(edit["approval_status"], "applied")
+                self.assertEqual(safety["external_visible_side_effects"], [])
+
+                with redirect_stdout(StringIO()) as text_stdout:
+                    text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(text_code, 0)
+                text = text_stdout.getvalue()
+                self.assertIn("safety_boundaries: needs_review", text)
+                self.assertIn("governance_edits=1", text)
+
+                state = load_state()
+                state["work_sessions"][0]["tool_calls"].append(
+                    {
+                        "id": 61,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": "git push origin main"},
+                        "result": {"command": "git push origin main", "exit_code": 0},
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as blocked_stdout:
+                    blocked_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(blocked_code, 0)
+                blocked_bundle = json.loads(blocked_stdout.getvalue())
+                blocked_safety = blocked_bundle["safety_boundaries"]
+                self.assertEqual(blocked_safety["status"], "blocked")
+                self.assertIn("external_visible_side_effect", blocked_safety["findings"])
+                self.assertEqual(blocked_safety["external_visible_side_effects"][0]["marker"], "git push")
+
+                state = load_state()
+                state["work_sessions"][0]["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "system",
+                        "text": "M5 safety blocked tool execution: git push origin main",
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as blocked_note_stdout:
+                    blocked_note_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(blocked_note_code, 0)
+                blocked_note_bundle = json.loads(blocked_note_stdout.getvalue())
+                blocked_note_safety = blocked_note_bundle["safety_boundaries"]
+                self.assertEqual(blocked_note_safety["status"], "blocked")
+                self.assertIn("safety_blocked_event", blocked_note_safety["findings"])
+                self.assertEqual(len(blocked_note_safety["blocked_events"]), 1)
+
+                with redirect_stdout(StringIO()) as blocked_text_stdout:
+                    blocked_text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(blocked_text_code, 0)
+                self.assertIn("blocked_events=1", blocked_text_stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_audit_surfaces_budget_and_ambiguous_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    code = main(["self-improve", "--start-session", "--focus", "Recover safely"])
+                self.assertEqual(code, 0)
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                session["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "system",
+                        "text": "Follow reached max_steps=10 after 10 step(s). Last action: read_file.",
+                    }
+                )
+                session["tool_calls"].append(
+                    {
+                        "id": 70,
+                        "tool": "run_command",
+                        "status": "interrupted",
+                        "parameters": {"command": "make release"},
+                        "result": {},
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    audit_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(audit_code, 0)
+                bundle = json.loads(stdout.getvalue())
+                safety = bundle["safety_boundaries"]
+                self.assertEqual(safety["status"], "blocked")
+                self.assertIn("budget_exhaustion_event", safety["findings"])
+                self.assertIn("ambiguous_recovery_event", safety["findings"])
+                self.assertEqual(len(safety["budget_events"]), 1)
+                self.assertEqual(safety["ambiguous_recovery_events"][0]["tool_call_id"], 70)
+                self.assertEqual(safety["ambiguous_recovery_events"][0]["reason"], "interrupted_without_recovery")
+
+                with redirect_stdout(StringIO()) as text_stdout:
+                    text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(text_code, 0)
+                text = text_stdout.getvalue()
+                self.assertIn("budget_events=1", text)
+                self.assertIn("ambiguous_recovery=1", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_audit_sequence_summarizes_candidates(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

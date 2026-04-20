@@ -25,6 +25,7 @@ from mew.runtime import (
     should_defer_commit_for_user_message,
 )
 from mew.state import add_event, add_outbox_message, default_state, load_state, save_state, state_lock
+from mew.watchers import scan_watch_paths
 from mew.work_session import create_work_session, mark_work_session_runtime_owned
 
 
@@ -2391,6 +2392,56 @@ class RuntimeTests(unittest.TestCase):
                 with state_lock():
                     state = load_state()
                 self.assertIsNotNone(state["inbox"][0]["processed_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_runtime_file_watcher_queues_and_processes_external_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                watched = Path("watched.txt")
+                watched.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    scan_watch_paths(state, [str(watched)], current_time="2026-04-20T00:00:00Z")
+                    save_state(state)
+                watched.write_text("after changed\n", encoding="utf-8")
+
+                def fake_plan_runtime_event(state_snapshot, event_snapshot, *args, **kwargs):
+                    self.assertEqual(event_snapshot["type"], "file_change")
+                    self.assertEqual(event_snapshot["source"], "daemon_watch")
+                    self.assertEqual(event_snapshot["payload"]["path"], "watched.txt")
+                    return (
+                        {"summary": "file event", "decisions": []},
+                        {"summary": "file event", "actions": []},
+                    )
+
+                with patch("mew.runtime.plan_runtime_event", side_effect=fake_plan_runtime_event):
+                    with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                        code = main(
+                            [
+                                "run",
+                                "--once",
+                                "--watch-path",
+                                "watched.txt",
+                                "--interval",
+                                "999",
+                                "--poll-interval",
+                                "0.01",
+                            ]
+                        )
+
+                self.assertEqual(code, 0)
+                self.assertIn("reason=external_event", stdout.getvalue())
+                with state_lock():
+                    state = load_state()
+                file_events = [event for event in state["inbox"] if event.get("type") == "file_change"]
+                self.assertEqual(len(file_events), 1)
+                self.assertIsNotNone(file_events[0]["processed_at"])
+                self.assertEqual(file_events[0]["payload"]["change_kind"], "modified")
+                self.assertEqual(state["watchers"]["items"][0]["status"], "idle")
+                self.assertEqual(state["watchers"]["items"][0]["last_event_id"], file_events[0]["id"])
             finally:
                 os.chdir(old_cwd)
 

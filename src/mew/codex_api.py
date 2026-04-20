@@ -1,9 +1,10 @@
 import json
+import os
 from pathlib import Path
 import urllib.error
 import urllib.request
 
-from .config import DEFAULT_AUTH_PATHS
+from .config import DEFAULT_AUTH_PATHS, DEFAULT_CODEX_REASONING_EFFORT
 from .errors import CodexApiError, MewError
 
 
@@ -130,6 +131,7 @@ def sse_text_delta(data):
 
 def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=None):
     url = base_url.rstrip("/") + "/responses"
+    reasoning_effort = os.environ.get("MEW_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT).strip()
     body = {
         "model": model,
         "instructions": (
@@ -151,6 +153,8 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         "stream": True,
         "store": False,
     }
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort}
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),

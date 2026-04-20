@@ -51,6 +51,7 @@ from .context_checkpoint import (
     load_context_checkpoints,
 )
 from .desk import build_desk_view_model, format_desk_view, write_desk_view
+from .daemon import build_daemon_status, format_daemon_log, format_daemon_status, tail_daemon_log
 from .dogfood import (
     format_dogfood_loop_report,
     format_dogfood_report,
@@ -119,6 +120,8 @@ from .self_improve_audit import (
     build_m5_self_improve_audit_sequence,
     format_m5_self_improve_audit_bundle,
     format_m5_self_improve_audit_sequence,
+    m5_self_improve_auto_approval_blocker,
+    m5_self_improve_tool_execution_blocker,
     seed_m5_self_improve_audit,
 )
 from .self_memory import (
@@ -126,6 +129,16 @@ from .self_memory import (
     format_self_memory_view,
     render_self_memory_markdown,
     write_self_memory_report,
+)
+from .signals import (
+    disable_signal_source,
+    enable_signal_source,
+    find_signal_source,
+    format_signal_journal,
+    format_signal_sources,
+    list_signal_journal,
+    list_signal_sources,
+    record_signal_observation,
 )
 from .state import (
     add_attention_item,
@@ -1017,6 +1030,8 @@ def format_work_ai_report(report, compact=False):
             line += f" error={step.get('error')}"
         if step.get("inline_approval"):
             line += f" inline_approval={step.get('inline_approval')}"
+        if step.get("inline_approval_error"):
+            line += f" approval_error={clip_inline_text(step.get('inline_approval_error') or '', 180)}"
         if step.get("inline_approval_tool_call_id"):
             line += f" approval_tool_call=#{step.get('inline_approval_tool_call_id')}"
         if step.get("inline_approval_status"):
@@ -4300,6 +4315,56 @@ def cmd_work_ai(args):
                     progress(f"step #{index}: continuing after interrupt submit")
                 continue
             break
+        safety_blocker = m5_self_improve_tool_execution_blocker(task, action_type, parameters)
+        if safety_blocker:
+            safety_action = {"type": "wait", "reason": safety_blocker}
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session) or find_task(state, task_id)
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    safety_action,
+                )
+                turn = finish_work_model_turn(state, session_id, planning_turn_id)
+                if turn is not None:
+                    turn["safety_blocker"] = safety_blocker
+                    turn["summary"] = clip_output(safety_blocker, 4000)
+                add_work_session_note(session, f"M5 safety blocked tool execution: {safety_blocker}", source="system")
+                save_state(state)
+            step = {
+                "index": index,
+                "status": "blocked",
+                "action": safety_action,
+                "model_turn": turn,
+                "safety_blocker": safety_blocker,
+                "summary": safety_blocker,
+            }
+            report["steps"].append(step)
+            report["stop_reason"] = "safety_blocked"
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                write_work_follow_snapshot(args, report, session, task, resume, step=step)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+            if progress:
+                progress(f"step #{index}: safety blocked")
+            break
         pairing_status = planned_unpaired_source_write_pairing_status(
             session,
             action_type,
@@ -4522,26 +4587,31 @@ def cmd_work_ai(args):
             and not tool_call.get("approval_status")
         )
         if pending_approval and work_auto_approve_edits_enabled(effective_args):
-            approve_args = SimpleNamespace(
-                task_id=task_id,
-                approve_tool=tool_call.get("id"),
-                allow_write=effective_args.allow_write or [],
-                allow_verify=effective_args.allow_verify,
-                verify_command=effective_args.verify_command or "",
-                verify_cwd=args.verify_cwd,
-                verify_timeout=effective_args.verify_timeout,
-                progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
-                json=False,
-                defer_verify=False,
-                allow_unpaired_source_edit=False,
-            )
-            approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
-            report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
-            if approval_data:
-                _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
-                applied_tool = approval_data.get("tool_call") or {}
-                report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
-                report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
+            safety_blocker = m5_self_improve_auto_approval_blocker(task, tool_call)
+            if safety_blocker:
+                report["steps"][-1]["inline_approval"] = "safety_blocked"
+                report["steps"][-1]["inline_approval_error"] = safety_blocker
+            else:
+                approve_args = SimpleNamespace(
+                    task_id=task_id,
+                    approve_tool=tool_call.get("id"),
+                    allow_write=effective_args.allow_write or [],
+                    allow_verify=effective_args.allow_verify,
+                    verify_command=effective_args.verify_command or "",
+                    verify_cwd=args.verify_cwd,
+                    verify_timeout=effective_args.verify_timeout,
+                    progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                    json=False,
+                    defer_verify=False,
+                    allow_unpaired_source_edit=False,
+                )
+                approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
+                report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_data:
+                    _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
+                    applied_tool = approval_data.get("tool_call") or {}
+                    report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
+                    report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
         if getattr(args, "live", False):
             with state_lock():
                 state = load_state()
@@ -7908,6 +7978,113 @@ def cmd_event(args):
         event_label=f"{event['type']} event",
     )
 
+
+def cmd_signals(args):
+    command = getattr(args, "signals_command", None) or "sources"
+    if command == "sources":
+        with state_lock():
+            state = load_state()
+            sources = list_signal_sources(state)
+        if getattr(args, "json", False):
+            print(json.dumps({"sources": sources}, ensure_ascii=False, indent=2))
+        else:
+            print(format_signal_sources(sources))
+        return 0
+
+    if command == "journal":
+        with state_lock():
+            state = load_state()
+            items = list_signal_journal(state, limit=getattr(args, "limit", 20))
+        if getattr(args, "json", False):
+            print(json.dumps({"journal": items}, ensure_ascii=False, indent=2))
+        else:
+            print(format_signal_journal(items))
+        return 0
+
+    if command == "enable":
+        try:
+            config = parse_event_payload(getattr(args, "config", ""))
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        try:
+            with state_lock():
+                state = load_state()
+                source = enable_signal_source(
+                    state,
+                    args.name,
+                    kind=args.kind,
+                    reason=getattr(args, "reason", "") or "",
+                    budget_limit=getattr(args, "budget", None),
+                    config=config,
+                )
+                save_state(state)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
+        else:
+            print(f"enabled signal source {source['name']} kind={source['kind']}")
+        return 0
+
+    if command == "disable":
+        with state_lock():
+            state = load_state()
+            source = disable_signal_source(state, args.name)
+            save_state(state)
+        if source is None:
+            print(f"mew: signal source not found: {args.name}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
+        else:
+            print(f"disabled signal source {source['name']}")
+        return 0
+
+    if command == "record":
+        try:
+            payload = parse_event_payload(getattr(args, "payload", ""))
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        with state_lock():
+            state = load_state()
+            if find_signal_source(state, args.source) is None:
+                print(f"mew: signal source not found: {args.source}", file=sys.stderr)
+                return 1
+            result = record_signal_observation(
+                state,
+                args.source,
+                kind=getattr(args, "kind", "") or "observation",
+                summary=getattr(args, "summary", "") or "",
+                reason_for_use=getattr(args, "reason", "") or "",
+                payload=payload,
+                budget_cost=getattr(args, "cost", 1),
+                queue_event=not getattr(args, "no_queue", False),
+            )
+            if result.get("status") == "recorded":
+                save_state(state)
+            else:
+                save_state(state)
+        if result.get("status") != "recorded":
+            if getattr(args, "json", False):
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: signal blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            signal_item = result.get("signal") or {}
+            event_text = f" event=#{signal_item.get('event_id')}" if signal_item.get("event_id") else ""
+            print(f"recorded signal #{signal_item.get('id')} source={args.source}{event_text}")
+        return 0
+
+    print(f"mew: unknown signals command: {command}", file=sys.stderr)
+    return 1
+
+
 def webhook_authorized(headers, token):
     if not token:
         return True
@@ -8574,6 +8751,43 @@ def cmd_stop(args):
 
     print(f"mew: timed out waiting for runtime pid={pid} to stop", file=sys.stderr)
     return 1
+
+
+def cmd_daemon(args):
+    daemon_command = getattr(args, "daemon_command", None) or "status"
+    if daemon_command == "start":
+        return cmd_start(args)
+    if daemon_command == "stop":
+        return cmd_stop(args)
+    if daemon_command == "repair":
+        return cmd_repair(args)
+    if daemon_command in ("pause", "resume"):
+        reason = " ".join(getattr(args, "reason", []) or []).strip()
+        paused = daemon_command == "pause"
+        chat_set_paused(paused, reason)
+        state = load_state()
+        data = build_daemon_status(state, read_lock(), pid_alive)
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print("daemon autonomy paused" if paused else "daemon autonomy resumed")
+            print(format_daemon_status(data))
+        return 0
+    if daemon_command == "logs":
+        data = tail_daemon_log(lines=getattr(args, "lines", 40))
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(format_daemon_log(data))
+        return 0
+
+    state = load_state()
+    data = build_daemon_status(state, read_lock(), pid_alive)
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_daemon_status(data))
+    return 0
 
 def build_doctor_data(args):
     data = {"ok": True}

@@ -401,6 +401,80 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("self_improve_status_refresh_command_is_executable", text)
             self.assertIn("self_improve_reused_session_refreshes_reentry_note", text)
 
+    def test_run_dogfood_m5_safety_hooks_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m5-safety-hooks",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m5-safety-hooks")
+            self.assertIn("m5_safety_hooks_governance_auto_approval_escalates", text)
+            self.assertIn("m5_safety_hooks_external_side_effect_blocks_before_execution", text)
+
+    def test_run_dogfood_m6_daemon_watch_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6-daemon-watch",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m6-daemon-watch")
+            self.assertIn("m6_daemon_status_reports_active_watcher", text)
+            self.assertIn("m6_daemon_watcher_queues_processed_file_event", text)
+            self.assertIn("m6_daemon_log_records_external_event", text)
+
+    def test_run_dogfood_m6_daemon_restart_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6-daemon-restart",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m6-daemon-restart")
+            self.assertIn("m6_daemon_restart_reattaches_watcher_snapshot", text)
+            self.assertIn("m6_daemon_restart_uses_external_event_path", text)
+            self.assertIn("m6_daemon_restart_final_stop_is_clean", text)
+
+    def test_run_dogfood_m6_daemon_loop_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6-daemon-loop",
+                duration=3.2,
+                interval=1.0,
+                poll_interval=0.05,
+                time_dilation=None,
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m6-daemon-loop")
+            self.assertIn("m6_daemon_loop_watcher_processes_file_event", text)
+            self.assertIn("m6_daemon_loop_controls_pause_inspect_resume", text)
+            self.assertIn("m6_daemon_loop_processes_multiple_passive_ticks", text)
+            self.assertIn("m6_daemon_loop_reentry_focus_surfaces_task", text)
+            self.assertGreaterEqual(report["scenarios"][0]["artifacts"]["passive_events"], 2)
+            self.assertIsNotNone(report["scenarios"][0]["artifacts"]["watcher_event_id"])
+
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

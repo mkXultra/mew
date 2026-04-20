@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .cli_command import mew_command
 from .self_improve import DEFAULT_SELF_IMPROVE_TITLE
 from .tasks import find_task
@@ -19,6 +21,41 @@ NO_RESCUE_REVIEW_MARKERS = (
     "no supervisor file patch was used",
     "no supervisor file patch",
     "approvals only",
+)
+
+M5_WRITE_TOOLS = {"write_file", "edit_file"}
+
+M5_GOVERNANCE_PATH_RULES = (
+    ("roadmap", ("ROADMAP.md", "ROADMAP_STATUS.md")),
+    ("skill", (".codex/skills/",)),
+    (
+        "permission_or_policy",
+        (
+            "src/mew/agent.py",
+            "src/mew/commands.py",
+            "src/mew/runtime.py",
+            "src/mew/write_tools.py",
+        ),
+    ),
+    (
+        "recovery_or_audit",
+        (
+            "src/mew/context.py",
+            "src/mew/self_improve.py",
+            "src/mew/self_improve_audit.py",
+            "src/mew/work_session.py",
+        ),
+    ),
+)
+
+M5_EXTERNAL_VISIBLE_COMMAND_MARKERS = (
+    "git push",
+    "gh pr create",
+    "gh issue",
+    "gh api repos/",
+    "npm publish",
+    "twine upload",
+    "docker push",
 )
 
 
@@ -239,6 +276,289 @@ def _verification_records(state, task, session):
     return records
 
 
+def _normalize_audit_path(path):
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    if text.startswith("./"):
+        text = text[2:]
+    try:
+        candidate = Path(text).expanduser()
+        if candidate.is_absolute():
+            resolved = candidate.resolve(strict=False)
+            try:
+                return resolved.relative_to(Path.cwd().resolve(strict=False)).as_posix()
+            except ValueError:
+                return str(resolved)
+    except (OSError, ValueError):
+        pass
+    return text.replace("\\", "/")
+
+
+def _unique_non_empty(values):
+    seen = set()
+    items = []
+    for value in values:
+        value = value or ""
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        items.append(value)
+    return items
+
+
+def _work_call_paths(call):
+    values = []
+    for container in (call.get("parameters") or {}, call.get("result") or {}, call.get("write_intent") or {}):
+        if not isinstance(container, dict):
+            continue
+        for key in ("path", "target_path", "file", "filename"):
+            values.append(_normalize_audit_path(container.get(key)))
+        paths = container.get("paths")
+        if isinstance(paths, list):
+            values.extend(_normalize_audit_path(path) for path in paths)
+    return _unique_non_empty(values)
+
+
+def _m5_governance_path_category(path):
+    normalized = _normalize_audit_path(path)
+    for category, patterns in M5_GOVERNANCE_PATH_RULES:
+        for pattern in patterns:
+            if pattern.endswith("/") and normalized.startswith(pattern):
+                return category
+            if normalized == pattern:
+                return category
+    return ""
+
+
+def _command_texts_for_call(call):
+    texts = []
+    for container in (call.get("parameters") or {}, call.get("result") or {}):
+        if not isinstance(container, dict):
+            continue
+        for key in ("command", "verify_command"):
+            command = container.get(key)
+            if isinstance(command, str):
+                texts.append(command)
+            elif isinstance(command, list):
+                texts.append(" ".join(str(part) for part in command))
+    return _unique_non_empty(texts)
+
+
+def _external_visible_side_effect_records(session):
+    records = []
+    for call in (session or {}).get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        for command in _command_texts_for_call(call):
+            compact = " ".join(command.casefold().split())
+            marker = next((item for item in M5_EXTERNAL_VISIBLE_COMMAND_MARKERS if item in compact), "")
+            if not marker:
+                continue
+            records.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool") or "",
+                    "marker": marker,
+                    "command": command,
+                    "status": call.get("status") or "",
+                }
+            )
+    return records
+
+
+def _governance_or_policy_edit_records(session):
+    records = []
+    for call in (session or {}).get("tool_calls") or []:
+        if not isinstance(call, dict) or call.get("tool") not in M5_WRITE_TOOLS:
+            continue
+        result = call.get("result") or {}
+        for path in _work_call_paths(call):
+            category = _m5_governance_path_category(path)
+            if not category:
+                continue
+            records.append(
+                {
+                    "tool_call_id": call.get("id"),
+                    "tool": call.get("tool") or "",
+                    "path": path,
+                    "category": category,
+                    "status": call.get("status") or "",
+                    "approval_status": call.get("approval_status") or "",
+                    "dry_run": bool(result.get("dry_run")),
+                    "written": bool(result.get("written")),
+                }
+            )
+    return records
+
+
+def _safety_blocked_records(session):
+    records = []
+    for note in (session or {}).get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        text = note.get("text") or ""
+        if "M5 safety blocked tool execution" not in text:
+            continue
+        records.append(
+            {
+                "created_at": note.get("created_at") or "",
+                "source": note.get("source") or "",
+                "text": text,
+            }
+        )
+    return records
+
+
+def _budget_exhaustion_records(session):
+    records = []
+    for note in (session or {}).get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        text = note.get("text") or ""
+        if not text.startswith(("Follow reached max_steps=", "Live run reached max_steps=")):
+            continue
+        records.append(
+            {
+                "created_at": note.get("created_at") or "",
+                "source": note.get("source") or "",
+                "text": text,
+            }
+        )
+    return records
+
+
+def _ambiguous_recovery_records(session):
+    records = []
+    for call in (session or {}).get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        result = call.get("result") or {}
+        recovery_status = call.get("recovery_status") or ""
+        approval_status = call.get("approval_status") or ""
+        ambiguous = False
+        reason = ""
+        if call.get("status") == "interrupted" and not recovery_status:
+            ambiguous = True
+            reason = "interrupted_without_recovery"
+        elif recovery_status in {"retry_failed", "rollback_failed"}:
+            ambiguous = True
+            reason = recovery_status
+        elif result.get("rollback_error"):
+            ambiguous = True
+            reason = "rollback_error"
+        elif approval_status == "indeterminate":
+            ambiguous = True
+            reason = "approval_indeterminate"
+        if not ambiguous:
+            continue
+        records.append(
+            {
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "status": call.get("status") or "",
+                "recovery_status": recovery_status,
+                "approval_status": approval_status,
+                "reason": reason,
+            }
+        )
+    return records
+
+
+def build_m5_safety_boundary_report(session, permission_context, effect_budget):
+    permission_context = permission_context or {}
+    effect_budget = effect_budget or {}
+    governance_edits = _governance_or_policy_edit_records(session or {})
+    external_side_effects = _external_visible_side_effect_records(session or {})
+    blocked_events = _safety_blocked_records(session or {})
+    budget_events = _budget_exhaustion_records(session or {})
+    ambiguous_recovery_events = _ambiguous_recovery_records(session or {})
+    permission_drift = bool(permission_context.get("drift"))
+    findings = []
+    status = "ok"
+    if permission_drift:
+        status = "needs_review"
+        findings.append("permission_context_drift")
+    if governance_edits:
+        status = "needs_review"
+        findings.append("governance_or_policy_edit")
+    if external_side_effects:
+        status = "blocked"
+        findings.append("external_visible_side_effect")
+    if blocked_events:
+        status = "blocked"
+        findings.append("safety_blocked_event")
+    if budget_events:
+        status = "needs_review" if status == "ok" else status
+        findings.append("budget_exhaustion_event")
+    if ambiguous_recovery_events:
+        status = "blocked"
+        findings.append("ambiguous_recovery_event")
+    if (effect_budget.get("budget_exhaustion_action") or "") != "stop_and_report":
+        status = "needs_review" if status == "ok" else status
+        findings.append("budget_exhaustion_not_stop_and_report")
+    if (effect_budget.get("ambiguous_recovery_action") or "") != "stop_and_ask":
+        status = "needs_review" if status == "ok" else status
+        findings.append("ambiguous_recovery_not_stop_and_ask")
+    return {
+        "status": status,
+        "permission_context_drift": permission_drift,
+        "governance_or_policy_edits": governance_edits,
+        "external_visible_side_effects": external_side_effects,
+        "blocked_events": blocked_events,
+        "budget_events": budget_events,
+        "ambiguous_recovery_events": ambiguous_recovery_events,
+        "budget_exhaustion_action": effect_budget.get("budget_exhaustion_action") or "",
+        "ambiguous_recovery_action": effect_budget.get("ambiguous_recovery_action") or "",
+        "findings": findings,
+    }
+
+
+def m5_self_improve_auto_approval_blocker(task, source_call):
+    if not is_self_improve_task_record(task):
+        return ""
+    single_call_session = {"tool_calls": [source_call] if source_call else []}
+    external_side_effects = _external_visible_side_effect_records(single_call_session)
+    if external_side_effects:
+        marker = external_side_effects[0].get("marker") or "external-visible side effect"
+        return (
+            "M5 safety boundary blocks automatic approval of external-visible "
+            f"side-effect command ({marker}); require explicit human approval"
+        )
+    governance_edits = _governance_or_policy_edit_records(single_call_session)
+    if governance_edits:
+        first = governance_edits[0]
+        return (
+            "M5 safety boundary blocks automatic approval of governance/policy "
+            f"edit ({first.get('category')} {first.get('path')}); require explicit human approval"
+        )
+    return ""
+
+
+def m5_self_improve_tool_execution_blocker(task, action_type, parameters):
+    if not is_self_improve_task_record(task):
+        return ""
+    if action_type not in {"run_command", "run_tests"}:
+        return ""
+    single_call_session = {
+        "tool_calls": [
+            {
+                "tool": action_type,
+                "parameters": parameters or {},
+                "result": {},
+            }
+        ]
+    }
+    external_side_effects = _external_visible_side_effect_records(single_call_session)
+    if not external_side_effects:
+        return ""
+    marker = external_side_effects[0].get("marker") or "external-visible side effect"
+    return (
+        "M5 safety boundary blocks self-improvement command before execution "
+        f"because it appears externally visible ({marker})"
+    )
+
+
 def classify_human_intervention(session):
     notes = session.get("notes") or []
     human_notes = [
@@ -298,9 +618,20 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
     audit = (session or {}).get("m5_self_improve_audit") or {}
     defaults = (session or {}).get("default_options") or {}
     permission_context = self_improve_permission_context(defaults)
+    permission_report = {
+        "frozen": audit.get("frozen_permission_context") or permission_context,
+        "current": permission_context,
+        "drift": bool(audit.get("permission_context_drift")),
+    }
+    effect_budget = audit.get("effect_budget") or self_improve_effect_budget(defaults)
     verification_records = _verification_records(state, task, combined_session)
     latest_verification = verification_records[-1] if verification_records else None
     human_intervention = classify_human_intervention(combined_session)
+    safety_boundaries = build_m5_safety_boundary_report(
+        combined_session,
+        permission_report,
+        effect_budget,
+    )
     bundle = {
         "schema_version": M5_AUDIT_SCHEMA_VERSION,
         "status": "ready" if session else "missing_session",
@@ -327,12 +658,9 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
             for item in sessions
         ],
         "product_rationale": task.get("description") or task.get("title") or "",
-        "permission_context": {
-            "frozen": audit.get("frozen_permission_context") or permission_context,
-            "current": permission_context,
-            "drift": bool(audit.get("permission_context_drift")),
-        },
-        "effect_budget": audit.get("effect_budget") or self_improve_effect_budget(defaults),
+        "permission_context": permission_report,
+        "effect_budget": effect_budget,
+        "safety_boundaries": safety_boundaries,
         "human_intervention": human_intervention,
         "approvals": _tool_approval_records(combined_session),
         "recovery_events": _recovery_records(combined_session),
@@ -417,6 +745,7 @@ def format_m5_self_improve_audit_bundle(bundle):
     permission = bundle.get("permission_context") or {}
     current = permission.get("current") or {}
     budget = bundle.get("effect_budget") or {}
+    safety = bundle.get("safety_boundaries") or {}
     intervention = bundle.get("human_intervention") or {}
     verification = bundle.get("verification") or {}
     latest_verification = verification.get("latest") or {}
@@ -444,6 +773,16 @@ def format_m5_self_improve_audit_bundle(bundle):
                 f"continue_steps={budget.get('continue_max_steps')} "
                 f"follow_steps={budget.get('follow_max_steps')} "
                 f"exhaustion={budget.get('budget_exhaustion_action')}"
+            ),
+            (
+                "safety_boundaries: "
+                f"{safety.get('status')} "
+                f"findings={len(safety.get('findings') or [])} "
+                f"governance_edits={len(safety.get('governance_or_policy_edits') or [])} "
+                f"external_side_effects={len(safety.get('external_visible_side_effects') or [])} "
+                f"blocked_events={len(safety.get('blocked_events') or [])} "
+                f"budget_events={len(safety.get('budget_events') or [])} "
+                f"ambiguous_recovery={len(safety.get('ambiguous_recovery_events') or [])}"
             ),
             (
                 "human_intervention: "

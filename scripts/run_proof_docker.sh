@@ -20,10 +20,11 @@ command=(
   uv run --no-sync mew dogfood
   --scenario "$SCENARIO"
   --workspace /proof/workspace
+  --report /proof/artifacts/report.json
   --json
 )
 
-if [[ "$SCENARIO" == "resident-loop" ]]; then
+if [[ "$SCENARIO" == "resident-loop" || "$SCENARIO" == "m6-daemon-loop" ]]; then
   command+=(
     --duration "$DURATION"
     --interval "$INTERVAL"
@@ -31,7 +32,7 @@ if [[ "$SCENARIO" == "resident-loop" ]]; then
   )
 fi
 
-if [[ "$SCENARIO" == "resident-loop" && -n "$TIME_DILATION" ]]; then
+if [[ ("$SCENARIO" == "resident-loop" || "$SCENARIO" == "m6-daemon-loop") && -n "$TIME_DILATION" ]]; then
   command+=(--time-dilation "$TIME_DILATION")
 fi
 
@@ -50,6 +51,7 @@ started $NAME
 scenario: $SCENARIO
 workspace: $WORKSPACE
 artifacts: $ARTIFACTS
+report: $ARTIFACTS/report.json
 logs: docker logs -f $NAME
 inspect: docker inspect $NAME
 EOF

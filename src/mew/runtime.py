@@ -57,6 +57,7 @@ from .repair import repair_incomplete_runtime_effects
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
+from .watchers import deactivate_watchers, scan_watch_paths
 from .write_tools import build_write_intent, resolve_allowed_write_path
 from .work_session import (
     active_work_sessions,
@@ -1483,6 +1484,12 @@ def run_runtime(args):
                 state = load_state()
                 if state["runtime_status"].get("state") != "running":
                     set_runtime_running(state, lock["started_at"])
+                watcher_report = scan_watch_paths(
+                    state,
+                    getattr(args, "watch_path", []) or [],
+                    current_time=now_iso(),
+                    active=True,
+                )
                 pending_user = has_pending_user_message(state)
                 pending_external = pending_external_event(state)
                 current_monotonic = time.time()
@@ -1536,6 +1543,8 @@ def run_runtime(args):
                         runtime_status["current_event_id"] = event_id
                         runtime_status["current_effect_id"] = effect_id
                         runtime_status["current_phase"] = "planning"
+                    save_state(state)
+                elif watcher_report.get("changed"):
                     save_state(state)
 
             if sleep_for is not None:
@@ -1904,6 +1913,7 @@ def run_runtime(args):
         with state_lock():
             state = load_state()
             set_runtime_stopped(state, stopped_at)
+            deactivate_watchers(state, current_time=stopped_at)
             save_state(state)
         release_lock()
         append_log(f"## {stopped_at}: runtime stopped pid={os.getpid()}")

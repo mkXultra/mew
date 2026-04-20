@@ -63,6 +63,28 @@ def _gap_summary(gaps, expected_interval):
     }
 
 
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _expected_passive_events_min(duration, interval):
+    if duration is None or interval is None or interval <= 0:
+        return None
+    if duration < interval * 3:
+        return 2
+    return max(2, int(duration // interval) - 2)
+
+
 def summarize_proof_artifacts(artifact_dir):
     artifact_path = Path(artifact_dir)
     errors = []
@@ -70,6 +92,7 @@ def summarize_proof_artifacts(artifact_dir):
         errors.append(f"artifact directory not found: {artifact_path}")
 
     summary_path = artifact_path / "summary.txt"
+    report_path = artifact_path / "report.json"
     stdout_path = artifact_path / "stdout.log"
     stderr_path = artifact_path / "stderr.log"
     inspect_path = artifact_path / "inspect.json"
@@ -79,12 +102,22 @@ def summarize_proof_artifacts(artifact_dir):
         errors.append(f"missing summary file: {summary_path}")
 
     report = None
+    report_source = ""
     try:
-        report = _load_json_file(stdout_path)
+        report = _load_json_file(report_path)
     except json.JSONDecodeError as exc:
-        errors.append(f"invalid stdout JSON: {exc}")
+        errors.append(f"invalid report JSON: {exc}")
+    if report is not None:
+        report_source = str(report_path)
+    else:
+        try:
+            report = _load_json_file(stdout_path)
+        except json.JSONDecodeError as exc:
+            errors.append(f"invalid stdout JSON: {exc}")
+        if report is not None:
+            report_source = str(stdout_path)
     if report is None:
-        errors.append(f"missing dogfood JSON stdout: {stdout_path}")
+        errors.append(f"missing dogfood JSON report: {report_path} or {stdout_path}")
         report = {}
 
     scenario = _first_scenario(report)
@@ -102,11 +135,19 @@ def summarize_proof_artifacts(artifact_dir):
         if isinstance(check, dict) and not bool(check.get("passed"))
     ]
 
-    expected_interval = None
-    try:
-        expected_interval = float(artifacts.get("requested_interval_seconds"))
-    except (TypeError, ValueError):
-        expected_interval = None
+    requested_duration = _float_or_none(artifacts.get("requested_duration_seconds"))
+    expected_interval = _float_or_none(artifacts.get("requested_interval_seconds"))
+    passive_events = _int_or_none(artifacts.get("passive_events"))
+    expected_passive_events_min = _expected_passive_events_min(requested_duration, expected_interval)
+    if (
+        expected_passive_events_min is not None
+        and passive_events is not None
+        and passive_events < expected_passive_events_min
+    ):
+        errors.append(
+            "passive event count below expected cadence: "
+            f"{passive_events} < {expected_passive_events_min}"
+        )
 
     dogfood_status = report.get("status") or scenario.get("status") or ""
     scenario_status = scenario.get("status") or ""
@@ -133,6 +174,7 @@ def summarize_proof_artifacts(artifact_dir):
             "status": dogfood_status,
             "generated_at": report.get("generated_at", ""),
             "scenario_status": scenario_status,
+            "report_source": report_source,
         },
         "resident_loop": {
             "requested_duration_seconds": artifacts.get("requested_duration_seconds"),
@@ -140,6 +182,7 @@ def summarize_proof_artifacts(artifact_dir):
             "time_dilation": artifacts.get("time_dilation"),
             "processed_events": artifacts.get("processed_events"),
             "passive_events": artifacts.get("passive_events"),
+            "expected_passive_events_min": expected_passive_events_min,
             "open_questions": artifacts.get("open_questions"),
             "deferred_questions": artifacts.get("deferred_questions"),
             "passive_span_seconds": artifacts.get("passive_span_seconds"),
@@ -153,6 +196,7 @@ def summarize_proof_artifacts(artifact_dir):
         },
         "files": {
             "summary": str(summary_path),
+            "report": str(report_path),
             "stdout": str(stdout_path),
             "stderr": str(stderr_path),
             "inspect": str(inspect_path),
@@ -184,13 +228,15 @@ def format_proof_summary(summary):
             f"status={dogfood.get('status', '')} "
             f"generated_at={dogfood.get('generated_at', '')}"
         ),
+        f"report_source: {dogfood.get('report_source', '')}",
         (
             "resident_loop: "
             f"duration={resident.get('requested_duration_seconds')} "
             f"interval={resident.get('requested_interval_seconds')} "
             f"time_dilation={resident.get('time_dilation')} "
             f"processed={resident.get('processed_events')} "
-            f"passive={resident.get('passive_events')}"
+            f"passive={resident.get('passive_events')} "
+            f"expected_passive_min={resident.get('expected_passive_events_min')}"
         ),
         (
             "questions: "

@@ -25,6 +25,7 @@ from .commands import (
     cmd_chat_log,
     cmd_code,
     cmd_context,
+    cmd_daemon,
     cmd_digest,
     cmd_do,
     cmd_desires_init,
@@ -62,6 +63,7 @@ from .commands import (
     cmd_self_memory,
     cmd_self_show,
     cmd_session,
+    cmd_signals,
     cmd_snapshot,
     cmd_start,
     cmd_status,
@@ -162,6 +164,12 @@ def build_parser():
         type=float,
         default=1.0,
         help="inbox poll interval in seconds; default 1",
+    )
+    run_parser.add_argument(
+        "--watch-path",
+        action="append",
+        default=[],
+        help="watch a file or directory path and queue file_change external events when it changes",
     )
     run_parser.add_argument(
         "--echo-outbox",
@@ -394,6 +402,57 @@ def build_parser():
     stop_parser.set_defaults(wait=True)
     stop_parser.set_defaults(func=cmd_stop)
 
+    daemon_parser = subparsers.add_parser("daemon", help="manage the resident runtime daemon")
+    daemon_subparsers = daemon_parser.add_subparsers(dest="daemon_command")
+    daemon_parser.set_defaults(func=cmd_daemon)
+
+    daemon_start_parser = daemon_subparsers.add_parser("start", help="start the runtime daemon")
+    daemon_start_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after spawning")
+    daemon_start_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for startup")
+    daemon_start_parser.add_argument("--poll-interval", type=float, default=0.1, help="startup poll interval in seconds")
+    daemon_start_parser.add_argument(
+        "run_args",
+        nargs=argparse.REMAINDER,
+        help="arguments passed to `mew run`; use `mew daemon start -- --autonomous`",
+    )
+    daemon_start_parser.set_defaults(wait=True)
+    daemon_start_parser.set_defaults(func=cmd_daemon)
+
+    daemon_status_parser = daemon_subparsers.add_parser("status", help="show daemon status")
+    daemon_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_status_parser.set_defaults(func=cmd_daemon)
+
+    daemon_inspect_parser = daemon_subparsers.add_parser("inspect", help="inspect daemon state")
+    daemon_inspect_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_inspect_parser.set_defaults(func=cmd_daemon)
+
+    daemon_stop_parser = daemon_subparsers.add_parser("stop", help="stop the runtime daemon")
+    daemon_stop_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after sending SIGTERM")
+    daemon_stop_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for shutdown")
+    daemon_stop_parser.add_argument("--poll-interval", type=float, default=0.1, help="shutdown poll interval in seconds")
+    daemon_stop_parser.set_defaults(wait=True)
+    daemon_stop_parser.set_defaults(func=cmd_daemon)
+
+    daemon_pause_parser = daemon_subparsers.add_parser("pause", help="pause autonomous daemon work")
+    daemon_pause_parser.add_argument("reason", nargs="*", help="optional pause reason")
+    daemon_pause_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_pause_parser.set_defaults(func=cmd_daemon)
+
+    daemon_resume_parser = daemon_subparsers.add_parser("resume", help="resume autonomous daemon work")
+    daemon_resume_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_resume_parser.set_defaults(func=cmd_daemon)
+
+    daemon_repair_parser = daemon_subparsers.add_parser("repair", help="repair daemon/runtime state")
+    daemon_repair_parser.add_argument("--force", action="store_true", help="repair even when a runtime lock is active")
+    daemon_repair_parser.add_argument("--dry-run", action="store_true", help="preview repairs without saving state")
+    daemon_repair_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_repair_parser.set_defaults(func=cmd_daemon)
+
+    daemon_logs_parser = daemon_subparsers.add_parser("logs", help="show daemon output log")
+    daemon_logs_parser.add_argument("--lines", type=int, default=40, help="number of log lines to print")
+    daemon_logs_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_logs_parser.set_defaults(func=cmd_daemon)
+
     doctor_parser = subparsers.add_parser("doctor", help="check local mew dependencies and state")
     doctor_parser.add_argument("--auth", help="path to Codex OAuth auth.json")
     doctor_parser.add_argument("--require-auth", action="store_true", help="fail if Codex OAuth auth is missing")
@@ -439,6 +498,44 @@ def build_parser():
     )
     event_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     event_parser.set_defaults(func=cmd_event)
+
+    signals_parser = subparsers.add_parser("signals", help="manage audited inbound signal sources")
+    signals_subparsers = signals_parser.add_subparsers(dest="signals_command")
+    signals_parser.set_defaults(func=cmd_signals)
+
+    signals_sources_parser = signals_subparsers.add_parser("sources", help="list configured signal sources")
+    signals_sources_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_sources_parser.set_defaults(func=cmd_signals)
+
+    signals_enable_parser = signals_subparsers.add_parser("enable", help="enable a gated signal source")
+    signals_enable_parser.add_argument("name", help="source name, for example hn")
+    signals_enable_parser.add_argument("--kind", required=True, help="source kind, for example rss or calendar")
+    signals_enable_parser.add_argument("--reason", default="", help="why mew may use this source")
+    signals_enable_parser.add_argument("--budget", type=int, default=None, help="daily observation budget")
+    signals_enable_parser.add_argument("--config", default="", help="JSON source config")
+    signals_enable_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_enable_parser.set_defaults(func=cmd_signals)
+
+    signals_disable_parser = signals_subparsers.add_parser("disable", help="disable a signal source")
+    signals_disable_parser.add_argument("name", help="source name")
+    signals_disable_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_disable_parser.set_defaults(func=cmd_signals)
+
+    signals_record_parser = signals_subparsers.add_parser("record", help="record an observation from an enabled source")
+    signals_record_parser.add_argument("source", help="enabled source name")
+    signals_record_parser.add_argument("--kind", default="observation", help="observation kind")
+    signals_record_parser.add_argument("--summary", default="", help="short human-readable observation")
+    signals_record_parser.add_argument("--reason", default="", help="why this observation is useful")
+    signals_record_parser.add_argument("--payload", default="", help="JSON observation payload")
+    signals_record_parser.add_argument("--cost", type=int, default=1, help="budget units consumed")
+    signals_record_parser.add_argument("--no-queue", action="store_true", help="record without queueing a runtime event")
+    signals_record_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_record_parser.set_defaults(func=cmd_signals)
+
+    signals_journal_parser = signals_subparsers.add_parser("journal", help="show recent signal observations")
+    signals_journal_parser.add_argument("--limit", type=int, default=20, help="number of observations to show")
+    signals_journal_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_journal_parser.set_defaults(func=cmd_signals)
 
     webhook_parser = subparsers.add_parser("webhook", help="serve HTTP external event ingress")
     webhook_parser.add_argument("--host", default="127.0.0.1", help="bind host")

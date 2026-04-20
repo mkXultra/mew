@@ -64,10 +64,85 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(summary["container"]["exit_code"], "0")
         self.assertEqual(summary["dogfood"]["scenario"], "resident-loop")
         self.assertEqual(summary["resident_loop"]["processed_events"], 240)
+        self.assertEqual(summary["resident_loop"]["expected_passive_events_min"], 238)
         self.assertEqual(summary["resident_loop"]["passive_gaps"]["count"], 3)
         self.assertEqual(summary["resident_loop"]["passive_gaps"]["outside_expected_by_more_than_2s"], 0)
         self.assertEqual(summary["checks"]["passed"], 2)
         self.assertIn("checks: 2/2 passed", format_proof_summary(summary))
+        self.assertIn("expected_passive_min=238", format_proof_summary(summary))
+
+    def test_summarize_prefers_report_json_over_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            (artifact_dir / "summary.txt").write_text("exit_code: 0\n", encoding="utf-8")
+            (artifact_dir / "stdout.log").write_text("not json\n", encoding="utf-8")
+            (artifact_dir / "report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-04-20T10:11:55Z",
+                        "scenario": "m6-daemon-loop",
+                        "status": "pass",
+                        "scenarios": [
+                            {
+                                "name": "m6-daemon-loop",
+                                "status": "pass",
+                                "artifacts": {
+                                    "requested_duration_seconds": 14400.0,
+                                    "requested_interval_seconds": 60.0,
+                                    "processed_events": 241,
+                                    "passive_events": 240,
+                                    "passive_gaps_seconds": [60.0, 60.0, 60.0],
+                                },
+                                "checks": [
+                                    {"name": "m6_daemon_loop_starts_reports_and_stops", "passed": True},
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = summarize_proof_artifacts(artifact_dir)
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["dogfood"]["scenario"], "m6-daemon-loop")
+        self.assertEqual(summary["dogfood"]["report_source"], str(artifact_dir / "report.json"))
+
+    def test_summarize_marks_low_passive_count_for_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            (artifact_dir / "summary.txt").write_text("exit_code: 0\n", encoding="utf-8")
+            (artifact_dir / "report.json").write_text(
+                json.dumps(
+                    {
+                        "scenario": "m6-daemon-loop",
+                        "status": "pass",
+                        "scenarios": [
+                            {
+                                "name": "m6-daemon-loop",
+                                "status": "pass",
+                                "artifacts": {
+                                    "requested_duration_seconds": 14400.0,
+                                    "requested_interval_seconds": 60.0,
+                                    "processed_events": 3,
+                                    "passive_events": 2,
+                                },
+                                "checks": [
+                                    {"name": "m6_daemon_loop_starts_reports_and_stops", "passed": True},
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = summarize_proof_artifacts(artifact_dir)
+
+        self.assertFalse(summary["ok"])
+        self.assertIn("passive event count below expected cadence: 2 < 238", summary["errors"])
+        self.assertIn("passive event count below expected cadence", format_proof_summary(summary))
 
     def test_summarize_failed_check_marks_review(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,4 +182,3 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(args.artifact_dir, "proof-artifacts/example")
         self.assertTrue(args.json)
         self.assertTrue(args.strict)
-
