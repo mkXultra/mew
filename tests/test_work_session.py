@@ -13071,6 +13071,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("fall back to the matching read_file tool_calls result text", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
+        self.assertIn("Keep working_memory.open_questions limited to unanswered items", prompt)
         self.assertIn("work_session.resume.active_memory", prompt)
         self.assertIn("durable typed recall", prompt)
         self.assertIn("Use work_session.effort as operational pressure", prompt)

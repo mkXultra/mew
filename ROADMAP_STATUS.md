@@ -837,6 +837,16 @@ Evidence:
   offset `read_file` from the top of the file. Focused prompt tests, `ruff`,
   `py_compile`, and `git diff --check` passed. This is product progress aimed
   at the #344 targeted-context blocker, not mew-side evidence.
+- M6.6 task #345 / session #333 then tested the next prompt-hygiene slice in
+  `src/mew/work_loop.py` and `tests/test_work_session.py`: add one THINK prompt
+  sentence telling mew to keep `working_memory.open_questions` limited to
+  unanswered items and drop resolved questions once answered. The native loop
+  eventually proposed the paired dry-run `edit_file` batch, auto-applied it,
+  passed `uv run python -m unittest tests.test_work_session` with `407 tests`,
+  and finished cleanly. But it still needed one exact-window
+  `interrupt_submit` steer to stop drifting off the prompt/test surfaces and
+  pin the correct line windows first, so carry #345 as product progress rather
+  than fresh no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -904,7 +914,10 @@ Missing proof:
   `last_verified_state`, but broader normal-case autonomy is still not proven:
   #343 still used some exploratory search/read steps before the final batch,
   and durable plan/path recall across broader multi-file coding work remains
-  open.
+  open. #345 showed the landed targeted-reread guidance can be converted into a
+  successful paired edit/verify/finish run once the exact source/test windows
+  are pinned, but normal-case exact-surface selection for prompt/test slices is
+  still not proven without supervisor hints.
 
 Done when:
 
@@ -946,19 +959,18 @@ Next action:
   not count it as no-rescue evidence.
 - Carry the landed recent-read-window limit expansion as product progress, but
   do not count it as no-rescue evidence.
+- Carry the landed #345 `open_questions` hygiene patch as product progress, but
+  do not count it as no-rescue evidence because the run needed an exact-window
+  interrupt steer.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
-  native proof task that exercises the landed blocker-reduction set:
-  merged recent windows, partial-write refusal, stale-approval invalidation,
-  duplicate same-path write rejection, and auto-scaled bridging line-window
-  reads plus full recent-window retention for those explicit bridges, and the
-  new `edit_file_hunks` surface for same-file multi-span edits. Choose one
-  narrow `src/mew/work_session.py` paired source/test slice that needs one
-  same-file multi-span source change, and verify that mew now reuses the exact
-  bridged source text from `recent_read_file_windows` or the matching
-  `tool_calls` result, proposes one stable dry-run batch with
-  `edit_file_hunks` for the source file plus the paired test edit, and avoids
-  the no-change finish seen in #342. Do not return to comparator work until
-  the mew-side implementation set is frozen.
+  native no-steer proof task on the `src/mew/work_loop.py` +
+  `tests/test_work_session.py` prompt surface that exercises the landed
+  targeted-reread, `plan_items`, and `open_questions` guidance together. Mew
+  should choose the correct prompt assertion block without supervisor hints,
+  propose a paired dry-run edit, verify with the focused unittest command, and
+  finish cleanly. If it drifts again, patch exact-surface selection or prompt
+  recall directly before returning to broader multi-file slices. Do not return
+  to comparator work until the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

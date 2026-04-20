@@ -930,6 +930,7 @@ def build_work_think_prompt(context):
         "Include a compact working_memory object that restates your current hypothesis, "
         "next intended step, open questions, and latest verified state for future reentry; "
         "If more than one concrete step remains, keep working_memory.plan_items as a short checklist of up to 3 remaining steps and prune completed items as work is completed. "
+        "Keep working_memory.open_questions limited to unanswered items and drop resolved questions once answered. "
         "keep it short and do not copy raw logs. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
