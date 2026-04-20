@@ -924,6 +924,18 @@ Evidence:
   `py_compile`, and `git diff --check` passed. This is blocker reduction and
   product progress; it still needs a fresh mew-side rerun on a broader
   `work_session.py` slice to count as no-rescue evidence.
+- M6.6 task #352 / session #340 then turned that blocker reduction into a
+  fresh broader no-rescue mew-side pass on `src/mew/work_session.py` and
+  `tests/test_work_session.py`: mew found the exact continuity-repair and test
+  surfaces, proposed a paired dry-run src/test edit batch, auto-applied both
+  edits, passed `uv run python -m unittest tests.test_work_session`, completed
+  the required same-surface audit natively, and finished the task without
+  supervisor steer or rescue edits. There was still some small targeted churn:
+  one repeated `working_memory_survived` search before the dry-run edit, and
+  one zero-match same-surface search that then recovered to a narrow read of
+  the known continuity window. Because the run stayed narrow and still closed
+  natively, this counts as fresh mew-side implementation evidence for the
+  frozen M6.6 set, not as a comparator slot.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -1013,8 +1025,13 @@ Missing proof:
   known target path, the native loop could discard that failure and restart
   with a top-of-file `read_file offset=0`. The new
   `broad_read_after_search_miss_guard` should reduce that fallback, but it
-  still needs a fresh broader mew-side rerun to prove the native loop now
+  still needed a fresh broader mew-side rerun to prove the native loop now
   reforms the search or reuses a targeted window instead of broad-reading.
+  Task #352 provided that proof: after a same-surface search miss, the native
+  loop recovered to a narrow `read_file` on the known continuity window and
+  then finished the verified task natively. The remaining M6.6 missing proof is
+  no longer this broad-read fallback; it is broader durable plan/path recall
+  and multi-file normal-case autonomy with less targeted search churn.
 
 Done when:
 

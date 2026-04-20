@@ -349,6 +349,9 @@ class WorkSessionTests(unittest.TestCase):
             "refresh working memory",
             continuity["recommendation"]["summary"],
         )
+        self.assertIn("plan_items", continuity["recommendation"]["summary"])
+        self.assertIn("target_paths", continuity["recommendation"]["summary"])
+        self.assertIn("open_questions", continuity["recommendation"]["summary"])
         self.assertIn("continuity_next: refresh working memory", format_work_session_resume(resume))
 
     def test_work_continuity_score_counts_durable_planning_fields_as_working_memory(self):

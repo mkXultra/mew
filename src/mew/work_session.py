@@ -3284,7 +3284,7 @@ def _continuity_pivot_text(resume):
 
 
 _CONTINUITY_REPAIR_ACTIONS = {
-    "working_memory_survived": "refresh working memory with a hypothesis, next step, or verified state",
+    "working_memory_survived": "refresh working memory with a hypothesis, next step, verified state, or durable planning fields like plan_items, target_paths, or open_questions",
     "risks_preserved": "inspect unresolved failures, pending approvals, and recovery state before acting",
     "next_action_runnable": "record a runnable next action, approval control, or recovery command",
     "approvals_visible": "preserve approve and reject controls for every pending approval",
