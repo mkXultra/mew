@@ -862,9 +862,19 @@ Missing proof:
   unrecoverable and finished. A direct follow-up patch now preserves full text
   in `recent_read_file_windows` for these explicit untruncated line-window
   reads and tells THINK to fall back to matching `tool_calls` text before
-  declaring old text unrecoverable. Those reductions still have not yet been
-  proven by a fresh no-rescue work-session task. The native loop is therefore
-  improved but not yet self-sufficient.
+  declaring old text unrecoverable. Fresh task #342 / session #329 then showed
+  the next blocker clearly: even with the bridged source window and widened
+  paired-test window preserved, the native loop still closed with a no-change
+  summary because the remaining same-file multi-span source change could not be
+  expressed safely as one contiguous `edit_file old/new` bridge. A direct
+  follow-up patch now adds `edit_file_hunks`, a single-path atomic write
+  surface for multiple disjoint exact old/new hunks, and wires it through the
+  work-loop paired-write rules, approvals, metrics, and prompts so same-file
+  multi-span edits no longer depend on restating the full bridged text as one
+  contiguous block. Focused write-tool, work-session, approval-path, `ruff`,
+  `py_compile`, and `git diff --check` validation passed. That reduction still
+  has not yet been proven by a fresh no-rescue work-session task. The native
+  loop is therefore improved but not yet self-sufficient.
 
 Done when:
 
@@ -910,14 +920,15 @@ Next action:
   native proof task that exercises the landed blocker-reduction set:
   merged recent windows, partial-write refusal, stale-approval invalidation,
   duplicate same-path write rejection, and auto-scaled bridging line-window
-  reads plus full recent-window retention for those explicit bridges. Choose
-  one narrow `src/mew/work_session.py` paired source/test slice that needs one
-  consolidated source edit across two nearby surfaces, and verify that mew now
-  reuses the exact bridged source text from `recent_read_file_windows` or the
-  matching `tool_calls` result, proposes a stable consolidated dry-run batch,
-  and avoids the same-span reread / no-change finish seen in #340 and #341. Do
-  not return to comparator work until the mew-side implementation set is
-  frozen.
+  reads plus full recent-window retention for those explicit bridges, and the
+  new `edit_file_hunks` surface for same-file multi-span edits. Choose one
+  narrow `src/mew/work_session.py` paired source/test slice that needs one
+  same-file multi-span source change, and verify that mew now reuses the exact
+  bridged source text from `recent_read_file_windows` or the matching
+  `tool_calls` result, proposes one stable dry-run batch with
+  `edit_file_hunks` for the source file plus the paired test edit, and avoids
+  the no-change finish seen in #342. Do not return to comparator work until
+  the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

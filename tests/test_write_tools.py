@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mew.write_tools import (
     edit_file,
+    edit_file_hunks,
     restore_write_snapshot,
     snapshot_write_path,
     summarize_write_result,
@@ -122,6 +123,55 @@ class WriteToolsTests(unittest.TestCase):
             summary = summarize_write_result(result)
             self.assertIn("no_op: old and new text are identical; file content is unchanged", summary)
             self.assertIn("re-read the target window", summary)
+
+    def test_edit_file_hunks_applies_disjoint_replacements_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multi.py"
+            path.write_text("alpha = 1\nmiddle = 2\nomega = 3\n", encoding="utf-8")
+
+            result = edit_file_hunks(
+                str(path),
+                [
+                    {"old": "alpha = 1", "new": "alpha = 10"},
+                    {"old": "omega = 3", "new": "omega = 30"},
+                ],
+                [tmp],
+            )
+
+            self.assertTrue(result["written"])
+            self.assertEqual(result["hunk_count"], 2)
+            self.assertEqual(path.read_text(encoding="utf-8"), "alpha = 10\nmiddle = 2\nomega = 30\n")
+            summary = summarize_write_result(result)
+            self.assertIn("hunks: 2", summary)
+
+    def test_edit_file_hunks_refuses_duplicate_match_hunk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multi.py"
+            path.write_text("value = old\nvalue = old\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "matched 2 times"):
+                edit_file_hunks(
+                    str(path),
+                    [{"old": "value = old", "new": "value = new"}],
+                    [tmp],
+                    dry_run=True,
+                )
+
+    def test_edit_file_hunks_refuses_overlapping_hunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multi.py"
+            path.write_text("abcdef\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "edit hunks overlap"):
+                edit_file_hunks(
+                    str(path),
+                    [
+                        {"old": "abcd", "new": "ABCD"},
+                        {"old": "cdef", "new": "CDEF"},
+                    ],
+                    [tmp],
+                    dry_run=True,
+                )
 
     def test_snapshot_restore_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:

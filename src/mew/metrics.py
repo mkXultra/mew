@@ -5,7 +5,7 @@ from .tasks import find_task, task_kind
 from .timeutil import parse_time
 
 
-WORK_WRITE_TOOLS = {"write_file", "edit_file"}
+WORK_WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 DEFAULT_SAMPLE_LIMIT = 3
 SAMPLE_TEXT_MAX_CHARS = 240
 SLOW_FIRST_TOOL_SECONDS = 30.0

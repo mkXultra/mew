@@ -158,7 +158,69 @@ def _planned_write_after_text(tool, parameters, before):
                 "or include surrounding context to narrow the match"
             )
         return before.replace(old, new) if parameters.get("replace_all") else before.replace(old, new, 1)
+    if tool == "edit_file_hunks":
+        edits = parameters.get("edits")
+        return _apply_edit_hunks(before, edits)
     raise ValueError(f"unsupported write tool: {tool}")
+
+
+def _normalize_edit_hunk(index, edit):
+    if not isinstance(edit, dict):
+        raise ValueError(f"edit hunk #{index + 1} must be an object with old/new strings")
+    old = edit.get("old")
+    new = edit.get("new")
+    if not isinstance(old, str) or old == "":
+        raise ValueError(f"edit hunk #{index + 1} old text must be a non-empty string")
+    if not isinstance(new, str):
+        raise ValueError(f"edit hunk #{index + 1} new text must be a string")
+    return {"old": old, "new": new}
+
+
+def _apply_edit_hunks(before, edits):
+    edits = edits if isinstance(edits, list) else []
+    if not edits:
+        raise ValueError("edit_file_hunks requires a non-empty edits list")
+
+    placements = []
+    for index, raw_edit in enumerate(edits):
+        edit = _normalize_edit_hunk(index, raw_edit)
+        old = edit["old"]
+        count = before.count(old)
+        if count == 0:
+            raise ValueError(
+                f"edit hunk #{index + 1} old text was not found; confirm the exact existing text before retrying; "
+                "use read_file on the latest target window first"
+            )
+        if count > 1:
+            raise ValueError(
+                f"edit hunk #{index + 1} old text matched {count} times; include more surrounding context to narrow the match"
+            )
+        start = before.find(old)
+        placements.append(
+            {
+                "index": index,
+                "old": old,
+                "new": edit["new"],
+                "start": start,
+                "end": start + len(old),
+            }
+        )
+
+    placements.sort(key=lambda item: (item["start"], item["end"], item["index"]))
+    for previous, current in zip(placements, placements[1:]):
+        if current["start"] < previous["end"]:
+            raise ValueError(
+                "edit hunks overlap in the target file; merge them into one hunk or use surrounding context that makes them disjoint"
+            )
+
+    pieces = []
+    cursor = 0
+    for placement in placements:
+        pieces.append(before[cursor : placement["start"]])
+        pieces.append(placement["new"])
+        cursor = placement["end"]
+    pieces.append(before[cursor:])
+    return "".join(pieces)
 
 
 def build_write_intent(tool, parameters):
@@ -367,6 +429,50 @@ def edit_file(
     return result
 
 
+def edit_file_hunks(path, edits, allowed_roots, dry_run=False, max_chars=DEFAULT_WRITE_MAX_CHARS):
+    try:
+        resolved = resolve_allowed_write_path(path, allowed_roots, create=False)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("path does not exist:"):
+            missing_path = message.split("path does not exist:", 1)[1].split(";", 1)[0].strip()
+            raise ValueError(
+                f"path does not exist: {missing_path}; use write_file with --create/create=True to create new files"
+            ) from exc
+        raise
+
+    before = _read_text_if_exists(resolved)
+    after = _apply_edit_hunks(before, edits)
+    changed = before != after
+    no_op_reason = ""
+    if not changed:
+        no_op_reason = "all hunk replacements produced no file changes"
+    edit_size = max(len(after) - len(before), *(len(edit.get("new") or "") for edit in (edits or [])), 0)
+    if edit_size > max_chars:
+        raise ValueError(f"edited content is too large: {edit_size} chars; max={max_chars}")
+    started_at = now_iso()
+    diff = _unified_diff_text(resolved, before, after)
+    if changed and not dry_run:
+        _atomic_write_text(resolved, after)
+
+    result = {
+        "operation": "edit_file_hunks",
+        "path": str(resolved),
+        "hunk_count": len(edits or []),
+        "changed": changed,
+        "no_op": not changed,
+        "dry_run": bool(dry_run),
+        "written": bool(changed and not dry_run),
+        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "diff_stats": _text_diff_line_counts(before, after),
+        "started_at": started_at,
+        "finished_at": now_iso(),
+    }
+    if no_op_reason:
+        result["no_op_reason"] = no_op_reason
+    return result
+
+
 def summarize_write_result(result):
     lines = [
         f"{result.get('operation')} {result.get('path')}",
@@ -376,6 +482,8 @@ def summarize_write_result(result):
         lines.append("created: True")
     if result.get("matched") is not None:
         lines.append(f"matched: {result.get('matched')} replaced: {result.get('replaced')}")
+    if result.get("hunk_count") is not None:
+        lines.append(f"hunks: {result.get('hunk_count')}")
     if result.get("no_op"):
         no_op_reason = result.get('no_op_reason') or 'replacement produced no file changes'
         if no_op_reason == 'old and new text are identical':

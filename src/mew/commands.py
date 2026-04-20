@@ -5042,8 +5042,8 @@ def _apply_work_approval(args, approve_tool_id):
         if not source_call:
             print(f"mew: work tool call not found: {approve_tool_id}", file=sys.stderr)
             return 1, None
-        if source_call.get("tool") not in ("write_file", "edit_file"):
-            print("mew: only write_file/edit_file tool calls can be approved", file=sys.stderr)
+        if source_call.get("tool") not in ("write_file", "edit_file", "edit_file_hunks"):
+            print("mew: only write_file/edit_file/edit_file_hunks tool calls can be approved", file=sys.stderr)
             return 1, None
         result = source_call.get("result") or {}
         if not result.get("dry_run"):
@@ -5189,7 +5189,7 @@ def cmd_work_approve_tool(args):
 def _pending_approval_tool_ids(session):
     ids = []
     for call in (session or {}).get("tool_calls") or []:
-        if call.get("tool") not in ("write_file", "edit_file"):
+        if call.get("tool") not in ("write_file", "edit_file", "edit_file_hunks"):
             continue
         result = call.get("result") or {}
         if not result.get("dry_run") or not result.get("changed"):
@@ -5379,8 +5379,8 @@ def cmd_work_approve_all(args):
 def _work_reject_error(source_call):
     if not source_call:
         return "work tool call not found"
-    if source_call.get("tool") not in ("write_file", "edit_file"):
-        return "only write_file/edit_file tool calls can be rejected"
+    if source_call.get("tool") not in ("write_file", "edit_file", "edit_file_hunks"):
+        return "only write_file/edit_file/edit_file_hunks tool calls can be rejected"
     result = source_call.get("result") or {}
     if not result.get("dry_run") or not result.get("changed"):
         return "only pending dry-run write/edit tool calls can be rejected"
@@ -6023,18 +6023,18 @@ def _work_reply_supported_actions():
         {"type": "stop", "description": "request a stop at the next model/tool boundary", "required": []},
         {
             "type": "reject",
-            "description": "reject a pending dry-run write_file/edit_file tool call",
+            "description": "reject a pending dry-run write_file/edit_file/edit_file_hunks tool call",
             "required": ["tool_call_id"],
         },
         {
             "type": "approve",
-            "description": "approve and apply a pending dry-run write_file/edit_file tool call",
+            "description": "approve and apply a pending dry-run write_file/edit_file/edit_file_hunks tool call",
             "required": ["tool_call_id"],
             "optional": ["allow_write", "allow_unpaired_source_edit", "defer_verify"],
         },
         {
             "type": "approve_all",
-            "description": "approve and apply all pending dry-run write_file/edit_file tool calls",
+            "description": "approve and apply all pending dry-run write_file/edit_file/edit_file_hunks tool calls",
             "required": [],
             "optional": ["allow_write", "allow_unpaired_source_edit"],
         },
@@ -6473,8 +6473,8 @@ def cmd_work_reply_schema(args):
 def _work_approve_error(source_call):
     if not source_call:
         return "work tool call not found"
-    if source_call.get("tool") not in ("write_file", "edit_file"):
-        return "only write_file/edit_file tool calls can be approved"
+    if source_call.get("tool") not in ("write_file", "edit_file", "edit_file_hunks"):
+        return "only write_file/edit_file/edit_file_hunks tool calls can be approved"
     result = source_call.get("result") or {}
     if not result.get("dry_run"):
         return "only dry-run write/edit tool calls can be approved"
@@ -7630,7 +7630,7 @@ def _work_tool_effective_cwd(args, task=None):
 
 
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
-    path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file"}
+    path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file", "edit_file_hunks"}
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
     parameters = {
         "path": args.path if getattr(args, "tool", "") in path_tools else None,
@@ -9787,7 +9787,7 @@ def cmd_step(args):
                 guidance.strip(),
                 (
                     "Manual step write permission:\n"
-                    "Gated write_file/edit_file actions are available under --allow-write roots. "
+                    "Gated write_file/edit_file/edit_file_hunks actions are available under --allow-write roots. "
                     "Omitting dry_run is treated as dry_run=true. "
                     "Set dry_run=false only for a small targeted write, and only when "
                     "--allow-verify plus a verification command are configured."

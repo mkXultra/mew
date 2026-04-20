@@ -813,7 +813,7 @@ def _work_action_schema_text():
         '  "summary": "short reason",\n'
         '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
+        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
         '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
         '"path": "required for read_file/glob/search_text", '
@@ -825,6 +825,7 @@ def _work_action_schema_text():
         '"content": "write_file content", '
         '"old": "edit_file old text", '
         '"new": "edit_file new text", '
+        '"edits": [{"old": "edit_file_hunks old text", "new": "replacement"}], '
         '"create": false, '
         '"replace_all": false, '
         '"dry_run": true}],\n'
@@ -839,6 +840,7 @@ def _work_action_schema_text():
         '    "content": "write_file content",\n'
         '    "old": "edit_file old text",\n'
         '    "new": "edit_file new text",\n'
+        '    "edits": [{"old": "edit_file_hunks old text", "new": "replacement"}],\n'
         '    "text": "send_message text",\n'
         '    "note": "remember note",\n'
         '    "question": "ask_user question",\n'
@@ -899,8 +901,8 @@ def build_work_think_prompt(context):
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple hunks, collapse them into one edit_file or write_file against the most recent exact window for that path. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
-        "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
+        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
         "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
@@ -1040,6 +1042,7 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
         "content",
         "old",
         "new",
+        "edits",
         "reason",
         "text",
         "summary",
@@ -1118,6 +1121,34 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
             "type": "wait",
             "reason": "edit_file requires path plus exact old and new strings",
         }
+    if action_type == "edit_file_hunks":
+        edits = normalized.get("edits")
+        valid_edits = (
+            isinstance(edits, list)
+            and bool(edits)
+            and all(
+                isinstance(item, dict)
+                and isinstance(item.get("old"), str)
+                and item.get("old") != ""
+                and isinstance(item.get("new"), str)
+                for item in edits
+            )
+        )
+        if not normalized.get("path") or not valid_edits:
+            if normalized.get("path"):
+                read_action = {
+                    "type": "read_file",
+                    "path": normalized.get("path"),
+                    "reason": "edit_file_hunks requires one path plus exact old/new hunk pairs; read the target window before retrying",
+                }
+                for key in ("line_start", "line_count", "summary"):
+                    if normalized.get(key) is not None:
+                        read_action[key] = normalized.get(key)
+                return read_action
+            return {
+                "type": "wait",
+                "reason": "edit_file_hunks requires path plus a non-empty edits list of exact old/new pairs",
+            }
     if action_type in WRITE_WORK_TOOLS:
         dry_run = action.get("dry_run")
         normalized["apply"] = bool(action.get("apply")) or dry_run is False
@@ -1193,7 +1224,7 @@ def paired_write_batch_rejection_reason(tools):
     if duplicates:
         return (
             "write batch may include at most one write/edit per file path; "
-            f"collapse same-file hunks into a single edit for {duplicates[0]}"
+            f"collapse same-file hunks into a single edit_file or edit_file_hunks for {duplicates[0]}"
         )
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
@@ -1212,6 +1243,15 @@ def valid_paired_write_batch_sub_action(action):
             and isinstance(action.get("old"), str)
             and action.get("old") != ""
             and isinstance(action.get("new"), str)
+        )
+    if action_type == "edit_file_hunks":
+        edits = action.get("edits")
+        return bool(action.get("path")) and isinstance(edits, list) and bool(edits) and all(
+            isinstance(item, dict)
+            and isinstance(item.get("old"), str)
+            and item.get("old") != ""
+            and isinstance(item.get("new"), str)
+            for item in edits
         )
     return False
 

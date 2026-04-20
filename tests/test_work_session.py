@@ -11678,6 +11678,109 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_accept_edits_auto_approves_paired_batch_with_edit_file_hunks(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                source = Path("src/mew/pairing.py")
+                test_path = Path("tests/test_pairing.py")
+                source.write_text("VALUE = 'old'\nHELPER = 'old'\n", encoding="utf-8")
+                test_path.write_text(
+                    "from pathlib import Path\n\n"
+                    "def test_pairing():\n"
+                    "    text = Path('src/mew/pairing.py').read_text()\n"
+                    "    assert \"VALUE = 'old'\" in text\n"
+                    "    assert \"HELPER = 'old'\" in text\n",
+                    encoding="utf-8",
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "apply paired batch",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": str(test_path),
+                                "old": "\"VALUE = 'old'\" in text\n    assert \"HELPER = 'old'\" in text",
+                                "new": "\"VALUE = 'new'\" in text\n    assert \"HELPER = 'new'\" in text",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file_hunks",
+                                "path": str(source),
+                                "edits": [
+                                    {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                                    {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                                ],
+                                "dry_run": False,
+                            },
+                        ],
+                    },
+                }
+                verify_command = (
+                    f"{sys.executable} -c \"from pathlib import Path; "
+                    "text = Path('src/mew/pairing.py').read_text(); "
+                    "assert \\\"VALUE = 'new'\\\" in text; "
+                    "assert \\\"HELPER = 'new'\\\" in text; "
+                    "test = Path('tests/test_pairing.py').read_text(); "
+                    "assert \\\"VALUE = 'new'\\\" in test; "
+                    "assert \\\"HELPER = 'new'\\\" in test\""
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        verify_command,
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["steps"][0]["inline_approval"], "auto_applied")
+                self.assertEqual(report["steps"][0]["inline_approval_count"], 2)
+                self.assertIn("VALUE = 'new'", source.read_text(encoding="utf-8"))
+                self.assertIn("HELPER = 'new'", source.read_text(encoding="utf-8"))
+                self.assertIn("VALUE = 'new'", test_path.read_text(encoding="utf-8"))
+                self.assertIn("HELPER = 'new'", test_path.read_text(encoding="utf-8"))
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["approval_status"] for call in session["tool_calls"][:2]], ["applied", "applied"])
+                self.assertEqual(session["tool_calls"][1]["tool"], "edit_file_hunks")
+                apply_results = [call["result"] for call in session["tool_calls"][2:4]]
+                self.assertTrue(apply_results[0]["verification_deferred"])
+                self.assertEqual(apply_results[1]["verification_exit_code"], 0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_live_accept_edits_paired_write_batch_shows_post_approval_resume(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -12987,11 +13090,13 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("include a paired tests/ change", prompt)
         self.assertIn("paired-write constraint applies to code write batches", prompt)
         self.assertIn("Use at most one write/edit per file path in the batch", prompt)
-        self.assertIn("collapse them into one edit_file or write_file", prompt)
+        self.assertIn("prefer one edit_file_hunks action for that path", prompt)
         self.assertIn("If the full required write set would exceed five tools", prompt)
         self.assertIn("do not propose a partial batch that drops sibling edits", prompt)
         self.assertIn("Docs-only single edit_file/write_file actions", prompt)
         self.assertIn("may be proposed directly", prompt)
+        self.assertIn("use edit_file, edit_file_hunks, or write_file", prompt)
+        self.assertIn("edit_file_hunks you must give one path plus a non-empty edits list", prompt)
         self.assertIn("pairing_status.suggested_test_path", prompt)
         self.assertIn("record the intended test in working_memory.next_step", prompt)
         self.assertIn("If a targeted test-file search misses, search tests/ or the likely test module", prompt)
@@ -13227,7 +13332,36 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(action["type"], "wait")
         self.assertIn("at most one write/edit per file path", action["reason"])
-        self.assertIn("single edit for src/mew/alpha.py", action["reason"])
+        self.assertIn("edit_file or edit_file_hunks for src/mew/alpha.py", action["reason"])
+
+    def test_work_model_batch_accepts_edit_file_hunks_as_single_same_path_write(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "src/mew/alpha.py",
+                            "edits": [
+                                {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                                {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                            ],
+                        },
+                    ],
+                    "reason": "preview paired edits with one multi-hunk source action",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(len(action["tools"]), 2)
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertTrue(action["tools"][0]["dry_run"])
+        self.assertTrue(action["tools"][1]["dry_run"])
 
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result

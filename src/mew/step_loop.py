@@ -65,7 +65,7 @@ def filter_step_action_plan(action_plan, allow_verify=False, allow_write=False):
     if allow_verify:
         allowed.add("run_verification")
     if allow_write:
-        allowed.update({"write_file", "edit_file"})
+        allowed.update({"write_file", "edit_file", "edit_file_hunks"})
 
     actions = []
     skipped = []

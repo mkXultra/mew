@@ -24,6 +24,7 @@ from .write_tools import (
     build_write_intent,
     classify_write_intent_world_state,
     edit_file,
+    edit_file_hunks,
     restore_write_snapshot,
     snapshot_write_path,
     summarize_write_result,
@@ -46,6 +47,7 @@ WORK_TOOLS = {
     "git_log",
     "write_file",
     "edit_file",
+    "edit_file_hunks",
 }
 APPROVAL_WAIT_RE = re.compile(
     r"\b(?:wait|waiting|await|awaiting)\b.*\b(?:approval|approve|rejection|reject)\b"
@@ -55,7 +57,7 @@ APPROVAL_WAIT_RE = re.compile(
 READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
-WRITE_WORK_TOOLS = {"write_file", "edit_file"}
+WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
@@ -590,6 +592,32 @@ def work_tool_signature(tool, parameters):
             "old": parameters.get("old") or "",
             "new": parameters.get("new") or "",
             "replace_all": bool(parameters.get("replace_all")),
+            "apply": apply,
+        }
+        if apply:
+            normalized.update(
+                {
+                    "verify_command": parameters.get("verify_command") or "",
+                    "verify_cwd": parameters.get("verify_cwd") or ".",
+                    "verify_timeout": _float_work_parameter(parameters, "verify_timeout", 300),
+                }
+            )
+        parameters = normalized
+    elif tool == "edit_file_hunks":
+        apply = bool(parameters.get("apply"))
+        edits = []
+        for item in parameters.get("edits") or []:
+            if not isinstance(item, dict):
+                continue
+            edits.append(
+                {
+                    "old": item.get("old") or "",
+                    "new": item.get("new") or "",
+                }
+            )
+        normalized = {
+            "path": parameters.get("path") or "",
+            "edits": edits,
             "apply": apply,
         }
         if apply:
@@ -1306,6 +1334,8 @@ def execute_work_write_tool(tool, parameters, on_output=None):
         raise ValueError("edit_file requires --old")
     if tool == "edit_file" and "new" not in parameters:
         raise ValueError("edit_file requires --new")
+    if tool == "edit_file_hunks" and "edits" not in parameters:
+        raise ValueError("edit_file_hunks requires --edits")
 
     path = parameters.get("path") or ""
     snapshot = None
@@ -1322,6 +1352,13 @@ def execute_work_write_tool(tool, parameters, on_output=None):
             parameters.get("content", ""),
             allowed_write_roots,
             create=bool(parameters.get("create")),
+            dry_run=not apply,
+        )
+    elif tool == "edit_file_hunks":
+        result = edit_file_hunks(
+            path,
+            parameters.get("edits") or [],
+            allowed_write_roots,
             dry_run=not apply,
         )
     else:
@@ -4582,6 +4619,9 @@ def format_work_action(action, parameters=None, tool_call_id=None):
         value = _display_value(action, parameters, key)
         if value is not None:
             lines.append(f"{key}: {len(str(value))} chars")
+    edits = _display_value(action, parameters, "edits")
+    if isinstance(edits, list):
+        lines.append(f"edits: {len(edits)} hunk(s)")
     return "\n".join(lines)
 
 
