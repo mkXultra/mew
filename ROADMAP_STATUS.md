@@ -1631,6 +1631,12 @@ Evidence:
   approved change kept the nonzero exit code and JSON shape while making text
   output concise. This is useful entry-rehearsal evidence, but it is still not
   M5 done-gate credit because it included supervisor redirection.
+- Task `#302` closed another M5 audit slice in commit `26752d3`. Audit bundles
+  now expose concrete verification result evidence from work-tool verification
+  records and task-level verification runs in both JSON and text output. The
+  loop is still not M5 done-gate credit: the resident hit a paired-edit guard
+  after a no-op test edit, and the supervisor applied the source/test patch as
+  a rescue.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1686,11 +1692,10 @@ Next action:
 
 - Start the next bounded M5 entry-rehearsal loop from `mew-product-evaluator`
   or `./mew self-improve --start-session --focus 'Advance M5 audited
-  self-improvement loop'`. The loop should target a missing audit-bundle or
-  no-rescue classification gap, leave validation evidence, and record whether
-  any supervisor intervention was approval/redirection versus rescue. It must
-  not count as M5 done-gate credit until M3 closes and a no-rescue review
-  confirms the loop needed no rescue edits.
+  self-improvement loop'`. The next best gap is human-intervention
+  classification: task `#302` visibly required rescue, but the audit still says
+  `rescue=not_assessed`. The next loop should make rescue/not-rescue evidence
+  explicit without pretending rescued loops count for M5 done credit.
 
 ## Latest Validation
 
