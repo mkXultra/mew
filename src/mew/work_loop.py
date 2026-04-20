@@ -5,6 +5,7 @@ import time
 
 from .agent import call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
+from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
 from .tasks import clip_output
 from .timeutil import now_iso
 from .work_session import (
@@ -926,6 +927,11 @@ def plan_work_model_turn(
         verify_command=verify_command,
         guidance=guidance,
     )
+    reasoning_policy = select_work_reasoning_policy(
+        task,
+        guidance=guidance,
+        capabilities=context.get("capabilities") or {},
+    )
     stream_deltas = []
 
     def capture_delta(phase, text):
@@ -940,16 +946,17 @@ def plan_work_model_turn(
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
     think_prompt = build_work_think_prompt(context)
     think_started = time.monotonic()
-    decision_plan = call_model_json_with_retries(
-        model_backend,
-        model_auth,
-        think_prompt,
-        model,
-        base_url,
-        timeout,
-        log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
-        **think_kwargs,
-    )
+    with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
+        decision_plan = call_model_json_with_retries(
+            model_backend,
+            model_auth,
+            think_prompt,
+            model,
+            base_url,
+            timeout,
+            log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
+            **think_kwargs,
+        )
     think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
@@ -960,6 +967,8 @@ def plan_work_model_turn(
             "prompt_chars": len(think_prompt),
             "elapsed_seconds": _round_seconds(think_elapsed),
         },
+        "reasoning_policy": reasoning_policy,
+        "reasoning_effort": reasoning_policy.get("effort") or "",
     }
     if act_mode == "deterministic":
         action = normalize_work_model_action(decision_plan, verify_command=verify_command)
@@ -983,16 +992,17 @@ def plan_work_model_turn(
         act_kwargs = {"on_text_delta": act_delta} if act_delta else {}
         act_prompt = build_work_act_prompt(context, decision_plan)
         act_started = time.monotonic()
-        action_plan = call_model_json_with_retries(
-            model_backend,
-            model_auth,
-            act_prompt,
-            model,
-            base_url,
-            timeout,
-            log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
-            **act_kwargs,
-        )
+        with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
+            action_plan = call_model_json_with_retries(
+                model_backend,
+                model_auth,
+                act_prompt,
+                model,
+                base_url,
+                timeout,
+                log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
+                **act_kwargs,
+            )
         act_elapsed = time.monotonic() - act_started
         model_metrics["act"] = {
             "prompt_chars": len(act_prompt),

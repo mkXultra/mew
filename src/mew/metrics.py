@@ -1064,6 +1064,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     think_prompt_chars = []
     act_prompt_chars = []
     total_model_seconds = []
+    reasoning_efforts = {}
     successful_verifications = _successful_verifications(state)
 
     for session in sessions:
@@ -1129,6 +1130,9 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
             think_prompt_chars.append(_numeric_model_metric(turn, "think", "prompt_chars"))
             act_prompt_chars.append(_numeric_model_metric(turn, "act", "prompt_chars"))
             total_model_seconds.append(_numeric_model_metric(turn, "total_model_seconds"))
+            reasoning_effort = _model_metric(turn, "reasoning_effort")
+            if reasoning_effort:
+                reasoning_efforts[str(reasoning_effort)] = reasoning_efforts.get(str(reasoning_effort), 0) + 1
 
     intervention_count = (
         tool_counts["failed"]
@@ -1180,6 +1184,7 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "think_prompt_chars": _summary(think_prompt_chars),
         "act_prompt_chars": _summary(act_prompt_chars),
         "total_model_seconds": _summary(total_model_seconds),
+        "reasoning_efforts": reasoning_efforts,
     }
     return {
         "kind": kind or "all",
@@ -1245,6 +1250,9 @@ def format_observation_metrics(data):
             f"median={summary.get('median')} p95={summary.get('p95')} max={summary.get('max')}"
         )
     lines.append("self_hosting:")
+    effort_counts = self_hosting.get("reasoning_efforts") or {}
+    if effort_counts:
+        lines.append("reasoning_efforts: " + " ".join(f"{name}={value}" for name, value in sorted(effort_counts.items())))
     for label, key in (
         ("first_think_latency_seconds", "first_think_latency_seconds"),
         ("first_edit_proposal_seconds", "first_edit_proposal_seconds"),

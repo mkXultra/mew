@@ -27,7 +27,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 20:01 JST.
+Last assessed: 2026-04-20 20:07 JST.
 
 Active work: **M6.5 Self-Hosting Speed** while the M6 enhanced proof runs in
 parallel.
@@ -60,10 +60,11 @@ Current next action:
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Build the next M6.5 slice: reasoning-effort policy for small implementation
-   work, exploration, safety, recovery, and roadmap decisions.
-4. Rerun a #320-class self-hosting task and compare first useful output and
-   edit-proposal latency against the failed attempt.
+3. Build the next M6.5 slice: a small implementation prompt/context path that
+   avoids injecting the full resident memory bundle.
+4. Rerun a #320-class self-hosting task and compare first useful output,
+   selected reasoning effort, prompt/context size, and edit-proposal latency
+   against the failed attempt.
 5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
    without dropping the M6.5 active focus.
 6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
@@ -378,14 +379,17 @@ Evidence:
 - `mew metrics` now prints and returns a `self_hosting` section with first
   THINK latency, first dry-run edit proposal latency, context chars,
   active-memory chars/count, prompt chars, and total model seconds.
+- Work turns now select and record a reasoning policy: read-only exploration
+  defaults to `low`, small implementation/verification to `medium`, and
+  roadmap/recovery/safety/daemon/auth/policy work to `high`, with
+  `MEW_CODEX_REASONING_EFFORT` as an explicit override.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
+  `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
   targeted `ruff`, `uv run python -m py_compile`, and `git diff --check` passed.
 
 Missing proof:
 
-- No reasoning-effort auto policy exists yet for small implementation versus
-  safety/recovery/roadmap work.
 - No small implementation prompt mode or differential/pointer context path
   exists yet.
 - No post-instrumentation real Codex work session has populated the new
@@ -408,8 +412,9 @@ Done when:
 
 Next action:
 
-- Add reasoning-effort policy, then rerun a #320-class self-hosting task and
-  compare the new `self_hosting` metrics against the failed attempt.
+- Add a small implementation prompt/context path, then rerun a #320-class
+  self-hosting task and compare the new `self_hosting` metrics against the
+  failed attempt.
 
 ### M7: Senses - Inbound Signals
 
@@ -517,8 +522,6 @@ The acceptable near-term work is:
 
 - collecting the running M6 enhanced Docker proof when it finishes;
 - self-hosting speed metrics for native work sessions;
-- reasoning-effort policy for small implementation, exploration, safety,
-  recovery, and roadmap work;
 - a small implementation prompt/context path that avoids injecting the full
   resident memory bundle;
 - rerunning a #320-class mew-as-implementer dogfood task and comparing latency

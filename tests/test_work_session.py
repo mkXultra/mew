@@ -6029,6 +6029,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertGreater(metrics.get("context_chars", 0), 0)
                 self.assertGreater(metrics.get("think", {}).get("prompt_chars", 0), 0)
                 self.assertGreaterEqual(metrics.get("think", {}).get("elapsed_seconds", -1), 0)
+                self.assertEqual(metrics.get("reasoning_effort"), "low")
+                self.assertEqual(metrics.get("reasoning_policy", {}).get("work_type"), "exploration")
                 self.assertEqual(metrics.get("act", {}).get("mode"), "deterministic")
                 self.assertEqual(metrics.get("act", {}).get("prompt_chars"), 0)
             finally:
