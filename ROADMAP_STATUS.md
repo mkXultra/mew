@@ -654,6 +654,19 @@ Evidence:
   appears in model context. Focused `uv run python -m unittest
   tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
   passed. This is product progress, not no-rescue mew-side evidence.
+- M6.6 task #335 / session #322 then attempted the next narrower checklist
+  evidence slice: surface `working_memory.plan_items` in `recent_decisions` and
+  `compressed_prior_think` summaries inside `src/mew/work_session.py` with a
+  paired test update. Even after multiple reviewer steers to stop redundant
+  search and pin exact spans, the native loop repeatedly reread the same exact
+  builder/formatter windows, exhausted the step budget at `pressure=high`, and
+  finished without proposing a dry-run edit. The feature then landed directly
+  as product progress: `recent_decisions` and `compressed_prior_think` now both
+  carry clipped `plan_items`, and `format_work_session_resume()` renders those
+  items in the Recent decisions / Compressed prior think blocks. Focused `uv
+  run python -m unittest tests.test_work_session`, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is blocker evidence plus product progress,
+  not no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -670,7 +683,8 @@ Missing proof:
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
   and #332 now proves one normal-case anti-churn/path-recall behavior for
   `working_memory.target_paths`. `working_memory.plan_items` now exists as
-  product behavior for persistence/surfacing, but broader durable
+  product behavior for persistence/surfacing across working memory, recent
+  decisions, and compressed prior-think summaries, but broader durable
   checklist/path-recall behavior is still not proven by a no-rescue mew-side
   task across multi-file normal coding work or resume after context
   compression.
@@ -687,9 +701,9 @@ Missing proof:
   read-root permission repair, in #330 one incorrect line-window guess, in
   #331 an exact-old-string reread loop under high context pressure, and in
   #332 one steer to stop repeated same-symbol search before the exact read. The
-  blocked #333 and direct-patch #334 follow-ups show that multi-file exact
-  old-text retention is still fragile once context pressure rises, so the
-  native loop is not yet self-sufficient.
+  blocked #333, direct-patch #334, and blocked/direct-patch #335 follow-ups
+  show that exact old-text retention and read-window reuse are still fragile
+  once context pressure rises, so the native loop is not yet self-sufficient.
 
 Done when:
 
@@ -723,11 +737,13 @@ Next action:
   comparator slots.
 - Carry the landed `plan_items` persistence half from #334 as product progress,
   but do not count it as no-rescue evidence.
-- Keep M6.6 on the mew-side critical path and use the next slice to prove the
-  landed checklist behavior with a smaller no-rescue task, or to narrow the
-  exact-old-text retention blocker enough that mew can land the next checklist
-  slice itself. Do not return to comparator work until the mew-side
-  implementation set is frozen.
+- Carry the landed #335 summary surfacing patch as product progress, but do not
+  count it as no-rescue evidence.
+- Keep M6.6 on the mew-side critical path, but stop replaying the same
+  checklist-summary feature slice. The next task should attack the measured
+  blocker directly: exact-old-text retention / read-window reuse for repeated
+  same-file multi-span edits under medium/high context pressure. Do not return
+  to comparator work until the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

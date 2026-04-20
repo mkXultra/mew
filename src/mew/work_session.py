@@ -3241,6 +3241,9 @@ def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
         for key in ("hypothesis", "next_step", "last_verified_state"):
             if memory.get(key):
                 entry[key] = clip_inline_text(memory.get(key), 240)
+        plan_items = _coerce_working_memory_plan_items(memory.get("plan_items") or [])
+        if plan_items:
+            entry["plan_items"] = plan_items
         questions = memory.get("open_questions") or []
         if questions:
             entry["open_questions"] = [clip_inline_text(str(item), 160) for item in questions[:3]]
@@ -3856,6 +3859,9 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     recent_decisions = []
     for turn in turns[-limit:]:
         action = turn.get("action") or {}
+        plan = turn.get("decision_plan") or {}
+        memory = plan.get("working_memory") if isinstance(plan, dict) else {}
+        memory = memory if isinstance(memory, dict) else {}
         recent_decisions.append(
             {
                 "model_turn_id": turn.get("id"),
@@ -3864,6 +3870,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 "summary": turn.get("finished_note") or turn.get("summary") or turn.get("error") or "",
                 "guidance_snapshot": clip_inline_text(work_turn_guidance_snapshot(turn), 240),
                 "tool_call_id": turn.get("tool_call_id"),
+                "plan_items": _coerce_working_memory_plan_items(memory.get("plan_items") or []),
             }
         )
     compressed_prior_think = build_compressed_prior_think(turns, recent_limit=limit, limit=4)
@@ -4364,6 +4371,10 @@ def format_work_session_resume(resume):
                     decision.get("model_turn_id"),
                 )
                 lines.append(f"  guidance: {guidance_text}")
+            plan_items = decision.get("plan_items") or []
+            if plan_items:
+                lines.append("  plan_items:")
+                lines.extend(f"  - {item}" for item in plan_items)
     else:
         lines.append("(none)")
 
@@ -4380,6 +4391,10 @@ def format_work_session_resume(resume):
             for key in ("hypothesis", "next_step", "last_verified_state"):
                 if item.get(key):
                     lines.append(f"  {key}: {item.get(key)}")
+            plan_items = item.get("plan_items") or []
+            if plan_items:
+                lines.append("  plan_items:")
+                lines.extend(f"  - {entry}" for entry in plan_items)
             if item.get("guidance_snapshot"):
                 lines.append(f"  guidance: {item.get('guidance_snapshot')}")
         if compressed_prior.get("omitted"):

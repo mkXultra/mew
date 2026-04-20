@@ -434,6 +434,12 @@ class WorkSessionTests(unittest.TestCase):
                         "working_memory": {
                             "hypothesis": f"Hypothesis {turn_id}",
                             "next_step": f"Next step {turn_id}",
+                            "plan_items": [
+                                f"Plan item {turn_id}A",
+                                f"Plan item {turn_id}B",
+                                f"Plan item {turn_id}C",
+                                f"Plan item {turn_id}D",
+                            ],
                             "last_verified_state": f"Verified {turn_id}",
                         }
                     },
@@ -461,8 +467,15 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(prior["shown"], 4)
         self.assertEqual(prior["items"][-1]["model_turn_id"], 7)
         self.assertEqual(prior["items"][-1]["hypothesis"], "Hypothesis 7")
+        self.assertEqual(
+            prior["items"][-1]["plan_items"],
+            ["Plan item 7A", "Plan item 7B", "Plan item 7C"],
+        )
         self.assertIn("Compressed prior think (4/7 older turn(s))", text)
         self.assertIn("#7 [completed] read_file Turn summary 7", text)
+        self.assertIn("  plan_items:", text)
+        self.assertIn("  - Plan item 7A", text)
+        self.assertNotIn("Plan item 7D", text)
 
     def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
         active_session = {
@@ -5454,9 +5467,18 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(memory["last_verified_state"], "full suite passed before this slice")
         self.assertEqual(memory["source"], "think")
         self.assertEqual(memory["model_turn_id"], 1)
+        self.assertEqual(
+            resume["recent_decisions"][0]["plan_items"],
+            [
+                "Capture the failing approval transcript.",
+                "Add a focused command-output pane.",
+                "Verify the narrowed approval flow.",
+            ],
+        )
 
         text = format_work_session_resume(resume)
         self.assertIn("Working memory", text)
+        self.assertIn("Recent decisions", text)
         self.assertIn("hypothesis: Approval UX still needs command output visibility.", text)
         self.assertIn("next_step: Add a focused command-output pane.", text)
         self.assertIn("plan_items:", text)
