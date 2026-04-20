@@ -10,26 +10,25 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, half-hour and one-hour real-time resident cadence proofs, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
+| 3. Persistent Advantage | `done` | M3 close gate passed: strict fresh-comparator and source/test reentry proofs choose `mew_preferred`, task-local continuity survives interruption/compression/reentry, and resident cadence now has half-hour, one-hour, and four-hour real-time Docker proofs plus week/ten-day synthetic or virtual-time reentry checks. |
 | 4. True Recovery | `done` | M4 close gate passed: crashed/interrupted runtime and work-session state can be classified, safely requeued/retried when deterministic, or surfaced as durable review without manual reconstruction; opaque shell side-effect retry remains a deliberate non-goal. |
-| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, but M5 is explicitly gated behind persistent continuity, true recovery, and a no-rescue multi-loop proof. |
+| 5. Self-Improving Mew | `ready_for_close` | M5 entry gates are now satisfied by M3/M4 closure, and `#307`-`#311` form a five-loop no-rescue candidate sequence with verification and recovery evidence; final close remains a human governance decision. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 13:28 JST.
+Last assessed: 2026-04-20 17:15 JST.
 
-Active milestone: Milestone 5, Self-Improving Mew (entry rehearsal while M3 proof runs).
+Active milestone: Milestone 5, Self-Improving Mew (`ready_for_close`).
 
-Rationale: The remaining M3 real-time cadence proof is already running in the
-background as container `mew-proof-real-4h-20260420-1312`; task `#300` is
-blocked on that proof and records the exact collection path. Do not mark M3
-`done` until the proof is collected and `mew proof-summary
-proof-artifacts/mew-proof-real-4h-20260420-1312 --json --strict` passes. The
-main implementation thread should not idle on wall-clock proof. It may move to
-M5 entry rehearsal work that builds the frozen permission context, explicit
-effect budget, readable audit bundle, and no-rescue intervention
-classification needed before M5 loops can count. This M5 work is preparatory:
-it does not claim M5 done-gate credit until M3 is honestly closed.
+Rationale: M3 is now closed by `docs/M3_CLOSE_GATE_2026-04-20.md`; the final
+4h Docker resident-loop proof passed strict summary with `processed=240`,
+`passive=239`, all passive gaps within 60-61 seconds, and `8/8` checks passed.
+M4 is already closed by `docs/M4_CLOSE_GATE_2026-04-20.md`. The current M5
+audit sequence `#307`-`#311` reports `candidate_sequence_ready` with
+`recovery=True`, verification passed, no-rescue review recorded, and candidate
+credit for every loop. Because M5 changes roadmap/governance status, final
+`done` closure should be an explicit human governance decision rather than an
+automatic side effect of proof collection.
 
 Previous M3 evidence rationale: Milestone 1 is closed and Milestone 2 has now passed its final
 evidence gate. Task `#293` / session `#275` completed a focused no-change
@@ -1245,6 +1244,12 @@ Evidence:
   including 59 passive ticks, and produced post-runtime reentry checks for
   `focus`, `brief`, and `context --save`. The durable summary is in
   `docs/M3_RESIDENT_LOOP_1H_REAL_2026-04-20.md`.
+- The M3 close-gate four-hour real-time isolated Docker proof passed.
+  Container `mew-proof-real-4h-20260420-1312` ran `resident-loop` for 14400
+  seconds with a 60 second interval and no time dilation, exited `0`,
+  processed 240 events including 239 passive ticks, kept 238 passive gaps
+  within 60-61 seconds, and passed all 8 resident-loop checks. The durable
+  close summary is in `docs/M3_CLOSE_GATE_2026-04-20.md`.
 - The accelerated M3 proof foundation is in place. `timeutil.now_iso()` and
   `now_date_iso()` can use `MEW_TIME_DILATION`, the seven daily report modules
   now resolve default dates through `now_date_iso()`, and
@@ -1787,16 +1792,16 @@ Evidence:
 
 Missing proof:
 
-- Milestone 3 is still in progress; long-running resident continuity is not
-  closed against comparable fresh CLI restarts.
+- Milestone 3 is now closed. `docs/M3_CLOSE_GATE_2026-04-20.md` records the
+  strict fresh-comparator, source/test reentry, virtual-time, aged-reentry, and
+  four-hour real-time resident-loop evidence.
 - Milestone 4 is done for the M5 entry gate; broader opaque shell/runtime
   side-effect auto-retry is a deliberate non-goal rather than an M5 blocker.
 - mew has produced five consecutive reviewed self-improvement candidates
   (`#307`-`#311`) with native resident work, verification, human review, and
-  passing readable audit bundles. The sequence audit now also confirms at
-  least one recovery event across the set. This sequence is still candidate
-  evidence rather than M5 closure because M3 remains open and the proof should
-  be reviewed as a set before changing milestone status.
+  passing readable audit bundles. The sequence audit also confirms at least
+  one recovery event across the set. This sequence is ready for final M5 close
+  review under the documented gate.
 - Earlier self-improvement dogfood includes supervisor rescue edits and manual
   completion work, but the latest `#307`-`#311` sequence satisfies the narrow
   no-supervisor-file-patch candidate condition.
@@ -1808,10 +1813,10 @@ Missing proof:
 
 Next action:
 
-- Keep the M3 4h proof as background-only until task `#300` can collect and
-  summarize it. After that, review the `#307`-`#311` no-rescue candidate
-  sequence as a set with `mew self-improve --audit-sequence 307 308 309 310
-  311`; do not declare M5 closed while M3 remains open.
+- Ask for or record explicit human governance approval before changing M5 from
+  `ready_for_close` to `done`. If approved, update
+  `docs/M5_CLOSE_REVIEW_2026-04-20.md` from `ready for human close approval`
+  to `passed` and mark M5 done in this file.
 
 ## Latest Validation
 

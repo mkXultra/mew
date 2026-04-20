@@ -1,6 +1,6 @@
 # M5 Close Review 2026-04-20
 
-Status: prepared; final close is blocked on M3 proof collection.
+Status: ready for human close approval.
 
 This document reviews Milestone 5 against the current documented gate. It does
 not add new post-hoc requirements. The separate accelerator review in
@@ -20,8 +20,8 @@ not as a retroactive M5 gate change.
   verification result, approvals, recovery events, and budget outcome in a
   readable audit bundle.
 
-M5 also depends on M3 and M4 entry gates. M4 is already closed. M3 remains the
-only open blocker until the 4h resident proof is collected and summarized.
+M5 also depends on M3 and M4 entry gates. M4 is already closed. M3 is now
+closed by `docs/M3_CLOSE_GATE_2026-04-20.md`.
 
 ## Current Machine Evidence
 
@@ -79,12 +79,16 @@ Post-M5/M5.1 likely next work:
 
 ## Close Decision
 
-Pending.
+Ready for explicit human governance approval.
 
-Close M5 only after:
+Completed prerequisites:
 
-1. task `#300` collects the 4h M3 proof artifacts;
-2. `./mew proof-summary proof-artifacts/mew-proof-real-4h-20260420-1312 --json --strict` passes;
-3. `ROADMAP_STATUS.md` marks M3 done or explicitly records why the proof is
-   still insufficient;
-4. this review is updated from `prepared` to `passed`.
+1. task `#300` collected the 4h M3 proof artifacts;
+2. `./mew proof-summary proof-artifacts/mew-proof-real-4h-20260420-1312 --json --strict` passed;
+3. `ROADMAP_STATUS.md` marks M3 done;
+4. this review records the M5 sequence as ready under the documented gate.
+
+Final step:
+
+- With explicit human approval, update this review from `ready for human close
+  approval` to `passed` and mark M5 `done` in `ROADMAP_STATUS.md`.
