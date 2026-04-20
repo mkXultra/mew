@@ -1038,6 +1038,11 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         round((later - earlier).total_seconds(), 2)
         for earlier, later in zip(passive_times, passive_times[1:])
     ]
+    passive_span_seconds = (
+        round((passive_times[-1] - passive_times[0]).total_seconds(), 2)
+        if len(passive_times) >= 2
+        else 0.0
+    )
 
     _scenario_check(
         checks,
@@ -1103,6 +1108,7 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         "time_dilation": multiplier,
         "processed_events": len(processed_events),
         "passive_events": len(passive_events),
+        "passive_span_seconds": passive_span_seconds,
         "passive_gaps_seconds": passive_gaps,
     }
     return report

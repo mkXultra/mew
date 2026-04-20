@@ -5,20 +5,21 @@ Generated: 2026-04-20 09:50 JST
 Command:
 
 ```bash
-./mew dogfood --scenario resident-loop --duration 7 --interval 2 --poll-interval 0.1 --time-dilation 24 --workspace /tmp/mew-time-dilation-smoke-20260420 --json
+./mew dogfood --scenario resident-loop --duration 7 --interval 2 --poll-interval 0.1 --time-dilation 24 --workspace /tmp/mew-time-dilation-span-smoke-20260420 --json
 ```
 
 Result: `pass`
 
 Artifacts:
 
-- workspace: `/tmp/mew-time-dilation-smoke-20260420`
+- workspace: `/tmp/mew-time-dilation-span-smoke-20260420`
 - requested duration: `7.0` seconds
 - requested interval: `2.0` seconds
 - time dilation: `24.0`
 - processed events: `4`
 - passive events: `3`
-- passive gaps: `[49.0, 51.0]` logical seconds
+- passive span: `97.0` logical seconds
+- passive gaps: `[48.0, 49.0]` logical seconds
 
 Checks:
 

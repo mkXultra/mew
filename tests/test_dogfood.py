@@ -362,6 +362,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["requested_interval_seconds"], 2.0)
             self.assertEqual(scenario["artifacts"]["time_dilation"], 24.0)
             self.assertGreaterEqual(scenario["artifacts"]["passive_events"], 2)
+            self.assertGreaterEqual(scenario["artifacts"]["passive_span_seconds"], 40.0)
 
     def test_run_dogfood_native_work_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

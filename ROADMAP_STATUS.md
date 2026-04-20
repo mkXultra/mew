@@ -1228,9 +1228,9 @@ Evidence:
   now resolve default dates through `now_date_iso()`, and
   `mew dogfood --scenario resident-loop --time-dilation 24` passes while
   keeping runtime scheduling real-time. The first smoke proof at
-  `/tmp/mew-time-dilation-smoke-20260420` processed 4 events, including 3
-  passive ticks, with logical passive gaps of `[49.0, 51.0]` seconds from a
-  2-second real interval. The durable summary is in
+  `/tmp/mew-time-dilation-span-smoke-20260420` processed 4 events, including 3
+  passive ticks, with `passive_span_seconds=97.0` and logical passive gaps of
+  `[48.0, 49.0]` seconds from a 2-second real interval. The durable summary is in
   `docs/M3_TIME_DILATION_FOUNDATION_2026-04-20.md`.
 
 Missing proof:
