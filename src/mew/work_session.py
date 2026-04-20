@@ -3281,7 +3281,16 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             and call.get("tool") in WRITE_WORK_TOOLS
             and effect_classification == "rollback_needed"
         )
-        if (call.get("status") != "interrupted" and not rollback_review_needed) or call.get("recovery_status"):
+        command_review_needed = (
+            call.get("tool") == "run_command"
+            and not call.get("recovery_status")
+            and (call.get("status") == "failed" or bool(work_tool_failure_record(call)))
+        )
+        if (
+            call.get("status") != "interrupted"
+            and not rollback_review_needed
+            and not command_review_needed
+        ) or call.get("recovery_status"):
             continue
         tool = call.get("tool") or "unknown"
         result = call.get("result") or {}
@@ -3356,7 +3365,11 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         elif tool in COMMAND_WORK_TOOLS:
             action = "needs_user_review"
             safety = "command"
-            reason = "interrupted command or verification may have side effects"
+            reason = (
+                "command failed after execution; review recorded stdout/stderr before rerunning side-effecting work"
+                if command_review_needed
+                else "interrupted command or verification may have side effects"
+            )
             review_steps = [
                 "open the resume with live world state",
                 "read captured stdout/stderr if present",
@@ -3465,7 +3478,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
     if not items:
         return {}
     if any(item.get("action") == "needs_user_review" for item in items):
-        next_action = "verify the world and review interrupted side-effecting work before retry"
+        next_action = "verify the world and review side-effecting work before retry"
     elif any(item.get("action") == "verify_completed_write" for item in items):
         next_action = "skip the already-completed write, then rerun the recorded verifier"
     elif any(item.get("action") == "retry_apply_write" for item in items):

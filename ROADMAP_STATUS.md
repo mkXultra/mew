@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, half-hour and one-hour real-time resident cadence proofs, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied file-write recovery, and rollback-needed write review exist; broader shell/runtime side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied file-write recovery, rollback-needed write review, and failed-command review recovery exist; broader shell/runtime side-effect retry is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
@@ -1480,6 +1480,11 @@ Evidence:
   The resume surfaces the touched path, verifier command, review hint, and
   restore-or-keep review steps instead of leaving the resident to infer this
   from a generic failed write.
+- Failed `run_command` work tools now enter the recovery plan as
+  `action_committed` / `needs_user_review` items with the recorded command and
+  review steps. This keeps shell recovery manual while putting failed shell
+  side effects on the same recovery-plan surface as interrupted command review.
+  Durable summary: `docs/M4_COMMAND_REVIEW_RECOVERY_2026-04-20.md`.
 - `dogfood --scenario m4-file-write-recovery` passed locally in
   `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-rollback`.
   The proof covers both safe resumption of a not-started apply-write and
@@ -1493,8 +1498,8 @@ Missing proof:
 - Automatic `ask_user` recovery exists for failed passive native-work advances,
   passive auto-retry now exists for selected interrupted verifier plus safe
   read/git work-session tools, and explicit side-effect recovery now exists for
-  the narrow applied file-write class, but not yet for all interrupted runtime
-  effects or shell work items.
+  the narrow applied file-write class plus failed shell-command review, but not
+  yet for all interrupted runtime effects or shell retry.
 - World-state revalidation before retry exists for safe read/git and
   interrupted verifier work-session recovery, and hash-based target
   revalidation now exists for applied file writes. Runtime effects now have

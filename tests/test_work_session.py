@@ -727,7 +727,7 @@ class WorkSessionTests(unittest.TestCase):
 
     def test_recovery_suggestions_prefer_side_effect_review_over_later_verifier(self):
         plan = {
-            "next_action": "verify the world and review interrupted side-effecting work before retry",
+            "next_action": "verify the world and review side-effecting work before retry",
             "items": [
                 {
                     "action": "retry_verification",
@@ -7613,13 +7613,20 @@ class WorkSessionTests(unittest.TestCase):
 
         resume = build_work_session_resume(session)
         reobserve = resume["suggested_safe_reobserve"]
+        item = resume["recovery_plan"]["items"][0]
         self.assertEqual(reobserve["source_tool_call_id"], 7)
         self.assertEqual(reobserve["kind"], "recorded_output_review")
         self.assertNotIn("action", reobserve)
         self.assertEqual(reobserve["parameters"]["command"], "uv run pytest -q")
+        self.assertEqual(item["action"], "needs_user_review")
+        self.assertEqual(item["safety"], "command")
+        self.assertEqual(item["effect_classification"], "action_committed")
+        self.assertEqual(item["command"], "uv run pytest -q")
+        self.assertIn("failed after execution", item["reason"])
 
         text = format_work_session_resume(resume)
         self.assertIn("review: recorded_output_review", text)
+        self.assertIn("effect=action_committed", text)
         self.assertNotIn("review_command_output", text)
 
     def test_work_session_resume_auto_recovers_safe_read_tool(self):
@@ -8313,7 +8320,7 @@ class WorkSessionTests(unittest.TestCase):
         item = resume["recovery_plan"]["items"][0]
 
         self.assertEqual(resume["phase"], "failed")
-        self.assertEqual(resume["next_action"], "verify the world and review interrupted side-effecting work before retry")
+        self.assertEqual(resume["next_action"], "verify the world and review side-effecting work before retry")
         self.assertEqual(item["action"], "needs_user_review")
         self.assertEqual(item["safety"], "write")
         self.assertEqual(item["effect_classification"], "rollback_needed")
