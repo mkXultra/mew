@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:54 JST.
+Last assessed: 2026-04-20 18:57 JST.
 
 Active work: **M6 Body**.
 
@@ -290,12 +290,19 @@ Evidence:
   path under the daemon namespace.
 - Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
   `ruff`, and `./mew daemon inspect` passed.
+- Dogfood scenario `m6-daemon-loop` now starts a background daemon, lets it run
+  repeated passive ticks, stops it cleanly, checks applied passive effects and
+  daemon output logs, and verifies `mew focus` can reenter the stopped daemon
+  state.
+- Validation: `m6-daemon-loop` passed in `/tmp/mew-m6-daemon-loop-proof` with
+  `duration=6`, `interval=2`, `processed_events=4`, `passive_events=3`, and
+  passive gaps `[2.0, 2.0]`; the focused dogfood pytest also passed.
 
 Missing proof:
 
-- No long-duration daemon proof has shown the watcher and passive loop staying
-  healthy beyond the short dogfood scenario.
 - No multi-hour resident proof has run through the daemon path.
+- No long-duration daemon proof has shown the watcher and passive loop staying
+  healthy beyond short dogfood scenarios.
 - Daemon controls exist, but they have not yet been exercised in a longer
   resident proof.
 

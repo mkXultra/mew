@@ -67,6 +67,7 @@ DOGFOOD_SCENARIOS = (
     "m5-safety-hooks",
     "m6-daemon-watch",
     "m6-daemon-restart",
+    "m6-daemon-loop",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -2018,6 +2019,157 @@ def run_m6_daemon_restart_scenario(workspace, env=None):
         "watched_path": str(watched),
         "event_id": (processed_event or {}).get("id"),
         "final_status": final_status_json,
+    }
+    return report
+
+
+def run_m6_daemon_loop_scenario(
+    workspace,
+    env=None,
+    duration=6.0,
+    interval=2.0,
+    poll_interval=0.1,
+    time_dilation=None,
+):
+    commands = []
+    checks = []
+    scenario_env = dogfood_time_dilation_env(env, time_dilation)
+    multiplier = effective_time_dilation(scenario_env)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=scenario_env)
+        commands.append(result)
+        return result
+
+    task_result = run(
+        [
+            "task",
+            "add",
+            "Daemon loop cadence task",
+            "--kind",
+            "coding",
+            "--priority",
+            "normal",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    start_result = run(
+        [
+            "daemon",
+            "start",
+            "--timeout",
+            "5",
+            "--poll-interval",
+            "0.05",
+            "--",
+            "--interval",
+            str(interval),
+            "--poll-interval",
+            str(poll_interval),
+            "--autonomous",
+            "--autonomy-level",
+            "propose",
+            "--echo-effects",
+        ],
+        timeout=10,
+    )
+    started = start_result.get("exit_code") == 0
+    time.sleep(max(0.0, float(duration)))
+    active_status = _json_stdout(run(["daemon", "status", "--json"], timeout=5))
+    stop_result = run(["daemon", "stop", "--timeout", "10", "--poll-interval", "0.05"], timeout=15) if started else {"exit_code": None}
+    final_status = _json_stdout(run(["daemon", "status", "--json"], timeout=5))
+    focus_result = run(["focus", "--kind", "coding"], timeout=15)
+    state = read_json_file(workspace / STATE_FILE, {})
+    log_text = read_text_file(workspace / STATE_DIR / "runtime.out")
+
+    processed_events = [event for event in state.get("inbox", []) if event.get("processed_at")]
+    passive_events = [event for event in processed_events if event.get("type") == "passive_tick"]
+    passive_effects = [effect for effect in state.get("runtime_effects", []) if effect.get("reason") == "passive_tick"]
+    passive_times = [
+        parsed
+        for parsed in (
+            parse_time(event.get("processed_at") or event.get("created_at"))
+            for event in passive_events
+        )
+        if parsed is not None
+    ]
+    passive_gaps = [
+        round((later - earlier).total_seconds(), 2)
+        for earlier, later in zip(passive_times, passive_times[1:])
+    ]
+    passive_span_seconds = (
+        round((passive_times[-1] - passive_times[0]).total_seconds(), 2)
+        if len(passive_times) >= 2
+        else 0.0
+    )
+
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_starts_reports_and_stops",
+        task_result.get("exit_code") == 0
+        and started
+        and active_status.get("state") == "running"
+        and active_status.get("uptime_seconds") is not None
+        and stop_result.get("exit_code") == 0
+        and final_status.get("state") == "stopped",
+        observed={
+            "task": task_data,
+            "start": command_result_tail(start_result),
+            "active_status": active_status,
+            "stop": command_result_tail(stop_result),
+            "final_status": final_status,
+        },
+        expected="daemon starts, reports uptime while running, and stops cleanly",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_processes_multiple_passive_ticks",
+        len(processed_events) >= 3
+        and bool([event for event in processed_events if event.get("type") == "startup"])
+        and len(passive_events) >= 2
+        and any(gap >= max(0.5, float(interval) * 0.5) for gap in passive_gaps),
+        observed={
+            "processed": len(processed_events),
+            "by_type": count_by(processed_events, "type"),
+            "passive_events": len(passive_events),
+            "passive_gaps_seconds": passive_gaps,
+        },
+        expected="daemon path processes startup plus at least two spaced passive ticks",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_records_passive_effects",
+        len(passive_effects) >= 2
+        and all(effect.get("status") == "applied" for effect in passive_effects[-2:]),
+        observed=runtime_effect_summary(state),
+        expected="daemon path records applied passive_tick runtime effects",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_logs_passive_ticks",
+        log_text.count("reason=passive_tick") >= 2,
+        observed=log_text[-600:],
+        expected="daemon output log includes repeated passive_tick summaries",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_loop_reentry_focus_surfaces_task",
+        focus_result.get("exit_code") == 0
+        and "Daemon loop cadence task" in (focus_result.get("stdout") or ""),
+        observed=(focus_result.get("stdout") or "").splitlines()[:12],
+        expected="focus can inspect stopped daemon state and task context",
+    )
+    report = _scenario_report("m6-daemon-loop", workspace, commands, checks)
+    report["artifacts"] = {
+        "requested_duration_seconds": float(duration),
+        "requested_interval_seconds": float(interval),
+        "time_dilation": multiplier,
+        "processed_events": len(processed_events),
+        "passive_events": len(passive_events),
+        "passive_span_seconds": passive_span_seconds,
+        "passive_gaps_seconds": passive_gaps,
     }
     return report
 
@@ -9967,6 +10119,17 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_daemon_watch_scenario(scenario_workspace, env=env))
         elif name == "m6-daemon-restart":
             reports.append(run_m6_daemon_restart_scenario(scenario_workspace, env=env))
+        elif name == "m6-daemon-loop":
+            reports.append(
+                run_m6_daemon_loop_scenario(
+                    scenario_workspace,
+                    env=env,
+                    duration=getattr(args, "duration", 6.0),
+                    interval=getattr(args, "interval", 2.0),
+                    poll_interval=getattr(args, "poll_interval", 0.1),
+                    time_dilation=getattr(args, "time_dilation", None),
+                )
+            )
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
