@@ -12,7 +12,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, half-hour and one-hour real-time resident cadence proofs, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied file-write recovery, rollback-needed write review, and failed-command review recovery exist; broader shell/runtime side-effect retry is not implemented. |
-| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
+| 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, but M5 is explicitly gated behind persistent continuity, true recovery, and a no-rescue multi-loop proof. |
 
 ## Active Milestone Decision
 
@@ -1518,12 +1518,45 @@ Next action:
 
 Status: `foundation`
 
+Operational gate:
+
+- Entry gate is not met yet. Milestone 3 must prove long-running resident
+  continuity against comparable fresh CLI restarts, and Milestone 4 must prove
+  recovery from interrupted, crashed, or failed runtime effects without manual
+  reconstruction.
+- Entry also requires each self-improvement loop to run with a frozen
+  permission context, explicit effect budget, and readable audit trail before
+  file edits are allowed.
+- `mew-product-evaluator` must reliably choose work that improves mew as an
+  inhabitable program and reject local polish drift.
+- Done gate is at least five consecutive closed self-improvement loops:
+  evaluator -> task -> plan -> native/delegated implementation ->
+  verification -> human review.
+- The done loops must require zero human rescue edits. Human intervention may
+  approve, reject, redirect, or make product judgments, but cannot patch files
+  to save the loop.
+- At least one done loop must include an interruption or failure recovered
+  through Milestone 4 surfaces without manual reconstruction.
+- Each loop must leave a readable audit bundle with product rationale,
+  tool/effect journal, verification output, approval decisions, recovery
+  events, budget outcome, and human-intervention classification.
+- Reference-derived M5 candidates from `docs/ADOPT_FROM_REFERENCES.md`, such
+  as Agent Frontmatter and Skill Manifest, remain implementation candidates
+  after the entry gate; adopting them is not proof of M5 by itself.
+- Safety boundaries: no autonomous external-visible side effects; no
+  autonomous edits to roadmap, evaluator, skill, permission, recovery, or
+  audit-trail governance; no bypass of read/write/shell/network/destructive
+  gates; budget exhaustion or ambiguous recovery stops and asks the user.
+
 Evidence:
 
 - `mew-product-evaluator` skill exists.
 - Dogfood scenarios exist and are used.
 - Self-improvement task creation/planning paths exist.
 - External model review through ACM has been used for roadmap and extraction decisions.
+- 2026-04-20 `claude-ultra` M5 gate review agreed that M5 should stay
+  `foundation` until M3/M4 close, and recommended a no-rescue multi-loop proof
+  with audit bundles and explicit self-improve safety boundaries.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1562,14 +1595,27 @@ Evidence:
 
 Missing proof:
 
-- mew does not yet run repeated self-improvement loops with native tools.
-- Human approval/checkpoint flow is still manual.
-- Self-improvement is not yet primarily driven by mew's own resident loop.
+- Milestone 3 is still in progress; long-running resident continuity is not
+  closed against comparable fresh CLI restarts.
+- Milestone 4 is still in progress; broader shell/runtime side-effect recovery
+  is not yet implemented.
+- mew has not yet produced five consecutive closed self-improvement loops with
+  native/delegated implementation, verification, review, and readable audit
+  bundles.
+- No M5 proof loop has yet exercised interruption or failure recovery through
+  Milestone 4 surfaces without manual reconstruction.
+- Existing self-improvement dogfood still includes supervisor rescue edits and
+  manual completion work, so it does not satisfy the no-rescue gate.
 - Roadmap/status files are governance support, not proof of autonomous self-improvement.
 
 Next action:
 
-- Once Native Hands exists, dogfood a small self-improvement task end-to-end inside mew.
+- Keep M5 at `foundation` while closing M3 and M4. Exploratory
+  self-improvement dogfood may continue, but it does not count toward M5 until
+  the entry gate is met. After M4 closes, run a single M5 entry rehearsal that
+  starts from `mew-product-evaluator`, creates one bounded task, implements it
+  through native/delegated tools, validates it, records the audit bundle, and
+  classifies any human intervention.
 
 ## Latest Validation
 

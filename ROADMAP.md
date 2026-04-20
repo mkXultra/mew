@@ -172,10 +172,41 @@ Target:
 - mew asks for review or approval at checkpoints
 - mew records why the change matters to the product goal
 
+Entry gate:
+
+- Milestone 3 is done enough that a resident mew session can preserve useful
+  context across long-running work and beat or match a fresh CLI restart on
+  comparable task shapes
+- Milestone 4 is done enough that interrupted, crashed, or failed runtime
+  effects can be recovered without manual reconstruction
+- a self-improvement loop runs with a frozen permission context, explicit
+  effect budget, and readable audit trail before it is allowed to edit files
+- `mew-product-evaluator` reliably selects work that improves mew as an
+  inhabitable program instead of drifting into local polish
+
 Done when:
 
-- mew can run multiple safe self-improvement loops with a clear audit trail
-- human intervention is mostly approval, redirection, or product judgment
+- mew can run at least five consecutive safe self-improvement loops:
+  evaluator -> task -> plan -> native/delegated implementation ->
+  verification -> human review
+- those loops require no human rescue edits; human intervention is limited to
+  approval, rejection, redirection, or product judgment
+- at least one loop exercises interruption or failure recovery and resumes
+  through Milestone 4 recovery surfaces without manual reconstruction
+- every loop records its product-goal rationale, tool/effect journal,
+  verification result, approvals, recovery events, and budget outcome in a
+  readable audit bundle
+
+M5-specific safety boundaries:
+
+- no autonomous external-visible side effects such as push, merge, PR creation,
+  issue comments, chat messages, or publication
+- no autonomous edits to roadmap, evaluator, skill, permission, recovery, or
+  audit-trail governance without explicit human approval
+- no bypass of read/write/shell/network/destructive gates; silence is never
+  treated as approval
+- budget exhaustion, ambiguous recovery, or governance edits stop the loop and
+  ask the user
 
 ## Non-Negotiable Safety Requirements
 
