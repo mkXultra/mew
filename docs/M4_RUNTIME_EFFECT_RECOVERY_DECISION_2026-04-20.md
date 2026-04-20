@@ -1,6 +1,6 @@
 # M4 Runtime Effect Recovery Decision 2026-04-20
 
-Status: unit proof passed.
+Status: unit and dogfood proof passed.
 
 This is a narrow M4 slice for runtime-effect recovery. It does not retry runtime
 effects yet. It upgrades `mew repair` from a string-only `recovery_hint` to a
@@ -34,6 +34,19 @@ uv run pytest --testmon -q tests/test_runtime.py -k 'startup_repairs_incomplete_
 ```
 
 Both passed.
+
+Dogfood:
+
+```bash
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1136 --json
+```
+
+Result:
+
+- status: `pass`
+- checks:
+  - `m4_runtime_effect_recovery_classifies_precommit_rerun`
+  - `m4_runtime_effect_recovery_classifies_committing_write_review`
 
 ## Interpretation
 

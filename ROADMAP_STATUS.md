@@ -1449,7 +1449,10 @@ Evidence:
 - `mew repair` now writes a structured `recovery_decision` for interrupted
   runtime effects. Pre-commit statuses become `rerun_event` /
   `no_action_committed`; committing effects with write runs, verification runs,
-  or only selected actions become explicit review decisions. Durable summary:
+  or only selected actions become explicit review decisions.
+  `dogfood --scenario m4-runtime-effect-recovery` passed locally in
+  `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1136`.
+  Durable summary:
   `docs/M4_RUNTIME_EFFECT_RECOVERY_DECISION_2026-04-20.md`.
 - Applied `write_file`/`edit_file` work tools now record a pre-execution
   `write_intent` with pre-write and intended post-write hashes. Interrupted

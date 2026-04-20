@@ -498,6 +498,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m4_file_write_recovery_reports_target_diverged_review", text)
             self.assertIn("m4_file_write_recovery_reports_partial_review", text)
 
+    def test_run_dogfood_m4_runtime_effect_recovery_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m4-runtime-effect-recovery",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m4-runtime-effect-recovery")
+            self.assertIn("m4_runtime_effect_recovery_classifies_precommit_rerun", text)
+            self.assertIn("m4_runtime_effect_recovery_classifies_committing_write_review", text)
+
     def test_run_dogfood_day_reentry_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

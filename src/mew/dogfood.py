@@ -55,6 +55,7 @@ DOGFOOD_SCENARIOS = (
     "passive-auto-recovery-read",
     "passive-auto-recovery-write",
     "m4-file-write-recovery",
+    "m4-runtime-effect-recovery",
     "day-reentry",
     "continuity",
     "m3-reentry-gate",
@@ -3104,6 +3105,125 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         expected="partial applied write reports temp-file review context instead of retrying",
     )
     return _scenario_report("m4-file-write-recovery", workspace, commands, checks)
+
+
+def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    state = default_state()
+    planning_event_id = next_id(state, "event")
+    committing_event_id = next_id(state, "event")
+    state["inbox"].extend(
+        [
+            {
+                "id": planning_event_id,
+                "type": "passive_tick",
+                "source": "runtime",
+                "payload": {},
+                "created_at": "then",
+                "processed_at": "then",
+            },
+            {
+                "id": committing_event_id,
+                "type": "passive_tick",
+                "source": "runtime",
+                "payload": {},
+                "created_at": "then",
+                "processed_at": "then",
+            },
+        ]
+    )
+    planning_effect_id = next_id(state, "runtime_effect")
+    committing_effect_id = next_id(state, "runtime_effect")
+    state["runtime_effects"].extend(
+        [
+            {
+                "id": planning_effect_id,
+                "event_id": planning_event_id,
+                "event_type": "passive_tick",
+                "reason": "passive_tick",
+                "status": "planning",
+                "phase": "planning",
+                "action_types": [],
+                "verification_run_ids": [],
+                "write_run_ids": [],
+                "started_at": "then",
+                "updated_at": "then",
+                "finished_at": None,
+            },
+            {
+                "id": committing_effect_id,
+                "event_id": committing_event_id,
+                "event_type": "passive_tick",
+                "reason": "passive_tick",
+                "status": "committing",
+                "phase": "committing",
+                "action_types": ["write_file"],
+                "verification_run_ids": [],
+                "write_run_ids": [7],
+                "started_at": "then",
+                "updated_at": "then",
+                "finished_at": None,
+            },
+        ]
+    )
+    state["write_runs"].append(
+        {
+            "id": 7,
+            "operation": "write_file",
+            "path": str(Path(workspace) / "side-effect.txt"),
+            "written": True,
+            "dry_run": False,
+        }
+    )
+    write_json_file(Path(workspace) / STATE_FILE, state)
+
+    repair_result = run(["repair", "--json"], timeout=15)
+    repaired_state = read_json_file(Path(workspace) / STATE_FILE, {})
+    repaired_effects = {effect.get("id"): effect for effect in repaired_state.get("runtime_effects") or []}
+    repair_data = _json_stdout(repair_result)
+    repairs = repair_data.get("repairs") or []
+    planning_decision = (repaired_effects.get(planning_effect_id) or {}).get("recovery_decision") or {}
+    committing_decision = (repaired_effects.get(committing_effect_id) or {}).get("recovery_decision") or {}
+
+    _scenario_check(
+        checks,
+        "m4_runtime_effect_recovery_classifies_precommit_rerun",
+        repair_result.get("exit_code") == 0
+        and planning_decision.get("action") == "rerun_event"
+        and planning_decision.get("effect_classification") == "no_action_committed"
+        and planning_decision.get("safety") == "safe_to_replan"
+        and (repaired_effects.get(planning_effect_id) or {}).get("status") == "interrupted",
+        observed={
+            "decision": planning_decision,
+            "effect": repaired_effects.get(planning_effect_id),
+            "repairs": repairs,
+        },
+        expected="pre-commit runtime effect is classified as safe to rerun/replan",
+    )
+    _scenario_check(
+        checks,
+        "m4_runtime_effect_recovery_classifies_committing_write_review",
+        repair_result.get("exit_code") == 0
+        and committing_decision.get("action") == "review_writes"
+        and committing_decision.get("effect_classification") == "write_may_have_started"
+        and committing_decision.get("safety") == "needs_user_review"
+        and committing_decision.get("write_run_ids") == [7]
+        and (repaired_effects.get(committing_effect_id) or {}).get("status") == "interrupted",
+        observed={
+            "decision": committing_decision,
+            "effect": repaired_effects.get(committing_effect_id),
+            "repairs": repairs,
+        },
+        expected="committing runtime effect with write runs is classified as write review",
+    )
+    return _scenario_report("m4-runtime-effect-recovery", workspace, commands, checks)
 
 
 def run_day_reentry_scenario(workspace, env=None):
@@ -8818,6 +8938,8 @@ def run_dogfood_scenario(args):
             reports.append(run_passive_auto_recovery_write_scenario(scenario_workspace, env=env))
         elif name == "m4-file-write-recovery":
             reports.append(run_m4_file_write_recovery_scenario(scenario_workspace, env=env))
+        elif name == "m4-runtime-effect-recovery":
+            reports.append(run_m4_runtime_effect_recovery_scenario(scenario_workspace, env=env))
         elif name == "day-reentry":
             reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
         elif name == "continuity":
