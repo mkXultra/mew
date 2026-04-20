@@ -2279,6 +2279,54 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(state["questions"][1]["related_task_id"], task["id"])
         self.assertIsNone(state["outbox"][-1]["read_at"])
 
+    def test_passive_tick_backs_off_repeated_stale_task_question_refresh(self):
+        state = default_state()
+        task = add_planned_ready_task(state)
+        task["kind"] = "coding"
+        task["status"] = "ready"
+        task["command"] = ""
+        task["agent_backend"] = ""
+        text = "Task #1 is ready coding work. Open the coding cockpit with ./mew code 1, add constraints, or block it?"
+        old_question, _ = add_question(state, text, related_task_id=task["id"])
+        old_question["status"] = "deferred"
+        old_question["created_at"] = "2026-04-17T00:00:00Z"
+        old_question["updated_at"] = "2026-04-18T00:00:00Z"
+        old_question["deferred_at"] = "2026-04-18T00:00:00Z"
+        old_question["defer_reason"] = (
+            "Question #1 was unanswered for 24.0h; refreshing one passive prompt "
+            "after 24h backoff instead of waiting forever."
+        )
+        refreshed_question, _ = add_question(state, text, related_task_id=task["id"])
+        refreshed_question["created_at"] = "2026-04-18T00:00:00Z"
+        refreshed_question["updated_at"] = "2026-04-18T00:00:00Z"
+
+        plan = deterministic_decision_plan(
+            state,
+            {"id": 1, "type": "passive_tick"},
+            "2026-04-19T12:00:00Z",
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        self.assertNotIn("ask_user", [decision["type"] for decision in plan["decisions"]])
+        waits = [decision for decision in plan["decisions"] if decision["type"] == "wait_for_user"]
+        self.assertEqual(waits[0]["reason"], f"Question #{refreshed_question['id']} is still unanswered.")
+
+        stale_plan = deterministic_decision_plan(
+            state,
+            {"id": 2, "type": "passive_tick"},
+            "2026-04-20T02:00:00Z",
+            allow_task_execution=False,
+            autonomous=True,
+            autonomy_level="propose",
+        )
+
+        ask_actions = [decision for decision in stale_plan["decisions"] if decision["type"] == "ask_user"]
+        self.assertEqual(len(ask_actions), 1)
+        self.assertEqual(ask_actions[0]["supersedes_question_id"], refreshed_question["id"])
+        self.assertIn("48h backoff", ask_actions[0]["supersedes_reason"])
+
     def test_passive_tick_uses_question_update_time_for_stale_refresh(self):
         state = default_state()
         task = add_planned_ready_task(state)

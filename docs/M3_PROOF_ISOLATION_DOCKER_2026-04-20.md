@@ -20,8 +20,12 @@ Implemented:
   output directories from the build context
 - `scripts/run_proof_docker.sh`: builds the image and starts a detached
   resident-loop proof container with mounted workspace/artifact directories
+- `scripts/collect_proof_docker.sh`: collects `docker inspect`, container logs,
+  and a short status summary after a detached proof run finishes
 - runtime commands use `uv run --no-sync` so proof execution does not mutate the
   environment by syncing development dependencies
+- default proof workspace and artifact paths are scoped by container name:
+  `proof-workspace/<container>` and `proof-artifacts/<container>`
 
 Usage:
 
@@ -38,6 +42,9 @@ scripts/run_proof_docker.sh
 
 # follow output
 docker logs -f mew-proof-dilated-week
+
+# collect durable run evidence after completion
+scripts/collect_proof_docker.sh mew-proof-dilated-week
 ```
 
 Boundary:
@@ -61,6 +68,7 @@ MEW_PROOF_IMAGE=mew-proof:validation-nosync \
 scripts/run_proof_docker.sh
 docker wait mew-proof-validation-nosync
 docker logs mew-proof-validation-nosync
+scripts/collect_proof_docker.sh mew-proof-validation-nosync
 ```
 
 Result: `pass`
@@ -69,3 +77,10 @@ The validation container ran `resident-loop` with `time_dilation=3600.0`,
 processed 4 events including 3 passive ticks, and passed all resident-loop
 checks. The container logs showed no runtime dependency sync after switching to
 `uv run --no-sync`.
+
+Follow-up virtual-time proof:
+
+- `docs/M3_VIRTUAL_TIME_ISOLATED_10DAY_2026-04-20.md`
+- A first 10-day logical isolated run found repeated stale-question refresh
+  spam; after adding passive question refresh backoff, the same short isolated
+  run passed with 17 passive events and repeated wait compaction.

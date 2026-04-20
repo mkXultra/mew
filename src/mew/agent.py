@@ -494,6 +494,7 @@ def open_task_with_title(state, title):
     return None
 
 PASSIVE_PENDING_QUESTION_REFRESH_HOURS = 24.0
+PASSIVE_PENDING_QUESTION_MAX_REFRESH_HOURS = 168.0
 
 
 def passive_pending_question_age_hours(question, current_time):
@@ -508,9 +509,33 @@ def passive_pending_question_age_hours(question, current_time):
     return elapsed_hours(timestamp, current_time)
 
 
-def passive_pending_question_is_stale(question, current_time):
+def passive_pending_question_refresh_count(state, question):
+    text = question.get("text") if isinstance(question, dict) else ""
+    task_id = question.get("related_task_id") if isinstance(question, dict) else None
+    if not text:
+        return 0
+    count = 0
+    for prior in state.get("questions", []):
+        if prior is question or prior.get("status") != "deferred":
+            continue
+        if prior.get("text") != text:
+            continue
+        if task_id is not None and str(prior.get("related_task_id")) != str(task_id):
+            continue
+        if "refreshing one passive prompt" in str(prior.get("defer_reason") or ""):
+            count += 1
+    return count
+
+
+def passive_pending_question_refresh_hours(state, question):
+    refresh_count = passive_pending_question_refresh_count(state, question)
+    backoff_hours = PASSIVE_PENDING_QUESTION_REFRESH_HOURS * (2 ** min(refresh_count, 8))
+    return min(backoff_hours, PASSIVE_PENDING_QUESTION_MAX_REFRESH_HOURS)
+
+
+def passive_pending_question_is_stale(state, question, current_time):
     age = passive_pending_question_age_hours(question, current_time)
-    return age is not None and age >= PASSIVE_PENDING_QUESTION_REFRESH_HOURS
+    return age is not None and age >= passive_pending_question_refresh_hours(state, question)
 
 
 def append_passive_decisions(
@@ -557,9 +582,10 @@ def append_passive_decisions(
                 and not question_added
                 and autonomous
                 and autonomy_level in ("propose", "act")
-                and passive_pending_question_is_stale(pending_question, current_time)
+                and passive_pending_question_is_stale(state, pending_question, current_time)
             ):
                 age_text = f"{pending_question_age:.1f}h" if pending_question_age is not None else "unknown age"
+                refresh_after = passive_pending_question_refresh_hours(state, pending_question)
                 decisions.append(
                     {
                         "type": "ask_user",
@@ -568,7 +594,8 @@ def append_passive_decisions(
                         "supersedes_question_id": pending_question_id,
                         "supersedes_reason": (
                             f"Question #{pending_question_id} was unanswered for {age_text}; "
-                            "refreshing one passive prompt instead of waiting forever."
+                            f"refreshing one passive prompt after {refresh_after:.0f}h backoff "
+                            "instead of waiting forever."
                         ),
                     }
                 )

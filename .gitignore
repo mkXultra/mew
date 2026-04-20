@@ -3,6 +3,8 @@ auth.json
 .venv/
 __pycache__/
 .testmondata
+proof-artifacts/
+proof-workspace/
 
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code
