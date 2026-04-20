@@ -3189,6 +3189,7 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     state = default_state()
     planning_event_id = next_id(state, "event")
     committing_event_id = next_id(state, "event")
+    verification_event_id = next_id(state, "event")
     state["inbox"].extend(
         [
             {
@@ -3207,10 +3208,19 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
                 "created_at": "then",
                 "processed_at": "then",
             },
+            {
+                "id": verification_event_id,
+                "type": "passive_tick",
+                "source": "runtime",
+                "payload": {},
+                "created_at": "then",
+                "processed_at": "then",
+            },
         ]
     )
     planning_effect_id = next_id(state, "runtime_effect")
     committing_effect_id = next_id(state, "runtime_effect")
+    verification_effect_id = next_id(state, "runtime_effect")
     state["runtime_effects"].extend(
         [
             {
@@ -3241,6 +3251,20 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
                 "updated_at": "then",
                 "finished_at": None,
             },
+            {
+                "id": verification_effect_id,
+                "event_id": verification_event_id,
+                "event_type": "passive_tick",
+                "reason": "passive_tick",
+                "status": "committing",
+                "phase": "committing",
+                "action_types": ["run_verification"],
+                "verification_run_ids": [9],
+                "write_run_ids": [],
+                "started_at": "then",
+                "updated_at": "then",
+                "finished_at": None,
+            },
         ]
     )
     state["write_runs"].append(
@@ -3250,6 +3274,16 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
             "path": str(Path(workspace) / "side-effect.txt"),
             "written": True,
             "dry_run": False,
+        }
+    )
+    state["verification_runs"].append(
+        {
+            "id": 9,
+            "command": "python -m pytest",
+            "cwd": str(workspace),
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "interrupted before result was reviewed",
         }
     )
     write_json_file(Path(workspace) / STATE_FILE, state)
@@ -3264,8 +3298,10 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     repairs = repair_data.get("repairs") or []
     planning_decision = (repaired_effects.get(planning_effect_id) or {}).get("recovery_decision") or {}
     committing_decision = (repaired_effects.get(committing_effect_id) or {}).get("recovery_decision") or {}
+    verification_decision = (repaired_effects.get(verification_effect_id) or {}).get("recovery_decision") or {}
     planning_followup = (repaired_effects.get(planning_effect_id) or {}).get("recovery_followup") or {}
     committing_followup = (repaired_effects.get(committing_effect_id) or {}).get("recovery_followup") or {}
+    verification_followup = (repaired_effects.get(verification_effect_id) or {}).get("recovery_followup") or {}
     repaired_events = {event.get("id"): event for event in repaired_state.get("inbox") or []}
     review_questions = list(repaired_state.get("questions") or [])
 
@@ -3273,11 +3309,13 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
         checks,
         "m4_runtime_effect_recovery_doctor_previews_decisions",
         doctor_result.get("exit_code") == 1
-        and len(doctor_items) == 2
+        and len(doctor_items) == 3
         and ((doctor_items[0].get("recovery_decision") or {}).get("action") == "rerun_event")
         and ((doctor_items[0].get("recovery_followup") or {}).get("action") == "requeue_event")
         and ((doctor_items[1].get("recovery_decision") or {}).get("action") == "review_writes")
-        and ((doctor_items[1].get("recovery_followup") or {}).get("action") == "ask_user_review"),
+        and ((doctor_items[1].get("recovery_followup") or {}).get("action") == "ask_user_review")
+        and ((doctor_items[2].get("recovery_decision") or {}).get("action") == "review_verification")
+        and "verification --details --limit 5" in (((doctor_items[2].get("recovery_followup") or {}).get("command")) or ""),
         observed={
             "doctor_runtime_effects": doctor_data.get("runtime_effects"),
         },
@@ -3325,17 +3363,47 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "m4_runtime_effect_recovery_classifies_committing_verification_review",
+        repair_result.get("exit_code") == 0
+        and verification_decision.get("action") == "review_verification"
+        and verification_decision.get("effect_classification") == "verification_may_have_run"
+        and verification_decision.get("safety") == "needs_user_review"
+        and verification_decision.get("verification_run_ids") == [9]
+        and verification_followup.get("action") == "ask_user_review"
+        and "verification --details --limit 5" in (verification_followup.get("command") or "")
+        and (repaired_effects.get(verification_effect_id) or {}).get("status") == "interrupted",
+        observed={
+            "decision": verification_decision,
+            "followup": verification_followup,
+            "effect": repaired_effects.get(verification_effect_id),
+            "repairs": repairs,
+        },
+        expected="committing runtime effect with verification runs is classified as verification review",
+    )
+    _scenario_check(
+        checks,
         "m4_runtime_effect_recovery_seeds_review_question",
         repair_result.get("exit_code") == 0
         and committing_followup.get("action") == "ask_user_review"
         and committing_followup.get("question_id")
-        and len(review_questions) == 1
-        and review_questions[0].get("id") == committing_followup.get("question_id")
-        and review_questions[0].get("source") == "runtime"
-        and "Runtime effect" in (review_questions[0].get("text") or "")
-        and "mew writes" in (review_questions[0].get("text") or ""),
+        and verification_followup.get("question_id")
+        and len(review_questions) == 2
+        and any(
+            question.get("id") == committing_followup.get("question_id")
+            and question.get("source") == "runtime"
+            and "Runtime effect" in (question.get("text") or "")
+            and "mew writes" in (question.get("text") or "")
+            for question in review_questions
+        )
+        and any(
+            question.get("id") == verification_followup.get("question_id")
+            and question.get("source") == "runtime"
+            and "verification --details --limit 5" in (question.get("text") or "")
+            for question in review_questions
+        ),
         observed={
             "followup": committing_followup,
+            "verification_followup": verification_followup,
             "questions": review_questions,
             "repairs": repairs,
         },

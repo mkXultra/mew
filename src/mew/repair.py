@@ -153,6 +153,8 @@ def runtime_effect_recovery_followup(state, effect, decision=None, current_time=
         command = mew_command("runtime-effects", "--limit", "5")
         if action == "review_writes":
             command = mew_command("writes")
+        elif action == "review_verification":
+            command = mew_command("verification", "--details", "--limit", "5")
         followup = {
             "action": "ask_user_review",
             "status": "needs_user_review",

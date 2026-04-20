@@ -1458,6 +1458,9 @@ Evidence:
   runtime effects. Pre-commit statuses become `rerun_event` /
   `no_action_committed`; committing effects with write runs, verification runs,
   or only selected actions become explicit review decisions.
+  Verification review follow-ups route to `mew verification --details --limit
+  5`, while write review follow-ups route to `mew writes`, so commit-phase
+  review points at the most specific existing inspection surface.
   The repair path now also records `recovery_followup`: pre-commit
   `rerun_event` effects requeue the original event when no later terminal
   effect exists, while commit-phase write/verification/action effects stay on
@@ -1476,7 +1479,8 @@ Evidence:
   `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup`
   and again in
   `proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420`
-  with the review-question check.
+  with the review-question check; the verification-review variant passed in
+  `proof-workspace/mew-proof-m4-runtime-effect-verification-review-local-20260420`.
   Durable summary:
   `docs/M4_RUNTIME_EFFECT_RECOVERY_DECISION_2026-04-20.md`.
 - Applied `write_file`/`edit_file` work tools now record a pre-execution

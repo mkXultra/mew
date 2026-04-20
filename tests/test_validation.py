@@ -506,6 +506,34 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repair_routes_committing_runtime_verification_effect_to_verification_review(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect["action_types"] = ["run_verification"]
+                effect["verification_run_ids"] = [4]
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                repaired = load_state()
+                followup = data["repairs"][0]["recovery_followup"]
+
+                self.assertEqual(data["repairs"][0]["recovery_decision"]["action"], "review_verification")
+                self.assertEqual(followup["action"], "ask_user_review")
+                self.assertIn("verification --details --limit 5", followup["command"])
+                self.assertEqual(followup["question_id"], 1)
+                self.assertIn("verification --details --limit 5", repaired["questions"][0]["text"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_repair_marks_running_work_items_interrupted(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

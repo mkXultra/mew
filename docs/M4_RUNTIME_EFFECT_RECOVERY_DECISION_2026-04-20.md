@@ -32,6 +32,7 @@ Current classifications:
   `effect_classification=write_may_have_started`.
 - `committing` effects with `verification_run_ids` become
   `review_verification` with `effect_classification=verification_may_have_run`.
+  Their review follow-up points at `mew verification --details --limit 5`.
 - `committing` effects with only `action_types` become `review_actions` with
   `effect_classification=action_may_have_committed`.
 - unknown commit state stays on `review_unknown_commit`.
@@ -65,6 +66,7 @@ Dogfood:
 ```bash
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup --json
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420 --json
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-verification-review-local-20260420 --json
 ```
 
 Result:
@@ -74,6 +76,7 @@ Result:
   - `m4_runtime_effect_recovery_doctor_previews_decisions`
   - `m4_runtime_effect_recovery_requeues_precommit_event`
   - `m4_runtime_effect_recovery_classifies_committing_write_review`
+  - `m4_runtime_effect_recovery_classifies_committing_verification_review`
   - `m4_runtime_effect_recovery_seeds_review_question`
 
 ## Interpretation
