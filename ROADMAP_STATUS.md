@@ -1030,8 +1030,14 @@ Missing proof:
   Task #352 provided that proof: after a same-surface search miss, the native
   loop recovered to a narrow `read_file` on the known continuity window and
   then finished the verified task natively. The remaining M6.6 missing proof is
-  no longer this broad-read fallback; it is broader durable plan/path recall
-  and multi-file normal-case autonomy with less targeted search churn.
+  no longer this broad-read fallback. Task #353 then tightened the follow-up
+  observation path on the same surface: when `search_text` matches are stored in
+  string form, `redundant_search_observations` now extracts the concrete anchor
+  line instead of degrading `suggested_next` to `line_start=None`. That
+  blocker-reduction patch landed through a fresh no-steer mew-side paired
+  src/test edit with native verification and same-surface audit. The remaining
+  M6.6 missing proof is broader durable plan/path recall and multi-file
+  normal-case autonomy with less targeted search churn.
 
 Done when:
 

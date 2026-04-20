@@ -3208,7 +3208,7 @@ class WorkSessionTests(unittest.TestCase):
                     "result": {
                         "path": "src/mew/work_loop.py",
                         "query": "build_work_think_prompt",
-                        "matches": [{"line": 897}],
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
                     },
                 },
                 {
@@ -3219,7 +3219,7 @@ class WorkSessionTests(unittest.TestCase):
                     "result": {
                         "path": "src/mew/work_loop.py",
                         "query": "build_work_think_prompt",
-                        "matches": [{"line": 897}],
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
                     },
                 },
             ],

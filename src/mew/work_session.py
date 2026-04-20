@@ -1963,6 +1963,13 @@ def _search_result_first_match_line(result):
                     return int(value)
             except (TypeError, ValueError):
                 continue
+    if isinstance(first, str):
+        parts = first.split(":", 2)
+        if len(parts) >= 2:
+            try:
+                return int(parts[1])
+            except (TypeError, ValueError):
+                pass
     return None
 
 
