@@ -516,6 +516,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m4_runtime_effect_recovery_requeues_precommit_event", text)
             self.assertIn("m4_runtime_effect_recovery_classifies_committing_write_review", text)
             self.assertIn("m4_runtime_effect_recovery_classifies_committing_verification_review", text)
+            self.assertIn("m4_runtime_effect_recovery_requeues_not_started_write_intent", text)
+            self.assertIn("m4_runtime_effect_recovery_reviews_completed_write_intent", text)
             self.assertIn("m4_runtime_effect_recovery_seeds_review_question", text)
 
     def test_run_dogfood_day_reentry_scenario(self):

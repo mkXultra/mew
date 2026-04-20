@@ -14552,6 +14552,13 @@ def format_runtime_effect(effect):
             f"effect={recovery_decision.get('effect_classification')} "
             f"safety={recovery_decision.get('safety')}"
         )
+        world_states = recovery_decision.get("runtime_write_world_states") or []
+        if world_states:
+            summary = ", ".join(
+                f"{item.get('state') or 'unknown'}:{item.get('path') or '-'}"
+                for item in world_states
+            )
+            text += f" write_world={clip_output(summary, 160)}"
     recovery_followup = effect.get("recovery_followup") or {}
     if recovery_followup:
         text += (

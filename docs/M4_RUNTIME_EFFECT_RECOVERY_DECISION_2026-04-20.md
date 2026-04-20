@@ -23,6 +23,12 @@ and follow-up action before repair mutates state.
 inspection command referenced by recovery follow-ups contains the same
 structured review context as `doctor` and `repair`.
 
+Non-dry-run runtime `write_file` / `edit_file` actions now persist
+`runtime_write_intents` before the commit phase applies actions. If mew stops
+after recording the commit phase but before or during a write, repair can
+classify the current target file against the intended pre/post hashes instead
+of treating every runtime write as an opaque side effect.
+
 Current classifications:
 
 - pre-commit statuses (`planning`, `planned`, `precomputing`, `precomputed`)
@@ -33,6 +39,15 @@ Current classifications:
 - `committing` effects with `verification_run_ids` become
   `review_verification` with `effect_classification=verification_may_have_run`.
   Their review follow-up points at `mew verification --details --limit 5`.
+- `committing` effects with recorded runtime write intents but no persisted
+  `write_run_ids` inspect target world state before choosing a follow-up:
+  - all targets still `not_started` become `rerun_event` with
+    `effect_classification=runtime_write_not_started` and
+    `safety=safe_to_replan`;
+  - `completed_externally`, `partial`, `target_diverged`, or `unknown` targets
+    become `review_writes` with the target state/path included in the durable
+    review question. The follow-up points at `mew runtime-effects --limit 5`
+    because there may be no persisted `write_run` yet.
 - `committing` effects with only `action_types` become `review_actions` with
   `effect_classification=action_may_have_committed`.
 - unknown commit state stays on `review_unknown_commit`.
@@ -47,6 +62,9 @@ Follow-up consumption:
 - committing review follow-ups now seed a durable open question, outbox
   message, and attention item, so the review request is visible in normal mew
   reentry surfaces instead of living only inside the repaired effect metadata.
+- runtime write-intent `not_started` decisions also requeue the original event;
+  changed/diverged/unknown write-intent decisions stay on review with the
+  observed target state.
 
 ## Validation
 
@@ -57,9 +75,11 @@ uv run pytest --testmon -q tests/test_validation.py -k 'repair_marks_incomplete_
 uv run pytest --testmon -q tests/test_validation.py -k 'doctor_previews_incomplete_runtime_effect_recovery'
 uv run pytest --testmon -q tests/test_runtime.py -k 'startup_repairs_incomplete_effects'
 uv run pytest --testmon -q tests/test_validation.py -k runtime_effects_command
+uv run pytest --testmon -q tests/test_validation.py -k 'runtime_write_intent or runtime_effects_command_surfaces'
+uv run pytest --testmon -q tests/test_runtime.py -k 'write_intent_before_commit_execution'
 ```
 
-Both passed.
+All passed.
 
 Dogfood:
 
@@ -67,6 +87,7 @@ Dogfood:
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup --json
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420 --json
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-verification-review-local-20260420 --json
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-write-intent-local-20260420 --json
 ```
 
 Result:
@@ -77,12 +98,16 @@ Result:
   - `m4_runtime_effect_recovery_requeues_precommit_event`
   - `m4_runtime_effect_recovery_classifies_committing_write_review`
   - `m4_runtime_effect_recovery_classifies_committing_verification_review`
+  - `m4_runtime_effect_recovery_requeues_not_started_write_intent`
+  - `m4_runtime_effect_recovery_reviews_completed_write_intent`
   - `m4_runtime_effect_recovery_seeds_review_question`
 
 ## Interpretation
 
 This connects M4's recovery language to machine-readable state and lets repair
 consume the safest class directly: a pre-commit runtime effect can make its
-original event pending again. Commit-phase effects still require explicit
-review, but that review is now a normal mew question rather than hidden
-metadata.
+original event pending again. Runtime write-intent effects add a second
+deterministic safe class: if the intended target is still unchanged, the event
+can be requeued; if the target already changed or diverged, review is still a
+normal mew question rather than hidden metadata. Shell and opaque action
+effects remain review-only.

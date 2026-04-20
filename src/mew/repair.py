@@ -1,6 +1,7 @@
 from .cli_command import mew_command
 from .state import add_question, incomplete_runtime_effects, update_runtime_effect
 from .timeutil import now_iso
+from .write_tools import classify_write_intent_world_state
 
 
 PRECOMMIT_RUNTIME_STATUSES = {"planning", "planned", "precomputing", "precomputed"}
@@ -40,6 +41,31 @@ def _has_later_terminal_effect(state, effect):
     return False
 
 
+def runtime_write_intent_world_states(effect):
+    states = []
+    for intent in (effect or {}).get("runtime_write_intents") or []:
+        try:
+            world_state = classify_write_intent_world_state(intent)
+        except (OSError, ValueError) as exc:
+            world_state = {
+                "state": "unknown",
+                "path": (intent or {}).get("path") or "",
+                "reason": str(exc),
+            }
+        states.append(world_state)
+    return states
+
+
+def runtime_write_intent_effect_classification(world_states):
+    states = [item.get("state") or "unknown" for item in world_states or []]
+    if states and all(state == "not_started" for state in states):
+        return "runtime_write_not_started"
+    for state in ("partial", "target_diverged", "unknown", "completed_externally"):
+        if state in states:
+            return f"runtime_write_{state}"
+    return "runtime_write_review"
+
+
 def runtime_effect_recovery_decision(effect, old_status):
     event_id = effect.get("event_id")
     event_ref = "the selected event" if event_id is None else f"event #{event_id}"
@@ -69,6 +95,24 @@ def runtime_effect_recovery_decision(effect, old_status):
                 "safety": "needs_user_review",
                 "reason": "runtime stopped while committing one or more verification actions",
                 "verification_run_ids": verification_run_ids,
+            }
+        runtime_write_world_states = runtime_write_intent_world_states(effect)
+        if runtime_write_world_states:
+            classification = runtime_write_intent_effect_classification(runtime_write_world_states)
+            if classification == "runtime_write_not_started":
+                return {
+                    "action": "rerun_event",
+                    "effect_classification": classification,
+                    "safety": "safe_to_replan",
+                    "reason": "runtime stopped during commit before the intended write changed the target",
+                    "runtime_write_world_states": runtime_write_world_states,
+                }
+            return {
+                "action": "review_writes",
+                "effect_classification": classification,
+                "safety": "needs_user_review",
+                "reason": "runtime stopped during commit with recorded write intent world state",
+                "runtime_write_world_states": runtime_write_world_states,
             }
         if action_types:
             return {
@@ -151,7 +195,7 @@ def runtime_effect_recovery_followup(state, effect, decision=None, current_time=
         return followup
     if decision.get("safety") == "needs_user_review":
         command = mew_command("runtime-effects", "--limit", "5")
-        if action == "review_writes":
+        if action == "review_writes" and decision.get("write_run_ids"):
             command = mew_command("writes")
         elif action == "review_verification":
             command = mew_command("verification", "--details", "--limit", "5")
@@ -166,9 +210,19 @@ def runtime_effect_recovery_followup(state, effect, decision=None, current_time=
         if mutate:
             event_ref = "unknown event" if event_id is None else f"event #{event_id}"
             actions = ", ".join((effect or {}).get("action_types") or []) or "unknown actions"
+            world_states = decision.get("runtime_write_world_states") or []
+            path_text = ""
+            if world_states:
+                paths = [item.get("path") for item in world_states if item.get("path")]
+                states = [item.get("state") for item in world_states if item.get("state")]
+                path_text = (
+                    f" Write states: {', '.join(states)}"
+                    f" paths={', '.join(paths[:3])}."
+                )
             text = (
                 f"Runtime effect #{(effect or {}).get('id')} for {event_ref} stopped while committing "
                 f"{actions}. Recovery needs review before retry. Inspect with `{command}`. "
+                f"{path_text} "
                 "Reply with the observed state and whether mew should retry, abort, or replan."
             )
             question, created = add_question(

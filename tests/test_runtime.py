@@ -1039,6 +1039,67 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_records_write_intent_before_commit_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("notes.md").write_text("old\n", encoding="utf-8")
+                with (
+                    patch("mew.runtime.sweep_agent_runs", return_value={}),
+                    patch(
+                        "mew.runtime.plan_runtime_event",
+                        return_value=(
+                            {"summary": "write now", "decisions": []},
+                            {
+                                "summary": "write now",
+                                "actions": [
+                                    {
+                                        "type": "write_file",
+                                        "path": "notes.md",
+                                        "content": "new\n",
+                                        "dry_run": False,
+                                    }
+                                ],
+                            },
+                        ),
+                    ),
+                    patch("mew.runtime.apply_runtime_event_plans", side_effect=RuntimeError("crash after commit intent")),
+                ):
+                    with self.assertRaises(RuntimeError):
+                        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                            main(
+                                [
+                                    "run",
+                                    "--once",
+                                    "--passive-now",
+                                    "--autonomous",
+                                    "--autonomy-level",
+                                    "act",
+                                    "--allow-write",
+                                    ".",
+                                    "--allow-verify",
+                                    "--verify-command",
+                                    f"{shlex.quote(sys.executable)} -V",
+                                    "--poll-interval",
+                                    "0.01",
+                                ]
+                            )
+
+                state = load_state()
+                effect = state["runtime_effects"][-1]
+                intents = effect.get("runtime_write_intents") or []
+                self.assertEqual(effect["status"], "committing")
+                self.assertEqual(effect.get("runtime_write_intent_errors"), [])
+                self.assertEqual(len(intents), 1)
+                self.assertEqual(intents[0]["operation"], "write_file")
+                self.assertEqual(Path(intents[0]["path"]).name, "notes.md")
+                self.assertTrue(intents[0]["before_existed"])
+                self.assertNotEqual(intents[0]["before_sha256"], intents[0]["expected_sha256"])
+                self.assertTrue(intents[0]["verify_expected"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_once_passive_now_auto_recovers_interrupted_native_verifier(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

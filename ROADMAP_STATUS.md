@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, half-hour and one-hour real-time resident cadence proofs, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied file-write recovery, rollback-needed write review, and failed-command review recovery exist; broader shell/runtime side-effect retry is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied/runtime file-write recovery, rollback-needed write review, and failed-command review recovery exist; broader shell side-effect retry is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, but M5 is explicitly gated behind persistent continuity, true recovery, and a no-rescue multi-loop proof. |
 
 ## Active Milestone Decision
@@ -1475,12 +1475,24 @@ Evidence:
   Commit-phase runtime-effect review follow-ups now also seed a durable open
   question/outbox/attention item, so review-required recovery is visible in
   normal mew reentry surfaces rather than only inside repaired effect metadata.
+  Non-dry-run runtime `write_file` / `edit_file` actions now persist
+  pre-execution `runtime_write_intents` before applying commit actions. Repair
+  classifies those intents against live target hashes when no `write_run_ids`
+  have been persisted yet: unchanged targets become
+  `runtime_write_not_started` and safely requeue the original event, while
+  `completed_externally`, `partial`, `target_diverged`, and `unknown` targets
+  stay on explicit `review_writes` with target state/path context. If a
+  `write_run` already exists, the existing write review path takes precedence.
+  `mew runtime-effects` surfaces this write-world state for review.
   `dogfood --scenario m4-runtime-effect-recovery` passed locally in
   `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup`
   and again in
   `proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420`
   with the review-question check; the verification-review variant passed in
   `proof-workspace/mew-proof-m4-runtime-effect-verification-review-local-20260420`.
+  The runtime-write-intent variant passed in
+  `proof-workspace/mew-proof-m4-runtime-effect-write-intent-local-20260420`
+  with explicit checks for safe not-started requeue and completed-write review.
   Durable summary:
   `docs/M4_RUNTIME_EFFECT_RECOVERY_DECISION_2026-04-20.md`.
 - Applied `write_file`/`edit_file` work tools now record a pre-execution
@@ -1520,25 +1532,26 @@ Missing proof:
   read/git work-session tools, and explicit side-effect recovery now exists for
   the narrow applied file-write class plus failed shell-command review.
   Commit-phase runtime-effect review follow-ups now become durable review
-  questions, but automatic retry still does not exist for all interrupted
-  runtime effects or shell commands.
+  questions, and runtime write intents can safely requeue when the intended
+  target is still unchanged, but automatic retry still does not exist for all
+  interrupted runtime effects or shell commands.
 - World-state revalidation before retry exists for safe read/git and
   interrupted verifier work-session recovery, and hash-based target
-  revalidation now exists for applied file writes. Runtime effects now have
-  structured recovery decisions and follow-ups; only the pre-commit rerun class
-  is consumed automatically by requeueing its event, while commit-phase runtime
-  effects still remain explicit review.
+  revalidation now exists for applied work-session file writes plus runtime
+  write intents. Runtime effects now have structured recovery decisions and
+  follow-ups; the pre-commit rerun class and unchanged runtime write-intent
+  class are consumed automatically by requeueing their events, while opaque
+  commit-phase runtime effects still remain explicit review.
 - Safe work-session auto-recovery is still opt-in and limited to selected
   safe read/git tools; write/apply/shell recovery still stays behind explicit
   gates or review unless a deterministic validator exists.
 
 Next action:
 
-- Extend runtime-effect recovery consumption or the next deterministic
-  side-effect validator. Keep shell recovery on explicit review until a
-  similarly deterministic world-state validator exists; next useful shell work
-  should improve the review surface or add a deterministic validator, not blind
-  retry.
+- Extend the next deterministic M4 recovery validator or define the remaining
+  M4 close gate. Keep shell recovery on explicit review until a similarly
+  deterministic world-state validator exists; next useful shell work should
+  improve the review surface or add a deterministic validator, not blind retry.
 
 ## Milestone 5: Self-Improving Mew
 
