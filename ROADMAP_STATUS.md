@@ -732,6 +732,15 @@ Evidence:
   Focused assertions plus `uv run python -m unittest tests.test_work_session`,
   `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
   evidence plus product progress, not no-rescue mew-side evidence.
+- A direct supervisor patch then tightened write-batch normalization for M6.6:
+  if a code write batch would exceed the five-tool limit, mew now returns
+  `wait` instead of truncating the batch and silently dropping required sibling
+  edits. The THINK prompt now also says not to propose a partial batch when the
+  full required write set exceeds five tools, and the tests cover both the
+  prompt text and the new refusal behavior. `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #339 blocker, not mew-side
+  evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -777,7 +786,10 @@ Missing proof:
   the earlier reread churn and let the native loop reach a paired dry-run edit
   batch, but the next failure mode is still unresolved: stable multi-edit
   assembly and exact old-text matching across the full same-file source/test
-  surface. The native loop is therefore improved but not yet self-sufficient.
+  surface. The partial-write-batch refusal patch should reduce one source of
+  that failure by stopping incomplete dry-run batches before approval, but it
+  has not yet been proven by a fresh no-rescue work-session task. The native
+  loop is therefore improved but not yet self-sufficient.
 
 Done when:
 
