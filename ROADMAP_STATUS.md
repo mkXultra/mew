@@ -1662,6 +1662,14 @@ Evidence:
   reviewed no-rescue candidate while M3 remains open. Task `#306` itself is not
   no-rescue credit because the supervisor completed the final source/test patch
   after the resident stopped at context pressure.
+- Task `#307` produced a second reviewed no-rescue candidate. The resident
+  independently searched and read the `loop_credit_status` source/test surface,
+  proposed paired source/test edits, and the supervisor only approved previews.
+  Top-level `loop_credit_status` now follows the human-intervention
+  `m5_credit`, so reviewed no-rescue candidates show
+  `candidate_no_rescue_reviewed_pending_m3` consistently in both places.
+  `mew self-improve --audit 307` reports verification passed,
+  `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1718,7 +1726,7 @@ Next action:
 - Keep the M3 4h proof as background-only until task `#300` can collect and
   summarize it. In parallel, run another deliberately small M5 entry-rehearsal
   loop and try to close it without supervisor file patches; the target evidence
-  is a second `mew self-improve --audit <task>` bundle with verification passed,
+  is a third `mew self-improve --audit <task>` bundle with verification passed,
   `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
 
 ## Latest Validation

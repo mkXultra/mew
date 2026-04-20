@@ -251,6 +251,7 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
     permission_context = self_improve_permission_context(defaults)
     verification_records = _verification_records(state, task, session or {})
     latest_verification = verification_records[-1] if verification_records else None
+    human_intervention = classify_human_intervention(session or {})
     bundle = {
         "schema_version": M5_AUDIT_SCHEMA_VERSION,
         "status": "ready" if session else "missing_session",
@@ -274,7 +275,7 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
             "drift": bool(audit.get("permission_context_drift")),
         },
         "effect_budget": audit.get("effect_budget") or self_improve_effect_budget(defaults),
-        "human_intervention": classify_human_intervention(session or {}),
+        "human_intervention": human_intervention,
         "approvals": _tool_approval_records(session or {}),
         "recovery_events": _recovery_records(session or {}),
         "verification": {
@@ -284,7 +285,7 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
             "latest": latest_verification,
             "records": verification_records,
         },
-        "loop_credit_status": audit.get("loop_credit_status") or "not_counted",
+        "loop_credit_status": human_intervention.get("m5_credit") or audit.get("loop_credit_status") or "not_counted",
         "controls": self_improve_audit_controls(task),
     }
     return bundle

@@ -578,6 +578,10 @@ class SelfImproveTests(unittest.TestCase):
                     reviewed_bundle["human_intervention"]["m5_credit"],
                     "candidate_no_rescue_reviewed_pending_m3",
                 )
+                self.assertEqual(
+                    reviewed_bundle["loop_credit_status"],
+                    "candidate_no_rescue_reviewed_pending_m3",
+                )
 
                 with redirect_stdout(StringIO()) as text_stdout:
                     text_code = main(["self-improve", "--audit", "1"])
