@@ -294,9 +294,35 @@ class DeskTests(unittest.TestCase):
                 "self-improve",
                 "--start-session",
                 "--focus",
-                "Prove M3 persistent advantage in resident reentry",
+                "Advance M5 audited self-improvement loop",
             ),
         )
+
+    def test_build_desk_view_model_skips_blocked_task_for_primary_action(self):
+        state = {
+            "tasks": [
+                {
+                    "id": 1,
+                    "title": "Wait for long proof",
+                    "status": "blocked",
+                    "kind": "coding",
+                    "effective_kind": "coding",
+                }
+            ],
+            "questions": [],
+            "work_sessions": [],
+        }
+
+        with patch(
+            "mew.desk.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            view = build_desk_view_model(state, kind="coding")
+
+        self.assertEqual(view["counts"]["open_tasks"], 1)
+        self.assertEqual(view["focus"], "Blocked: #1 Wait for long proof [blocked]")
+        self.assertEqual(view["primary_action"]["kind"], "start_self_improve")
+        self.assertEqual(view["details"]["tasks"][0]["status"], "blocked")
 
     def test_build_desk_view_model_surfaces_context_checkpoint(self):
         with (

@@ -16,11 +16,22 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 09:30 JST.
+Last assessed: 2026-04-20 13:28 JST.
 
-Active milestone: Milestone 3, Persistent Advantage.
+Active milestone: Milestone 5, Self-Improving Mew (entry rehearsal while M3 proof runs).
 
-Rationale: Milestone 1 is closed and Milestone 2 has now passed its final
+Rationale: The remaining M3 real-time cadence proof is already running in the
+background as container `mew-proof-real-4h-20260420-1312`; task `#300` is
+blocked on that proof and records the exact collection path. Do not mark M3
+`done` until the proof is collected and `mew proof-summary
+proof-artifacts/mew-proof-real-4h-20260420-1312 --json --strict` passes. The
+main implementation thread should not idle on wall-clock proof. It may move to
+M5 entry rehearsal work that builds the frozen permission context, explicit
+effect budget, readable audit bundle, and no-rescue intervention
+classification needed before M5 loops can count. This M5 work is preparatory:
+it does not claim M5 done-gate credit until M3 is honestly closed.
+
+Previous M3 evidence rationale: Milestone 1 is closed and Milestone 2 has now passed its final
 evidence gate. Task `#293` / session `#275` completed a focused no-change
 coding investigation after an explicit stop/reentry, preserved `continuity:
 9/9`, verified the focused suite, and finished without forcing edits or needing

@@ -58,6 +58,14 @@ def active_roadmap_self_improve_focus(root=None):
     return ""
 
 
+def task_is_actionable(task):
+    return (task.get("status") or "").strip().casefold() != "blocked"
+
+
+def actionable_open_tasks(tasks):
+    return [task for task in tasks if task_is_actionable(task)]
+
+
 def scoped_agent_status(state, kind=None):
     agent = dict(state.get("agent_status", {}))
     if not kind:
@@ -168,6 +176,12 @@ def practical_next_step(task):
     if kind == "personal":
         return f"take one 5-minute personal step on task #{task_id}: {title}"
     return f"clarify or take one small step on task #{task_id}: {title}"
+
+
+def task_reentry_next_step(task):
+    if not task_is_actionable(task):
+        return "blocked; wait for the unblock condition before advancing"
+    return practical_next_step(task)
 
 
 def dispatchable_planned_tasks(tasks):
@@ -742,7 +756,7 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
         "tasks": [
             {
                 **_task_item(task),
-                "next_step": practical_next_step(task),
+                "next_step": task_reentry_next_step(task),
             }
             for task in tasks[:limit]
         ],
@@ -1177,18 +1191,24 @@ def coding_self_improve_focus_from_friction(state, kind=None):
 
 def next_move(state, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
+    action_tasks = actionable_open_tasks(tasks)
+    blocked_task_ids = {
+        str(task.get("id"))
+        for task in tasks
+        if not task_is_actionable(task) and task.get("id") is not None
+    }
     questions = filter_questions_for_tasks(
         [question for question in state.get("questions", []) if question.get("status") == "open"],
         tasks,
         kind=kind,
     )
-    running_tasks = [task for task in tasks if task.get("status") == "running"]
+    running_tasks = [task for task in action_tasks if task.get("status") == "running"]
     running_task_ids = {str(task.get("id")) for task in running_tasks}
     attention = [
         item for item in state.get("attention", {}).get("items", []) if item.get("status") == "open"
     ]
     attention = filter_attention_for_tasks(attention, tasks, kind=kind)
-    task_ids = {str(task.get("id")) for task in tasks}
+    task_ids = {str(task.get("id")) for task in action_tasks}
     running_runs = [
         run for run in running_agent_runs(state)
         if not kind or str(run.get("task_id")) in task_ids
@@ -1204,15 +1224,18 @@ def next_move(state, kind=None):
         run for run in review_runs_needing_followup(state)
         if not kind or str(run.get("task_id")) in task_ids
     ]
-    dry_run_waiting = dry_run_implementation_runs(state, tasks)
-    dispatchable = dispatchable_planned_tasks(tasks)
-    plan_needed = tasks_needing_plan(tasks)
+    dry_run_waiting = dry_run_implementation_runs(state, action_tasks)
+    dispatchable = dispatchable_planned_tasks(action_tasks)
+    plan_needed = tasks_needing_plan(action_tasks)
     recent_verifications = (
         recent_verification_runs_for_tasks(state, task_ids, limit=1)
         if kind
         else recent_verification_runs(state, limit=1)
     )
-    active_work = active_work_session_items(state, limit=1, kind=kind)
+    active_work = [
+        session for session in active_work_session_items(state, limit=1, kind=kind)
+        if str(session.get("task_id")) not in blocked_task_ids
+    ]
 
     if running_tasks:
         for question in questions:
@@ -1236,7 +1259,7 @@ def next_move(state, kind=None):
                 f"repair continuity for active work session #{session.get('id')}: "
                 f"{continuity_summary} via `{command}`"
             )
-        task = next((task for task in tasks if str(task.get("id")) == str(session.get("task_id"))), {})
+        task = next((task for task in action_tasks if str(task.get("id")) == str(session.get("task_id"))), {})
         if task_kind(task) == "coding" and session.get("task_id") is not None:
             return (
                 f"enter coding cockpit for active work session #{session.get('id')} "
@@ -1261,8 +1284,8 @@ def next_move(state, kind=None):
         return f"enter coding cockpit for task #{task_id} with `{mew_command('code', task_id)}`"
     if attention:
         return f"resolve attention #{attention[0].get('id')}: {attention[0].get('title')}"
-    if tasks:
-        return practical_next_step(tasks[0])
+    if action_tasks:
+        return practical_next_step(action_tasks[0])
     if kind == "coding":
         if not current_project_looks_like_mew():
             return (

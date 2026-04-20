@@ -154,6 +154,14 @@ def open_tasks_for_desk(state: dict[str, Any], kind: str | None = None) -> list[
     ]
 
 
+def task_is_actionable_for_desk(task: dict[str, Any]) -> bool:
+    return normalize_text(task.get("status")).casefold() != "blocked"
+
+
+def actionable_tasks_for_desk(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [task for task in tasks if task_is_actionable_for_desk(task)]
+
+
 def open_questions_for_desk(state: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(state.get("questions"), list):
         return list(canonical_open_questions(state))
@@ -499,6 +507,8 @@ def desk_actions_for_desk(
             continue
         _append_unique_action(actions, seen, attention_action_item(item, current_time=current_time))
     for task in tasks:
+        if not task_is_actionable_for_desk(task):
+            continue
         if action_identity(task.get("id")) in active_task_ids:
             continue
         _append_unique_action(actions, seen, task_action_item(task, current_time=current_time))
@@ -557,8 +567,11 @@ def focus_summary(
         return f"Working on: {goal}"
     if tasks is None:
         tasks = open_tasks_for_desk(state)
+    action_tasks = actionable_tasks_for_desk(tasks)
+    if action_tasks:
+        return f"Next: {task_label(action_tasks[0])}"
     if tasks:
-        return f"Next: {task_label(tasks[0])}"
+        return f"Blocked: {task_label(tasks[0])}"
     return "No active work recorded"
 
 

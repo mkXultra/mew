@@ -62,8 +62,21 @@ class BriefTests(unittest.TestCase):
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
         self.assertEqual(
             next_move(default_state(), kind="coding"),
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
         )
+
+    def test_next_move_skips_blocked_task_for_self_improve(self):
+        state = default_state()
+        add_task(state, status="blocked", task_id=1, title="Wait for long proof", kind="coding")
+
+        with patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            self.assertEqual(
+                next_move(state, kind="coding"),
+                "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+            )
 
     def test_next_move_coding_filter_in_empty_project_suggests_task_creation(self):
         old_cwd = os.getcwd()
@@ -182,7 +195,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("mew reply", data["next_move"])
         self.assertEqual(
             data["coding_next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
         )
         self.assertIn("Coding: start a native self-improvement session", focus)
 
@@ -1107,7 +1120,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(
             data["next_move"],
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`",
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
         )
 
     def test_focus_kind_filter_shows_matching_tasks_and_questions(self):
