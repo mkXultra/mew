@@ -689,6 +689,14 @@ Evidence:
   `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
   and `git diff --check` passed. This is blocker evidence plus product
   progress, not no-rescue mew-side evidence.
+- A direct supervisor patch then widened
+  `WORK_RECENT_READ_FILE_WINDOW_LIMIT` from `2` to `5` in
+  `src/mew/work_loop.py`, with a focused regression in
+  `tests/test_work_session.py` proving that five recent exact read windows
+  survive in full context for same-file multi-span edit preparation. Focused
+  `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is product progress aimed at the #337
+  blocker, not mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -728,8 +736,9 @@ Missing proof:
   show where exact old-text retention failed before #336. The #336 blocker
   reduction improves same-session exact window reuse, but #337 shows that
   same-file multi-span exact-old-text reuse inside `src/mew/work_session.py`
-  still is not proven under medium context pressure, so the native loop is not
-  yet self-sufficient.
+  still is not proven under medium context pressure. The recent-window limit
+  patch should help, but it has not yet been proven by a fresh no-rescue
+  work-session task, so the native loop is not yet self-sufficient.
 
 Done when:
 
@@ -769,6 +778,8 @@ Next action:
   `recent_read_file_windows` reuse in full context.
 - Carry the landed #337 target-path summary patch as product progress, but do
   not count it as no-rescue evidence.
+- Carry the landed recent-read-window limit expansion as product progress, but
+  do not count it as no-rescue evidence.
 - Keep M6.6 on the mew-side critical path. The next task should attack the
   remaining blocker directly inside `src/mew/work_session.py`: same-file
   multi-span exact-old-text reuse after exact windows are already read. That

@@ -13646,6 +13646,119 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(work_context["recent_read_file_windows"][0]["text"], exact_text)
         self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
 
+    def test_work_model_context_keeps_five_recent_read_windows_for_edit_preparation(self):
+        from mew.work_loop import build_work_model_context
+
+        tool_calls = [
+            {
+                "id": 1,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/work_session.py", "line_start": 3217, "line_count": 32},
+                "result": {
+                    "path": "src/mew/work_session.py",
+                    "line_start": 3217,
+                    "line_end": 3248,
+                    "text": "compressed prior window\n",
+                    "truncated": False,
+                },
+                "summary": "read compressed prior",
+            },
+            {
+                "id": 2,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/work_session.py", "line_start": 3859, "line_count": 16},
+                "result": {
+                    "path": "src/mew/work_session.py",
+                    "line_start": 3859,
+                    "line_end": 3874,
+                    "text": "recent decisions window\n",
+                    "truncated": False,
+                },
+                "summary": "read recent decisions",
+            },
+            {
+                "id": 3,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/work_session.py", "line_start": 4350, "line_count": 56},
+                "result": {
+                    "path": "src/mew/work_session.py",
+                    "line_start": 4350,
+                    "line_end": 4405,
+                    "text": "formatter window\n",
+                    "truncated": False,
+                },
+                "summary": "read formatter",
+            },
+            {
+                "id": 4,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "tests/test_work_session.py", "line_start": 460, "line_count": 16},
+                "result": {
+                    "path": "tests/test_work_session.py",
+                    "line_start": 460,
+                    "line_end": 475,
+                    "text": "compressed prior test\n",
+                    "truncated": False,
+                },
+                "summary": "read compressed prior test",
+            },
+            {
+                "id": 5,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "tests/test_work_session.py", "line_start": 5440, "line_count": 55},
+                "result": {
+                    "path": "tests/test_work_session.py",
+                    "line_start": 5440,
+                    "line_end": 5494,
+                    "text": "recent decisions test\n",
+                    "truncated": False,
+                },
+                "summary": "read recent decisions test",
+            },
+        ]
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep enough exact windows for same-file multi-span edits.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Recent windows",
+            "description": "Preserve exact read windows for edit preparation.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+
+        self.assertEqual(len(work_context["recent_read_file_windows"]), 5)
+        self.assertEqual(
+            [item["tool_call_id"] for item in work_context["recent_read_file_windows"]],
+            [5, 4, 3, 2, 1],
+        )
+        self.assertEqual(
+            work_context["recent_read_file_windows"][2]["path"],
+            "src/mew/work_session.py",
+        )
+        self.assertEqual(
+            work_context["recent_read_file_windows"][2]["line_start"],
+            4350,
+        )
+        self.assertEqual(
+            work_context["recent_read_file_windows"][4]["line_start"],
+            3217,
+        )
+
     def test_work_model_context_clips_large_search_matches(self):
         from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context
 
