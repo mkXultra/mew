@@ -2302,6 +2302,75 @@ def prompt_live_write_approval(tool_call, verify_command=""):
     return "skip"
 
 
+def _resume_pending_approval_for_tool(resume, tool_call_id):
+    for approval in (resume or {}).get("pending_approvals") or []:
+        if str(approval.get("tool_call_id")) == str(tool_call_id):
+            return approval
+    return {}
+
+
+def record_work_approval_elicitation(state, session, task, source_call, resume=None):
+    if not state or not session or not source_call:
+        return None
+    if source_call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
+        return None
+    result = source_call.get("result") or {}
+    if source_call.get("tool") not in WRITE_WORK_TOOLS or not result.get("dry_run") or not result.get("changed"):
+        return None
+    existing = find_question(state, source_call.get("approval_question_id"))
+    if existing and existing.get("status") == "open":
+        return existing
+    task_id = session.get("task_id") or (task or {}).get("id")
+    approval = _resume_pending_approval_for_tool(resume, source_call.get("id"))
+    path = approval.get("path") or work_call_path(source_call) or ""
+    title = (task or {}).get("title") or ""
+    lines = [
+        f"Work session #{session.get('id')} tool #{source_call.get('id')} is waiting for approval.",
+        f"tool: {source_call.get('tool')} path: {path or '(unknown)'}",
+    ]
+    if task_id:
+        task_text = f"task: #{task_id}"
+        if title:
+            task_text += f" {title}"
+        lines.append(task_text)
+    summary = source_call.get("summary") or ""
+    if summary:
+        lines.append(f"summary: {summary}")
+    if approval.get("approval_blocked_reason"):
+        lines.append(f"approval blocked: {approval.get('approval_blocked_reason')}")
+    if approval.get("cli_approve_hint"):
+        lines.append(f"approve: `{approval.get('cli_approve_hint')}`")
+    if approval.get("cli_override_approve_hint"):
+        lines.append(f"override approve: `{approval.get('cli_override_approve_hint')}`")
+    if approval.get("cli_defer_verify_hint") and approval.get("cli_defer_verify_hint") != approval.get("cli_approve_hint"):
+        lines.append(f"defer verify: `{approval.get('cli_defer_verify_hint')}`")
+    if approval.get("cli_reject_hint"):
+        lines.append(f"reject: `{approval.get('cli_reject_hint')}`")
+    lines.append("If this prompt was interrupted, inspect the pending approval before retrying.")
+    question, _created = add_question(
+        state,
+        "\n".join(lines),
+        related_task_id=task_id,
+        source="work_approval",
+    )
+    source_call["approval_question_id"] = question.get("id")
+    source_call["approval_prompt_status"] = "open"
+    source_call["approval_prompted_at"] = source_call.get("approval_prompted_at") or now_iso()
+    return question
+
+
+def resolve_work_approval_elicitation(state, source_call, answer_text):
+    if not state or not source_call:
+        return None
+    question = find_question(state, source_call.get("approval_question_id"))
+    if not question or question.get("status") != "open":
+        return None
+    reply = mark_question_answered(state, question, answer_text)
+    source_call["approval_prompt_status"] = "answered"
+    source_call["approval_prompt_answered_at"] = question.get("answered_at")
+    return reply
+
+
 def _work_control_text(action, fallback):
     for key in ("text", "note", "question", "reason", "summary"):
         value = (action or {}).get(key)
@@ -4496,6 +4565,18 @@ def cmd_work_ai(args):
                     state = load_state()
                     session = find_work_session(state, session_id)
                     task = work_session_task(state, session)
+                    resume = build_work_session_resume(session, task=task, state=state)
+                    stored_tool_call = find_work_tool_call(session, tool_call.get("id"))
+                    approval_question = record_work_approval_elicitation(
+                        state,
+                        session,
+                        task,
+                        stored_tool_call,
+                        resume=resume,
+                    )
+                    if approval_question:
+                        report["steps"][-1]["approval_question_id"] = approval_question.get("id")
+                    save_state(state)
                 approval_verify_command = effective_args.verify_command or work_session_default_verify_command(session, task=task)
                 approval = prompt_live_write_approval(tool_call, verify_command=approval_verify_command)
                 report["steps"][-1]["inline_approval"] = approval
@@ -4970,6 +5051,12 @@ def _apply_work_approval(args, approve_tool_id):
         if source_call:
             source_call["approval_status"] = "applied" if tool_call.get("status") == "completed" else "failed"
             source_call["approval_error"] = tool_call.get("error") or ""
+            if tool_call.get("status") == "completed":
+                resolve_work_approval_elicitation(
+                    state,
+                    source_call,
+                    f"Approved work tool #{approve_tool_id}.",
+                )
         save_state(state)
     if progress:
         progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} {tool_call.get('status')}")
@@ -5205,6 +5292,11 @@ def cmd_work_reject_tool(args):
             print(f"mew: {reject_error}", file=sys.stderr)
             return 1
         reject_work_tool_call(session, source_call, getattr(args, "reject_reason", None) or "")
+        resolve_work_approval_elicitation(
+            state,
+            source_call,
+            f"Rejected work tool #{args.reject_tool}: {getattr(args, 'reject_reason', None) or ''}".strip(),
+        )
         save_state(state)
     if args.json:
         print(json.dumps({"rejected_tool_call": source_call}, ensure_ascii=False, indent=2))

@@ -12327,6 +12327,153 @@ class WorkSessionTests(unittest.TestCase):
                 rejected = load_state()["work_sessions"][0]["tool_calls"][0]
                 self.assertEqual(rejected["approval_status"], "rejected")
                 self.assertEqual(rejected["rejection_reason"], "inline approval rejected")
+                state = load_state()
+                rejected = state["work_sessions"][0]["tool_calls"][0]
+                question_id = rejected.get("approval_question_id")
+                self.assertEqual(rejected["approval_prompt_status"], "answered")
+                question = [item for item in state["questions"] if item["id"] == question_id][0]
+                self.assertEqual(question["source"], "work_approval")
+                self.assertEqual(question["status"], "answered")
+                self.assertIn("Work session #1 tool #1 is waiting for approval.", question["text"])
+                self.assertIn("Rejected work tool #1", state["replies"][0]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_live_prompt_approval_records_durable_question_when_unanswered(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "old text",
+                        "new": "new text",
+                    },
+                }
+                verify_command = f"{sys.executable} -c \"print('verify ok')\""
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("sys.stdin", StringIO("")):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--live",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-write",
+                                            ".",
+                                            "--allow-verify",
+                                            "--verify-command",
+                                            verify_command,
+                                            "--prompt-approval",
+                                            "--max-steps",
+                                            "1",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                self.assertIn("inline_approval=skip", stdout.getvalue())
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+                state = load_state()
+                session = state["work_sessions"][0]
+                source_call = session["tool_calls"][0]
+                question_id = source_call.get("approval_question_id")
+                self.assertEqual(source_call["approval_prompt_status"], "open")
+                self.assertEqual(source_call.get("approval_status", ""), "")
+                self.assertEqual(len(state["questions"]), 1)
+                question = state["questions"][0]
+                self.assertEqual(question["id"], question_id)
+                self.assertEqual(question["source"], "work_approval")
+                self.assertEqual(question["status"], "open")
+                self.assertIn("Work session #1 tool #1 is waiting for approval.", question["text"])
+                self.assertIn("approve: `mew work 1 --approve-tool 1", question["text"])
+                self.assertIn("reject: `mew work 1 --reject-tool 1", question["text"])
+                self.assertEqual(state["outbox"][0]["question_id"], question_id)
+                self.assertEqual(state["attention"]["items"][0]["question_id"], question_id)
+                resume = build_work_session_resume(session, task=state["tasks"][0], state=state)
+                self.assertEqual(resume["phase"], "awaiting_approval")
+                self.assertEqual(resume["pending_approvals"][0]["tool_call_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_live_prompt_approval_answers_question_after_apply(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview edit",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "old text",
+                        "new": "new text",
+                    },
+                }
+                verify_command = f"{sys.executable} -c \"print('verify ok')\""
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("sys.stdin", StringIO("y\n")):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--live",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-write",
+                                            ".",
+                                            "--allow-verify",
+                                            "--verify-command",
+                                            verify_command,
+                                            "--prompt-approval",
+                                            "--max-steps",
+                                            "1",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                self.assertIn("inline_approval=applied", stdout.getvalue())
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+                state = load_state()
+                source_call = state["work_sessions"][0]["tool_calls"][0]
+                question_id = source_call.get("approval_question_id")
+                self.assertEqual(source_call["approval_status"], "applied")
+                self.assertEqual(source_call["approval_prompt_status"], "answered")
+                question = [item for item in state["questions"] if item["id"] == question_id][0]
+                self.assertEqual(question["source"], "work_approval")
+                self.assertEqual(question["status"], "answered")
+                self.assertIn("Approved work tool #1.", state["replies"][0]["text"])
             finally:
                 os.chdir(old_cwd)
 
