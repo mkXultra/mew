@@ -444,6 +444,12 @@ class WorkSessionTests(unittest.TestCase):
                                 f"src/path_{turn_id}.py",
                                 f"tests/test_path_{turn_id}.py",
                             ],
+                            "open_questions": [
+                                f"Question {turn_id}A",
+                                f"Question {turn_id}B",
+                                f"Question {turn_id}C",
+                                f"Question {turn_id}D",
+                            ],
                             "last_verified_state": f"Verified {turn_id}",
                         }
                     },
@@ -479,12 +485,20 @@ class WorkSessionTests(unittest.TestCase):
             prior["items"][-1]["target_paths"],
             ["src/path_7.py", "tests/test_path_7.py"],
         )
+        self.assertEqual(
+            prior["items"][-1]["open_questions"],
+            ["Question 7A", "Question 7B", "Question 7C"],
+        )
         self.assertIn("Compressed prior think (4/7 older turn(s))", text)
         self.assertIn("#7 [completed] read_file Turn summary 7", text)
         self.assertIn("  plan_items:", text)
         self.assertIn("  - Plan item 7A", text)
         self.assertIn("  target_paths: src/path_7.py, tests/test_path_7.py", text)
+        self.assertIn("  open_questions:", text)
+        self.assertIn("  - Question 7A", text)
+        self.assertIn("  - Question 7C", text)
         self.assertNotIn("Plan item 7D", text)
+        self.assertNotIn("Question 7D", text)
 
     def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
         active_session = {
@@ -5488,6 +5502,10 @@ class WorkSessionTests(unittest.TestCase):
             resume["recent_decisions"][0]["target_paths"],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
+        self.assertEqual(
+            resume["recent_decisions"][0]["open_questions"],
+            ["Should chat expose the same pane?"],
+        )
 
         text = format_work_session_resume(resume)
         self.assertIn("Working memory", text)
@@ -5499,6 +5517,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("- Verify the narrowed approval flow.", text)
         self.assertNotIn("- Ignore this extra item.", text)
         self.assertIn("target_paths: src/mew/workbench.py, tests/test_workbench.py", text)
+        self.assertIn("open_questions:", text)
         self.assertIn("- Should chat expose the same pane?", text)
 
         context = build_work_model_context(

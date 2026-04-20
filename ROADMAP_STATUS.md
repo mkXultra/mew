@@ -716,6 +716,22 @@ Evidence:
   cap. Focused `uv run python -m unittest tests.test_work_session`, `ruff`,
   `py_compile`, and `git diff --check` passed. This is product progress aimed
   at the #338 blocker, not mew-side evidence.
+- M6.6 task #339 / session #326 then retried the fresh
+  `working_memory.open_questions` summary-recall slice after the merged-window
+  patch. This time the native loop no longer fell into the same-file reread
+  churn seen in #337/#338: it reached the intended narrow pattern of
+  `search_text -> exact read_file windows -> paired dry-run edit batch`.
+  However, the first dry-run batch still missed one required source surface,
+  and the repair attempt then failed with `old text was not found` on the
+  final source edit. That shifts the remaining blocker from recent-window
+  eviction to stable multi-edit batch assembly and exact old-text matching
+  under medium context pressure. The feature then landed directly as product
+  progress: `recent_decisions` now carries `open_questions`, and
+  `format_work_session_resume()` renders `open_questions` in both the Recent
+  decisions and Compressed prior think blocks, with paired test coverage.
+  Focused assertions plus `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
+  evidence plus product progress, not no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -757,9 +773,11 @@ Missing proof:
   #338 showed that same-file multi-span exact-old-text reuse inside
   `src/mew/work_session.py` still was not proven under medium context pressure:
   overlapping/adjacent same-path repairs displaced each other even after the
-  five-window limit patch. The merged-window patch should reduce that failure
-  mode, but it has not yet been proven by a fresh no-rescue work-session task,
-  so the native loop is not yet self-sufficient.
+  five-window limit patch. #339 then showed the merged-window patch did remove
+  the earlier reread churn and let the native loop reach a paired dry-run edit
+  batch, but the next failure mode is still unresolved: stable multi-edit
+  assembly and exact old-text matching across the full same-file source/test
+  surface. The native loop is therefore improved but not yet self-sufficient.
 
 Done when:
 
