@@ -56,9 +56,9 @@ infrastructure slice itself. This is the integration test for the gate:
 
 ## Bootstrap Run Record
 
-Status: `blocked`
+Status: `success`
 
-Task: #322 `M6.6 bootstrap: durable coding plan state`
+Task: #323 `M6.6 bootstrap retry: coding plan state`
 
 Adopted reference patterns:
 
@@ -67,25 +67,28 @@ Adopted reference patterns:
 
 Mew run:
 
-- Session #307 started at 2026-04-20 21:30 JST.
-- Mew read the reference gate and narrowed implementation surfaces to
-  `src/mew/work_loop.py`, `src/mew/snapshot.py`, and
+- Retry followed the blocked #322 bootstrap after commit `ca9ba94`.
+- Mew produced dry-run edits for `src/mew/work_loop.py` (#2182) and
+  `tests/test_work_session.py` (#2183).
+- Codex reviewed and approved/applied those mew-authored writes (#2184 and
+  #2185).
+- The resulting patch changed `src/mew/work_loop.py` and
   `tests/test_work_session.py`.
-- Mew required reviewer steering after repeated search/read churn.
-- Mew then stopped without proposing edits because exact `read_file` old text
-  was not retained across model turns under the current context mode.
+- Reviewer steering was still needed during the run, and one read-root
+  permission repair was needed before completion.
 
-Verification: not run; no edit was proposed.
+Verification: focused pytest passed with 2 tests.
 
 Rescue edits: 0
 
-Blocker if failed:
+Caveats:
 
-- Native work turns must preserve exact recent file-window content, or provide
-  another safe edit mechanism, before mew can self-implement the first M6.6
-  slice without guessing old strings.
+- This is bootstrap evidence for one small reference-grounded coding-loop slice,
+  not full M6.6 closure.
+- The retry succeeded without rescue edits, but broader native coding-loop
+  robustness still needs follow-up work.
 
-Verdict: bootstrap failed honestly and produced the next M6.6 blocker.
+Verdict: bootstrap retry succeeded for the durable coding plan state slice.
 
 ## Run Template
 

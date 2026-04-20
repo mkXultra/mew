@@ -540,35 +540,35 @@ Evidence:
   bootstrap a prerequisite, treating any Codex rescue edit as a failed
   bootstrap blocker, and adding a dedicated bootstrap record section.
 - Bootstrap task #322 / session #307 ran with mew as implementer and Codex only
-  steering/reviewing. It did not produce edits. Mew narrowed the surfaces but
-  finished blocked because exact `read_file` old strings were not retained
-  across model turns, so safe `edit_file` dry-runs would require guessing. This
-  is recorded in `docs/M6_6_CODEX_PARITY_COMPARE.md` with `rescue_edits=0`.
+  steering/reviewing. It did not produce edits and exposed the exact
+  `read_file` old-string retention blocker. Retry #323 after `ca9ba94` then
+  succeeded for one small coding-loop slice: mew authored dry-run edits for
+  `src/mew/work_loop.py` (#2182) and `tests/test_work_session.py` (#2183),
+  Codex only reviewed/approved/applied them (#2184/#2185), focused pytest
+  passed with 2 tests, and `rescue_edits=0`. Reviewer steering and one
+  read-root permission repair were still needed. This is recorded in
+  `docs/M6_6_CODEX_PARITY_COMPARE.md` as bootstrap evidence for a small slice,
+  not full M6.6 closure.
 
 Missing proof:
 
-- Plan state: no durable plan/checklist exists at the work-session level yet.
-- Path recall: no first-class codebase map, symbol/path recall, or targeted
-  context selector exists beyond prompt instructions and normal search/read
-  tools.
-- Coding loop: no built-in edit planner, verifier discovery, repair loop, or
-  self-review phase exists at the work-session level.
-- Bootstrap integration: task #322 failed honestly before edits. Native work
-  context must preserve exact recent file-window content, or provide another
-  safe edit mechanism, before mew can self-implement the first M6.6 slice.
+- Plan state and path recall: the #323 retry shows one small bootstrap slice,
+  but broader durable checklist/path-recall behavior is not yet proven across
+  normal coding tasks.
+- Coding loop: no built-in verifier discovery, repair loop, or self-review
+  phase exists at the work-session level for general coding tasks yet.
 - Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
   on correctness, tool churn, latency, and reviewability across representative
   coding tasks.
+- Robustness: the successful retry still needed reviewer steering and one
+  read-root permission repair, so the native loop is not yet self-sufficient.
 
 Done when:
 
-- Mew completes three predeclared representative coding tasks without Codex
+- The #323 bootstrap retry remains documented as the no-rescue baseline, and
+  mew completes three predeclared representative coding tasks without Codex
   rescue edits: one behavior-preserving refactor, one bug fix with a regression
   test, and one small feature with paired source/test changes.
-- The M6.6 bootstrap integration task is completed before the three comparator
-  tasks are counted: mew reads the reference-grounded gate, implements one
-  small coding-loop slice, proposes a reviewable edit, verifies it, and records
-  the trace without Codex rescue edits.
 - The same tasks are compared against Codex CLI in a checked-in comparator
   artifact that records first-edit latency, model turns, search/read calls
   before first edit, changed files, verifier commands, repair cycles, and
@@ -586,9 +586,9 @@ Done when:
 
 Next action:
 
-- Fix or bypass the #322 blocker: preserve exact recent `read_file` file-window
-  content in native work model context, then rerun the M6.6 bootstrap
-  integration task with mew as implementer.
+- Use the #323 bootstrap retry as the new baseline, then start the first
+  predeclared M6.6 comparator task while targeting the remaining
+  steering/permission-repair gaps.
 
 ### M7: Senses - Inbound Signals
 

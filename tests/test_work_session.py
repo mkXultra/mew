@@ -12781,6 +12781,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Treat guidance as the user's current instruction", prompt)
         self.assertIn("do not finish solely because older notes", prompt)
         self.assertIn("guidance_snapshot", prompt)
+        self.assertIn("recent_read_file_windows", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("work_session.resume.active_memory", prompt)
