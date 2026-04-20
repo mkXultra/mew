@@ -13586,6 +13586,53 @@ class WorkSessionTests(unittest.TestCase):
         self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
         self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_CONTEXT_BUDGET)
 
+    def test_work_model_context_includes_recent_read_line_window_without_compaction(self):
+        from mew.work_loop import build_work_model_context
+
+        exact_text = "small exact window\n"
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep exact recent line window available in full context.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "line_start": 760, "line_count": 1},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "line_start": 760,
+                        "line_end": 760,
+                        "text": exact_text,
+                        "truncated": False,
+                    },
+                    "summary": "read exact prompt line",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Full context",
+            "description": "Keep exact recent line window available in full context.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+
+        self.assertNotIn("context_compaction", work_context)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["tool_call_id"], 1)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["path"], "src/mew/work_loop.py")
+        self.assertEqual(work_context["recent_read_file_windows"][0]["line_start"], 760)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["line_end"], 760)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["text"], exact_text)
+        self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
+
     def test_work_model_context_clips_large_search_matches(self):
         from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context
 

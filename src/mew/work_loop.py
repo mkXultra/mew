@@ -574,8 +574,7 @@ def build_work_session_context(
             for turn in model_turns[-recent_turn_count:]
         ],
     }
-    if compacted or prompt_compacted:
-        work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
+    work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
         note = "Recent work context was compacted due to session size; use remember for durable observations."
         if work_context.get("recent_read_file_windows"):
