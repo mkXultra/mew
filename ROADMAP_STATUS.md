@@ -16,8 +16,8 @@ M5 was archived losslessly in
 | 3. Persistent Advantage | `done` | M3 close gate passed with strict reentry/comparator evidence plus half-hour, one-hour, four-hour, week-scale, and ten-day proof shapes. |
 | 4. True Recovery | `done` | Crashed/interrupted runtime and work-session effects can be classified, safely retried/requeued when deterministic, or surfaced for durable review. |
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
-| 5.1 Trust & Safety Close-Out | `in_progress` | Post-M5 hardening only. Add adversarial review and enforceable safety hooks without moving the M5 gate. |
-| 6. Body: Daemon & Persistent Presence | `not_started` | Make mew a resident process rather than a CLI that exists only when summoned. |
+| 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
+| 6. Body: Daemon & Persistent Presence | `in_progress` | Make mew a resident process rather than a CLI that exists only when summoned. |
 | 7. Senses: Inbound Signals | `not_started` | Let the resident notice audited external signals, not only its own state. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -26,43 +26,42 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 17:45 JST.
+Last assessed: 2026-04-20 18:34 JST.
 
-Active work: **M5.1 Trust & Safety Close-Out**, then open **M6 Body**.
+Active work: **M6 Body**.
 
 Reasoning:
 
 - M1-M5 are closed. M5 closure was explicitly approved by the user on
   2026-04-20 after M3 and M4 were already closed.
-- M5.1 is not a new destination. It is a bounded close-out patch that should
-  make future self-improvement safer without retroactively changing the M5 done
-  gate.
+- M5.1 closed as a bounded patch that makes future self-improvement safer
+  without retroactively changing the M5 done gate.
 - `claude-ultra` was consulted in session
   `831f34ca-4610-4c9b-9d10-b99f467d5f5f` and argued that the next real
   inhabitation milestone should be a persistent body: daemon, restart, and
   passive event handling. Codex agrees.
 - Broad refactor work is not a milestone. Refactor only where it directly
-  enables M5.1 safety or M6 daemon work.
+  enables M6 daemon work or a directly observed blocker.
 
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
-2. Implement M5.1 in small slices:
-   - `mew-adversarial-verifier` for future self-improve review quality;
-   - hook-based safety boundaries for the M5 safety rules;
-   - only the refactor-readiness needed to make those changes safe.
-3. After M5.1 is bounded and recorded, open M6 Body.
+2. Start M6 Body in small slices: daemon status, resident tick supervision,
+   durable pause/inspect/repair/resume controls, and one real watcher-triggered
+   passive turn.
+3. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+   self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
 
-- During M5.1, dogfood the first small slice with **mew as implementer** and
-  Codex acting as the human reviewer/approver whenever the task is scoped,
-  low-risk, and has clear verification.
+- M5.1 dogfooded the first small slice with **mew as implementer** and Codex
+  acting as the human reviewer/approver. The rescue was recorded honestly, so
+  it did not count as autonomy credit.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
-- After M5.1 closes, low- and medium-risk implementation should default to mew
-  as primary implementer. Codex should increasingly act as requester, reviewer,
-  approver, and product judge.
+- Low- and medium-risk implementation should now default to mew as primary
+  implementer. Codex should increasingly act as requester, reviewer, approver,
+  and product judge.
 - Keep Codex as direct implementer for daemon, safety-hook, permission,
   recovery, roadmap/evaluator, and other high-risk architecture until M6 Body
   proves durable resident operation.
@@ -154,10 +153,11 @@ Missing proof:
 
 ### M5.1: Trust & Safety Close-Out
 
-Status: `in_progress`.
+Status: `done`.
 
 Evidence:
 
+- `docs/M5_1_CLOSE_GATE_2026-04-20.md` records `Status: passed`.
 - Task `#319` / work session `#299` created
   `.codex/skills/mew-adversarial-verifier/SKILL.md` through a mew-native
   self-improvement loop. Codex acted as human reviewer/approver and did not
@@ -208,19 +208,20 @@ Evidence:
   produce `blocked`.
 - Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`
   passed.
+- `claude-ultra` close-readiness review in ACM session
+  `0a0a8006-0753-471d-a1e3-a8f257089e1d` asked for combined verifier+hook
+  evidence, budget/recovery interpretation, and a close-gate document. Those
+  artifacts are now recorded in the close-gate doc.
+- The `mew-adversarial-verifier` criteria were applied to the
+  `/tmp/mew-m5-safety-hooks-proof` audit bundles for task `#1` and task `#2`;
+  decision: `approve`. The governance audit produced `needs_review`; the
+  external side-effect audit produced `blocked`.
 
 Missing proof:
 
-- The adversarial verifier exists and has been used manually, but it has not yet
-  reviewed a later mew-native self-improvement loop.
-- Hook-based safety boundaries now escalate governance/policy edits away from
-  automatic approval, block known external-visible command side effects before
-  execution, and surface budget/recovery safety states in audit. The remaining
-  uncertainty is whether this is enough enforcement for M5.1 or whether
-  budget/recovery need pre-action blockers beyond audit escalation.
-- The new `m5-safety-hooks` scenario exercises mechanical safety hooks with a
-  readable audit bundle, but it does not yet include adversarial verifier review
-  inside the same loop/scenario.
+- None for the documented M5.1 gate. Future self-improvement loops should use
+  the verifier routinely, and later milestones can harden the command-risk
+  marker list and budget/recovery policy actions.
 
 Goal:
 
@@ -242,12 +243,11 @@ Done when:
 
 Next action:
 
-- Add the remaining budget-exhaustion / ambiguous-recovery safety evidence, then
-  decide whether M5.1 can close or needs one combined verifier + hooks scenario.
+- Move to M6 Body.
 
 ### M6: Body - Daemon & Persistent Presence
 
-Status: `not_started`.
+Status: `in_progress`.
 
 Goal:
 
@@ -342,18 +342,19 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M5.1 Trust & Safety Close-Out**.
+Active focus: **M6 Body**.
 
 The next long session should not drift into broad polish or general refactor.
-The only acceptable near-term work is:
+The acceptable near-term work is:
 
-- adversarial verification for future self-improvement loops;
-- hook-based enforcement of M5 safety boundaries;
-- minimal refactor-readiness directly required by those two changes;
+- daemon status and resident lifecycle controls;
+- a supervised passive tick loop that survives ordinary CLI session boundaries;
+- one real file or git watcher-triggered passive turn;
+- pause, inspect, repair, and resume controls for the resident;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-After M5.1 closes, move to **M6 Body**.
+Keep M5.1 as the closed safety baseline while M6 work begins.
 
 ## Maintenance Rule
 
