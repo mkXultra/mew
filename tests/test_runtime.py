@@ -1026,6 +1026,7 @@ class RuntimeTests(unittest.TestCase):
                     state = load_state()
                 old_effect = next(effect for effect in state["runtime_effects"] if effect.get("id") == 1)
                 self.assertEqual(old_effect["status"], "interrupted")
+                self.assertEqual(old_effect["recovery_decision"]["action"], "rerun_event")
                 self.assertIn("no action was recorded", old_effect["recovery_hint"])
                 tool_call = state["work_sessions"][0]["tool_calls"][0]
                 self.assertEqual(tool_call["status"], "running")

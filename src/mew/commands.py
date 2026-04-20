@@ -8783,6 +8783,14 @@ def cmd_repair(args):
                             f"- {repair.get('type')} effect=#{repair.get('effect_id')} "
                             f"event=#{repair.get('event_id')} {repair.get('old_status')}->{repair.get('new_status')}"
                         )
+                        decision = repair.get("recovery_decision") or {}
+                        if decision:
+                            print(
+                                "  decision: "
+                                f"{decision.get('action')} "
+                                f"effect={decision.get('effect_classification')} "
+                                f"safety={decision.get('safety')}"
+                            )
                         print(f"  next: {repair.get('recovery_hint')}")
                     elif repair.get("type") == "interrupted_work_tool_call":
                         print(

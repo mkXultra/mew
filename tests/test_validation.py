@@ -376,13 +376,45 @@ class ValidationTests(unittest.TestCase):
 
                 self.assertEqual(code, 0)
                 self.assertIn("interrupted_runtime_effect effect=#1 event=#1 planning->interrupted", stdout.getvalue())
+                self.assertIn("decision: rerun_event effect=no_action_committed safety=safe_to_replan", stdout.getvalue())
                 self.assertIn("next: Re-run event #1; no action was recorded as committed.", stdout.getvalue())
                 self.assertEqual(repaired["runtime_effects"][0]["status"], "interrupted")
+                self.assertEqual(repaired["runtime_effects"][0]["recovery_decision"]["action"], "rerun_event")
                 self.assertEqual(
                     repaired["runtime_effects"][0]["recovery_hint"],
                     "Re-run event #1; no action was recorded as committed.",
                 )
                 self.assertTrue(repaired["runtime_effects"][0]["finished_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_classifies_committing_runtime_write_effect(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect["action_types"] = ["write_file"]
+                effect["write_run_ids"] = [7]
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair", "--json"])
+                data = json.loads(stdout.getvalue())
+                repaired = load_state()
+                decision = repaired["runtime_effects"][0]["recovery_decision"]
+
+                self.assertEqual(code, 0)
+                self.assertTrue(data["ok"])
+                self.assertEqual(data["repairs"][0]["recovery_decision"]["action"], "review_writes")
+                self.assertEqual(decision["effect_classification"], "write_may_have_started")
+                self.assertEqual(decision["safety"], "needs_user_review")
+                self.assertEqual(decision["write_run_ids"], [7])
+                self.assertIn("write_may_have_started", repaired["runtime_effects"][0]["recovery_hint"])
             finally:
                 os.chdir(old_cwd)
 
