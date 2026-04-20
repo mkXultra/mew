@@ -350,6 +350,28 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("continuity_next: refresh working memory", format_work_session_resume(resume))
 
+    def test_work_continuity_score_counts_durable_planning_fields_as_working_memory(self):
+        resume = {
+            "working_memory": {
+                "plan_items": ["inspect continuity"],
+                "target_paths": ["src/mew/work_session.py"],
+                "open_questions": ["Do durable planning fields count?"],
+            },
+            "phase": "active",
+            "next_action": "continue from preserved plan",
+            "context": {"pressure": "low"},
+        }
+
+        continuity = build_work_continuity_score(resume)
+        axes = {axis["key"]: axis for axis in continuity["axes"]}
+
+        self.assertTrue(axes["working_memory_survived"]["ok"])
+        self.assertNotIn("working_memory_survived", continuity["missing"])
+        self.assertIn(
+            "durable planning fields",
+            axes["working_memory_survived"]["reason"],
+        )
+
     def test_work_continuity_score_counts_user_pivot_when_visible(self):
         resume = {
             "phase": "idle",

@@ -3166,7 +3166,14 @@ def build_work_continuity_score(resume):
     recurring_failures = resume.get("recurring_failures") or []
     pivot_texts = _continuity_pivot_text(resume)
 
-    memory_ok = bool(memory.get("hypothesis") or memory.get("next_step") or memory.get("last_verified_state"))
+    memory_ok = bool(
+        memory.get("hypothesis")
+        or memory.get("next_step")
+        or memory.get("last_verified_state")
+        or memory.get("plan_items")
+        or memory.get("target_paths")
+        or memory.get("open_questions")
+    )
     risky = bool(
         unresolved_failure
         or failures
@@ -3215,7 +3222,7 @@ def build_work_continuity_score(resume):
         _continuity_axis(
             "working_memory_survived",
             memory_ok,
-            "working memory has hypothesis, next step, or latest verification state"
+            "working memory has hypothesis, next step, latest verification state, or durable planning fields"
             if memory_ok
             else "working memory is absent",
             ["working_memory"],

@@ -887,6 +887,18 @@ Evidence:
   repeated anchored search into the intended read-before-edit behavior. This is
   implementation evidence for the frozen M6.6 set, not an extra comparator
   slot.
+- M6.6 task #349 / session #337 then returned to the broader
+  `src/mew/work_session.py` continuity surface: `memory_ok` now counts
+  `plan_items`, `target_paths`, and `open_questions` as durable working-memory
+  evidence, and the paired test now asserts that broader continuity reason. The
+  native loop found the correct src/test surfaces without supervisor hints,
+  eventually proposed a paired dry-run edit, auto-applied it, and passed `uv
+  run python -m unittest tests.test_work_session` with `409 tests`. But it
+  used a long adjacent-window reread chain before first edit, and same-surface
+  audit then found one stale continuity-axis reason string that needed a direct
+  paired follow-up patch. Focused continuity pytest, the full unittest,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
+  evidence plus product progress, not fresh no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -966,7 +978,10 @@ Missing proof:
   `redundant_search_observations` signal into a fresh no-steer pass on the
   prompt surface, so that exact search-to-read conversion blocker is now
   reduced. The remaining missing proof is broader durable plan/path recall and
-  multi-file normal-case autonomy, not this prompt-surface search loop.
+  multi-file normal-case autonomy, not this prompt-surface search loop. #349
+  sharpened that remaining gap: on a broader `work_session.py` slice, mew can
+  reach paired edit/verify, but adjacent source rereads before first edit and a
+  same-surface audit follow-up still block no-rescue credit.
 
 Done when:
 
@@ -1017,8 +1032,9 @@ Next action:
   normal coding work rather than another prompt-only edit. Prefer a slice that
   needs exact remembered src/test windows plus one concrete plan_items /
   target_paths / open_questions carry-forward decision before the edit is
-  proposed. Do not return to comparator work until the mew-side implementation
-  set is frozen.
+  proposed, but avoid the adjacent-window reread creep seen in #349 and require
+  same-surface audit to close natively. Do not return to comparator work until
+  the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
