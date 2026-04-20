@@ -807,6 +807,7 @@ def build_work_think_prompt(context):
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
         "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. "
+        "If work_session.resume.same_surface_audit.status indicates a sibling-surface audit is still needed after src/mew edits, do one narrow audit step or record why the sibling surface is already covered or out of scope before finish. "
         "For implementation tasks with allowed write roots, do not finish merely because the next edit is clear; if exact old/new text or file content is available, propose the dry-run edit_file/write_file action instead. "
         "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
         "Include a compact working_memory object that restates your current hypothesis, "

@@ -612,6 +612,14 @@ Evidence:
   permission/environment-related. The mew-side run proposed a paired dry-run
   batch, applied it, ran the focused verifier, then chose the broader
   suggested verifier before finish. `rescue_edits=0`.
+- M6.6 task #330 / session #317 advanced same-surface self-review behavior:
+  after two reviewer steers corrected repeated search churn and one bad
+  line-window guess, mew read exact source/test windows, proposed a reviewable
+  paired dry-run batch, applied it, and passed broad `uv run pytest -q`
+  verification. On the next turn, mew obeyed the new prompt rule by performing
+  one narrow same-surface audit read on the nearby `ACT`/control surface in
+  `src/mew/work_loop.py` before finishing, then recorded why that sibling
+  surface was covered/out of scope for the THINK-only reminder. `rescue_edits=0`.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -628,16 +636,18 @@ Missing proof:
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
   but broader durable checklist/path-recall behavior is not yet proven across
   normal coding tasks.
-- Coding loop: built-in verifier discovery and one prompt-level repair-loop
-  rule are now improved, but no general self-review phase exists at the
-  work-session level for normal coding tasks yet.
+- Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
+  and prompt-level same-surface self-review are now improved, but there is
+  still no broader work-session self-review phase beyond the `src/mew`
+  same-surface audit path.
 - Comparator: M6.6-A and M6.6-B have checked-in side-by-side evidence, and
   M6.6-C now has a mew-side run, but the frozen-commit parallel comparator
   batch for the final M6.6 implementation set has not been run yet.
 - M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
   caveat.
-- Robustness: the successful retry still needed reviewer steering and one
-  read-root permission repair, so the native loop is not yet self-sufficient.
+- Robustness: the successful retries still needed reviewer steering, one
+  read-root permission repair, and in #330 one incorrect line-window guess, so
+  the native loop is not yet self-sufficient.
 
 Done when:
 
@@ -674,6 +684,9 @@ Next action:
 - After task #329, keep M6.6 on the mew-side critical path and choose the next
   slice from self-review or same-surface audit behavior rather than comparator
   work.
+- After task #330, keep M6.6 on the mew-side critical path and choose the next
+  slice from durable plan/path recall or another normal-case anti-churn proof
+  rather than comparator work or more same-surface polish.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
