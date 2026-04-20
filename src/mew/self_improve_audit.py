@@ -137,6 +137,47 @@ def _recovery_records(session):
     return records
 
 
+def _verification_status(exit_code):
+    if exit_code == 0:
+        return "passed"
+    if exit_code is None:
+        return "unknown"
+    return "failed"
+
+
+def _verification_record_from_command(source, record):
+    return {
+        "source": source,
+        "id": record.get("id"),
+        "command": record.get("command") or "",
+        "exit_code": record.get("exit_code"),
+        "status": _verification_status(record.get("exit_code")),
+        "started_at": record.get("started_at") or "",
+        "finished_at": record.get("finished_at") or "",
+        "reason": record.get("reason") or "",
+    }
+
+
+def _verification_records(state, task, session):
+    records = []
+    for call in (session or {}).get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        result = call.get("result") or {}
+        verification = result.get("verification")
+        if isinstance(verification, dict):
+            item = _verification_record_from_command("work_tool", verification)
+            item["tool_call_id"] = call.get("id")
+            item["tool"] = call.get("tool") or ""
+            records.append(item)
+    task_id = str((task or {}).get("id"))
+    for run in state.get("verification_runs") or []:
+        if not isinstance(run, dict) or str(run.get("task_id")) != task_id:
+            continue
+        records.append(_verification_record_from_command("task_verification", run))
+    return records
+
+
 def classify_human_intervention(session):
     notes = session.get("notes") or []
     human_notes = [
@@ -173,6 +214,8 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
     audit = (session or {}).get("m5_self_improve_audit") or {}
     defaults = (session or {}).get("default_options") or {}
     permission_context = self_improve_permission_context(defaults)
+    verification_records = _verification_records(state, task, session or {})
+    latest_verification = verification_records[-1] if verification_records else None
     bundle = {
         "schema_version": M5_AUDIT_SCHEMA_VERSION,
         "status": "ready" if session else "missing_session",
@@ -202,6 +245,9 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
         "verification": {
             "verify_command": defaults.get("verify_command") or "",
             "allow_verify": bool(defaults.get("allow_verify")),
+            "status": (latest_verification or {}).get("status") or "not_recorded",
+            "latest": latest_verification,
+            "records": verification_records,
         },
         "loop_credit_status": audit.get("loop_credit_status") or "not_counted",
         "controls": self_improve_audit_controls(task),
@@ -216,6 +262,8 @@ def format_m5_self_improve_audit_bundle(bundle):
     current = permission.get("current") or {}
     budget = bundle.get("effect_budget") or {}
     intervention = bundle.get("human_intervention") or {}
+    verification = bundle.get("verification") or {}
+    latest_verification = verification.get("latest") or {}
     lines = [
         "M5 self-improve audit",
         f"status: {bundle.get('status')}",
@@ -246,6 +294,11 @@ def format_m5_self_improve_audit_bundle(bundle):
                 f"{intervention.get('classification')} "
                 f"rescue={intervention.get('rescue_edit_status')} "
                 f"credit={intervention.get('m5_credit')}"
+            ),
+            (
+                "verification: "
+                f"{verification.get('status')} "
+                f"exit_code={latest_verification.get('exit_code')}"
             ),
             f"loop_credit_status: {bundle.get('loop_credit_status')}",
         ]

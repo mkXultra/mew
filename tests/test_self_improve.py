@@ -512,6 +512,24 @@ class SelfImproveTests(unittest.TestCase):
                 with redirect_stdout(StringIO()):
                     code = main(["self-improve", "--start-session", "--focus", "Start native work"])
                 self.assertEqual(code, 0)
+                state = load_state()
+                session = state["work_sessions"][0]
+                session["tool_calls"].append(
+                    {
+                        "id": 50,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "result": {
+                            "verification": {
+                                "command": "uv run pytest -q",
+                                "exit_code": 0,
+                                "started_at": now_iso(),
+                                "finished_at": now_iso(),
+                            }
+                        },
+                    }
+                )
+                save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
                     audit_code = main(["self-improve", "--audit", "1", "--json"])
@@ -528,6 +546,16 @@ class SelfImproveTests(unittest.TestCase):
                     bundle["human_intervention"]["m5_credit"],
                     "not_counted_until_human_review_confirms_no_rescue_edits",
                 )
+                self.assertEqual(bundle["verification"]["status"], "passed")
+                self.assertEqual(bundle["verification"]["latest"]["source"], "work_tool")
+                self.assertEqual(bundle["verification"]["latest"]["tool_call_id"], 50)
+                self.assertEqual(bundle["verification"]["latest"]["exit_code"], 0)
+
+                with redirect_stdout(StringIO()) as text_stdout:
+                    text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(text_code, 0)
+                self.assertIn("verification: passed exit_code=0", text_stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 
