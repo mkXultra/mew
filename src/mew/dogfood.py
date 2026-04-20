@@ -2981,6 +2981,17 @@ def run_day_reentry_scenario(workspace, env=None):
         "session_created_at": session_created_at,
         "session_updated_at": memory_at,
         "observed_inactive_hours": focus_session.get("inactive_hours"),
+        "reentry_contract": {
+            "surfaces": ["focus", "work --session --resume", "activity"],
+            "risk_present": "day-scale verifier still needs recovery" in (focus_session.get("risk") or ""),
+            "working_memory_keys": sorted(focus_memory.keys()),
+            "world_state_files": [
+                record.get("path")
+                for record in world_state.get("files") or []
+                if record.get("exists")
+            ],
+            "next_cli_controls": resume_data.get("next_cli_controls"),
+        },
     }
     return report
 

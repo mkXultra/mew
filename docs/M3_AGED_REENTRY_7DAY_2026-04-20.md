@@ -41,12 +41,12 @@ aged-reentry layer, not toward OS/process stability or external API TTL proof.
 Docker Isolation Follow-up:
 
 ```bash
-MEW_PROOF_NAME=mew-proof-day-reentry-20260420-1035 \
+MEW_PROOF_NAME=mew-proof-day-reentry-contract-20260420-1038 \
 MEW_PROOF_SCENARIO=day-reentry \
-MEW_PROOF_IMAGE=mew-proof:day-reentry \
+MEW_PROOF_IMAGE=mew-proof:day-reentry-contract \
 scripts/run_proof_docker.sh
-docker wait mew-proof-day-reentry-20260420-1035
-scripts/collect_proof_docker.sh mew-proof-day-reentry-20260420-1035
+docker wait mew-proof-day-reentry-contract-20260420-1038
+scripts/collect_proof_docker.sh mew-proof-day-reentry-contract-20260420-1038
 ```
 
 Result: `pass`
@@ -55,7 +55,14 @@ The isolated run preserved the same checks and recorded:
 
 - synthetic age: `7` days
 - observed inactive hours: `191.4`
-- session created at: `2026-04-12T01:35:13Z`
-- session updated at: `2026-04-12T02:11:13Z`
+- session created at: `2026-04-12T01:37:45Z`
+- session updated at: `2026-04-12T02:13:45Z`
+- reentry contract:
+  - `risk_present=true`
+  - `working_memory_keys` include `hypothesis`, `next_step`, and
+    `last_verified_state`
+  - `world_state_files=["README.md"]`
+  - `next_cli_controls` include live, follow, steer, stop, resume, and chat
+    controls
 - collected artifacts under
-  `proof-artifacts/mew-proof-day-reentry-20260420-1035/`
+  `proof-artifacts/mew-proof-day-reentry-contract-20260420-1038/`

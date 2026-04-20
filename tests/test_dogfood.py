@@ -493,8 +493,14 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "day-reentry")
-            self.assertEqual(report["scenarios"][0]["artifacts"]["synthetic_age_days"], 7)
-            self.assertGreaterEqual(report["scenarios"][0]["artifacts"]["observed_inactive_hours"], 168.0)
+            artifacts = report["scenarios"][0]["artifacts"]
+            self.assertEqual(artifacts["synthetic_age_days"], 7)
+            self.assertGreaterEqual(artifacts["observed_inactive_hours"], 168.0)
+            contract = artifacts["reentry_contract"]
+            self.assertTrue(contract["risk_present"])
+            self.assertIn("hypothesis", contract["working_memory_keys"])
+            self.assertIn("README.md", contract["world_state_files"])
+            self.assertIn("focus", contract["surfaces"])
             self.assertIn("day_reentry_focus_surfaces_aged_active_session", text)
             self.assertIn("day_reentry_resume_restores_memory_and_world_state", text)
 

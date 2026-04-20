@@ -1277,9 +1277,11 @@ Evidence:
   checks. The durable summary is in
   `docs/M3_VIRTUAL_TIME_ISOLATED_10DAY_2026-04-20.md`.
 - The Docker proof runner can now run non-resident dogfood scenarios through
-  `MEW_PROOF_SCENARIO`. `mew-proof-day-reentry-20260420-1035` passed
-  `day-reentry` in Docker with `observed_inactive_hours=191.4`, proving the
-  week-scale synthetic reentry layer in an isolated filesystem/process
+  `MEW_PROOF_SCENARIO`. `mew-proof-day-reentry-contract-20260420-1038` passed
+  `day-reentry` in Docker with `observed_inactive_hours=191.4` and a
+  machine-readable `reentry_contract` recording preserved risk, working memory
+  keys, `README.md` world state, and resume/follow/chat controls. This proves
+  the week-scale synthetic reentry layer in an isolated filesystem/process
   environment. The durable summary was appended to
   `docs/M3_AGED_REENTRY_7DAY_2026-04-20.md`.
 
