@@ -625,6 +625,19 @@ class SelfImproveTests(unittest.TestCase):
                     rescue_bundle["loop_credit_status"],
                     "not_counted_due_to_rescue",
                 )
+
+                with redirect_stdout(StringIO()) as rescue_text_stdout:
+                    rescue_text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(rescue_text_code, 0)
+                self.assertIn(
+                    "human_intervention: human_guidance_recorded rescue=rescue_recorded no_rescue_review=rescue_recorded credit=not_counted_due_to_rescue",
+                    rescue_text_stdout.getvalue(),
+                )
+                self.assertIn(
+                    "loop_credit_status: not_counted_due_to_rescue",
+                    rescue_text_stdout.getvalue(),
+                )
             finally:
                 os.chdir(old_cwd)
 

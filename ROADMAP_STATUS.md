@@ -1682,6 +1682,13 @@ Evidence:
   regression for candidate text output. The supervisor only approved the
   preview. `mew self-improve --audit 309` reports verification passed,
   `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
+- Task `#310` produced the fifth reviewed no-rescue candidate in total, and
+  the fourth consecutive candidate after rescued task `#306`. The resident
+  independently inspected rescue audit text output and tests, had one
+  rejected/rolled-back assertion with the wrong text shape, then re-read and
+  proposed the corrected test-only regression. The supervisor only approved the
+  preview. `mew self-improve --audit 310` reports verification passed,
+  `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1737,9 +1744,10 @@ Next action:
 
 - Keep the M3 4h proof as background-only until task `#300` can collect and
   summarize it. In parallel, run another deliberately small M5 entry-rehearsal
-  loop and try to close it without supervisor file patches; the target evidence
-  is a fifth `mew self-improve --audit <task>` bundle with verification passed,
-  `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
+  loop and try to close it without supervisor file patches. Because rescued task
+  `#306` interrupts the sequence, the next useful target is one more candidate
+  after `#310`, giving five consecutive reviewed candidates from `#307` through
+  `#311` if it passes with no supervisor file patch.
 
 ## Latest Validation
 
