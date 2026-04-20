@@ -7629,6 +7629,19 @@ def _work_tool_effective_cwd(args, task=None):
     return cwd
 
 
+def _work_tool_edits(args):
+    raw = getattr(args, "edits_json", None)
+    if raw in (None, ""):
+        return None
+    try:
+        edits = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--edits-json must be valid JSON: {exc.msg}") from exc
+    if not isinstance(edits, list):
+        raise ValueError("--edits-json must decode to a JSON list")
+    return edits
+
+
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
     path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file", "edit_file_hunks"}
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
@@ -7643,6 +7656,7 @@ def _work_tool_parameters(args, session=None, gate_options=None, task=None):
         "content": getattr(args, "content", None),
         "old": getattr(args, "old", None),
         "new": getattr(args, "new", None),
+        "edits": _work_tool_edits(args),
         "create": getattr(args, "create", False),
         "replace_all": getattr(args, "replace_all", False),
         "apply": getattr(args, "apply", False),
@@ -7691,7 +7705,14 @@ def cmd_work_tool(args):
             return 1
         gate_options = _work_tool_gate_options(args, session)
         task = work_session_task(state, session)
-        parameters = _work_tool_parameters(args, session=session, gate_options=gate_options, task=task)
+        try:
+            parameters = _work_tool_parameters(args, session=session, gate_options=gate_options, task=task)
+        except ValueError as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"error": "invalid_work_tool_parameters", "message": str(exc)}, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: {exc}", file=sys.stderr)
+            return 1
         tool_call = start_work_tool_call(state, session, args.tool, parameters)
         if review_probe:
             tool_call["review_probe"] = True

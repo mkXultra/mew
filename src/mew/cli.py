@@ -1178,6 +1178,7 @@ def build_parser():
             "run_tests",
             "write_file",
             "edit_file",
+            "edit_file_hunks",
         ),
         help="run a native work-session tool",
     )
@@ -1195,9 +1196,10 @@ def build_parser():
     work_parser.add_argument("--content", help="content for write_file")
     work_parser.add_argument("--old", help="old text for edit_file")
     work_parser.add_argument("--new", help="new text for edit_file")
+    work_parser.add_argument("--edits-json", help="JSON list of {old,new} hunks for edit_file_hunks")
     work_parser.add_argument("--create", action="store_true", help="allow write_file to create a file")
     work_parser.add_argument("--replace-all", action="store_true", help="replace all edit_file matches")
-    work_parser.add_argument("--apply", action="store_true", help="apply write_file/edit_file instead of dry-run")
+    work_parser.add_argument("--apply", action="store_true", help="apply write_file/edit_file/edit_file_hunks instead of dry-run")
     work_parser.add_argument("--verify-command", help="verification command required for applied writes; persisted on the work session")
     work_parser.add_argument("--verify-cwd", default=".", help="verification command cwd")
     work_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout")
