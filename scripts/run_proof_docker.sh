@@ -6,6 +6,7 @@ IMAGE="${MEW_PROOF_IMAGE:-mew-proof:latest}"
 NAME="${MEW_PROOF_NAME:-mew-proof-$(date +%Y%m%d-%H%M%S)}"
 WORKSPACE="${MEW_PROOF_WORKSPACE:-$ROOT/proof-workspace/$NAME}"
 ARTIFACTS="${MEW_PROOF_ARTIFACTS:-$ROOT/proof-artifacts/$NAME}"
+SCENARIO="${MEW_PROOF_SCENARIO:-resident-loop}"
 DURATION="${MEW_PROOF_DURATION:-3600}"
 INTERVAL="${MEW_PROOF_INTERVAL:-60}"
 POLL_INTERVAL="${MEW_PROOF_POLL_INTERVAL:-0.2}"
@@ -17,15 +18,20 @@ docker build -f "$ROOT/Dockerfile.proof" -t "$IMAGE" "$ROOT"
 
 command=(
   uv run --no-sync mew dogfood
-  --scenario resident-loop
-  --duration "$DURATION"
-  --interval "$INTERVAL"
-  --poll-interval "$POLL_INTERVAL"
+  --scenario "$SCENARIO"
   --workspace /proof/workspace
   --json
 )
 
-if [[ -n "$TIME_DILATION" ]]; then
+if [[ "$SCENARIO" == "resident-loop" ]]; then
+  command+=(
+    --duration "$DURATION"
+    --interval "$INTERVAL"
+    --poll-interval "$POLL_INTERVAL"
+  )
+fi
+
+if [[ "$SCENARIO" == "resident-loop" && -n "$TIME_DILATION" ]]; then
   command+=(--time-dilation "$TIME_DILATION")
 fi
 
@@ -41,6 +47,7 @@ docker run \
 
 cat <<EOF
 started $NAME
+scenario: $SCENARIO
 workspace: $WORKSPACE
 artifacts: $ARTIFACTS
 logs: docker logs -f $NAME

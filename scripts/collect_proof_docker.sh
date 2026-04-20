@@ -19,9 +19,11 @@ status="$(docker inspect "$NAME" --format '{{.State.Status}}')"
 exit_code="$(docker inspect "$NAME" --format '{{.State.ExitCode}}')"
 started_at="$(docker inspect "$NAME" --format '{{.State.StartedAt}}')"
 finished_at="$(docker inspect "$NAME" --format '{{.State.FinishedAt}}')"
+image="$(docker inspect "$NAME" --format '{{.Config.Image}}')"
 
 cat > "$ARTIFACTS/summary.txt" <<EOF
 container: $NAME
+image: $image
 status: $status
 exit_code: $exit_code
 started_at: $started_at

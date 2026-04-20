@@ -33,6 +33,11 @@ Usage:
 # one-hour real cadence proof
 scripts/run_proof_docker.sh
 
+# run a non-resident dogfood scenario in Docker
+MEW_PROOF_SCENARIO=day-reentry \
+MEW_PROOF_NAME=mew-proof-day-reentry \
+scripts/run_proof_docker.sh
+
 # one-hour real run with one-week logical time
 MEW_PROOF_DURATION=3600 \
 MEW_PROOF_INTERVAL=60 \
@@ -86,3 +91,6 @@ Follow-up virtual-time proof:
   run passed with 17 passive events and repeated wait compaction.
 - The resident-loop dogfood now also verifies post-runtime reentry surfaces:
   `mew focus`, `mew brief`, and `mew context --save`.
+- `MEW_PROOF_SCENARIO=day-reentry` now runs the synthetic week-scale reentry
+  dogfood in Docker; `mew-proof-day-reentry-20260420-1035` passed and collected
+  artifacts under `proof-artifacts/mew-proof-day-reentry-20260420-1035/`.

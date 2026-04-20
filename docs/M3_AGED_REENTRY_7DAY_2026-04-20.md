@@ -37,3 +37,25 @@ Boundary:
 The scenario synthesizes old timestamps in `.mew/state.json` and then exercises
 normal CLI surfaces. It should count toward the accelerated M3 proof pyramid's
 aged-reentry layer, not toward OS/process stability or external API TTL proof.
+
+Docker Isolation Follow-up:
+
+```bash
+MEW_PROOF_NAME=mew-proof-day-reentry-20260420-1035 \
+MEW_PROOF_SCENARIO=day-reentry \
+MEW_PROOF_IMAGE=mew-proof:day-reentry \
+scripts/run_proof_docker.sh
+docker wait mew-proof-day-reentry-20260420-1035
+scripts/collect_proof_docker.sh mew-proof-day-reentry-20260420-1035
+```
+
+Result: `pass`
+
+The isolated run preserved the same checks and recorded:
+
+- synthetic age: `7` days
+- observed inactive hours: `191.4`
+- session created at: `2026-04-12T01:35:13Z`
+- session updated at: `2026-04-12T02:11:13Z`
+- collected artifacts under
+  `proof-artifacts/mew-proof-day-reentry-20260420-1035/`
