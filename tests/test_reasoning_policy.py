@@ -61,6 +61,24 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["effort"], "medium")
         self.assertEqual(policy["work_type"], "small_implementation")
 
+    def test_ignores_historical_task_notes_for_small_implementation(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Improve mew itself",
+                "kind": "coding",
+                "description": "Focus:\nM7: add a minimal RSS signal fetcher.",
+                "notes": (
+                    "Dogfood note: previous M6 daemon proof and recovery work "
+                    "used high effort, but that is historical context."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "medium")
+        self.assertEqual(policy["work_type"], "small_implementation")
+
     def test_env_override_wins(self):
         policy = select_work_reasoning_policy(
             {"title": "Inspect project shape", "kind": "coding"},

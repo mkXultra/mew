@@ -25,6 +25,11 @@ TASK_HISTORY_MARKERS = (
     "\n\nRecent friction",
     "\n\nConstraints:",
 )
+NOTE_HISTORY_MARKERS = (
+    "Dogfood note:",
+    "Long session checkpoint:",
+    "Context save ",
+)
 
 
 def normalize_reasoning_effort(value):
@@ -49,6 +54,14 @@ def task_policy_description(task):
     return description
 
 
+def task_policy_notes(task):
+    notes = str((task or {}).get("notes") or "")
+    for marker in NOTE_HISTORY_MARKERS:
+        if marker in notes:
+            return ""
+    return notes
+
+
 def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, env=None):
     env = os.environ if env is None else env
     override = normalize_reasoning_effort(env.get(CODEX_REASONING_ENV))
@@ -65,7 +78,7 @@ def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, e
     text = _joined_text(
         task.get("title"),
         task_policy_description(task),
-        task.get("notes"),
+        task_policy_notes(task),
         guidance,
     )
     high_risk_terms = _matching_high_risk_terms(text)

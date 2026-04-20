@@ -42,9 +42,14 @@ Reasoning:
   running detached. Waiting for that proof should not block useful local work.
 - M7 signal registry foundation exists, but feature expansion exposed a more
   important blocker: mew is still too slow to act as its own implementer.
-- The #320-class self-hosting attempt produced no reviewable edit proposal:
-  xhigh had roughly 132s first THINK latency, high then stalled beyond three
-  minutes, and the repaired model turns recorded interruption without edits.
+- The first #320-class self-hosting attempts produced no reviewable edit
+  proposal: xhigh had roughly 132s first THINK latency, high then stalled
+  beyond three minutes, and the repaired model turns recorded interruption
+  without edits.
+- After prompt-size instrumentation and approval-path cleanup, session #301 did
+  produce and apply a reviewable paired src/tests patch, but its recorded
+  model metrics still used `high`/`full`; M6.5 remains open until a clean
+  `medium`/`compact_memory` rerun proves the speed path.
 - `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` identifies the structural
   cause: durable memory is currently used as prompt bulk instead of a fast
   pointer/index.
@@ -60,11 +65,11 @@ Current next action:
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Rerun a #320-class self-hosting task and compare first useful output,
-   selected reasoning effort, prompt/context size, and edit-proposal latency
-   against the failed attempt.
-4. If the rerun still stalls, reduce context further before adding new M7
-   features.
+3. Run a clean #320-class self-hosting rerun after the task-note policy fix and
+   compare first useful output, selected reasoning effort, prompt/context size,
+   and edit-proposal latency against the failed attempt and session #301.
+4. If the clean rerun still stalls, reduce context further or add Codex prompt
+   caching before adding new M7 features.
 5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
    without dropping the M6.5 active focus.
 6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
@@ -403,6 +408,26 @@ Evidence:
   such as completed commits when matching high-risk terms, preventing a small
   #320-class M7 implementation task from being escalated to `high` and full
   prompt mode just because its history mentions M6/daemon work.
+- The #320 dogfood patch reached the normal work-session approval surface and
+  was applied through approvals #2120, #2121, and #2122, producing completed
+  write tool calls #2123, #2124, and #2125 without manual rescue edits to the
+  source/test files before approval. Focused verification passed:
+  `uv run pytest -q tests/test_signal_fetch.py tests/test_signals.py --no-testmon`.
+- The applied #320 slice added a minimal RSS/Atom feed parser and `rss`
+  source-config fetch helper in `src/mew/signals.py`, plus mocked-fetch tests
+  in `tests/test_signal_fetch.py`. CLI `signals fetch` wiring and explicit
+  `atom` source-kind support are deferred M7 follow-up work, not part of the
+  M6.5 speed gate.
+- This did not close M6.5: `mew metrics --kind coding --limit 8` still records
+  the completed #320 model turns as `reasoning_efforts: high=2` and
+  `prompt_context_modes: full=2`, with first THINK latency `128.209s` and
+  first tool output for session #301 at `140.0s`.
+- The root cause of the unexpected `high`/`full` rerun was task notes: the
+  previous policy ignored historical sections in the task description but still
+  matched high-risk terms from historical dogfood notes. The policy now ignores
+  historical note prefixes such as `Dogfood note:`, `Long session checkpoint:`,
+  and `Context save ` when selecting reasoning effort. A live policy check for
+  task #320 now returns `medium` / `small_implementation`.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
@@ -410,9 +435,10 @@ Evidence:
 
 Missing proof:
 
-- No post-instrumentation real Codex work session has populated the new
-  `self_hosting` metrics yet.
-- The #320-class task has not yet been rerun successfully after speed changes.
+- No clean post-task-note-policy rerun has populated `medium` /
+  `compact_memory` self-hosting metrics yet.
+- The #320-class task has succeeded as a reviewable and verified edit proposal,
+  but not yet as a fast resident implementation loop.
 
 Done when:
 
@@ -430,9 +456,10 @@ Done when:
 
 Next action:
 
-- Rerun a #320-class self-hosting task and compare first useful output,
-  edit-proposal latency, and the new `self_hosting` prompt-size breakdown
-  against the failed attempt.
+- Rerun a clean #320-class self-hosting task after the historical task-note
+  policy fix and compare first useful output, edit-proposal latency, selected
+  effort, selected prompt mode, and the new `self_hosting` prompt-size
+  breakdown against the failed attempt and session #301.
 
 ### M7: Senses - Inbound Signals
 
