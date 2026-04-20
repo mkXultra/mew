@@ -3244,6 +3244,9 @@ def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
         plan_items = _coerce_working_memory_plan_items(memory.get("plan_items") or [])
         if plan_items:
             entry["plan_items"] = plan_items
+        target_paths = _coerce_working_memory_target_paths(memory.get("target_paths") or [])
+        if target_paths:
+            entry["target_paths"] = target_paths
         questions = memory.get("open_questions") or []
         if questions:
             entry["open_questions"] = [clip_inline_text(str(item), 160) for item in questions[:3]]
@@ -3871,6 +3874,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 "guidance_snapshot": clip_inline_text(work_turn_guidance_snapshot(turn), 240),
                 "tool_call_id": turn.get("tool_call_id"),
                 "plan_items": _coerce_working_memory_plan_items(memory.get("plan_items") or []),
+                "target_paths": _coerce_working_memory_target_paths(memory.get("target_paths") or []),
             }
         )
     compressed_prior_think = build_compressed_prior_think(turns, recent_limit=limit, limit=4)
@@ -4375,6 +4379,9 @@ def format_work_session_resume(resume):
             if plan_items:
                 lines.append("  plan_items:")
                 lines.extend(f"  - {item}" for item in plan_items)
+            target_paths = decision.get("target_paths") or []
+            if target_paths:
+                lines.append(f"  target_paths: {', '.join(target_paths)}")
     else:
         lines.append("(none)")
 
@@ -4395,6 +4402,9 @@ def format_work_session_resume(resume):
             if plan_items:
                 lines.append("  plan_items:")
                 lines.extend(f"  - {entry}" for entry in plan_items)
+            target_paths = item.get("target_paths") or []
+            if target_paths:
+                lines.append(f"  target_paths: {', '.join(target_paths)}")
             if item.get("guidance_snapshot"):
                 lines.append(f"  guidance: {item.get('guidance_snapshot')}")
         if compressed_prior.get("omitted"):

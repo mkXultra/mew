@@ -677,6 +677,18 @@ Evidence:
   `work_session.recent_read_file_windows` in normal/full work-session context,
   not only after compaction, while leaving `context_compaction` itself gated to
   compacted modes. `rescue_edits=0`.
+- M6.6 task #337 / session #324 then retried a fresh same-file multi-span
+  `src/mew/work_session.py` slice using the landed #336 surface: add
+  `working_memory.target_paths` to `recent_decisions` and
+  `compressed_prior_think` summaries with paired test updates. The native loop
+  read the exact src/test windows but still repeated the same `work_session.py`
+  exact-span rereads instead of reaching a dry-run edit batch. The feature then
+  landed directly as product progress: `recent_decisions` and
+  `compressed_prior_think` now both carry `target_paths`, and
+  `format_work_session_resume()` renders them in the summary blocks. Focused
+  `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is blocker evidence plus product
+  progress, not no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -694,11 +706,11 @@ Missing proof:
   #332 proves one normal-case anti-churn/path-recall behavior for
   `working_memory.target_paths`, and #336 proves one blocker-reduction slice
   for exact recent window reuse in normal/full context. `working_memory.plan_items`
-  now exists as product behavior for persistence/surfacing across working
-  memory, recent decisions, and compressed prior-think summaries, but broader
-  durable checklist/path-recall behavior is still not proven by a no-rescue
-  mew-side task across multi-file normal coding work or resume after context
-  compression.
+  and `working_memory.target_paths` now both exist as product behavior for
+  persistence/surfacing across working memory, recent decisions, and compressed
+  prior-think summaries, but broader durable checklist/path-recall behavior is
+  still not proven by a no-rescue mew-side task across multi-file normal coding
+  work or resume after context compression.
 - Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
   and prompt-level same-surface self-review are now improved, but there is
   still no broader work-session self-review phase beyond the `src/mew`
@@ -714,9 +726,10 @@ Missing proof:
   #332 one steer to stop repeated same-symbol search before the exact read. The
   blocked #333, direct-patch #334, and blocked/direct-patch #335 follow-ups
   show where exact old-text retention failed before #336. The #336 blocker
-  reduction improves same-session exact window reuse, but multi-span
-  work-session robustness under higher context pressure still is not proven, so
-  the native loop is not yet self-sufficient.
+  reduction improves same-session exact window reuse, but #337 shows that
+  same-file multi-span exact-old-text reuse inside `src/mew/work_session.py`
+  still is not proven under medium context pressure, so the native loop is not
+  yet self-sufficient.
 
 Done when:
 
@@ -754,12 +767,14 @@ Next action:
   count it as no-rescue evidence.
 - Record task #336 / session #323 as fresh blocker-reduction evidence for
   `recent_read_file_windows` reuse in full context.
-- Keep M6.6 on the mew-side critical path. The next task should use the landed
-  #336 surface to retry a fresh no-rescue durable checklist/path-recall slice
-  that previously stalled on exact-span rereads, or prove another small
-  same-file multi-span edit in `src/mew/work_session.py` now succeeds without
-  replaying the same feature wording. Do not return to comparator work until
-  the mew-side implementation set is frozen.
+- Carry the landed #337 target-path summary patch as product progress, but do
+  not count it as no-rescue evidence.
+- Keep M6.6 on the mew-side critical path. The next task should attack the
+  remaining blocker directly inside `src/mew/work_session.py`: same-file
+  multi-span exact-old-text reuse after exact windows are already read. That
+  likely means a narrow blocker-reduction slice in the native coding loop
+  rather than replaying more summary-surfacing features. Do not return to
+  comparator work until the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

@@ -440,6 +440,10 @@ class WorkSessionTests(unittest.TestCase):
                                 f"Plan item {turn_id}C",
                                 f"Plan item {turn_id}D",
                             ],
+                            "target_paths": [
+                                f"src/path_{turn_id}.py",
+                                f"tests/test_path_{turn_id}.py",
+                            ],
                             "last_verified_state": f"Verified {turn_id}",
                         }
                     },
@@ -471,10 +475,15 @@ class WorkSessionTests(unittest.TestCase):
             prior["items"][-1]["plan_items"],
             ["Plan item 7A", "Plan item 7B", "Plan item 7C"],
         )
+        self.assertEqual(
+            prior["items"][-1]["target_paths"],
+            ["src/path_7.py", "tests/test_path_7.py"],
+        )
         self.assertIn("Compressed prior think (4/7 older turn(s))", text)
         self.assertIn("#7 [completed] read_file Turn summary 7", text)
         self.assertIn("  plan_items:", text)
         self.assertIn("  - Plan item 7A", text)
+        self.assertIn("  target_paths: src/path_7.py, tests/test_path_7.py", text)
         self.assertNotIn("Plan item 7D", text)
 
     def test_work_session_effort_uses_current_time_for_active_wall_pressure(self):
@@ -5474,6 +5483,10 @@ class WorkSessionTests(unittest.TestCase):
                 "Add a focused command-output pane.",
                 "Verify the narrowed approval flow.",
             ],
+        )
+        self.assertEqual(
+            resume["recent_decisions"][0]["target_paths"],
+            ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
 
         text = format_work_session_resume(resume)
