@@ -646,7 +646,7 @@ def work_tool_repeat_guard(
     count = consecutive if reason == "consecutive_repeat" else total
     message = (
         f"repeat-action guard blocked {tool}: identical parameters were used "
-        f"{count} previous time(s); review the prior result, change parameters, "
+        f"{count} previous time(s); review the prior result, incorporate any prior rejection or review feedback, change parameters, "
         "summarize what is missing, or ask the user before retrying"
     )
     return {

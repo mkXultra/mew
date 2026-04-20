@@ -1718,6 +1718,15 @@ Evidence:
   `verification: passed exit_code=0` from the closed work session. This is not
   M5 done-gate credit: the resident narrowed the surface and preserved the
   next edit plan, but the supervisor applied the final paired source/test patch.
+- Task `#315` produced a reviewed no-rescue candidate directly from the `#313`
+  failure mode. The resident initially drifted toward the self-improve
+  start-session surface, accepted an `interrupt-submit` refocus, found the
+  repeat-action guard surface, proposed a paired source/test edit, and
+  verification passed in the approval flow. The guard message now explicitly
+  tells the resident to incorporate prior rejection or review feedback before
+  retrying an identical tool call. `mew self-improve --audit 315` reports
+  `verification: passed`, `no_rescue_review_recorded`, and
+  `candidate_no_rescue_reviewed_pending_m3`.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.

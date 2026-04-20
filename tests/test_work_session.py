@@ -503,6 +503,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(guard["total_count"], 3)
         self.assertEqual(guard["matching_tool_call_ids"], [1, 3, 4])
         self.assertIn("repeat-action guard blocked read_file", guard["message"])
+        self.assertIn("incorporate any prior rejection or review feedback", guard["message"])
 
         total_guard = work_tool_repeat_guard(
             {
