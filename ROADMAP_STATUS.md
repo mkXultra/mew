@@ -169,12 +169,21 @@ Evidence:
   `loop_credit_status: not_counted_due_to_rescue` because reviewer steer was
   needed for a missing new-file read, missing `create=true`, and an invalid
   shell-style verifier.
+- `mew self-improve --audit` now includes an audit-only `safety_boundaries`
+  report for permission-context drift, governance/policy-path edits, external
+  visible side-effect commands, budget-exhaustion policy, and ambiguous-recovery
+  policy. Current task `#319` surfaces `safety_boundaries: needs_review` because
+  it touched `.codex/skills` and changed its permission context.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`,
+  `uv run ruff check src/mew/self_improve_audit.py tests/test_self_improve.py`,
+  `git diff --check`, and `./mew self-improve --audit 319`.
 
 Missing proof:
 
 - The adversarial verifier exists as a skill, but it has not yet been used to
   review a later self-improvement loop.
-- Hook-based safety boundaries are still not implemented.
+- Hook-based safety boundaries currently provide audit visibility only; they do
+  not yet block or require explicit escalation before approval.
 - No M5.1 loop has yet exercised both adversarial review and mechanical safety
   hooks in one readable audit bundle.
 
@@ -199,7 +208,9 @@ Done when:
 Next action:
 
 - Use `mew-adversarial-verifier` on the next small self-improvement proposal,
-  then start hook-based enforcement.
+  then turn the audit-only safety boundary report into explicit
+  block/escalation behavior for governance/policy edits and external-visible
+  side effects.
 
 ### M6: Body - Daemon & Persistent Presence
 
