@@ -12,13 +12,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `done` | M3 close gate passed: strict fresh-comparator and source/test reentry proofs choose `mew_preferred`, task-local continuity survives interruption/compression/reentry, and resident cadence now has half-hour, one-hour, and four-hour real-time Docker proofs plus week/ten-day synthetic or virtual-time reentry checks. |
 | 4. True Recovery | `done` | M4 close gate passed: crashed/interrupted runtime and work-session state can be classified, safely requeued/retried when deterministic, or surfaced as durable review without manual reconstruction; opaque shell side-effect retry remains a deliberate non-goal. |
-| 5. Self-Improving Mew | `ready_for_close` | M5 entry gates are now satisfied by M3/M4 closure, and `#307`-`#311` form a five-loop no-rescue candidate sequence with verification and recovery evidence; final close remains a human governance decision. |
+| 5. Self-Improving Mew | `done` | M5 close gate passed: M3/M4 are closed, `#307`-`#311` form a five-loop no-rescue candidate sequence with verification and recovery evidence, and the user explicitly approved M5 closure on 2026-04-20. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 17:15 JST.
+Last assessed: 2026-04-20 17:24 JST.
 
-Active milestone: Milestone 5, Self-Improving Mew (`ready_for_close`).
+Active milestone: Post-M5 / M5.1 hardening.
 
 Rationale: M3 is now closed by `docs/M3_CLOSE_GATE_2026-04-20.md`; the final
 4h Docker resident-loop proof passed strict summary with `processed=240`,
@@ -26,9 +26,11 @@ Rationale: M3 is now closed by `docs/M3_CLOSE_GATE_2026-04-20.md`; the final
 M4 is already closed by `docs/M4_CLOSE_GATE_2026-04-20.md`. The current M5
 audit sequence `#307`-`#311` reports `candidate_sequence_ready` with
 `recovery=True`, verification passed, no-rescue review recorded, and candidate
-credit for every loop. Because M5 changes roadmap/governance status, final
-`done` closure should be an explicit human governance decision rather than an
-automatic side effect of proof collection.
+credit for every loop. The user explicitly approved M5 closure on 2026-04-20
+after reviewing that mew had become a task/coding resident shell worth
+inhabiting. M5.1 should now improve the post-close quality bar without moving
+the M5 gate: first `mew-adversarial-verifier`, then hook-based safety
+boundaries, with refactor readiness work where it directly lowers risk.
 
 Previous M3 evidence rationale: Milestone 1 is closed and Milestone 2 has now passed its final
 evidence gate. Task `#293` / session `#275` completed a focused no-change
@@ -1582,33 +1584,23 @@ Next action:
 
 ## Milestone 5: Self-Improving Mew
 
-Status: `foundation`
+Status: `done`
 
-Operational gate:
+Close gate:
 
-- Entry gate is not met yet. Milestone 3 must still prove long-running
-  resident continuity against comparable fresh CLI restarts. Milestone 4's
-  recovery entry-gate requirement is now satisfied by
-  `docs/M4_CLOSE_GATE_2026-04-20.md`.
-- Entry also requires each self-improvement loop to run with a frozen
-  permission context, explicit effect budget, and readable audit trail before
-  file edits are allowed.
-- `mew-product-evaluator` must reliably choose work that improves mew as an
-  inhabitable program and reject local polish drift.
-- Done gate is at least five consecutive closed self-improvement loops:
-  evaluator -> task -> plan -> native/delegated implementation ->
-  verification -> human review.
-- The done loops must require zero human rescue edits. Human intervention may
-  approve, reject, redirect, or make product judgments, but cannot patch files
-  to save the loop.
-- At least one done loop must include an interruption or failure recovered
-  through Milestone 4 surfaces without manual reconstruction.
-- Each loop must leave a readable audit bundle with product rationale,
-  tool/effect journal, verification output, approval decisions, recovery
-  events, budget outcome, and human-intervention classification.
+- Entry gates are met: M3 is closed by `docs/M3_CLOSE_GATE_2026-04-20.md`, and
+  M4 is closed by `docs/M4_CLOSE_GATE_2026-04-20.md`.
+- The five-loop no-rescue sequence is `#307`-`#311`.
+- `./mew self-improve --audit-sequence 307 308 309 310 311` reports
+  `candidate_sequence_ready` with found, consecutive, done, closed,
+  verification, recovery, no-rescue review, and candidate credit all true.
+- The sequence includes recovery evidence: task `#310` records one rollback
+  recovery event and later passing verification.
+- `docs/M5_CLOSE_REVIEW_2026-04-20.md` records the close review. The user
+  explicitly approved closing M5 on 2026-04-20.
 - Reference-derived M5 candidates from `docs/ADOPT_FROM_REFERENCES.md`, such
   as Agent Frontmatter and Skill Manifest, remain implementation candidates
-  after the entry gate; adopting them is not proof of M5 by itself.
+  after M5; adopting them is not proof of M5 by itself.
 - Safety boundaries: no autonomous external-visible side effects; no
   autonomous edits to roadmap, evaluator, skill, permission, recovery, or
   audit-trail governance; no bypass of read/write/shell/network/destructive
@@ -1790,7 +1782,7 @@ Evidence:
 - `mew work <task-id> --tests --commands --diffs` now prints all requested focused panes in one command and prints a single start/resume hint when no session exists for the task.
 - `mew chat --quiet` now suppresses the REPL banner as well as startup brief, unread messages, activity, and controls, making scripted attach/chat checks truly quiet.
 
-Missing proof:
+Closed proof:
 
 - Milestone 3 is now closed. `docs/M3_CLOSE_GATE_2026-04-20.md` records the
   strict fresh-comparator, source/test reentry, virtual-time, aged-reentry, and
@@ -1813,10 +1805,11 @@ Missing proof:
 
 Next action:
 
-- Ask for or record explicit human governance approval before changing M5 from
-  `ready_for_close` to `done`. If approved, update
-  `docs/M5_CLOSE_REVIEW_2026-04-20.md` from `ready for human close approval`
-  to `passed` and mark M5 done in this file.
+- Start Post-M5 / M5.1 hardening. First, add `mew-adversarial-verifier` as a
+  review-quality skill for future self-improve loops. Then add hook-based
+  safety boundaries for M5 safety rules. Before broad refactors, run a short
+  refactor-readiness pass around `commands.py`, self-improve audit, work
+  sessions, and safety/policy boundaries.
 
 ## Latest Validation
 
@@ -2950,15 +2943,16 @@ Next action:
 
 ## Current Roadmap Focus
 
-Milestone 3: Persistent Advantage.
+Post-M5 / M5.1 hardening.
 
 The canonical active decision is the top-level `Active Milestone Decision`.
-Fresh implementation should continue dogfooding real coding changes through
-`mew code <task-id>` or a native self-improvement session, but the task must
-map to a Milestone 3 Done-when criterion: returning to mew after interruption,
-context compression, terminal close, or time away should be faster than
-starting a new Claude Code or Codex CLI session. Prefer evidence that improves
-or measures automatic context reconstruction, long-running resident cadence,
-project-memory recall that changes model behavior, or passive next-action
-refinement. Do not spend new long-session work on polish, side projects, or
-later-milestone architecture unless it directly closes an M3 evidence gap.
+Fresh implementation should keep dogfooding real coding changes through
+`mew code <task-id>` or native self-improvement sessions, but the next work
+should strengthen mew after M5 rather than move the M5 gate. Prioritize:
+
+- `mew-adversarial-verifier` as a review-quality skill for future
+  self-improve loops;
+- hook-based safety boundaries for M5 safety rules;
+- small refactor-readiness work that makes those two changes safer, especially
+  around `commands.py`, self-improve audit, work sessions, and safety/policy
+  boundaries.

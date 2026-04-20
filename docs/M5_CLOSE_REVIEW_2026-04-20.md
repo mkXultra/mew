@@ -1,6 +1,6 @@
 # M5 Close Review 2026-04-20
 
-Status: ready for human close approval.
+Status: passed.
 
 This document reviews Milestone 5 against the current documented gate. It does
 not add new post-hoc requirements. The separate accelerator review in
@@ -79,7 +79,7 @@ Post-M5/M5.1 likely next work:
 
 ## Close Decision
 
-Ready for explicit human governance approval.
+Passed.
 
 Completed prerequisites:
 
@@ -87,8 +87,10 @@ Completed prerequisites:
 2. `./mew proof-summary proof-artifacts/mew-proof-real-4h-20260420-1312 --json --strict` passed;
 3. `ROADMAP_STATUS.md` marks M3 done;
 4. this review records the M5 sequence as ready under the documented gate.
+5. the user explicitly approved M5 closure on 2026-04-20.
 
-Final step:
+Post-M5 direction:
 
-- With explicit human approval, update this review from `ready for human close
-  approval` to `passed` and mark M5 `done` in `ROADMAP_STATUS.md`.
+- Start M5.1 hardening without moving the M5 gate: add an adversarial verifier
+  skill, add hook-based safety boundaries, and perform only the refactor
+  readiness work needed to make those changes safe.
