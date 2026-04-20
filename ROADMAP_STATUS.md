@@ -1701,6 +1701,11 @@ Evidence:
   no-rescue-reviewed, and candidate-credited. This task is not no-rescue credit:
   the resident inspected the audit surfaces but stopped before editing, and the
   supervisor implemented the command manually.
+- Task `#318` tightened the same sequence gate to include recovery evidence.
+  Sequence entries now expose `recovery_event_count`, text output prints
+  `recovery=...`, and readiness requires `any_recovery_events=True`. The live
+  `#307`-`#311` sequence still reports `candidate_sequence_ready` because
+  task `#310` contributes one recovery event.
 - Task `#313` dogfooded the Claude/Codex inhabitability critique that short
   scoped edits still feel heavier than fresh CLI. Native self-improve start
   output now includes an explicit `inspect` control next to `resume`, so a
@@ -1788,11 +1793,10 @@ Missing proof:
   side-effect auto-retry is a deliberate non-goal rather than an M5 blocker.
 - mew has produced five consecutive reviewed self-improvement candidates
   (`#307`-`#311`) with native resident work, verification, human review, and
-  passing readable audit bundles. This sequence is still candidate evidence
-  rather than M5 closure because M3 remains open and the proof should be
-  reviewed as a set before changing milestone status.
-- No M5 proof loop has yet exercised interruption or failure recovery through
-  Milestone 4 surfaces without manual reconstruction.
+  passing readable audit bundles. The sequence audit now also confirms at
+  least one recovery event across the set. This sequence is still candidate
+  evidence rather than M5 closure because M3 remains open and the proof should
+  be reviewed as a set before changing milestone status.
 - Earlier self-improvement dogfood includes supervisor rescue edits and manual
   completion work, but the latest `#307`-`#311` sequence satisfies the narrow
   no-supervisor-file-patch candidate condition.

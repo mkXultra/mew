@@ -354,12 +354,15 @@ def _audit_sequence_entry(bundle):
     session = bundle.get("work_session") or {}
     intervention = bundle.get("human_intervention") or {}
     verification = bundle.get("verification") or {}
+    recovery_events = bundle.get("recovery_events") or []
     return {
         "task_id": task.get("id"),
         "task_status": task.get("status"),
         "work_session_id": session.get("id"),
         "work_session_status": session.get("status"),
         "verification_status": verification.get("status"),
+        "recovery_event_count": len(recovery_events),
+        "has_recovery_events": bool(recovery_events),
         "rescue_edit_status": intervention.get("rescue_edit_status"),
         "no_rescue_review_status": intervention.get("no_rescue_review_status"),
         "m5_credit": intervention.get("m5_credit"),
@@ -386,6 +389,7 @@ def build_m5_self_improve_audit_sequence(state, task_refs):
         "all_tasks_done": bool(entries) and all(entry.get("task_status") == "done" for entry in entries),
         "all_sessions_closed": bool(entries) and all(entry.get("work_session_status") == "closed" for entry in entries),
         "all_verification_passed": bool(entries) and all(entry.get("verification_status") == "passed" for entry in entries),
+        "any_recovery_events": any(entry.get("has_recovery_events") for entry in entries),
         "all_no_rescue_reviewed": bool(entries)
         and all(entry.get("no_rescue_review_status") == "no_rescue_review_recorded" for entry in entries),
         "all_candidate_credit": bool(entries)
@@ -475,6 +479,7 @@ def format_m5_self_improve_audit_sequence(sequence):
             f"done={checks.get('all_tasks_done')} "
             f"closed={checks.get('all_sessions_closed')} "
             f"verification={checks.get('all_verification_passed')} "
+            f"recovery={checks.get('any_recovery_events')} "
             f"no_rescue_review={checks.get('all_no_rescue_reviewed')} "
             f"candidate_credit={checks.get('all_candidate_credit')}"
         ),
@@ -485,6 +490,7 @@ def format_m5_self_improve_audit_sequence(sequence):
                 f"- #{entry.get('task_id')} task={entry.get('task_status')} "
                 f"session=#{entry.get('work_session_id')}[{entry.get('work_session_status')}] "
                 f"verification={entry.get('verification_status')} "
+                f"recovery_events={entry.get('recovery_event_count')} "
                 f"no_rescue_review={entry.get('no_rescue_review_status')} "
                 f"credit={entry.get('loop_credit_status')}"
             )

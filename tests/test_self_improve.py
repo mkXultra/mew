@@ -764,23 +764,26 @@ class SelfImproveTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     code = main(["self-improve", "--audit-sequence", "1", "2", "--json"])
 
-                self.assertEqual(code, 0)
+                self.assertEqual(code, 1)
                 sequence = json.loads(stdout.getvalue())
-                self.assertEqual(sequence["status"], "candidate_sequence_ready")
+                self.assertEqual(sequence["status"], "needs_review")
                 self.assertEqual(sequence["count"], 2)
                 self.assertTrue(sequence["checks"]["consecutive_task_ids"])
+                self.assertFalse(sequence["checks"]["any_recovery_events"])
                 self.assertTrue(sequence["checks"]["all_no_rescue_reviewed"])
                 self.assertTrue(sequence["checks"]["all_candidate_credit"])
+                self.assertEqual(sequence["entries"][0]["recovery_event_count"], 0)
                 self.assertEqual(sequence["entries"][0]["task_id"], 1)
                 self.assertEqual(sequence["entries"][1]["loop_credit_status"], "candidate_no_rescue_reviewed_pending_m3")
 
                 with redirect_stdout(StringIO()) as text_stdout:
                     text_code = main(["self-improve", "--audit-sequence", "1", "2"])
 
-                self.assertEqual(text_code, 0)
+                self.assertEqual(text_code, 1)
                 output = text_stdout.getvalue()
-                self.assertIn("status: candidate_sequence_ready", output)
+                self.assertIn("status: needs_review", output)
                 self.assertIn("consecutive=True", output)
+                self.assertIn("recovery=False", output)
                 self.assertIn("- #1 task=done", output)
             finally:
                 os.chdir(old_cwd)
