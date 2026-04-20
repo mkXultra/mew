@@ -552,7 +552,12 @@ Evidence:
 - M6.6-B mew-side comparator task #324 / session #310 passed as a bugfix with
   regression test: mew authored dry-run edits #2207/#2208, Codex
   reviewed/approved/applied them as #2209/#2210, focused pytest passed, and
-  `rescue_edits=0`. The Codex CLI comparator run is still pending.
+  `rescue_edits=0`.
+- The matching Codex CLI comparator ran in
+  `/tmp/mew-m66b-codex-20260420-2218` against commit `ac8b7d6`, produced a
+  comparable source/test patch, and passed the focused regression via an
+  existing pytest environment. Normal `uv run` verification hit sandbox/cache
+  dependency limits, so the comparator is recorded with an environment caveat.
 
 Missing proof:
 
@@ -564,7 +569,8 @@ Missing proof:
 - Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
   on correctness, tool churn, latency, and reviewability across representative
   coding tasks.
-- M6.6-B comparator: mew-side run passed; Codex CLI comparator is pending.
+- M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
+  caveat.
 - Robustness: the successful retry still needed reviewer steering and one
   read-root permission repair, so the native loop is not yet self-sufficient.
 
@@ -591,9 +597,8 @@ Done when:
 
 Next action:
 
-- Use the #324 M6.6-B mew-side run as the first comparator datum, then run the
-  matching Codex CLI comparator or start M6.6-A/M6.6-C while keeping the
-  side-by-side evidence complete.
+- Start M6.6-A or M6.6-C while preserving the same side-by-side comparator
+  discipline used for M6.6-B.
 
 ### M7: Senses - Inbound Signals
 

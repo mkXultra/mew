@@ -11,7 +11,7 @@ M6.6 closes only after three predeclared representative coding tasks pass:
 | Task | Shape | Status | Mew run | Codex CLI comparator | Rescue edits |
 |---|---|---|---|---|---|
 | M6.6-A | Behavior-preserving refactor | `not_started` | | | |
-| M6.6-B | Bug fix with regression test | `mew_passed_pending_codex` | #324 / session #310 | pending | 0 |
+| M6.6-B | Bug fix with regression test | `side_by_side_recorded` | #324 / session #310 | `/tmp/mew-m66b-codex-20260420-2218` | 0 |
 | M6.6-C | Small feature with paired source/test changes | `not_started` | | | |
 
 Required pass conditions for each task:
@@ -165,12 +165,53 @@ Review:
 - reviewability: dry-run diffs #2207/#2208 were reviewable and approved as
   #2209/#2210
 - resident_state_reuse: reused #323 friction as the next M6.6 comparator target
-- notes: this is the mew-side run only; Codex CLI comparator is still pending
+- notes: Codex CLI comparator was run afterward in
+  `/tmp/mew-m66b-codex-20260420-2218`
 
-Verdict: mew run passed; Codex CLI comparator pending.
+Verdict: mew run passed.
+
+### M6.6-B Codex CLI run
+
+Task: same as M6.6-B mew run, executed in a detached worktree at commit
+`ac8b7d6`.
+
+Predeclared success criteria: same as mew run.
+
+Start time: 2026-04-20 22:17 JST
+End time: 2026-04-20 22:29 JST
+
+Metrics:
+
+- first_edit_latency_seconds: about 120
+- model_turns: one Codex CLI session
+- search_calls_before_first_edit: several broad shell searches plus large file
+  reads; exact count not captured
+- read_calls_before_first_edit: included a broad
+  `sed -n '1,260p' tests/test_work_session.py` and multiple targeted windows
+- changed_files: `src/mew/work_loop.py`,
+  `tests/test_work_session.py`
+- verifier_commands:
+  `PYTHONPATH=src /Users/mk/dev/x-cli/.venv/bin/python -m pytest -q -o addopts= tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_allows_docs_only_single_writes_outside_code_batch_rule`
+- repair_cycles: 0 implementation repairs; multiple verification environment
+  retries
+- prompt_context_chars: not recorded
+- rescue_edits: 0
+- adopted_reference_patterns: Codex patch/review loop, focused regression test
+
+Review:
+
+- correctness: focused regression passed with `1 passed in 0.67s`
+- minimality: one prompt sentence and one focused new regression test
+- reviewability: patch was readable, but the test was larger than the mew-side
+  assertion-only update
+- resident_state_reuse: none; this was a fresh CLI worktree comparator
+- notes: normal `uv run pytest ...` could not complete in the Codex CLI
+  sandbox because uncached `coverage`/`hatchling` dependencies were unavailable;
+  Codex recovered by using an existing pytest environment with `PYTHONPATH=src`
+
+Verdict: Codex CLI comparator passed with environment caveat.
 
 ## Current Comparator State
 
-Bootstrap is complete. M6.6-B has a mew-side passing run and still needs the
-matching Codex CLI comparator run before it can count as side-by-side evidence.
+Bootstrap is complete. M6.6-B has side-by-side mew/Codex CLI evidence.
 M6.6-A and M6.6-C have not started.
