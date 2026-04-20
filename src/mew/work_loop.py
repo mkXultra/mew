@@ -820,7 +820,7 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
-        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
@@ -928,6 +928,7 @@ def build_work_think_prompt(context):
         "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
         "Include a compact working_memory object that restates your current hypothesis, "
         "next intended step, open questions, and latest verified state for future reentry; "
+        "If more than one concrete step remains, keep working_memory.plan_items as a short checklist of up to 3 remaining steps and prune completed items as work is completed. "
         "keep it short and do not copy raw logs. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"

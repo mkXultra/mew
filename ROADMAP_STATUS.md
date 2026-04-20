@@ -819,6 +819,17 @@ Evidence:
   `working_memory.last_verified_state` through `recent_decisions` and renders
   that field in the Recent decisions block. This is implementation evidence
   for the frozen M6.6 set, not an extra comparator slot.
+- M6.6 task #344 / session #332 then targeted the first-slice durable plan
+  state gap in `src/mew/work_loop.py` and `tests/test_work_session.py`: make
+  THINK explicitly expose `working_memory.plan_items` in the schema text and
+  instruct the model to keep up to 3 short checklist items when more than one
+  concrete step remains. The native loop did eventually land and verify the
+  paired patch with `edit_file_hunks` on both files, but only after repeated
+  explicit steers, three zero-match test searches, a temporary wait/replan, and
+  a mid-task stop request. Validation passed (`uv run python -m unittest
+  tests.test_work_session`, focused pytest, `ruff`, `py_compile`, and
+  `git diff --check`), but this should be carried as product progress rather
+  than no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
