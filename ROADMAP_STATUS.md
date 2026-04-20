@@ -597,6 +597,14 @@ Evidence:
   patch in `src/mew/work_loop.py` and `tests/test_work_session.py` tells the
   model to reuse an exact `recent_read_file_windows` entry instead of issuing
   another same-span `read_file` during edit preparation. `rescue_edits=0`.
+- M6.6 task #328 / session #315 advanced built-in verifier discovery: mew
+  added prompt guidance telling THINK to prefer `run_tests` with the broader
+  `suggested_verify_command` before finish when
+  `verification_confidence.status` is `narrow` after source edits, then
+  validated the paired change with both the focused selector and the broader
+  inferred module verifier. The mew-side run proposed a reviewable dry-run
+  batch, applied it, ran the narrow verifier, chose the broader verifier on the
+  next turn, and only then finished. `rescue_edits=0`.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -613,8 +621,9 @@ Missing proof:
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
   but broader durable checklist/path-recall behavior is not yet proven across
   normal coding tasks.
-- Coding loop: no built-in verifier discovery, repair loop, or self-review
-  phase exists at the work-session level for general coding tasks yet.
+- Coding loop: built-in verifier discovery is now partially improved, but no
+  general repair loop or self-review phase exists at the work-session level for
+  normal coding tasks yet.
 - Comparator: M6.6-A and M6.6-B have checked-in side-by-side evidence, and
   M6.6-C now has a mew-side run, but the frozen-commit parallel comparator
   batch for the final M6.6 implementation set has not been run yet.
@@ -653,6 +662,8 @@ Next action:
 - Commit the finished M6.6-C mew-side slice and continue the next mew-side
   M6.6 implementation task toward built-in verifier discovery, repair, or
   self-review.
+- After task #328, keep M6.6 on the mew-side critical path and choose the next
+  slice from repair loop or self-review rather than comparator work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

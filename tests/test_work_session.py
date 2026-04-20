@@ -12813,6 +12813,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("If investigation shows the task premise is false", prompt)
         self.assertIn("do not force a source edit", prompt)
         self.assertIn("finish with a no-change summary", prompt)
+        self.assertIn("prefer run_tests with that broader suggested verifier before finish", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn("keep it short and do not copy raw logs", prompt)
         self.assertIn("suggested_verify_command.command", prompt)
