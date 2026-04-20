@@ -12814,6 +12814,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("do not force a source edit", prompt)
         self.assertIn("finish with a no-change summary", prompt)
         self.assertIn("prefer run_tests with that broader suggested verifier before finish", prompt)
+        self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn("keep it short and do not copy raw logs", prompt)
         self.assertIn("suggested_verify_command.command", prompt)
