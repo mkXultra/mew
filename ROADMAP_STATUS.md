@@ -1701,6 +1701,16 @@ Evidence:
   no-rescue-reviewed, and candidate-credited. This task is not no-rescue credit:
   the resident inspected the audit surfaces but stopped before editing, and the
   supervisor implemented the command manually.
+- Task `#313` dogfooded the Claude/Codex inhabitability critique that short
+  scoped edits still feel heavier than fresh CLI. Native self-improve start
+  output now includes an explicit `inspect` control next to `resume`, so a
+  returning resident has a calmer state-reading entrypoint before editing.
+  The loop is not M5 done-gate credit: the resident found the right surface,
+  the paired-test guard blocked a no-op test attempt, a failed source approval
+  rolled back safely, reentry preserved the failure and next repair, but the
+  resident then repeated incomplete source diffs until the repeat-action guard
+  fired and the supervisor applied the final two-line source repair. This is
+  useful M5 recovery/friction evidence, not a no-rescue candidate.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.

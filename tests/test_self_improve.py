@@ -442,6 +442,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("active memory: mew memory --active --task-id 1", output)
                 self.assertIn("audit: mew self-improve --audit 1", output)
                 self.assertIn("chat: mew chat", output)
+                self.assertIn("inspect: mew work 1 --session --resume --allow-read .", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["status"], "ready")
                 self.assertEqual(state["tasks"][0]["plans"], [])

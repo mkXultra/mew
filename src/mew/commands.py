@@ -10112,6 +10112,7 @@ def native_self_improve_controls(task, *, include_start_hint=False, session=None
         "follow": _work_live_continue_command(follow_args, task["id"], session=session, max_steps=10, follow=True),
         "status": mew_command("work", task["id"], "--follow-status", "--json"),
         "resume": _work_resume_command(continue_args, task["id"], session=session),
+        "inspect": _work_resume_command(continue_args, task["id"], session=session),
         "cells": mew_command("work", task["id"], "--cells"),
         "active_memory": mew_command("memory", "--active", "--task-id", task["id"]),
         "audit": mew_command("self-improve", "--audit", task["id"]),
@@ -10161,6 +10162,7 @@ def print_native_self_improve_controls(task, *, include_start_hint=False, sessio
     print(f"follow: {controls['follow']}")
     print(f"status: {controls['status']}")
     print(f"resume: {controls['resume']}")
+    print(f"inspect: {controls['inspect']}")
     print(f"cells: {controls['cells']}")
     print(f"active memory: {controls['active_memory']}")
     print(f"audit: {controls['audit']}")
