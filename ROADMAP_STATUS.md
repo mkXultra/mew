@@ -1319,6 +1319,15 @@ Evidence:
   `pending_approval_count=1`, `unresolved_failure_exit_code=1`, and final
   verifier pass. The durable summary is in
   `docs/M3_SOURCE_REENTRY_DOGFOOD_2026-04-20.md`.
+- A strict fresh `codex-ultra` comparator also ran for the source/test shape in
+  non-git workspace `/tmp/mew-m3-source-fresh-strict-20260420-1100`. It passed
+  with `manual_rebrief_needed=false`, `repository_only_compliance=true`,
+  `comparison_result.choice=mew_preferred`,
+  `repository_only_steps_before_first_correct_action=3`,
+  `needed_to_read_test_before_action=true`, and
+  `mew_saved_reconstruction=true`. Durable files:
+  `docs/M3_SOURCE_FRESH_TEMPLATE_2026-04-20.json` and
+  `docs/M3_SOURCE_FRESH_STRICT_COMPARATOR_2026-04-20.json`.
 
 Missing proof:
 
@@ -1338,10 +1347,10 @@ Missing proof:
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
   prompt/template and merge the completed report. One fresh `codex-ultra` leg
   has run to parity, one richer burden leg has run to `mew_preferred`, and a
-  strict clean comparator has now run to `mew_preferred`. The comparison
-  artifacts are still README-sized, but `m3-source-reentry` now proves the
-  mew-side source/test reentry path; the missing comparison is a fresh CLI leg
-  on that larger task shape or long-running resident cadence proof.
+  strict clean comparator has now run to `mew_preferred`. A strict source/test
+  fresh comparator also chose `mew_preferred`, so the remaining comparison gap
+  is no longer only README-size; the larger remaining proof gap is long-running
+  resident cadence.
 - AgentMemorySnapshot can now save/load closed-session snapshots, but snapshot
   load is not yet part of the primary resume path and has not been dogfooded
   against a stale or drifted real session.

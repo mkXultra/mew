@@ -68,3 +68,39 @@ Boundary:
 This does not replace a real multi-hour resident cadence proof or a fresh CLI
 comparator on the same source/test shape. It closes part of the "tiny README
 task" gap by proving the mew-side source/test reentry path.
+
+Strict Fresh Comparator:
+
+The source/test shape was also compared against a strict fresh restart in a
+non-git `/tmp` workspace:
+
+```text
+/tmp/mew-m3-source-fresh-strict-20260420-1100
+```
+
+Durable comparator inputs and output:
+
+- template: `docs/M3_SOURCE_FRESH_TEMPLATE_2026-04-20.json`
+- report: `docs/M3_SOURCE_FRESH_STRICT_COMPARATOR_2026-04-20.json`
+
+Result:
+
+- `status=passed`
+- `manual_rebrief_needed=false`
+- `repository_only_compliance=true`
+- `verification_exit_code=0`
+- `comparison_result.choice=mew_preferred`
+- `repository_only_steps_before_first_correct_action=3`
+- `needed_to_read_test_before_action=true`
+- `needed_to_run_tests_before_action=false`
+- `mew_saved_reconstruction=true`
+- `mew_saved_test_rerun=false`
+- `mew_prevented_wrong_first_action=false`
+
+Interpretation:
+
+The fresh CLI correctly recovered the source/test mismatch after reading the
+test and source. mew is still preferred for this reentry shape because it
+already retained the pending source diff, the prior failed unittest result, and
+the queued approve-then-verify next action. The advantage here is
+reconstruction efficiency, not preventing a wrong edit.

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "context_mode": "true_restart",
+  "fresh_cli_tool": "Codex CLI",
+  "fresh_model": "codex-ultra",
+  "manual_rebrief_needed": false,
+  "repository_only_compliance": true,
+  "verification_exit_code": 0,
+  "comparison_result": {
+    "choice": "mew_preferred",
+    "allowed_values": [
+      "mew_preferred",
+      "fresh_cli_preferred",
+      "parity",
+      "inconclusive",
+      "blocked"
+    ],
+    "reason": "The fresh attempt recovered the source correctly from current-folder files alone and passed the verifier. Mew is still preferred for this reentry case because its evidence already retained the pending source diff, the prior failing unittest result, and the queued approve-then-verify next action, while the fresh attempt had to reconstruct the source-test mismatch by reading the files."
+  },
+  "reconstruction_burden": {
+    "repository_only_steps_before_first_correct_action": 3,
+    "needed_to_read_test_before_action": true,
+    "needed_to_run_tests_before_action": false,
+    "missing_context_that_mew_resume_had": [
+      "pending dry-run source edit diff",
+      "already-observed unittest failure",
+      "queued follow-up to approve then verify"
+    ],
+    "mew_resume_would_have_changed_first_action": true,
+    "notes": "Fresh reconstruction found mew_status.py returning \"pending\" while test_mew_status.py required \"complete\". The risky surface was the status string contract; the next action was to change status() to return \"complete\" and run the verifier from VERIFY_COMMAND.txt."
+  },
+  "persistent_advantage_signal": {
+    "mew_saved_reconstruction": true,
+    "mew_saved_test_rerun": false,
+    "mew_prevented_wrong_first_action": false,
+    "reason": "Mew preserved enough working memory to skip rediscovering the mismatch and proceed directly with the known edit. In this simple case the fresh CLI still chose the same source edit after reading the test, so the advantage was reconstruction efficiency rather than preventing an incorrect edit."
+  },
+  "mew_evidence": {
+    "scenario": "m3-source-reentry",
+    "continuity_status": "strong",
+    "continuity_score": "9/9",
+    "pending_approval_count": 1,
+    "unresolved_failure_tool": "run_tests",
+    "unresolved_failure_exit_code": 1,
+    "source_file": "mew_status.py",
+    "test_file": "test_mew_status.py",
+    "working_memory_next_step": "Approve the mew_status.py dry-run edit with deferred verification, then run unittest.",
+    "pending_diff_summary": "mew_status.py changes return \"pending\" to return \"complete\".",
+    "repo_only_missing_context": [
+      "pending dry-run source edit diff",
+      "already-observed unittest failure",
+      "queued follow-up to approve then verify"
+    ]
+  }
+}

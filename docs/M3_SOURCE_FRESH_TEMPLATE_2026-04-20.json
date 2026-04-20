@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "status": "unknown",
+  "context_mode": "true_restart",
+  "fresh_cli_tool": "",
+  "fresh_model": "",
+  "manual_rebrief_needed": null,
+  "repository_only_compliance": null,
+  "verification_exit_code": null,
+  "comparison_result": {
+    "choice": "unknown",
+    "allowed_values": [
+      "mew_preferred",
+      "fresh_cli_preferred",
+      "parity",
+      "inconclusive",
+      "blocked"
+    ],
+    "reason": ""
+  },
+  "reconstruction_burden": {
+    "repository_only_steps_before_first_correct_action": null,
+    "needed_to_read_test_before_action": null,
+    "needed_to_run_tests_before_action": null,
+    "missing_context_that_mew_resume_had": [],
+    "mew_resume_would_have_changed_first_action": null,
+    "notes": ""
+  },
+  "persistent_advantage_signal": {
+    "mew_saved_reconstruction": null,
+    "mew_saved_test_rerun": null,
+    "mew_prevented_wrong_first_action": null,
+    "reason": ""
+  },
+  "mew_evidence": {
+    "scenario": "m3-source-reentry",
+    "continuity_status": "strong",
+    "continuity_score": "9/9",
+    "pending_approval_count": 1,
+    "unresolved_failure_tool": "run_tests",
+    "unresolved_failure_exit_code": 1,
+    "source_file": "mew_status.py",
+    "test_file": "test_mew_status.py",
+    "working_memory_next_step": "Approve the mew_status.py dry-run edit with deferred verification, then run unittest.",
+    "pending_diff_summary": "mew_status.py changes return \"pending\" to return \"complete\".",
+    "repo_only_missing_context": [
+      "pending dry-run source edit diff",
+      "already-observed unittest failure",
+      "queued follow-up to approve then verify"
+    ]
+  }
+}
