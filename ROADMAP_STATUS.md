@@ -1443,6 +1443,10 @@ Evidence:
   explicit `--allow-read` to cover the interrupted tool's path/cwd, marks the
   old tool call superseded on success, and falls back to the visible recovery
   question when read gates are missing.
+- Safe read/git auto-recovery can batch multiple consecutive safe interrupted
+  tools without crossing a higher-priority side-effect review item; CLI resume
+  reports `retry_tool_batch` and passive runtime recovery reports
+  `auto_retry_tool_batch`.
 - `dogfood --scenario passive-auto-recovery-read` proves the safe-read path end
   to end with an interrupted `read_file`, a passive auto-retry, and a following
   passive native advance.
@@ -1520,7 +1524,9 @@ Missing proof:
   structured recovery decisions and follow-ups; only the pre-commit rerun class
   is consumed automatically by requeueing its event, while commit-phase runtime
   effects still remain explicit review.
-- Safe work-session auto-recovery is still opt-in and limited to one interrupted read/git tool per resume.
+- Safe work-session auto-recovery is still opt-in and limited to selected
+  safe read/git tools; write/apply/shell recovery still stays behind explicit
+  gates or review unless a deterministic validator exists.
 
 Next action:
 
