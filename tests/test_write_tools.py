@@ -120,7 +120,7 @@ class WriteToolsTests(unittest.TestCase):
             self.assertFalse(result["written"])
 
             summary = summarize_write_result(result)
-            self.assertIn("no_op: old and new text are identical", summary)
+            self.assertIn("no_op: old and new text are identical; file content is unchanged", summary)
             self.assertIn("re-read the target window", summary)
 
     def test_snapshot_restore_existing_file(self):

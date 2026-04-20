@@ -377,7 +377,10 @@ def summarize_write_result(result):
     if result.get("matched") is not None:
         lines.append(f"matched: {result.get('matched')} replaced: {result.get('replaced')}")
     if result.get("no_op"):
-        lines.append(f"no_op: {result.get('no_op_reason') or 'replacement produced no file changes'}")
+        no_op_reason = result.get('no_op_reason') or 'replacement produced no file changes'
+        if no_op_reason == 'old and new text are identical':
+            no_op_reason = 'old and new text are identical; file content is unchanged'
+        lines.append(f"no_op: {no_op_reason}")
         lines.append("next: re-read the target window and retry with an edit that changes file content")
     if result.get("diff"):
         lines.extend(["diff:", result["diff"]])
