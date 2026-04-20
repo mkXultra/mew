@@ -1,4 +1,6 @@
 from copy import deepcopy
+from urllib.request import urlopen
+from xml.etree import ElementTree
 
 from .state import add_event, next_id
 from .timeutil import now_iso
@@ -178,6 +180,96 @@ def record_signal_observation(
     del journal[:-MAX_SIGNAL_JOURNAL]
     source["updated_at"] = current_time
     return {"status": "recorded", "source": source, "signal": item}
+
+
+def _feed_local_name(tag):
+    return (tag or "").rsplit("}", 1)[-1]
+
+
+def _feed_child(element, name):
+    if element is None:
+        return None
+    for child in element:
+        if _feed_local_name(child.tag) == name:
+            return child
+    return None
+
+
+def _feed_text(element, name):
+    child = _feed_child(element, name)
+    if child is None:
+        return ""
+    return (child.text or "").strip()
+
+
+def _feed_link(element):
+    link = _feed_child(element, "link")
+    if link is None:
+        return ""
+    return (link.attrib.get("href") or link.text or "").strip()
+
+
+def parse_signal_feed(xml_text):
+    root = ElementTree.fromstring(xml_text or "")
+    root_name = _feed_local_name(root.tag)
+    if root_name == "rss":
+        channel = _feed_child(root, "channel")
+        item = _feed_child(channel, "item")
+        link = _feed_text(item, "link") if item is not None else ""
+    elif root_name == "feed":
+        item = _feed_child(root, "entry")
+        link = _feed_link(item) if item is not None else ""
+    else:
+        raise ValueError(f"unsupported feed root: {root_name}")
+    if item is None:
+        return None
+    title = _feed_text(item, "title")
+    summary = title or link
+    if not summary:
+        return None
+    return {
+        "kind": "rss_item",
+        "summary": summary,
+        "payload": {
+            "title": title,
+            "url": link,
+        },
+    }
+
+
+def fetch_signal_source(state, source_name, *, opener=None, current_time=None):
+    source = find_signal_source(state, source_name)
+    if source is None:
+        return {"status": "blocked", "reason": "unknown_source", "source": None}
+    if not source.get("enabled"):
+        return {"status": "blocked", "reason": "source_disabled", "source": source}
+    if (source.get("kind") or "").strip() != "rss":
+        return {"status": "blocked", "reason": "unsupported_source_kind", "source": source}
+    url = ((source.get("config") or {}).get("url") or "").strip()
+    if not url:
+        return {"status": "blocked", "reason": "missing_url", "source": source}
+
+    opener = opener or urlopen
+    with opener(url, timeout=10) as response:
+        feed_text = response.read().decode("utf-8", errors="replace")
+    try:
+        item = parse_signal_feed(feed_text)
+    except (ElementTree.ParseError, ValueError):
+        return {"status": "blocked", "reason": "invalid_feed", "source": source}
+    if item is None:
+        return {"status": "blocked", "reason": "no_items", "source": source}
+
+    payload = deepcopy(item.get("payload") or {})
+    payload.setdefault("feed_url", url)
+    return record_signal_observation(
+        state,
+        source_name,
+        kind=item.get("kind") or "rss_item",
+        summary=item.get("summary") or "",
+        reason_for_use=source.get("reason") or f"fetched from {url}",
+        payload=payload,
+        current_time=current_time,
+    )
 
 
 def format_signal_sources(sources):
