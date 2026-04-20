@@ -249,6 +249,7 @@ from .work_session import (
     start_work_model_turn,
     work_tool_result_error,
     start_work_tool_call,
+    broad_read_after_search_miss_guard,
     suggested_verify_command_for_call_path,
     update_work_model_turn_plan,
     verification_command_covers_suggestion,
@@ -2587,7 +2588,7 @@ def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_p
     return execute_work_tool(tool, parameters, allowed_read_roots)
 
 
-def compact_repeat_guard_action(action):
+def compact_work_tool_guard_action(action):
     return {
         key: action.get(key)
         for key in (
@@ -2615,7 +2616,7 @@ def work_session_guard_command(session, *parts):
     return mew_command(*command_parts)
 
 
-def repeat_guard_session_actions(session):
+def work_tool_guard_session_actions(session):
     return [
         {
             "kind": "review_work_session",
@@ -2634,7 +2635,7 @@ def repeat_guard_session_actions(session):
     ]
 
 
-def repeat_guard_desk_actions(state, session, limit=3):
+def work_tool_guard_desk_actions(state, session, limit=3):
     try:
         actions = build_desk_view_model(state).get("actions") or []
     except (TypeError, ValueError):
@@ -2650,19 +2651,19 @@ def repeat_guard_desk_actions(state, session, limit=3):
             or str(action.get("task_id") or "") == current_task_id
         ):
             continue
-        suggestions.append(compact_repeat_guard_action(action))
+        suggestions.append(compact_work_tool_guard_action(action))
         if len(suggestions) >= limit:
             break
     return suggestions
 
 
-def enrich_repeat_guard_with_actions(state, session, guard):
+def enrich_work_tool_guard_with_actions(state, session, guard):
     guard = dict(guard or {})
     actions = [
-        compact_repeat_guard_action(action)
-        for action in repeat_guard_session_actions(session)
+        compact_work_tool_guard_action(action)
+        for action in work_tool_guard_session_actions(session)
     ]
-    actions.extend(repeat_guard_desk_actions(state, session))
+    actions.extend(work_tool_guard_desk_actions(state, session))
     if actions:
         guard["suggested_actions"] = actions
         guard["suggested_next"] = (
@@ -2672,20 +2673,44 @@ def enrich_repeat_guard_with_actions(state, session, guard):
     return guard
 
 
-def finish_repeated_work_tool_guard(state, session, tool, parameters, guard):
-    guard = enrich_repeat_guard_with_actions(state, session, guard)
+def finish_guarded_work_tool_call(state, session, tool, parameters, guard, *, guard_field, default_error):
+    guard = enrich_work_tool_guard_with_actions(state, session, guard)
     tool_call = start_work_tool_call(state, session, tool, parameters)
-    tool_call["repeat_guard"] = guard
+    tool_call[guard_field] = guard
     tool_call = finish_work_tool_call(
         state,
         session.get("id"),
         tool_call.get("id"),
-        error=guard.get("message") or "repeat-action guard blocked tool call",
+        error=guard.get("message") or default_error,
     )
     if tool_call:
-        tool_call["repeat_guard"] = guard
+        tool_call[guard_field] = guard
         tool_call["summary"] = guard.get("message") or tool_call.get("summary") or ""
     return tool_call
+
+
+def finish_repeated_work_tool_guard(state, session, tool, parameters, guard):
+    return finish_guarded_work_tool_call(
+        state,
+        session,
+        tool,
+        parameters,
+        guard,
+        guard_field="repeat_guard",
+        default_error="repeat-action guard blocked tool call",
+    )
+
+
+def finish_broad_read_after_search_miss_guard(state, session, tool, parameters, guard):
+    return finish_guarded_work_tool_call(
+        state,
+        session,
+        tool,
+        parameters,
+        guard,
+        guard_field="broad_read_guard",
+        default_error="broad-read-after-search-miss guard blocked tool call",
+    )
 
 
 BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
@@ -2850,18 +2875,36 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
-            repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
-            if repeat_guard:
-                tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+            task = work_session_task(state, session)
+            broad_read_guard = broad_read_after_search_miss_guard(session, action_type, parameters, task=task)
+            repeat_guard = {}
+            if broad_read_guard:
+                tool_call = finish_broad_read_after_search_miss_guard(
+                    state,
+                    session,
+                    action_type,
+                    parameters,
+                    broad_read_guard,
+                )
             else:
-                tool_call = start_work_tool_call(state, session, action_type, parameters)
+                repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
+                if repeat_guard:
+                    tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+                else:
+                    tool_call = start_work_tool_call(state, session, action_type, parameters)
             tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
-        if repeat_guard:
-            error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+        guard_error = ""
+        if broad_read_guard:
+            guard_error = broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call"
+        elif repeat_guard:
+            guard_error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+        if broad_read_guard or repeat_guard:
+            error = guard_error
             tool_calls.append(tool_call)
             if progress:
-                progress(f"step #{index}: batch tool #{tool_call_id} {action_type} repeat-guard")
+                label = "broad-read-guard" if broad_read_guard else "repeat-guard"
+                progress(f"step #{index}: batch tool #{tool_call_id} {action_type} {label}")
             break
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
@@ -4475,25 +4518,49 @@ def cmd_work_ai(args):
             )
             if coerced_test_dry_run:
                 turn["coerced_dry_run_reason"] = "paired_test_steer"
-            repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
-            if repeat_guard:
-                tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+            broad_read_guard = broad_read_after_search_miss_guard(session, action_type, parameters, task=task)
+            repeat_guard = {}
+            if broad_read_guard:
+                tool_call = finish_broad_read_after_search_miss_guard(
+                    state,
+                    session,
+                    action_type,
+                    parameters,
+                    broad_read_guard,
+                )
                 turn["tool_call_id"] = tool_call.get("id") if tool_call else None
                 turn = finish_work_model_turn(
                     state,
                     session_id,
                     planning_turn_id,
                     tool_call_id=turn["tool_call_id"],
-                    error=repeat_guard.get("message") or "repeat-action guard blocked tool call",
+                    error=broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call",
                 )
             else:
-                tool_call = start_work_tool_call(state, session, action_type, parameters)
-                turn["tool_call_id"] = tool_call.get("id")
+                repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
+                if repeat_guard:
+                    tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
+                    turn["tool_call_id"] = tool_call.get("id") if tool_call else None
+                    turn = finish_work_model_turn(
+                        state,
+                        session_id,
+                        planning_turn_id,
+                        tool_call_id=turn["tool_call_id"],
+                        error=repeat_guard.get("message") or "repeat-action guard blocked tool call",
+                    )
+                else:
+                    tool_call = start_work_tool_call(state, session, action_type, parameters)
+                    turn["tool_call_id"] = tool_call.get("id")
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
-        if repeat_guard:
-            error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+        guard_error = ""
+        if broad_read_guard:
+            guard_error = broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call"
+        elif repeat_guard:
+            guard_error = repeat_guard.get("message") or "repeat-action guard blocked tool call"
+        if broad_read_guard or repeat_guard:
+            error = guard_error
             step = {
                 "index": index,
                 "status": "failed",
@@ -4523,7 +4590,8 @@ def cmd_work_ai(args):
                     live_cells_seen,
                 )
             if progress:
-                progress(f"step #{index}: tool #{tool_call_id} {action_type} repeat-guard")
+                label = "broad-read-guard" if broad_read_guard else "repeat-guard"
+                progress(f"step #{index}: tool #{tool_call_id} {action_type} {label}")
             break
         refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)

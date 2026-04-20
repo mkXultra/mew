@@ -689,6 +689,79 @@ def work_tool_repeat_guard(
     }
 
 
+def _read_file_is_broad(parameters):
+    parameters = dict(parameters or {})
+    if _optional_clamped_int_work_parameter(parameters, "line_start", 1, 1_000_000) is not None:
+        return False
+    offset = _optional_clamped_int_work_parameter(parameters, "offset", 0, 1_000_000)
+    return offset in (None, 0)
+
+
+def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
+    if not isinstance(session, dict) or tool != "read_file":
+        return {}
+    parameters = dict(parameters or {})
+    if not _read_file_is_broad(parameters):
+        return {}
+    path = _working_memory_target_path_text(parameters.get("path"))
+    if not path:
+        return {}
+    calls = list(session.get("tool_calls") or [])
+    memory = build_working_memory(session.get("model_turns") or [], calls, task=task)
+    target_paths = _coerce_working_memory_target_paths(memory.get("target_paths") or [])
+    if path not in target_paths:
+        return {}
+
+    latest_search = None
+    for call in reversed(calls):
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        if _working_memory_target_path_text(work_call_path(call)) != path:
+            continue
+        latest_search = call
+        break
+    if not latest_search:
+        return {}
+    search_result = latest_search.get("result") or {}
+    if search_result.get("matches"):
+        return {}
+
+    latest_window = None
+    for call in reversed(calls):
+        if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
+            continue
+        if _working_memory_target_path_text(work_call_path(call)) != path:
+            continue
+        latest_window = _read_file_call_line_window(call)
+        if latest_window is not None:
+            break
+
+    query = search_result.get("query") or (latest_search.get("parameters") or {}).get("query") or ""
+    if latest_window is not None:
+        line_start, line_end = latest_window
+        suggested_next = f"read_file path={path} line_start={line_start} line_count={line_end - line_start + 1}"
+    else:
+        suggested_next = (
+            f"search_text path={path} query={query}" if query else f"search_text path={path} query=<symbol-or-literal>"
+        )
+    message = (
+        f"broad-read guard blocked read_file on {path}: the latest search_text for this target path returned zero matches, "
+        "so a top-of-file read would discard the known search failure and widen context without a new anchor"
+    )
+    return {
+        "reason": "broad_read_after_search_miss",
+        "tool": tool,
+        "path": path,
+        "search_tool_call_id": latest_search.get("id"),
+        "search_query": query,
+        "message": message,
+        "suggested_next": suggested_next,
+        "guard_reason": (
+            "reuse the last exact window or reformulate the search instead of restarting from the top of the file"
+        ),
+    }
+
+
 def create_work_session(state, task, current_time=None, inherit_defaults=True):
     current_time = current_time or now_iso()
     existing = work_session_for_task(state, task.get("id"))

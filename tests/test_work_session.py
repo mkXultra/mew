@@ -31,6 +31,7 @@ from mew.work_session import (
     DEFAULT_RUNNING_OUTPUT_MAX_CHARS,
     active_memory_terms,
     append_work_tool_running_output,
+    broad_read_after_search_miss_guard,
     build_work_continuity_score,
     build_work_session_effort,
     build_work_session_resume,
@@ -3302,6 +3303,65 @@ class WorkSessionTests(unittest.TestCase):
             "suggested_next: read_file path=src/mew/work_session.py line_start=3200 line_count=26",
             text,
         )
+
+    def test_broad_read_after_search_miss_guard_reuses_latest_same_path_window(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Guard broad reads",
+            "updated_at": "now",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "Repair continuity text.",
+                            "next_step": "Search the continuity surface before editing.",
+                            "target_paths": ["src/mew/work_session.py"],
+                        }
+                    },
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 3200, "line_count": 26},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 3200,
+                        "line_end": 3225,
+                        "text": "window one",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "query": "working_memory_survived"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "query": "working_memory_survived",
+                        "matches": [],
+                    },
+                },
+            ],
+        }
+
+        guard = broad_read_after_search_miss_guard(session, "read_file", {"path": "src/mew/work_session.py"})
+
+        self.assertEqual(guard["reason"], "broad_read_after_search_miss")
+        self.assertEqual(guard["path"], "src/mew/work_session.py")
+        self.assertEqual(guard["search_tool_call_id"], 2)
+        self.assertEqual(guard["search_query"], "working_memory_survived")
+        self.assertEqual(
+            guard["suggested_next"],
+            "read_file path=src/mew/work_session.py line_start=3200 line_count=26",
+        )
+        self.assertIn("latest search_text for this target path returned zero matches", guard["message"])
 
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
@@ -10892,6 +10952,104 @@ class WorkSessionTests(unittest.TestCase):
                     snapshot["last_step"]["tool_call"]["repeat_guard"]["suggested_actions"][1]["kind"],
                     "steer_work_session",
                 )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_blocks_broad_read_after_same_path_search_miss_before_execution(self):
+        import mew.commands as commands_module
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("src/mew/work_session.py").write_text("VALUE = 'resident body'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "search continuity symbol",
+                        "working_memory": {
+                            "hypothesis": "Need the continuity helper span.",
+                            "next_step": "Search the known target path before reading.",
+                            "target_paths": ["src/mew/work_session.py"],
+                        },
+                        "action": {
+                            "type": "search_text",
+                            "path": "src/mew/work_session.py",
+                            "query": "missing continuity symbol",
+                        },
+                    },
+                    {
+                        "summary": "read from the top anyway",
+                        "working_memory": {
+                            "hypothesis": "Need the continuity helper span.",
+                            "next_step": "Read the full file from the top.",
+                            "target_paths": ["src/mew/work_session.py"],
+                        },
+                        "action": {
+                            "type": "read_file",
+                            "path": "src/mew/work_session.py",
+                        },
+                    },
+                ]
+
+                original_execute = commands_module.execute_work_tool_with_output
+
+                def guarded_execute(tool, parameters, allowed_read_roots, output_progress=None):
+                    if tool == "read_file":
+                        raise AssertionError("broad read should have been blocked before execution")
+                    return original_execute(tool, parameters, allowed_read_roots, output_progress)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=guarded_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--live",
+                                            "--quiet",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--max-steps",
+                                            "2",
+                                        ]
+                                    ),
+                                    1,
+                                )
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(len(session["tool_calls"]), 2)
+                blocked_call = session["tool_calls"][-1]
+                self.assertEqual(blocked_call["tool"], "read_file")
+                self.assertEqual(blocked_call["status"], "failed")
+                self.assertIn("broad-read guard blocked read_file", blocked_call["error"])
+                self.assertEqual(blocked_call["broad_read_guard"]["reason"], "broad_read_after_search_miss")
+                self.assertEqual(blocked_call["broad_read_guard"]["search_tool_call_id"], 1)
+                self.assertEqual(blocked_call["broad_read_guard"]["path"], "src/mew/work_session.py")
+                from mew.work_loop import work_tool_call_for_model
+
+                self.assertEqual(
+                    work_tool_call_for_model(blocked_call)["broad_read_guard"]["reason"],
+                    "broad_read_after_search_miss",
+                )
+                snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
+                self.assertEqual(snapshot["stop_reason"], "tool_failed")
+                self.assertEqual(
+                    snapshot["last_step"]["tool_call"]["broad_read_guard"]["reason"],
+                    "broad_read_after_search_miss",
+                )
+                self.assertIn("stop=tool_failed", stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

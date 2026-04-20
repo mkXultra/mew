@@ -302,6 +302,12 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
             text_limit=list_item_text_limit,
             item_limit=list_item_limit,
         )
+    if call.get("broad_read_guard"):
+        item["broad_read_guard"] = _compact_context_value(
+            call.get("broad_read_guard"),
+            text_limit=list_item_text_limit,
+            item_limit=list_item_limit,
+        )
     return item
 
 

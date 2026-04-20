@@ -907,6 +907,23 @@ Evidence:
   --check` passed. A follow-up rerun task (#350) showed the new signal did
   change behavior, but that attempted rerun overlapped with the already-landed
   continuity diff in the working tree, so it does not count as fresh evidence.
+- M6.6 task #351 / session #339 then retried a fresh broader
+  `src/mew/work_session.py` continuity slice, but the native loop's first
+  search used an invalid `pattern`, got zero matches, and immediately fell back
+  to `read_file path=src/mew/work_session.py offset=0`, which disqualified the
+  run before any edit attempt. The task was stopped and recorded as blocker
+  evidence instead of spending more turns on a now-invalid proof attempt.
+- A direct supervisor patch then added a code-level
+  `broad_read_after_search_miss_guard` in `src/mew/work_session.py`, wired it
+  into both work execution loops in `src/mew/commands.py`, and exposed the
+  guard in model-visible tool-call context via `src/mew/work_loop.py`. The
+  guard blocks `read_file` when the path is already a known target path, the
+  latest same-path `search_text` returned zero matches, and the model tries to
+  restart from the top of the file instead of reusing a targeted window or
+  reformulating the search. Focused unit/integration pytest, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is blocker reduction and
+  product progress; it still needs a fresh mew-side rerun on a broader
+  `work_session.py` slice to count as no-rescue evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -991,7 +1008,13 @@ Missing proof:
   reach paired edit/verify, but adjacent source rereads before first edit and a
   same-surface audit follow-up still block no-rescue credit. The new
   `adjacent_read_observations` signal should reduce that reread creep, but it
-  still needs a fresh unsatisfied rerun task to prove it.
+  still needs a fresh unsatisfied rerun task to prove it. #351 then exposed one
+  more broader-work_session failure mode: after a same-path search miss on a
+  known target path, the native loop could discard that failure and restart
+  with a top-of-file `read_file offset=0`. The new
+  `broad_read_after_search_miss_guard` should reduce that fallback, but it
+  still needs a fresh broader mew-side rerun to prove the native loop now
+  reforms the search or reuses a targeted window instead of broad-reading.
 
 Done when:
 
