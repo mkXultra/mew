@@ -1877,6 +1877,66 @@ def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
     return warnings[-limit:]
 
 
+def _search_result_first_match_line(result):
+    matches = (result or {}).get("matches") or []
+    if not matches:
+        return None
+    first = matches[0]
+    if isinstance(first, dict):
+        for key in ("line", "line_start"):
+            value = first.get(key)
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def build_redundant_search_observations(calls, *, limit=3, read_line_count=20):
+    prior_success = {}
+    repeated = []
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        matches = result.get("matches")
+        if not matches:
+            continue
+        path = result.get("path") or (call.get("parameters") or {}).get("path") or ""
+        query = result.get("query") or (call.get("parameters") or {}).get("query") or ""
+        pattern = result.get("pattern") or (call.get("parameters") or {}).get("pattern") or ""
+        first_match_line = _search_result_first_match_line(result)
+        key = (path, query, pattern)
+        prior = prior_success.get(key)
+        if prior:
+            repeated.append(
+                {
+                    "tool": "search_text",
+                    "path": path,
+                    "query": query,
+                    "pattern": pattern,
+                    "count": prior.get("count", 1) + 1,
+                    "prior_tool_call_id": prior.get("tool_call_id"),
+                    "last_tool_call_id": call.get("id"),
+                    "prior_first_match_line": prior.get("first_match_line"),
+                    "latest_first_match_line": first_match_line,
+                    "reason": "same successful search_text was repeated instead of converting the anchored result into a narrow read_file",
+                    "suggested_next": (
+                        f"read_file path={path} line_start={prior.get('first_match_line') or first_match_line} "
+                        f"line_count={read_line_count}"
+                    ).strip(),
+                }
+            )
+        prior_success[key] = {
+            "tool_call_id": call.get("id"),
+            "first_match_line": first_match_line,
+            "count": (prior or {}).get("count", 0) + 1,
+        }
+    repeated.sort(key=lambda item: item.get("last_tool_call_id") or 0)
+    return repeated[-limit:]
+
+
 def latest_work_verify_command(calls, task=None):
     command = (task or {}).get("command") or ""
     for call in calls:
@@ -4010,6 +4070,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
+        "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -4290,6 +4351,22 @@ def format_work_session_resume(resume):
             )
             if queries:
                 lines.append(f"  queries: {queries}")
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
+    redundant_search = resume.get("redundant_search_observations") or []
+    if redundant_search:
+        lines.extend(["", "Redundant search observations"])
+        for item in redundant_search:
+            target = f" {item.get('path')}" if item.get("path") else ""
+            pattern = f" pattern={item.get('pattern')}" if item.get("pattern") else ""
+            query = f" query={item.get('query')}" if item.get("query") else ""
+            line = item.get("prior_first_match_line") or item.get("latest_first_match_line")
+            line_text = f" first_match_line={line}" if line else ""
+            lines.append(
+                f"- {item.get('tool')}{target}{pattern}{query} repeated with matches "
+                f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}{line_text}"
+            )
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
 

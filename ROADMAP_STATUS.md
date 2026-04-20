@@ -859,6 +859,34 @@ Evidence:
   narrow `read_file` instead. Focused pytest, `ruff`, `py_compile`, and
   `git diff --check` passed. This is blocker evidence plus product progress,
   not mew-side evidence.
+- M6.6 task #347 / session #335 then reran the prompt surface immediately
+  after that patch with a fresh `target_paths` stale-path pruning slice. The
+  native loop improved again: it found the correct `build_work_think_prompt`
+  function anchor in `src/mew/work_loop.py`, found the correct
+  `build_work_think_prompt` test block in `tests/test_work_session.py`, and
+  refreshed the exact test window without supervisor hints. But before first
+  edit it still repeated the same anchored `search_text
+  src/mew/work_loop.py query=build_work_think_prompt`, so the no-steer proof is
+  still not complete. A direct supervisor patch then added structured
+  `redundant_search_observations` to `src/mew/work_session.py` resume data,
+  rendered those observations in the formatted resume, and taught
+  `build_work_think_prompt()` to use the signal's concrete `read_file`
+  replacement instead of rerunning the same successful search. Focused pytest,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker evidence
+  plus product progress, not mew-side evidence.
+- M6.6 task #348 / session #336 then turned that direct patch into fresh
+  no-steer mew-side evidence on the same prompt surface. The native loop did
+  not rerun the same anchored search again: it used the anchored result to move
+  into narrow `read_file` observations on `src/mew/work_loop.py` and
+  `tests/test_work_session.py`, proposed a paired dry-run edit batch, auto-
+  applied it, passed `uv run python -m unittest tests.test_work_session` with
+  `408 tests`, and finished cleanly with same-surface audit covered.
+  `rescue_edits=0`. The landed feature now tells THINK to drop stale
+  `working_memory.target_paths` entries once they are no longer needed, and the
+  new `redundant_search_observations` signal proved strong enough to convert
+  repeated anchored search into the intended read-before-edit behavior. This is
+  implementation evidence for the frozen M6.6 set, not an extra comparator
+  slot.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -932,8 +960,13 @@ Missing proof:
   still not proven without supervisor hints. #346 improved that diagnosis:
   exact prompt/test surface discovery now works without steer, but search
   results are still not always converted into the anchored `read_file` step on
-  the first try. The new search-to-read guidance patch now needs a fresh
-  no-steer rerun.
+  the first try. #347 confirmed the remaining gap more precisely: even after a
+  prompt-level warning, the native loop can still repeat the same successful
+  anchor search before first edit. #348 then converted the structured
+  `redundant_search_observations` signal into a fresh no-steer pass on the
+  prompt surface, so that exact search-to-read conversion blocker is now
+  reduced. The remaining missing proof is broader durable plan/path recall and
+  multi-file normal-case autonomy, not this prompt-surface search loop.
 
 Done when:
 
@@ -979,15 +1012,13 @@ Next action:
   do not count it as no-rescue evidence because the run needed an exact-window
   interrupt steer.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
-  native no-steer proof task on the `src/mew/work_loop.py` +
-  `tests/test_work_session.py` prompt surface that specifically exercises the
-  new search-to-read conversion rule after #346. Mew should choose the correct
-  prompt assertion block, avoid rerunning the same `search_text`, convert the
-  latest anchored search result into a narrow `read_file`, propose a paired
-  dry-run edit, verify with the focused unittest command, and finish cleanly.
-  If it still repeats same-path search instead of reading, patch exact-surface
-  conversion directly before returning to broader multi-file slices. Do not
-  return to comparator work until the mew-side implementation set is frozen.
+  native no-steer proof task on a broader `src/mew/work_session.py` +
+  `tests/test_work_session.py` slice that exercises durable plan/path recall in
+  normal coding work rather than another prompt-only edit. Prefer a slice that
+  needs exact remembered src/test windows plus one concrete plan_items /
+  target_paths / open_questions carry-forward decision before the edit is
+  proposed. Do not return to comparator work until the mew-side implementation
+  set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

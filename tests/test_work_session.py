@@ -3166,6 +3166,63 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(resume["low_yield_observations"], [])
 
+    def test_work_session_redundant_search_observations_capture_repeat_with_matches(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search repeat",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": [{"line": 897}],
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": [{"line": 897}],
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        warning = resume["redundant_search_observations"][0]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(warning["path"], "src/mew/work_loop.py")
+        self.assertEqual(warning["query"], "build_work_think_prompt")
+        self.assertEqual(warning["count"], 2)
+        self.assertEqual(warning["prior_first_match_line"], 897)
+        self.assertEqual(warning["last_tool_call_id"], 2)
+        self.assertEqual(
+            warning["suggested_next"],
+            "read_file path=src/mew/work_loop.py line_start=897 line_count=20",
+        )
+        self.assertIn("Redundant search observations", text)
+        self.assertIn(
+            "search_text src/mew/work_loop.py query=build_work_think_prompt repeated with matches 2x",
+            text,
+        )
+        self.assertIn(
+            "suggested_next: read_file path=src/mew/work_loop.py line_start=897 line_count=20",
+            text,
+        )
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -13080,10 +13137,13 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
+        self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
         self.assertIn("do not rerun that same search_text", prompt)
         self.assertIn("switch to a narrow read_file on the anchored window instead", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
+        self.assertIn("work_session.resume.redundant_search_observations", prompt)
+        self.assertIn("use its suggested_next read_file replacement instead of rerunning search_text again", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)
         self.assertIn("treat continuity.recommendation as the first repair queue", prompt)
         self.assertIn("missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state", prompt)
