@@ -828,6 +828,58 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_audit_surfaces_budget_and_ambiguous_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    code = main(["self-improve", "--start-session", "--focus", "Recover safely"])
+                self.assertEqual(code, 0)
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                session["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "system",
+                        "text": "Follow reached max_steps=10 after 10 step(s). Last action: read_file.",
+                    }
+                )
+                session["tool_calls"].append(
+                    {
+                        "id": 70,
+                        "tool": "run_command",
+                        "status": "interrupted",
+                        "parameters": {"command": "make release"},
+                        "result": {},
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    audit_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(audit_code, 0)
+                bundle = json.loads(stdout.getvalue())
+                safety = bundle["safety_boundaries"]
+                self.assertEqual(safety["status"], "blocked")
+                self.assertIn("budget_exhaustion_event", safety["findings"])
+                self.assertIn("ambiguous_recovery_event", safety["findings"])
+                self.assertEqual(len(safety["budget_events"]), 1)
+                self.assertEqual(safety["ambiguous_recovery_events"][0]["tool_call_id"], 70)
+                self.assertEqual(safety["ambiguous_recovery_events"][0]["reason"], "interrupted_without_recovery")
+
+                with redirect_stdout(StringIO()) as text_stdout:
+                    text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(text_code, 0)
+                text = text_stdout.getvalue()
+                self.assertIn("budget_events=1", text)
+                self.assertIn("ambiguous_recovery=1", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_audit_sequence_summarizes_candidates(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

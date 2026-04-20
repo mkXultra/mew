@@ -202,15 +202,22 @@ Evidence:
   self-improve audit bundle.
 - Validation: `./mew dogfood --scenario m5-safety-hooks --json` passed, and
   `uv run pytest -q tests/test_dogfood.py --no-testmon` passed.
+- `mew self-improve --audit` now surfaces budget-exhaustion notes and ambiguous
+  recovery states as safety-boundary findings. Budget events produce
+  `needs_review`; interrupted/unrecovered or indeterminate recovery states
+  produce `blocked`.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`
+  passed.
 
 Missing proof:
 
 - The adversarial verifier exists and has been used manually, but it has not yet
   reviewed a later mew-native self-improvement loop.
 - Hook-based safety boundaries now escalate governance/policy edits away from
-  automatic approval and block known external-visible command side effects
-  before execution. Budget exhaustion and ambiguous recovery are not yet fully
-  enforced across every execution path.
+  automatic approval, block known external-visible command side effects before
+  execution, and surface budget/recovery safety states in audit. The remaining
+  uncertainty is whether this is enough enforcement for M5.1 or whether
+  budget/recovery need pre-action blockers beyond audit escalation.
 - The new `m5-safety-hooks` scenario exercises mechanical safety hooks with a
   readable audit bundle, but it does not yet include adversarial verifier review
   inside the same loop/scenario.
