@@ -617,6 +617,10 @@ class SelfImproveTests(unittest.TestCase):
                     rescue_bundle["human_intervention"]["m5_credit"],
                     "not_counted_due_to_rescue",
                 )
+                self.assertEqual(
+                    rescue_bundle["loop_credit_status"],
+                    "not_counted_due_to_rescue",
+                )
             finally:
                 os.chdir(old_cwd)
 
