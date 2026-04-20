@@ -511,6 +511,7 @@ class DogfoodTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["scenarios"][0]["name"], "m4-runtime-effect-recovery")
+            self.assertIn("m4_runtime_effect_recovery_doctor_previews_decisions", text)
             self.assertIn("m4_runtime_effect_recovery_classifies_precommit_rerun", text)
             self.assertIn("m4_runtime_effect_recovery_classifies_committing_write_review", text)
 

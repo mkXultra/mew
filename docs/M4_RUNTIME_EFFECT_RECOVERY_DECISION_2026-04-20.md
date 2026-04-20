@@ -46,13 +46,14 @@ Both passed.
 Dogfood:
 
 ```bash
-./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1136 --json
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1142 --json
 ```
 
 Result:
 
 - status: `pass`
 - checks:
+  - `m4_runtime_effect_recovery_doctor_previews_decisions`
   - `m4_runtime_effect_recovery_classifies_precommit_rerun`
   - `m4_runtime_effect_recovery_classifies_committing_write_review`
 

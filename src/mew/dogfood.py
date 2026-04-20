@@ -3184,6 +3184,9 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     )
     write_json_file(Path(workspace) / STATE_FILE, state)
 
+    doctor_result = run(["doctor", "--json"], timeout=15)
+    doctor_data = _json_stdout(doctor_result)
+    doctor_items = (doctor_data.get("runtime_effects") or {}).get("incomplete_items") or []
     repair_result = run(["repair", "--json"], timeout=15)
     repaired_state = read_json_file(Path(workspace) / STATE_FILE, {})
     repaired_effects = {effect.get("id"): effect for effect in repaired_state.get("runtime_effects") or []}
@@ -3192,6 +3195,18 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     planning_decision = (repaired_effects.get(planning_effect_id) or {}).get("recovery_decision") or {}
     committing_decision = (repaired_effects.get(committing_effect_id) or {}).get("recovery_decision") or {}
 
+    _scenario_check(
+        checks,
+        "m4_runtime_effect_recovery_doctor_previews_decisions",
+        doctor_result.get("exit_code") == 1
+        and len(doctor_items) == 2
+        and ((doctor_items[0].get("recovery_decision") or {}).get("action") == "rerun_event")
+        and ((doctor_items[1].get("recovery_decision") or {}).get("action") == "review_writes"),
+        observed={
+            "doctor_runtime_effects": doctor_data.get("runtime_effects"),
+        },
+        expected="doctor previews structured recovery decisions before repair mutates state",
+    )
     _scenario_check(
         checks,
         "m4_runtime_effect_recovery_classifies_precommit_rerun",

@@ -1455,7 +1455,7 @@ Evidence:
   `mew brief` surfaces recent startup-repair decision actions alongside repair
   types, so reentry does not require opening raw state.
   `dogfood --scenario m4-runtime-effect-recovery` passed locally in
-  `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1136`.
+  `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1142`.
   Durable summary:
   `docs/M4_RUNTIME_EFFECT_RECOVERY_DECISION_2026-04-20.md`.
 - Applied `write_file`/`edit_file` work tools now record a pre-execution
