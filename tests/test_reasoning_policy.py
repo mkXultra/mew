@@ -41,6 +41,26 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertIn("roadmap", policy["matched_terms"])
         self.assertIn("recovery", policy["matched_terms"])
 
+    def test_ignores_historical_commit_context_for_small_implementation(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Improve mew itself",
+                "kind": "coding",
+                "description": (
+                    "Focus:\n"
+                    "M7: add a minimal RSS signal fetcher.\n\n"
+                    "Recently completed git commits. Do not repeat these topics:\n"
+                    "8c12154 Support M6 daemon Docker proofs\n"
+                    "0b51fae Record enhanced M6 proof gate\n"
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "medium")
+        self.assertEqual(policy["work_type"], "small_implementation")
+
     def test_env_override_wins(self):
         policy = select_work_reasoning_policy(
             {"title": "Inspect project shape", "kind": "coding"},

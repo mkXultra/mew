@@ -399,6 +399,10 @@ Evidence:
 - Running work model turns now save preflight prompt-size metrics before the
   THINK API call completes, so interrupted or timed-out self-hosting attempts
   can still report context size and chosen reasoning policy.
+- The reasoning-effort policy now ignores historical task-description sections
+  such as completed commits when matching high-risk terms, preventing a small
+  #320-class M7 implementation task from being escalated to `high` and full
+  prompt mode just because its history mentions M6/daemon work.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,

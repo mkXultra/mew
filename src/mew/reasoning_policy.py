@@ -19,6 +19,12 @@ HIGH_RISK_TERMS = (
     "safety",
     "security",
 )
+TASK_HISTORY_MARKERS = (
+    "\n\nRecently completed git commits",
+    "\n\nCurrent coding focus:",
+    "\n\nRecent friction",
+    "\n\nConstraints:",
+)
 
 
 def normalize_reasoning_effort(value):
@@ -33,6 +39,14 @@ def _joined_text(*values):
 def _matching_high_risk_terms(text):
     lowered = str(text or "").casefold()
     return [term for term in HIGH_RISK_TERMS if term in lowered]
+
+
+def task_policy_description(task):
+    description = str((task or {}).get("description") or "")
+    for marker in TASK_HISTORY_MARKERS:
+        if marker in description:
+            description = description.split(marker, 1)[0]
+    return description
 
 
 def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, env=None):
@@ -50,7 +64,7 @@ def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, e
     capabilities = capabilities or {}
     text = _joined_text(
         task.get("title"),
-        task.get("description"),
+        task_policy_description(task),
         task.get("notes"),
         guidance,
     )
