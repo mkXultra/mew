@@ -190,6 +190,9 @@ Evidence:
   external-visible side-effect commands before execution. A regression test
   verifies a proposed `git push origin main` records `safety_blocked`, never
   reaches tool execution, and leaves a work-session note.
+- `mew self-improve --audit` now includes safety-blocked work-session events as
+  `safety_boundaries.blocked_events`, so a blocked external side-effect attempt
+  is visible in the readable audit bundle.
 - Validation: the targeted accept-edits work-session tests passed with
   `--no-testmon`.
 

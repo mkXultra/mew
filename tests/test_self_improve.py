@@ -799,6 +799,32 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(blocked_safety["status"], "blocked")
                 self.assertIn("external_visible_side_effect", blocked_safety["findings"])
                 self.assertEqual(blocked_safety["external_visible_side_effects"][0]["marker"], "git push")
+
+                state = load_state()
+                state["work_sessions"][0]["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "system",
+                        "text": "M5 safety blocked tool execution: git push origin main",
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as blocked_note_stdout:
+                    blocked_note_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(blocked_note_code, 0)
+                blocked_note_bundle = json.loads(blocked_note_stdout.getvalue())
+                blocked_note_safety = blocked_note_bundle["safety_boundaries"]
+                self.assertEqual(blocked_note_safety["status"], "blocked")
+                self.assertIn("safety_blocked_event", blocked_note_safety["findings"])
+                self.assertEqual(len(blocked_note_safety["blocked_events"]), 1)
+
+                with redirect_stdout(StringIO()) as blocked_text_stdout:
+                    blocked_text_code = main(["self-improve", "--audit", "1"])
+
+                self.assertEqual(blocked_text_code, 0)
+                self.assertIn("blocked_events=1", blocked_text_stdout.getvalue())
             finally:
                 os.chdir(old_cwd)
 

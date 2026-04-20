@@ -392,11 +392,30 @@ def _governance_or_policy_edit_records(session):
     return records
 
 
+def _safety_blocked_records(session):
+    records = []
+    for note in (session or {}).get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        text = note.get("text") or ""
+        if "M5 safety blocked tool execution" not in text:
+            continue
+        records.append(
+            {
+                "created_at": note.get("created_at") or "",
+                "source": note.get("source") or "",
+                "text": text,
+            }
+        )
+    return records
+
+
 def build_m5_safety_boundary_report(session, permission_context, effect_budget):
     permission_context = permission_context or {}
     effect_budget = effect_budget or {}
     governance_edits = _governance_or_policy_edit_records(session or {})
     external_side_effects = _external_visible_side_effect_records(session or {})
+    blocked_events = _safety_blocked_records(session or {})
     permission_drift = bool(permission_context.get("drift"))
     findings = []
     status = "ok"
@@ -409,6 +428,9 @@ def build_m5_safety_boundary_report(session, permission_context, effect_budget):
     if external_side_effects:
         status = "blocked"
         findings.append("external_visible_side_effect")
+    if blocked_events:
+        status = "blocked"
+        findings.append("safety_blocked_event")
     if (effect_budget.get("budget_exhaustion_action") or "") != "stop_and_report":
         status = "needs_review" if status == "ok" else status
         findings.append("budget_exhaustion_not_stop_and_report")
@@ -420,6 +442,7 @@ def build_m5_safety_boundary_report(session, permission_context, effect_budget):
         "permission_context_drift": permission_drift,
         "governance_or_policy_edits": governance_edits,
         "external_visible_side_effects": external_side_effects,
+        "blocked_events": blocked_events,
         "budget_exhaustion_action": effect_budget.get("budget_exhaustion_action") or "",
         "ambiguous_recovery_action": effect_budget.get("ambiguous_recovery_action") or "",
         "findings": findings,
@@ -691,7 +714,8 @@ def format_m5_self_improve_audit_bundle(bundle):
                 f"{safety.get('status')} "
                 f"findings={len(safety.get('findings') or [])} "
                 f"governance_edits={len(safety.get('governance_or_policy_edits') or [])} "
-                f"external_side_effects={len(safety.get('external_visible_side_effects') or [])}"
+                f"external_side_effects={len(safety.get('external_visible_side_effects') or [])} "
+                f"blocked_events={len(safety.get('blocked_events') or [])}"
             ),
             (
                 "human_intervention: "
