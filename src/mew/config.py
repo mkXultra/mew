@@ -23,6 +23,7 @@ DEFAULT_ATTACH_POLL_INTERVAL_SECONDS = 0.5
 MAX_COMMAND_OUTPUT_CHARS = 4000
 DEFAULT_CODEX_WEB_BASE_URL = "https://chatgpt.com/backend-api/codex"
 DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
 DEFAULT_MODEL_BACKEND = "codex"
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
 DEFAULT_AUTH_PATHS = (Path("auth.json"), Path.home() / ".codex" / "auth.json")

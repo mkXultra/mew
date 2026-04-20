@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -73,3 +74,26 @@ class CodexApiTests(unittest.TestCase):
 
         self.assertEqual(text, "hello")
         self.assertEqual(deltas, ["hel", "lo"])
+
+    def test_call_codex_web_api_sends_default_xhigh_reasoning_effort(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "ok"}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+                text = call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    1,
+                )
+
+        self.assertEqual(text, "ok")
+        self.assertEqual(captured["body"]["reasoning"], {"effort": "xhigh"})
