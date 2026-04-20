@@ -13307,6 +13307,61 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(result["visible_chars"], WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT)
         self.assertLessEqual(len(json.dumps(work_context, ensure_ascii=False)), WORK_COMPACT_CONTEXT_BUDGET)
 
+    def test_work_model_context_compact_prompt_keeps_recent_read_file_windows(self):
+        from mew.work_loop import (
+            WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT,
+            build_work_model_context,
+        )
+
+        text = "exact file window\n" * 180
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Edit from exact text.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "line_start": 10, "line_count": 80},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "line_start": 10,
+                        "line_end": 89,
+                        "text": text,
+                        "truncated": False,
+                    },
+                    "summary": "read exact file window",
+                }
+            ],
+            "model_turns": [],
+        }
+        task = {"id": 1, "title": "Compact", "description": "Compact recent read context.", "status": "todo", "kind": "coding"}
+
+        work_context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_memory",
+        )["work_session"]
+
+        compact_result = work_context["tool_calls"][0]["result"]
+        self.assertLess(compact_result["visible_chars"], len(text))
+        self.assertEqual(compact_result["visible_chars"], WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["text"], text)
+        self.assertEqual(work_context["recent_read_file_windows"][0]["tool_call_id"], 1)
+        self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
+
+    def test_work_prompt_context_mode_high_effort_uses_full_context(self):
+        from mew.work_loop import work_prompt_context_mode
+
+        self.assertEqual(work_prompt_context_mode({"effort": "high", "work_type": "explicit"}), "full")
+        self.assertEqual(work_prompt_context_mode({"effort": "xhigh", "work_type": "explicit"}), "full")
+
     def test_work_model_context_under_budget_keeps_recent_window(self):
         from mew.work_loop import build_work_model_context
 

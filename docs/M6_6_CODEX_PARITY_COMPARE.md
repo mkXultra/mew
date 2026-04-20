@@ -56,21 +56,36 @@ infrastructure slice itself. This is the integration test for the gate:
 
 ## Bootstrap Run Record
 
-Status: `not_started`
+Status: `blocked`
 
-Task:
+Task: #322 `M6.6 bootstrap: durable coding plan state`
 
 Adopted reference patterns:
 
+- Durable plan state: TodoWriteTool-style persistent checklist
+- Read-only exploration discipline: exploreAgent-style scoped exploration before edit
+
 Mew run:
 
-Verification:
+- Session #307 started at 2026-04-20 21:30 JST.
+- Mew read the reference gate and narrowed implementation surfaces to
+  `src/mew/work_loop.py`, `src/mew/snapshot.py`, and
+  `tests/test_work_session.py`.
+- Mew required reviewer steering after repeated search/read churn.
+- Mew then stopped without proposing edits because exact `read_file` old text
+  was not retained across model turns under the current context mode.
 
-Rescue edits:
+Verification: not run; no edit was proposed.
+
+Rescue edits: 0
 
 Blocker if failed:
 
-Verdict:
+- Native work turns must preserve exact recent file-window content, or provide
+  another safe edit mechanism, before mew can self-implement the first M6.6
+  slice without guessing old strings.
+
+Verdict: bootstrap failed honestly and produced the next M6.6 blocker.
 
 ## Run Template
 

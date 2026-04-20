@@ -44,6 +44,8 @@ WORK_COMPACT_RESUME_TEXT_LIMIT = 600
 WORK_COMPACT_RESUME_ITEM_LIMIT = 6
 WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
+WORK_RECENT_READ_FILE_WINDOW_LIMIT = 2
+WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
@@ -370,6 +372,39 @@ def build_session_knowledge(calls, recent_count=WORK_CONTEXT_RECENT_TOOL_CALLS):
     return entries
 
 
+def build_recent_read_file_windows(
+    calls,
+    *,
+    limit=WORK_RECENT_READ_FILE_WINDOW_LIMIT,
+    text_limit=WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT,
+):
+    windows = []
+    for call in reversed(list(calls or [])):
+        if len(windows) >= limit:
+            break
+        if call.get("tool") != "read_file" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        text = result.get("text") or ""
+        if not text:
+            continue
+        clipped = clip_output(text, text_limit)
+        windows.append(
+            {
+                "tool_call_id": call.get("id"),
+                "path": result.get("path") or (call.get("parameters") or {}).get("path"),
+                "line_start": result.get("line_start"),
+                "line_end": result.get("line_end"),
+                "offset": result.get("offset"),
+                "text": clipped,
+                "visible_chars": min(len(text), text_limit),
+                "source_text_chars": len(text),
+                "context_truncated": len(text) > text_limit,
+            }
+        )
+    return windows
+
+
 def _json_size(value):
     try:
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -486,6 +521,8 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
 
 
 def work_prompt_context_mode(reasoning_policy):
+    if (reasoning_policy or {}).get("effort") in {"high", "xhigh"}:
+        return "full"
     if (reasoning_policy or {}).get("work_type") == "high_risk":
         return "full"
     return "compact_memory"
@@ -526,6 +563,8 @@ def build_work_session_context(
             for turn in model_turns[-recent_turn_count:]
         ],
     }
+    if prompt_compacted:
+        work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
         work_context["context_compaction"] = {
             "compacted": bool(compacted),
@@ -537,7 +576,7 @@ def build_work_session_context(
             "total_tool_calls": len(tool_calls),
             "total_model_turns": len(model_turns),
             "note": (
-                "Recent work context uses compact prompt limits; read one narrow source window if exact text is needed."
+                "Recent work context uses compact prompt limits; use recent_read_file_windows for exact recent file text and keep any new read_file window narrow."
                 if prompt_compacted
                 else "Recent work context was compacted due to session size; use remember for durable observations."
             ),

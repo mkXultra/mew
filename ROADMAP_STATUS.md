@@ -539,6 +539,11 @@ Evidence:
   new gates and agreed they are conceptually correct. It recommended making the
   bootstrap a prerequisite, treating any Codex rescue edit as a failed
   bootstrap blocker, and adding a dedicated bootstrap record section.
+- Bootstrap task #322 / session #307 ran with mew as implementer and Codex only
+  steering/reviewing. It did not produce edits. Mew narrowed the surfaces but
+  finished blocked because exact `read_file` old strings were not retained
+  across model turns, so safe `edit_file` dry-runs would require guessing. This
+  is recorded in `docs/M6_6_CODEX_PARITY_COMPARE.md` with `rescue_edits=0`.
 
 Missing proof:
 
@@ -548,8 +553,9 @@ Missing proof:
   tools.
 - Coding loop: no built-in edit planner, verifier discovery, repair loop, or
   self-review phase exists at the work-session level.
-- Bootstrap integration: mew has not yet used the M6.6 reference-grounded gate
-  to implement a small M6.6 infrastructure slice itself.
+- Bootstrap integration: task #322 failed honestly before edits. Native work
+  context must preserve exact recent file-window content, or provide another
+  safe edit mechanism, before mew can self-implement the first M6.6 slice.
 - Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
   on correctness, tool churn, latency, and reviewability across representative
   coding tasks.
@@ -580,10 +586,9 @@ Done when:
 
 Next action:
 
-- Use mew as implementer for the bootstrap integration task: a small,
-  reference-grounded coding-loop slice, preferably durable coding plan state
-  plus path recall, and record the trace in
-  `docs/M6_6_CODEX_PARITY_COMPARE.md`.
+- Fix or bypass the #322 blocker: preserve exact recent `read_file` file-window
+  content in native work model context, then rerun the M6.6 bootstrap
+  integration task with mew as implementer.
 
 ### M7: Senses - Inbound Signals
 
