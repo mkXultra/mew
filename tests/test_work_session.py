@@ -13089,6 +13089,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Explicit line_start/line_count reads auto-scale max_chars for edit preparation", prompt)
         self.assertIn("search the broader project tree or allowed read root", prompt)
         self.assertIn("instead of repeating same-file searches", prompt)
+        self.assertIn("refresh that same targeted window instead of falling back to an offset read_file from the top of the file", prompt)
         self.assertIn("prefer one batch action", prompt)
         self.assertIn("exact old and new strings", prompt)
         self.assertIn("do not reread the full file solely to prepare edit_file", prompt)

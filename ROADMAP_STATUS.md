@@ -830,6 +830,13 @@ Evidence:
   tests.test_work_session`, focused pytest, `ruff`, `py_compile`, and
   `git diff --check`), but this should be carried as product progress rather
   than no-rescue mew-side evidence.
+- A direct supervisor prompt patch then addressed the fresh #344 drift:
+  `build_work_think_prompt()` now says that when guidance, recent windows, or a
+  recent failure already identify an exact `line_start`/`line_count` window,
+  THINK should refresh that same targeted window instead of falling back to an
+  offset `read_file` from the top of the file. Focused prompt tests, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress aimed
+  at the #344 targeted-context blocker, not mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
