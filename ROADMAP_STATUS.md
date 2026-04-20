@@ -1637,6 +1637,11 @@ Evidence:
   loop is still not M5 done-gate credit: the resident hit a paired-edit guard
   after a no-op test edit, and the supervisor applied the source/test patch as
   a rescue.
+- Task `#303` closed the immediate rescue-classification gap in commit
+  `7bf7d9b`. Audit bundles now mark human notes that mention supervisor rescue,
+  manual patch, or rescue edit as `rescue_recorded` and set M5 credit to
+  `not_counted_due_to_rescue`. `mew self-improve --audit 303` now makes the
+  rescue visible next to verification status.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1692,10 +1697,11 @@ Next action:
 
 - Start the next bounded M5 entry-rehearsal loop from `mew-product-evaluator`
   or `./mew self-improve --start-session --focus 'Advance M5 audited
-  self-improvement loop'`. The next best gap is human-intervention
-  classification: task `#302` visibly required rescue, but the audit still says
-  `rescue=not_assessed`. The next loop should make rescue/not-rescue evidence
-  explicit without pretending rescued loops count for M5 done credit.
+  self-improvement loop'`. The next best gap is no-rescue feasibility: tasks
+  `#302` and `#303` both needed supervisor rescue because paired edits hit
+  no-op or old-text-mismatch failures. The next loop should reduce that concrete
+  resident edit failure mode, or run a deliberately tiny no-rescue loop to
+  check whether the latest audit trail can honestly record no rescue.
 
 ## Latest Validation
 
