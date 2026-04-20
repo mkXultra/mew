@@ -1,5 +1,5 @@
 from .cli_command import mew_command
-from .state import incomplete_runtime_effects, update_runtime_effect
+from .state import add_question, incomplete_runtime_effects, update_runtime_effect
 from .timeutil import now_iso
 
 
@@ -153,7 +153,7 @@ def runtime_effect_recovery_followup(state, effect, decision=None, current_time=
         command = mew_command("runtime-effects", "--limit", "5")
         if action == "review_writes":
             command = mew_command("writes")
-        return {
+        followup = {
             "action": "ask_user_review",
             "status": "needs_user_review",
             "event_id": event_id,
@@ -161,6 +161,24 @@ def runtime_effect_recovery_followup(state, effect, decision=None, current_time=
             "command": command,
             "reason": decision.get("reason") or "effect stopped during commit",
         }
+        if mutate:
+            event_ref = "unknown event" if event_id is None else f"event #{event_id}"
+            actions = ", ".join((effect or {}).get("action_types") or []) or "unknown actions"
+            text = (
+                f"Runtime effect #{(effect or {}).get('id')} for {event_ref} stopped while committing "
+                f"{actions}. Recovery needs review before retry. Inspect with `{command}`. "
+                "Reply with the observed state and whether mew should retry, abort, or replan."
+            )
+            question, created = add_question(
+                state,
+                text,
+                event_id=event_id,
+                related_task_id=(effect or {}).get("task_id"),
+                source="runtime",
+            )
+            followup["question_id"] = question.get("id")
+            followup["question_created"] = created
+        return followup
     return {
         "action": "inspect_effect",
         "status": "needs_user_review",

@@ -3267,6 +3267,7 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     planning_followup = (repaired_effects.get(planning_effect_id) or {}).get("recovery_followup") or {}
     committing_followup = (repaired_effects.get(committing_effect_id) or {}).get("recovery_followup") or {}
     repaired_events = {event.get("id"): event for event in repaired_state.get("inbox") or []}
+    review_questions = list(repaired_state.get("questions") or [])
 
     _scenario_check(
         checks,
@@ -3321,6 +3322,24 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
             "repairs": repairs,
         },
         expected="committing runtime effect with write runs is classified as write review",
+    )
+    _scenario_check(
+        checks,
+        "m4_runtime_effect_recovery_seeds_review_question",
+        repair_result.get("exit_code") == 0
+        and committing_followup.get("action") == "ask_user_review"
+        and committing_followup.get("question_id")
+        and len(review_questions) == 1
+        and review_questions[0].get("id") == committing_followup.get("question_id")
+        and review_questions[0].get("source") == "runtime"
+        and "Runtime effect" in (review_questions[0].get("text") or "")
+        and "mew writes" in (review_questions[0].get("text") or ""),
+        observed={
+            "followup": committing_followup,
+            "questions": review_questions,
+            "repairs": repairs,
+        },
+        expected="commit-phase runtime-effect review follow-up is consumed as a durable open question",
     )
     return _scenario_report("m4-runtime-effect-recovery", workspace, commands, checks)
 

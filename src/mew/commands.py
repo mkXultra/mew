@@ -8828,11 +8828,17 @@ def cmd_repair(args):
                             )
                         followup = repair.get("recovery_followup") or {}
                         if followup:
+                            question_text = (
+                                f" question=#{followup.get('question_id')}"
+                                if followup.get("question_id")
+                                else ""
+                            )
                             print(
                                 "  followup: "
                                 f"{followup.get('action')} "
                                 f"status={followup.get('status')} "
                                 f"command={followup.get('command') or ''}"
+                                f"{question_text}"
                             )
                         print(f"  next: {repair.get('recovery_hint')}")
                     elif repair.get("type") == "interrupted_work_tool_call":

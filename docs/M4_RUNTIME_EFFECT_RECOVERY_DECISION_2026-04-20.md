@@ -37,7 +37,10 @@ Follow-up consumption:
   already been marked processed and no later terminal effect exists;
 - events that are already pending stay pending and record `already_pending`;
 - committing write/verification/action decisions stay on explicit review
-  follow-ups, pointing to the relevant inspection command instead of retrying.
+  follow-ups, pointing to the relevant inspection command instead of retrying;
+- committing review follow-ups now seed a durable open question, outbox
+  message, and attention item, so the review request is visible in normal mew
+  reentry surfaces instead of living only inside the repaired effect metadata.
 
 ## Validation
 
@@ -55,6 +58,7 @@ Dogfood:
 
 ```bash
 ./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup --json
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420 --json
 ```
 
 Result:
@@ -64,10 +68,12 @@ Result:
   - `m4_runtime_effect_recovery_doctor_previews_decisions`
   - `m4_runtime_effect_recovery_requeues_precommit_event`
   - `m4_runtime_effect_recovery_classifies_committing_write_review`
+  - `m4_runtime_effect_recovery_seeds_review_question`
 
 ## Interpretation
 
 This connects M4's recovery language to machine-readable state and lets repair
 consume the safest class directly: a pre-commit runtime effect can make its
 original event pending again. Commit-phase effects still require explicit
-review.
+review, but that review is now a normal mew question rather than hidden
+metadata.

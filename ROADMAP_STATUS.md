@@ -1462,8 +1462,14 @@ Evidence:
   effects before repair mutates state.
   `mew brief` surfaces recent startup-repair decision and follow-up actions
   alongside repair types, so reentry does not require opening raw state.
+  Commit-phase runtime-effect review follow-ups now also seed a durable open
+  question/outbox/attention item, so review-required recovery is visible in
+  normal mew reentry surfaces rather than only inside repaired effect metadata.
   `dogfood --scenario m4-runtime-effect-recovery` passed locally in
-  `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup`.
+  `proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup`
+  and again in
+  `proof-workspace/mew-proof-m4-runtime-effect-review-question-local-20260420`
+  with the review-question check.
   Durable summary:
   `docs/M4_RUNTIME_EFFECT_RECOVERY_DECISION_2026-04-20.md`.
 - Applied `write_file`/`edit_file` work tools now record a pre-execution
@@ -1498,8 +1504,10 @@ Missing proof:
 - Automatic `ask_user` recovery exists for failed passive native-work advances,
   passive auto-retry now exists for selected interrupted verifier plus safe
   read/git work-session tools, and explicit side-effect recovery now exists for
-  the narrow applied file-write class plus failed shell-command review, but not
-  yet for all interrupted runtime effects or shell retry.
+  the narrow applied file-write class plus failed shell-command review.
+  Commit-phase runtime-effect review follow-ups now become durable review
+  questions, but automatic retry still does not exist for all interrupted
+  runtime effects or shell commands.
 - World-state revalidation before retry exists for safe read/git and
   interrupted verifier work-session recovery, and hash-based target
   revalidation now exists for applied file writes. Runtime effects now have
@@ -1512,7 +1520,9 @@ Next action:
 
 - Extend runtime-effect recovery consumption or the next deterministic
   side-effect validator. Keep shell recovery on explicit review until a
-  similarly deterministic world-state validator exists.
+  similarly deterministic world-state validator exists; next useful shell work
+  should improve the review surface or add a deterministic validator, not blind
+  retry.
 
 ## Milestone 5: Self-Improving Mew
 

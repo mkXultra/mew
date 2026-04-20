@@ -488,10 +488,20 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(data["repairs"][0]["recovery_decision"]["action"], "review_writes")
                 self.assertEqual(data["repairs"][0]["recovery_followup"]["action"], "ask_user_review")
                 self.assertEqual(data["repairs"][0]["recovery_followup"]["command"], "mew writes")
+                self.assertEqual(data["repairs"][0]["recovery_followup"]["question_id"], 1)
+                self.assertTrue(data["repairs"][0]["recovery_followup"]["question_created"])
                 self.assertEqual(decision["effect_classification"], "write_may_have_started")
                 self.assertEqual(decision["safety"], "needs_user_review")
                 self.assertEqual(decision["write_run_ids"], [7])
                 self.assertEqual(repaired["runtime_effects"][0]["recovery_followup"]["status"], "needs_user_review")
+                self.assertEqual(len(repaired["questions"]), 1)
+                self.assertEqual(repaired["questions"][0]["source"], "runtime")
+                self.assertEqual(repaired["questions"][0]["event_id"], 1)
+                self.assertIn(
+                    "Runtime effect #1 for event #1 stopped while committing write_file",
+                    repaired["questions"][0]["text"],
+                )
+                self.assertIn("Inspect with `mew writes`", repaired["questions"][0]["text"])
                 self.assertIn("write_may_have_started", repaired["runtime_effects"][0]["recovery_hint"])
             finally:
                 os.chdir(old_cwd)
