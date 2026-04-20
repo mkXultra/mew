@@ -440,6 +440,7 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("resume: mew work 1 --session --resume --allow-read .", output)
                 self.assertIn("cells: mew work 1 --cells", output)
                 self.assertIn("active memory: mew memory --active --task-id 1", output)
+                self.assertIn("audit: mew self-improve --audit 1", output)
                 self.assertIn("chat: mew chat", output)
                 state = load_state()
                 self.assertEqual(state["tasks"][0]["status"], "ready")
@@ -449,6 +450,10 @@ class SelfImproveTests(unittest.TestCase):
                 defaults = state["work_sessions"][0]["default_options"]
                 self.assertEqual(defaults["allow_read"], ["."])
                 self.assertTrue(defaults["compact_live"])
+                audit = state["work_sessions"][0]["m5_self_improve_audit"]
+                self.assertEqual(audit["schema_version"], 1)
+                self.assertEqual(audit["frozen_permission_context"]["allow_read"], ["."])
+                self.assertEqual(audit["effect_budget"]["continue_max_steps"], 1)
             finally:
                 os.chdir(old_cwd)
 
@@ -477,6 +482,10 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertIn("Native self-improve reentry prepared.", notes[0]["text"])
                 self.assertIn("mew work 1 --live --allow-read . --compact-live --max-steps 1", notes[0]["text"])
                 self.assertIn("mew work 1 --session --resume --allow-read .", notes[0]["text"])
+                self.assertIn("mew self-improve --audit 1", notes[0]["text"])
+                audit = data["work_session"]["m5_self_improve_audit"]
+                self.assertEqual(audit["loop_credit_status"], "not_counted_until_closed_with_no_rescue_review")
+                self.assertFalse(audit["permission_context_drift"])
                 self.assertEqual(data["controls"]["work_cwd"], str(Path(tmp).resolve()))
                 self.assertEqual(
                     data["controls"]["continue"],
@@ -490,7 +499,35 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(data["controls"]["resume"], "mew work 1 --session --resume --allow-read .")
                 self.assertEqual(data["controls"]["cells"], "mew work 1 --cells")
                 self.assertEqual(data["controls"]["active_memory"], "mew memory --active --task-id 1")
+                self.assertEqual(data["controls"]["audit"], "mew self-improve --audit 1")
                 self.assertEqual(data["controls"]["chat"], "mew chat")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_self_improve_audit_outputs_m5_bundle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    code = main(["self-improve", "--start-session", "--focus", "Start native work"])
+                self.assertEqual(code, 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    audit_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(audit_code, 0)
+                bundle = json.loads(stdout.getvalue())
+                self.assertEqual(bundle["status"], "ready")
+                self.assertEqual(bundle["task"]["id"], 1)
+                self.assertEqual(bundle["work_session"]["id"], 1)
+                self.assertEqual(bundle["permission_context"]["frozen"]["allow_read"], ["."])
+                self.assertEqual(bundle["effect_budget"]["follow_max_steps"], 10)
+                self.assertEqual(bundle["human_intervention"]["classification"], "none_recorded")
+                self.assertEqual(
+                    bundle["human_intervention"]["m5_credit"],
+                    "not_counted_until_human_review_confirms_no_rescue_edits",
+                )
             finally:
                 os.chdir(old_cwd)
 

@@ -1284,6 +1284,12 @@ def build_parser():
     self_improve_parser.add_argument("--force", action="store_true", help="create a new task even if one is open")
     self_improve_parser.add_argument("--force-plan", action="store_true", help="create a new plan even if one exists")
     self_improve_parser.add_argument("--prompt", action="store_true", help="print generated implementation and review prompts")
+    self_improve_parser.add_argument(
+        "--audit",
+        nargs="?",
+        const="latest",
+        help="show the M5 audit bundle for a self-improvement task id, or latest when omitted",
+    )
     self_improve_parser.add_argument("--dispatch", action="store_true", help="start an implementation run immediately")
     self_improve_parser.add_argument("--dry-run", action="store_true", help="create the run record without starting ai-cli")
     self_improve_parser.add_argument(

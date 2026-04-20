@@ -1571,9 +1571,9 @@ Residual non-goals:
 
 Next action:
 
-- Return active product work to the earliest unfinished entry gate: Milestone 3
-  persistent advantage. M5 remains blocked until M3 is closed, even though M4 is
-  now done.
+- M3 proof collection is now blocked on the background 4h Docker proof, tracked
+  by task `#300`. The main implementation thread should move to M5 entry
+  rehearsal work instead of idling on wall-clock proof.
 
 ## Milestone 5: Self-Improving Mew
 
@@ -1618,6 +1618,12 @@ Evidence:
 - 2026-04-20 `claude-ultra` M5 gate review agreed that M5 should stay
   `foundation` until M3/M4 close, and recommended a no-rescue multi-loop proof
   with audit bundles and explicit self-improve safety boundaries.
+- M5 entry rehearsal has started. Native self-improve sessions now seed an
+  `m5_self_improve_audit` bundle with a frozen permission context, current
+  permission drift check, explicit effect budget, allowed/disallowed human
+  intervention policy, and no-rescue loop credit status. `mew self-improve
+  --audit <task-id>` renders the readable audit bundle, and task `#301` /
+  session `#280` dogfooded the path for the active M5 focus.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1661,8 +1667,8 @@ Missing proof:
 - Milestone 4 is done for the M5 entry gate; broader opaque shell/runtime
   side-effect auto-retry is a deliberate non-goal rather than an M5 blocker.
 - mew has not yet produced five consecutive closed self-improvement loops with
-  native/delegated implementation, verification, review, and readable audit
-  bundles.
+  native/delegated implementation, verification, review, and passing readable
+  audit bundles. The audit-bundle seed exists, but the loop proof does not.
 - No M5 proof loop has yet exercised interruption or failure recovery through
   Milestone 4 surfaces without manual reconstruction.
 - Existing self-improvement dogfood still includes supervisor rescue edits and
@@ -1671,12 +1677,11 @@ Missing proof:
 
 Next action:
 
-- Keep M5 at `foundation` while closing M3 and M4. Exploratory
-  self-improvement dogfood may continue, but it does not count toward M5 until
-  the entry gate is met. After M4 closes, run a single M5 entry rehearsal that
-  starts from `mew-product-evaluator`, creates one bounded task, implements it
-  through native/delegated tools, validates it, records the audit bundle, and
-  classifies any human intervention.
+- Continue the M5 entry rehearsal from task `#301`: run one bounded
+  self-improvement loop through native/delegated implementation, validation,
+  audit-bundle capture, and human-intervention classification. It may be useful
+  evidence, but it must not count as M5 done-gate credit until M3 closes and a
+  no-rescue review confirms no manual rescue edits.
 
 ## Latest Validation
 

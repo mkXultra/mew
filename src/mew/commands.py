@@ -114,6 +114,11 @@ from .repair import (
     runtime_effect_recovery_followup,
 )
 from .self_improve import DEFAULT_SELF_IMPROVE_TITLE, create_self_improve_task, ensure_self_improve_plan
+from .self_improve_audit import (
+    build_m5_self_improve_audit_bundle,
+    format_m5_self_improve_audit_bundle,
+    seed_m5_self_improve_audit,
+)
 from .self_memory import (
     build_self_memory_view_model,
     format_self_memory_view,
@@ -5324,6 +5329,7 @@ def cmd_work_start_session(args):
         remember_work_session_default_options(session, args)
         if is_self_improve_task(task):
             seed_native_self_improve_session_defaults(session, task)
+            seed_m5_self_improve_audit(session, task)
             seed_native_self_improve_reentry_note(session, task)
         save_state(state)
     if args.json:
@@ -10106,6 +10112,7 @@ def native_self_improve_controls(task, *, include_start_hint=False, session=None
         "resume": _work_resume_command(continue_args, task["id"], session=session),
         "cells": mew_command("work", task["id"], "--cells"),
         "active_memory": mew_command("memory", "--active", "--task-id", task["id"]),
+        "audit": mew_command("self-improve", "--audit", task["id"]),
         "chat": mew_command("chat"),
     }
     if include_start_hint:
@@ -10137,7 +10144,8 @@ def seed_native_self_improve_reentry_note(session, task):
         f"{NATIVE_SELF_IMPROVE_REENTRY_NOTE_PREFIX} "
         f"Next: run `{controls['continue']}`. "
         f"Inspect: `{controls['resume']}`. "
-        f"Status: `{controls['status']}`."
+        f"Status: `{controls['status']}`. "
+        f"Audit: `{controls['audit']}`."
     )
     return add_work_session_note(session, text, source="system")
 
@@ -10153,6 +10161,7 @@ def print_native_self_improve_controls(task, *, include_start_hint=False, sessio
     print(f"resume: {controls['resume']}")
     print(f"cells: {controls['cells']}")
     print(f"active memory: {controls['active_memory']}")
+    print(f"audit: {controls['audit']}")
     print(f"chat: {controls['chat']}")
 
 
@@ -10171,6 +10180,8 @@ def self_improve_native_validation_error(
 
 
 def cmd_self_improve(args):
+    if getattr(args, "audit", None) is not None:
+        return cmd_self_improve_audit(args)
     native = bool(getattr(args, "native", False) or getattr(args, "start_session", False))
     if args.prompt and args.no_plan:
         print("mew: --prompt requires a programmer plan; remove --no-plan", file=sys.stderr)
@@ -10228,6 +10239,7 @@ def cmd_self_improve(args):
         if getattr(args, "start_session", False):
             session, session_created = create_work_session(state, task)
             seed_native_self_improve_session_defaults(session, task)
+            seed_m5_self_improve_audit(session, task)
             seed_native_self_improve_reentry_note(session, task)
         save_state(state)
 
@@ -10279,6 +10291,18 @@ def cmd_self_improve(args):
     if run:
         return print_self_improve_run_status(run, dry_run=args.dry_run, plan=plan)
     return 0
+
+
+def cmd_self_improve_audit(args):
+    with state_lock():
+        state = load_state()
+        bundle = build_m5_self_improve_audit_bundle(state, getattr(args, "audit", None))
+        save_state(state)
+    if args.json:
+        print(json.dumps(bundle, ensure_ascii=False, indent=2))
+    else:
+        print(format_m5_self_improve_audit_bundle(bundle))
+    return 0 if bundle.get("status") != "missing_task" else 1
 
 
 def print_self_improve_run_status(run, *, dry_run=False, plan=None):
