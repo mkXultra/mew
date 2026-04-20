@@ -2901,6 +2901,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if error:
             break
 
+    if error and write_batch and pending_approval_ids:
+        _invalidate_pending_approval_batch(
+            session_id,
+            pending_approval_ids,
+            f"batch halted after sibling tool failed: {error}",
+        )
+        pending_approval_ids = []
+
     tool_call_ids = [call.get("id") for call in tool_calls if call]
     with state_lock():
         state = load_state()
@@ -5276,6 +5284,25 @@ def _rollback_deferred_approval_batch(approved, reason):
             }
         )
     return rolled_back
+
+
+def _invalidate_pending_approval_batch(session_id, approve_ids, reason):
+    if not approve_ids:
+        return
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        for approve_id in approve_ids:
+            source_call = find_work_tool_call(session, approve_id)
+            if not source_call:
+                continue
+            if source_call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
+                continue
+            source_call["approval_status"] = APPROVAL_STATUS_INDETERMINATE
+            source_call["approval_error"] = reason
+        if session is not None:
+            session["updated_at"] = now_iso()
+        save_state(state)
 
 
 def _apply_work_approval_batch(args, approve_ids=None):

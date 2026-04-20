@@ -741,6 +741,15 @@ Evidence:
   tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
   passed. This is product progress aimed at the #339 blocker, not mew-side
   evidence.
+- A direct supervisor patch then tightened batch-failure cleanup for M6.6:
+  when a write batch hits a later sibling-tool failure after earlier dry-run
+  edits have already been previewed, mew now marks those earlier dry-run
+  approvals `indeterminate` and removes them from `resume.pending_approvals`
+  instead of leaving a misleading partial-approval surface behind. The tests
+  now cover the failing batch case directly, and `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #339 blocker, not mew-side
+  evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -787,8 +796,10 @@ Missing proof:
   batch, but the next failure mode is still unresolved: stable multi-edit
   assembly and exact old-text matching across the full same-file source/test
   surface. The partial-write-batch refusal patch should reduce one source of
-  that failure by stopping incomplete dry-run batches before approval, but it
-  has not yet been proven by a fresh no-rescue work-session task. The native
+  that failure by stopping incomplete dry-run batches before approval, and the
+  batch-failure cleanup patch now prevents stale pending approvals from hiding
+  the real recovery path after a sibling-tool failure. Those reductions still
+  have not yet been proven by a fresh no-rescue work-session task. The native
   loop is therefore improved but not yet self-sufficient.
 
 Done when:

@@ -11397,6 +11397,94 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_batch_failure_invalidates_prior_pending_approvals(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.work_session import build_work_session_resume
+
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/pairing.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+                Path("src/mew/extra.py").write_text("EXTRA = 'keep'\n", encoding="utf-8")
+                Path("tests/test_pairing.py").write_text("def test_pairing():\n    assert 'old'\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview batch with failing sibling edit",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "src/mew/pairing.py",
+                                "old": "old",
+                                "new": "new",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": "tests/test_pairing.py",
+                                "old": "'old'",
+                                "new": "'new'",
+                                "dry_run": False,
+                            },
+                            {
+                                "type": "edit_file",
+                                "path": "src/mew/extra.py",
+                                "old": "missing",
+                                "new": "new",
+                                "dry_run": False,
+                            },
+                        ],
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "tool_failed")
+                self.assertEqual(report["steps"][0]["pending_approval_ids"], [])
+                self.assertFalse(report["steps"][0]["pending_approval"])
+                self.assertIn("old text was not found", report["steps"][0]["error"])
+
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(
+                    [call["parameters"]["path"] for call in session["tool_calls"]],
+                    ["tests/test_pairing.py", "src/mew/pairing.py", "src/mew/extra.py"],
+                )
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "indeterminate")
+                self.assertEqual(session["tool_calls"][1]["approval_status"], "indeterminate")
+                self.assertIn("batch halted after sibling tool failed", session["tool_calls"][0]["approval_error"])
+                self.assertEqual(session["tool_calls"][2]["status"], "failed")
+                self.assertEqual(build_work_session_resume(session)["pending_approvals"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_batch_rejects_unpaired_mew_source_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
