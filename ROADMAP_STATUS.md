@@ -1711,6 +1711,13 @@ Evidence:
   resident then repeated incomplete source diffs until the repeat-action guard
   fired and the supervisor applied the final two-line source repair. This is
   useful M5 recovery/friction evidence, not a no-rescue candidate.
+- Task `#314` closed the concrete audit aggregation gap exposed by `#313`.
+  `mew self-improve --audit` now treats successful `run_tests` work-session
+  tool calls as verification records, not only write/edit tool
+  `result.verification` records. Live `mew self-improve --audit 313` now reports
+  `verification: passed exit_code=0` from the closed work session. This is not
+  M5 done-gate credit: the resident narrowed the surface and preserved the
+  next edit plan, but the supervisor applied the final paired source/test patch.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.

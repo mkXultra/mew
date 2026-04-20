@@ -561,6 +561,33 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(bundle["verification"]["latest"]["exit_code"], 0)
 
                 state = load_state()
+                state["work_sessions"][0]["tool_calls"].append(
+                    {
+                        "id": 51,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "result": {
+                            "command": "uv run pytest -q tests/test_self_improve.py",
+                            "exit_code": 0,
+                            "started_at": now_iso(),
+                            "finished_at": now_iso(),
+                        },
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as run_tests_stdout:
+                    run_tests_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(run_tests_code, 0)
+                run_tests_bundle = json.loads(run_tests_stdout.getvalue())
+                self.assertEqual(run_tests_bundle["verification"]["status"], "passed")
+                self.assertEqual(run_tests_bundle["verification"]["latest"]["source"], "work_tool")
+                self.assertEqual(run_tests_bundle["verification"]["latest"]["tool"], "run_tests")
+                self.assertEqual(run_tests_bundle["verification"]["latest"]["tool_call_id"], 51)
+                self.assertEqual(run_tests_bundle["verification"]["latest"]["exit_code"], 0)
+
+                state = load_state()
                 state["work_sessions"][0]["notes"].append(
                     {
                         "created_at": now_iso(),

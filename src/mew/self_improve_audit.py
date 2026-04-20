@@ -186,6 +186,11 @@ def _verification_records(state, task, session):
         if not isinstance(call, dict):
             continue
         result = call.get("result") or {}
+        if call.get("tool") == "run_tests" and isinstance(result, dict) and "exit_code" in result:
+            item = _verification_record_from_command("work_tool", result)
+            item["tool_call_id"] = call.get("id")
+            item["tool"] = call.get("tool") or ""
+            records.append(item)
         verification = result.get("verification")
         if isinstance(verification, dict):
             item = _verification_record_from_command("work_tool", verification)
