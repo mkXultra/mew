@@ -1088,7 +1088,7 @@ def start_work_model_turn(state, session, decision_plan, action_plan, action, gu
     return turn
 
 
-def update_work_model_turn_plan(state, session_id, turn_id, decision_plan, action_plan, action):
+def update_work_model_turn_plan(state, session_id, turn_id, decision_plan, action_plan, action, model_metrics=None):
     session = find_work_session(state, session_id)
     turn = find_work_model_turn(session, turn_id)
     if not turn:
@@ -1098,6 +1098,8 @@ def update_work_model_turn_plan(state, session_id, turn_id, decision_plan, actio
     turn["action_plan"] = dict(action_plan or {})
     turn["action"] = dict(action or {})
     turn["summary"] = (action_plan or {}).get("summary") or (decision_plan or {}).get("summary") or turn.get("summary") or ""
+    if model_metrics is not None:
+        turn["model_metrics"] = dict(model_metrics or {})
     turn["updated_at"] = current_time
     if session:
         session["updated_at"] = current_time

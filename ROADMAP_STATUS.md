@@ -27,7 +27,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 19:51 JST.
+Last assessed: 2026-04-20 20:01 JST.
 
 Active work: **M6.5 Self-Hosting Speed** while the M6 enhanced proof runs in
 parallel.
@@ -60,12 +60,10 @@ Current next action:
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Build the first M6.5 slice: self-hosting speed metrics and a gate that
-   records first THINK latency, prompt/context size, memory injection size, time
-   to first tool, and time to first edit proposal.
-4. Add the reasoning-effort policy needed for small implementation work, then
-   rerun a #320-class self-hosting task and compare first useful output and
-   edit-proposal latency.
+3. Build the next M6.5 slice: reasoning-effort policy for small implementation
+   work, exploration, safety, recovery, and roadmap decisions.
+4. Rerun a #320-class self-hosting task and compare first useful output and
+   edit-proposal latency against the failed attempt.
 5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
    without dropping the M6.5 active focus.
 6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
@@ -374,16 +372,24 @@ Evidence:
   silent Codex rescue edits counted as autonomy.
 - `claude-ultra` session `f220b253-51d5-435e-ab24-520190e3f97e` agreed that
   prompt pipeline speed work should precede further M7 collectors.
+- Work model turns now persist `model_metrics` with context size, injected
+  active-memory size/count, THINK prompt chars, THINK latency, ACT prompt chars,
+  ACT latency, and total model seconds.
+- `mew metrics` now prints and returns a `self_hosting` section with first
+  THINK latency, first dry-run edit proposal latency, context chars,
+  active-memory chars/count, prompt chars, and total model seconds.
+- Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
+  `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
+  targeted `ruff`, `uv run python -m py_compile`, and `git diff --check` passed.
 
 Missing proof:
 
-- No self-hosting speed gate yet records first THINK latency, prompt/context
-  size, memory injection size, time to first tool, and time to first edit
-  proposal.
 - No reasoning-effort auto policy exists yet for small implementation versus
   safety/recovery/roadmap work.
 - No small implementation prompt mode or differential/pointer context path
   exists yet.
+- No post-instrumentation real Codex work session has populated the new
+  `self_hosting` metrics yet.
 - The #320-class task has not yet been rerun successfully after speed changes.
 
 Done when:
@@ -402,8 +408,8 @@ Done when:
 
 Next action:
 
-- Implement the M6.5 speed metric report first, then add reasoning-effort
-  policy and rerun a #320-class self-hosting task.
+- Add reasoning-effort policy, then rerun a #320-class self-hosting task and
+  compare the new `self_hosting` metrics against the failed attempt.
 
 ### M7: Senses - Inbound Signals
 

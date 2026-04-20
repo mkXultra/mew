@@ -6025,6 +6025,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(session["notes"][0]["source"], "user")
                 self.assertIn("User steer for this step:", session["model_turns"][0]["guidance_snapshot"])
                 self.assertIn("prefer reading README first", session["model_turns"][0]["guidance_snapshot"])
+                metrics = session["model_turns"][0].get("model_metrics") or {}
+                self.assertGreater(metrics.get("context_chars", 0), 0)
+                self.assertGreater(metrics.get("think", {}).get("prompt_chars", 0), 0)
+                self.assertGreaterEqual(metrics.get("think", {}).get("elapsed_seconds", -1), 0)
+                self.assertEqual(metrics.get("act", {}).get("mode"), "deterministic")
+                self.assertEqual(metrics.get("act", {}).get("prompt_chars"), 0)
             finally:
                 os.chdir(old_cwd)
 

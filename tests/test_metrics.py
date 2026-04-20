@@ -27,6 +27,14 @@ class MetricsTests(unittest.TestCase):
                         "tool_call_id": 1,
                         "started_at": "2026-04-19T00:00:01Z",
                         "finished_at": "2026-04-19T00:00:03Z",
+                        "model_metrics": {
+                            "context_chars": 12345,
+                            "active_memory_chars": 456,
+                            "active_memory_entries": 2,
+                            "think": {"prompt_chars": 111, "elapsed_seconds": 7.5},
+                            "act": {"prompt_chars": 222, "elapsed_seconds": 2.0, "mode": "model"},
+                            "total_model_seconds": 9.5,
+                        },
                     },
                     {
                         "id": 2,
@@ -115,6 +123,14 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["latency"]["model_resume_wait_seconds"]["avg"], 3.0)
         self.assertEqual(metrics["latency"]["approval_bound_wait_seconds"]["count"], 0)
         self.assertEqual(metrics["latency"]["perceived_idle_ratio"]["avg"], 0.588)
+        self.assertEqual(metrics["self_hosting"]["first_think_latency_seconds"]["avg"], 7.5)
+        self.assertEqual(metrics["self_hosting"]["first_edit_proposal_seconds"]["avg"], 11.0)
+        self.assertEqual(metrics["self_hosting"]["context_chars"]["avg"], 12345.0)
+        self.assertEqual(metrics["self_hosting"]["active_memory_chars"]["avg"], 456.0)
+        self.assertEqual(metrics["self_hosting"]["active_memory_entries"]["avg"], 2.0)
+        self.assertEqual(metrics["self_hosting"]["think_prompt_chars"]["avg"], 111.0)
+        self.assertEqual(metrics["self_hosting"]["act_prompt_chars"]["avg"], 222.0)
+        self.assertEqual(metrics["self_hosting"]["total_model_seconds"]["avg"], 9.5)
         signal_ids = {signal["id"] for signal in metrics["signals"]}
         self.assertIn("approval_friction", signal_ids)
         self.assertIn("verification_friction", signal_ids)
@@ -124,6 +140,10 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("interventions=3", text)
         self.assertIn("rates: completion=1.0 interventions_per_session=3.0", text)
         self.assertIn("perceived_idle_ratio: count=1 avg=0.588 median=0.588 p95=0.588 max=0.588", text)
+        self.assertIn("self_hosting:", text)
+        self.assertIn("first_think_latency_seconds: count=1 avg=7.5", text)
+        self.assertIn("first_edit_proposal_seconds: count=1 avg=11.0", text)
+        self.assertIn("context_chars: count=1 avg=12345.0", text)
         self.assertIn("signals:", text)
         self.assertIn("verification failures are frequent", text)
         self.assertIn("diagnostics:", text)

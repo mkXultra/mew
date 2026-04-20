@@ -152,6 +152,54 @@ def _first_tool_start_seconds(session, model_turns, tool_calls):
     return _duration_seconds(baseline, min(starts))
 
 
+def _first_edit_proposal_seconds(session, model_turns, tool_calls):
+    started_turns = [turn for turn in model_turns or [] if isinstance(turn, dict) and turn.get("started_at")]
+    baseline = min((turn.get("started_at") for turn in started_turns), default=session.get("created_at"))
+    starts = [
+        call.get("started_at")
+        for call in tool_calls
+        if isinstance(call, dict)
+        and call.get("tool") in WORK_WRITE_TOOLS
+        and call.get("started_at")
+        and (call.get("result") or {}).get("dry_run")
+        and (call.get("result") or {}).get("changed")
+    ]
+    if not starts:
+        return None
+    return _duration_seconds(baseline, min(starts))
+
+
+def _model_metric(turn, *keys):
+    value = (turn or {}).get("model_metrics") or {}
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    if value in ("", [], {}):
+        return None
+    return value
+
+
+def _numeric_model_metric(turn, *keys):
+    value = _model_metric(turn, *keys)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_think_latency_seconds(model_turns):
+    for turn in model_turns or []:
+        if not isinstance(turn, dict):
+            continue
+        value = _numeric_model_metric(turn, "think", "elapsed_seconds")
+        if value is not None:
+            return value
+    return None
+
+
 def _first_tool_start_sample(state, session, model_turns, tool_calls):
     seconds = _first_tool_start_seconds(session, model_turns, tool_calls)
     if seconds is None or seconds <= SLOW_FIRST_TOOL_SECONDS:
@@ -873,7 +921,7 @@ def _add_signal(signals, signal_id, severity, message, *, value=None, threshold=
     signals.append(signal)
 
 
-def _build_signals(sessions, reliability, latency):
+def _build_signals(sessions, reliability, latency, self_hosting=None):
     signals = []
     if sessions.get("awaiting_approval", 0) > 0:
         _add_signal(
@@ -964,6 +1012,17 @@ def _build_signals(sessions, reliability, latency):
             threshold="<=0.8",
         )
 
+    first_think_p95 = ((self_hosting or {}).get("first_think_latency_seconds") or {}).get("p95")
+    if first_think_p95 is not None and first_think_p95 > SLOW_FIRST_TOOL_SECONDS:
+        _add_signal(
+            signals,
+            "slow_first_think",
+            "warn",
+            "first THINK latency is slow at p95",
+            value=first_think_p95,
+            threshold=f"<={SLOW_FIRST_TOOL_SECONDS:.0f}s",
+        )
+
     if not signals:
         _add_signal(signals, "no_obvious_bottleneck", "ok", "no obvious bottleneck in selected sessions")
     return signals
@@ -997,6 +1056,14 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     model_resume_waits = []
     approval_bound_waits = []
     idle_ratios = []
+    first_think_latencies = []
+    first_edit_proposal_times = []
+    context_chars = []
+    active_memory_chars = []
+    active_memory_entries = []
+    think_prompt_chars = []
+    act_prompt_chars = []
+    total_model_seconds = []
     successful_verifications = _successful_verifications(state)
 
     for session in sessions:
@@ -1053,6 +1120,15 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
             if record.get("approval_bound_wait_seconds") is not None
         )
         idle_ratios.append(_session_idle_ratio(session, model_turns, tool_calls))
+        first_think_latencies.append(_first_think_latency_seconds(model_turns))
+        first_edit_proposal_times.append(_first_edit_proposal_seconds(session, model_turns, tool_calls))
+        for turn in model_turns:
+            context_chars.append(_numeric_model_metric(turn, "context_chars"))
+            active_memory_chars.append(_numeric_model_metric(turn, "active_memory_chars"))
+            active_memory_entries.append(_numeric_model_metric(turn, "active_memory_entries"))
+            think_prompt_chars.append(_numeric_model_metric(turn, "think", "prompt_chars"))
+            act_prompt_chars.append(_numeric_model_metric(turn, "act", "prompt_chars"))
+            total_model_seconds.append(_numeric_model_metric(turn, "total_model_seconds"))
 
     intervention_count = (
         tool_counts["failed"]
@@ -1095,6 +1171,16 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "approval_bound_wait_seconds": _summary(approval_bound_waits),
         "perceived_idle_ratio": _summary(idle_ratios),
     }
+    self_hosting = {
+        "first_think_latency_seconds": _summary(first_think_latencies),
+        "first_edit_proposal_seconds": _summary(first_edit_proposal_times),
+        "context_chars": _summary(context_chars),
+        "active_memory_chars": _summary(active_memory_chars),
+        "active_memory_entries": _summary(active_memory_entries),
+        "think_prompt_chars": _summary(think_prompt_chars),
+        "act_prompt_chars": _summary(act_prompt_chars),
+        "total_model_seconds": _summary(total_model_seconds),
+    }
     return {
         "kind": kind or "all",
         "session_limit": limit,
@@ -1102,7 +1188,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "sessions": session_counts,
         "reliability": reliability,
         "latency": latency,
-        "signals": _build_signals(session_counts, reliability, latency),
+        "self_hosting": self_hosting,
+        "signals": _build_signals(session_counts, reliability, latency, self_hosting),
         "diagnostics": _diagnostic_samples(
             state,
             sessions,
@@ -1116,6 +1203,7 @@ def format_observation_metrics(data):
     sessions = data.get("sessions") or {}
     reliability = data.get("reliability") or {}
     latency = data.get("latency") or {}
+    self_hosting = data.get("self_hosting") or {}
     lines = [
         "Mew observation metrics",
         f"scope: kind={data.get('kind') or 'all'} session_limit={data.get('session_limit')}",
@@ -1152,6 +1240,22 @@ def format_observation_metrics(data):
         ("perceived_idle_ratio", "perceived_idle_ratio"),
     ):
         summary = latency.get(key) or {}
+        lines.append(
+            f"{label}: count={summary.get('count', 0)} avg={summary.get('avg')} "
+            f"median={summary.get('median')} p95={summary.get('p95')} max={summary.get('max')}"
+        )
+    lines.append("self_hosting:")
+    for label, key in (
+        ("first_think_latency_seconds", "first_think_latency_seconds"),
+        ("first_edit_proposal_seconds", "first_edit_proposal_seconds"),
+        ("context_chars", "context_chars"),
+        ("active_memory_chars", "active_memory_chars"),
+        ("active_memory_entries", "active_memory_entries"),
+        ("think_prompt_chars", "think_prompt_chars"),
+        ("act_prompt_chars", "act_prompt_chars"),
+        ("total_model_seconds", "total_model_seconds"),
+    ):
+        summary = self_hosting.get(key) or {}
         lines.append(
             f"{label}: count={summary.get('count', 0)} avg={summary.get('avg')} "
             f"median={summary.get('median')} p95={summary.get('p95')} max={summary.get('max')}"

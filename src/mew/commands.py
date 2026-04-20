@@ -2755,6 +2755,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 planned.get("action_plan") or {},
                 action,
             )
+            if planned.get("model_metrics") is not None:
+                turn["model_metrics"] = dict(planned.get("model_metrics") or {})
         else:
             turn = update_work_model_turn_plan(
                 state,
@@ -2763,6 +2765,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 planned.get("decision_plan") or {},
                 planned.get("action_plan") or {},
                 action,
+                model_metrics=planned.get("model_metrics"),
             )
         turn_id = turn.get("id")
         save_state(state)
@@ -3990,6 +3993,7 @@ def cmd_work_ai(args):
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     action,
+                    model_metrics=planned.get("model_metrics"),
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 if turn is not None:
@@ -4186,6 +4190,7 @@ def cmd_work_ai(args):
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     action,
+                    model_metrics=planned.get("model_metrics"),
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 control_effect = apply_work_control_action(state, session, task, action)
@@ -4283,6 +4288,7 @@ def cmd_work_ai(args):
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     action,
+                    model_metrics=planned.get("model_metrics"),
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 if turn is not None:
@@ -4329,6 +4335,7 @@ def cmd_work_ai(args):
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     safety_action,
+                    model_metrics=planned.get("model_metrics"),
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id)
                 if turn is not None:
@@ -4385,6 +4392,7 @@ def cmd_work_ai(args):
                     planned.get("decision_plan") or {},
                     planned.get("action_plan") or {},
                     steer_action,
+                    model_metrics=planned.get("model_metrics"),
                 )
                 steer = queue_work_session_steer(
                     session,
@@ -4444,6 +4452,7 @@ def cmd_work_ai(args):
                 planned.get("decision_plan") or {},
                 planned.get("action_plan") or {},
                 action,
+                model_metrics=planned.get("model_metrics"),
             )
             if coerced_test_dry_run:
                 turn["coerced_dry_run_reason"] = "paired_test_steer"

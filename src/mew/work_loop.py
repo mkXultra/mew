@@ -1,6 +1,7 @@
 import json
 import os
 import shlex
+import time
 
 from .agent import call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
@@ -295,6 +296,20 @@ def _json_size(value):
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
     except (TypeError, ValueError):
         return len(str(value))
+
+
+def _round_seconds(value):
+    return round(float(value), 3)
+
+
+def _active_memory_metrics(context):
+    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    active_memory = resume.get("active_memory") or []
+    entries = len(active_memory) if isinstance(active_memory, list) else 0
+    return {
+        "active_memory_chars": _json_size(active_memory),
+        "active_memory_entries": entries,
+    }
 
 
 def build_work_session_context(
@@ -923,18 +938,29 @@ def plan_work_model_turn(
     delta_progress = progress if progress_model_deltas else None
     think_delta = model_delta_progress(delta_progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
+    think_prompt = build_work_think_prompt(context)
+    think_started = time.monotonic()
     decision_plan = call_model_json_with_retries(
         model_backend,
         model_auth,
-        build_work_think_prompt(context),
+        think_prompt,
         model,
         base_url,
         timeout,
         log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
         **think_kwargs,
     )
+    think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
+    model_metrics = {
+        "context_chars": _json_size(context),
+        **_active_memory_metrics(context),
+        "think": {
+            "prompt_chars": len(think_prompt),
+            "elapsed_seconds": _round_seconds(think_elapsed),
+        },
+    }
     if act_mode == "deterministic":
         action = normalize_work_model_action(decision_plan, verify_command=verify_command)
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
@@ -943,6 +969,11 @@ def plan_work_model_turn(
             "action": action,
             "act_mode": "deterministic",
         }
+        model_metrics["act"] = {
+            "prompt_chars": 0,
+            "elapsed_seconds": 0.0,
+            "mode": "deterministic",
+        }
         if progress:
             progress(f"session #{session.get('id')}: ACT deterministic action={action.get('type') or 'unknown'}")
     else:
@@ -950,17 +981,29 @@ def plan_work_model_turn(
             progress(f"session #{session.get('id')}: ACT start")
         act_delta = model_delta_progress(delta_progress, session.get("id"), "ACT", sink=capture_delta) if stream_model else None
         act_kwargs = {"on_text_delta": act_delta} if act_delta else {}
+        act_prompt = build_work_act_prompt(context, decision_plan)
+        act_started = time.monotonic()
         action_plan = call_model_json_with_retries(
             model_backend,
             model_auth,
-            build_work_act_prompt(context, decision_plan),
+            act_prompt,
             model,
             base_url,
             timeout,
             log_prefix=f"{current_time}: work_act {model_backend} session={session.get('id')}",
             **act_kwargs,
         )
+        act_elapsed = time.monotonic() - act_started
+        model_metrics["act"] = {
+            "prompt_chars": len(act_prompt),
+            "elapsed_seconds": _round_seconds(act_elapsed),
+            "mode": "model",
+        }
     action = normalize_work_model_action(action_plan, verify_command=verify_command)
+    model_metrics["total_model_seconds"] = _round_seconds(
+        (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
+        + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
+    )
     if progress:
         progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
     return {
@@ -968,5 +1011,6 @@ def plan_work_model_turn(
         "action_plan": action_plan,
         "action": action,
         "context": context,
+        "model_metrics": model_metrics,
         "model_stream": compact_model_stream(stream_deltas),
     }
