@@ -589,6 +589,19 @@ Evidence:
   `work_session.resume.suggested_verify_command.command`. Focused and broader
   validation passed, but this patch is not comparator evidence because mew did
   not author a reviewable dry-run edit in #326.
+- M6.6-C task #327 / session #314 then replaced the blocked #326 evidence path
+  with a fresh mew-side run: after a few repeated narrow searches and two
+  reviewer steers, mew used one exact src window read, proposed a paired
+  dry-run edit batch, focused pytest passed on apply, and reviewer broader
+  `uv run python -m unittest tests.test_work_session` passed. The resulting
+  patch in `src/mew/work_loop.py` and `tests/test_work_session.py` tells the
+  model to reuse an exact `recent_read_file_windows` entry instead of issuing
+  another same-span `read_file` during edit preparation. `rescue_edits=0`.
+- Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
+  Finish the mew-side M6.6 implementation set first, freeze a commit, then run
+  the remaining comparator tasks in parallel detached worktrees as gate
+  evidence. Comparator work is evidence collection, not the implementation
+  critical path.
 - On 2026-04-20, a proposed split to add `M6.5.2` as a separate
   "mew can implement mew sanely enough" milestone was considered and rejected.
   The current roadmap already assigns that role transition to the M6.6 first
@@ -602,12 +615,9 @@ Missing proof:
   normal coding tasks.
 - Coding loop: no built-in verifier discovery, repair loop, or self-review
   phase exists at the work-session level for general coding tasks yet.
-- Comparator: M6.6-A and M6.6-B now have checked-in side-by-side evidence, but
-  the representative set is still incomplete and too small to claim stable
-  parity on correctness, tool churn, latency, and reviewability.
-- M6.6-C comparator: the first mew-side attempt is blocked and explicitly
-  non-counting; a fresh mew-authored run is still needed before any Codex CLI
-  side-by-side result can close the feature slice.
+- Comparator: M6.6-A and M6.6-B have checked-in side-by-side evidence, and
+  M6.6-C now has a mew-side run, but the frozen-commit parallel comparator
+  batch for the final M6.6 implementation set has not been run yet.
 - M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
   caveat.
 - Robustness: the successful retry still needed reviewer steering and one
@@ -619,10 +629,10 @@ Done when:
   mew completes three predeclared representative coding tasks without Codex
   rescue edits: one behavior-preserving refactor, one bug fix with a regression
   test, and one small feature with paired source/test changes.
-- The same tasks are compared against Codex CLI in a checked-in comparator
-  artifact that records first-edit latency, model turns, search/read calls
-  before first edit, changed files, verifier commands, repair cycles, and
-  review outcome.
+- The final frozen M6.6 implementation set is compared against Codex CLI in a
+  checked-in comparator artifact that records first-edit latency, model turns,
+  search/read calls before first edit, changed files, verifier commands,
+  repair cycles, and review outcome.
 - Every comparator task has `rescue_edits=0`, no obvious path hallucination, no
   repeated identical broad search/read loop, and a focused verifier command
   chosen by mew.
@@ -638,14 +648,17 @@ Next action:
 
 - Keep M6.6 active; do not introduce `M6.5.2`.
 - Carry the landed suggested-verifier fallback as product progress, but do not
-  count task #326 as comparator evidence.
-- Start a fresh mew-side M6.6-C small-feature run after this fallback fix, then
-  run the matching Codex CLI comparator in a clean worktree and record the same
-  side-by-side latency/tool-churn/reviewability evidence.
+  count task #326 as comparator evidence; use task #327 as the M6.6-C mew-side
+  replacement run.
+- Commit the finished M6.6-C mew-side slice and continue the next mew-side
+  M6.6 implementation task toward built-in verifier discovery, repair, or
+  self-review.
+- Defer the remaining/final Codex CLI comparator runs until the M6.6
+  implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
   mew-as-implementer readiness work as M6.6 first-slice sub-tasks, then
-  continue M6.6-C with the same side-by-side comparator discipline used for
-  M6.6-A and M6.6-B.
+  continue with the next M6.6 coding-loop slice instead of per-slice
+  comparator work.
 
 ### M7: Senses - Inbound Signals
 

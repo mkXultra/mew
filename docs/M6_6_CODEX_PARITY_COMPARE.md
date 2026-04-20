@@ -12,7 +12,13 @@ M6.6 closes only after three predeclared representative coding tasks pass:
 |---|---|---|---|---|---|
 | M6.6-A | Behavior-preserving refactor | `side_by_side_recorded` | #325 / session #311 | `/tmp/mew-m66a-codex-20260420-2316` | 0 |
 | M6.6-B | Bug fix with regression test | `side_by_side_recorded` | #324 / session #310 | `/tmp/mew-m66b-codex-20260420-2218` | 0 |
-| M6.6-C | Small feature with paired source/test changes | `blocked_pending_fresh_mew_run` | #326 / sessions #312-#313 (not counted) | | |
+| M6.6-C | Small feature with paired source/test changes | `mew_run_recorded_comparator_deferred` | #327 / session #314 | deferred until M6.6 freeze | 0 |
+
+Comparator note:
+
+- Codex CLI comparator runs are gate evidence, not per-slice critical-path work.
+- Once the mew-side M6.6 implementation set is stable, run the remaining
+  comparator tasks from that frozen commit in parallel detached worktrees.
 
 Required pass conditions for each task:
 
@@ -303,7 +309,60 @@ Review:
 
 Verdict: Codex CLI comparator passed with environment caveat.
 
-## M6.6-C Blocker Note
+### M6.6-C mew run
+
+Task: #327 `M6.6-C comparator: recent window reuse guidance`
+
+Predeclared success criteria:
+
+- Add one small prompt behavior feature in `src/mew/work_loop.py`: when
+  `work_session.recent_read_file_windows` already contains the exact recent
+  path/span or old text needed for edit preparation, explicitly tell the model
+  to reuse that recent window instead of issuing another same-span `read_file`.
+- Add one focused regression assertion in
+  `tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch`.
+- Codex may steer/review/approve only; no rescue edits.
+
+Start time: 2026-04-20 23:50 JST
+End time: 2026-04-20 23:55 JST
+
+Metrics:
+
+- first_edit_latency_seconds: about 242
+- model_turns: 4 before first edit proposal; 6 total
+- search_calls_before_first_edit: 5
+- read_calls_before_first_edit: 4
+- changed_files: `src/mew/work_loop.py`,
+  `tests/test_work_session.py`
+- verifier_commands:
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch --no-testmon`;
+  reviewer broader verify:
+  `uv run python -m unittest tests.test_work_session`
+- repair_cycles: 0
+- prompt_context_chars: not recorded
+- rescue_edits: 0
+- adopted_reference_patterns: read-only exploration discipline, Codex
+  patch/review loop, paired source/test approval surface
+
+Review:
+
+- correctness: focused verifier passed on apply, then reviewer broader verify
+  passed with `396 tests`
+- minimality: one prompt sentence expanded and one focused assertion added
+- reviewability: mew proposed a paired dry-run edit batch (#2270/#2271) before
+  apply; Codex only approved/applied it as #2272/#2273
+- resident_state_reuse: session #314 reused task guidance, touched-file state,
+  and recent read windows; the final patch directly reduced same-span reread
+  churn during edit preparation
+- notes: the first fresh attempt still repeated narrow `search_text` on the
+  same src symbol, so reviewer steer redirected the run toward one exact src
+  window read (#2269) and then a paired dry-run batch; this run counts as
+  mew-side evidence with steering but no rescue edits
+
+Verdict: mew run passed. Matching Codex CLI comparator is deferred until the
+M6.6 implementation set is frozen.
+
+## Historical M6.6-C Blocker Note
 
 Task: #326 `M6.6-C comparator: suggested verifier fallback`
 
@@ -339,13 +398,15 @@ Not-counted direct fix:
   comparator evidence because sessions #312/#313 never reached a reviewable
   dry-run edit.
 
-Verdict: M6.6-C remains open and needs a fresh mew-side run after this direct
-fix; do not treat task #326 as passed comparator evidence.
+Verdict: historical blocker only. Task #326 does not count as M6.6-C evidence;
+task #327 is the replacement mew-side run.
 
 ## Current Comparator State
 
-Bootstrap is complete. M6.6-A and M6.6-B now have side-by-side mew/Codex CLI
+Bootstrap is complete. M6.6-A and M6.6-B have side-by-side mew/Codex CLI
 evidence. M6.6-B still carries an environment caveat from its comparator run.
-M6.6-C has a landed direct fix, but its first mew-side attempt is explicitly
-non-counting blocker evidence, so a fresh mew run is still required before the
-matching Codex CLI comparator can be scheduled.
+M6.6-C now has mew-side evidence from task #327 / session #314. By project
+decision on 2026-04-21, the remaining/final Codex CLI comparator runs are
+deferred until the M6.6 mew-side implementation set is frozen, then they should
+run in parallel detached worktrees as gate evidence rather than per-slice
+critical-path work.

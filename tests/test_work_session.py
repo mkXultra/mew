@@ -12782,6 +12782,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("do not finish solely because older notes", prompt)
         self.assertIn("guidance_snapshot", prompt)
         self.assertIn("recent_read_file_windows", prompt)
+        self.assertIn("reuse that recent window instead of issuing another same-span read_file", prompt)
         self.assertIn("not current instructions", prompt)
         self.assertIn("capabilities object as current and authoritative", prompt)
         self.assertIn("work_session.resume.active_memory", prompt)
