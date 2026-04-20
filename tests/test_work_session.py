@@ -5416,6 +5416,12 @@ class WorkSessionTests(unittest.TestCase):
             "working_memory": {
                 "hypothesis": "Approval UX still needs command output visibility.",
                 "next_step": "Add a focused command-output pane.",
+                "plan_items": [
+                    "Capture the failing approval transcript.",
+                    "Add a focused command-output pane.",
+                    "Verify the narrowed approval flow.",
+                    "Ignore this extra item.",
+                ],
                 "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
                 "open_questions": ["Should chat expose the same pane?"],
                 "last_verified_state": "full suite passed before this slice",
@@ -5435,6 +5441,14 @@ class WorkSessionTests(unittest.TestCase):
         memory = resume["working_memory"]
         self.assertEqual(memory["hypothesis"], "Approval UX still needs command output visibility.")
         self.assertEqual(memory["next_step"], "Add a focused command-output pane.")
+        self.assertEqual(
+            memory["plan_items"],
+            [
+                "Capture the failing approval transcript.",
+                "Add a focused command-output pane.",
+                "Verify the narrowed approval flow.",
+            ],
+        )
         self.assertEqual(memory["target_paths"], ["src/mew/workbench.py", "tests/test_workbench.py"])
         self.assertEqual(memory["open_questions"], ["Should chat expose the same pane?"])
         self.assertEqual(memory["last_verified_state"], "full suite passed before this slice")
@@ -5445,6 +5459,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Working memory", text)
         self.assertIn("hypothesis: Approval UX still needs command output visibility.", text)
         self.assertIn("next_step: Add a focused command-output pane.", text)
+        self.assertIn("plan_items:", text)
+        self.assertIn("- Capture the failing approval transcript.", text)
+        self.assertIn("- Verify the narrowed approval flow.", text)
+        self.assertNotIn("- Ignore this extra item.", text)
         self.assertIn("target_paths: src/mew/workbench.py, tests/test_workbench.py", text)
         self.assertIn("- Should chat expose the same pane?", text)
 
@@ -5457,6 +5475,14 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["next_step"],
             "Add a focused command-output pane.",
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["working_memory"]["plan_items"],
+            [
+                "Capture the failing approval transcript.",
+                "Add a focused command-output pane.",
+                "Verify the narrowed approval flow.",
+            ],
         )
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["target_paths"],

@@ -640,6 +640,20 @@ Evidence:
   `tests/test_work_session.py` tells THINK to issue a direct `read_file` on a
   known `working_memory.target_paths` entry before repeating same-surface
   `search_text`. `rescue_edits=0`.
+- M6.6 task #333 / session #320 attempted to widen durable plan state with a
+  three-file `plan_items` checklist slice, but under high context pressure the
+  native loop could not safely reconstruct the full
+  `work_session.py`/`work_loop.py`/test batch after one old-text mismatch in
+  `src/mew/work_session.py`. The task was recorded as blocked evidence for
+  multi-file exact-old-text retention, not as a passed mew-side slice.
+- M6.6 task #334 / session #321 then retried the narrower persistence half in
+  `src/mew/work_session.py` and `tests/test_work_session.py`. Mew reached a
+  partial dry-run, but the accepted patch landed directly afterward for product
+  progress rather than autonomy credit: `working_memory.plan_items` now seeds in
+  startup memory, normalizes and caps to 3 items, surfaces in resume text, and
+  appears in model context. Focused `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress, not no-rescue mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -655,9 +669,11 @@ Missing proof:
 
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
   and #332 now proves one normal-case anti-churn/path-recall behavior for
-  `working_memory.target_paths`, but broader durable checklist/path-recall
-  behavior is still not proven across multi-file normal coding tasks or resume
-  after context compression.
+  `working_memory.target_paths`. `working_memory.plan_items` now exists as
+  product behavior for persistence/surfacing, but broader durable
+  checklist/path-recall behavior is still not proven by a no-rescue mew-side
+  task across multi-file normal coding work or resume after context
+  compression.
 - Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
   and prompt-level same-surface self-review are now improved, but there is
   still no broader work-session self-review phase beyond the `src/mew`
@@ -670,8 +686,10 @@ Missing proof:
 - Robustness: the successful retries still needed reviewer steering, one
   read-root permission repair, in #330 one incorrect line-window guess, in
   #331 an exact-old-string reread loop under high context pressure, and in
-  #332 one steer to stop repeated same-symbol search before the exact read, so
-  the native loop is not yet self-sufficient.
+  #332 one steer to stop repeated same-symbol search before the exact read. The
+  blocked #333 and direct-patch #334 follow-ups show that multi-file exact
+  old-text retention is still fragile once context pressure rises, so the
+  native loop is not yet self-sufficient.
 
 Done when:
 
@@ -703,10 +721,13 @@ Next action:
 - Record task #332 / session #319 as fresh mew-side path-recall/anti-churn
   proof for the frozen M6.6 implementation set, but not as one of the three
   comparator slots.
-- Keep M6.6 on the mew-side critical path and use the next slice to widen
-  durable plan/path recall or broader work-session self-review beyond prompt-
-  only guidance, with no comparator work until the mew-side implementation set
-  is frozen.
+- Carry the landed `plan_items` persistence half from #334 as product progress,
+  but do not count it as no-rescue evidence.
+- Keep M6.6 on the mew-side critical path and use the next slice to prove the
+  landed checklist behavior with a smaller no-rescue task, or to narrow the
+  exact-old-text retention blocker enough that mew can land the next checklist
+  slice itself. Do not return to comparator work until the mew-side
+  implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

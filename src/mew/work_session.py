@@ -702,6 +702,7 @@ def startup_working_memory(task):
     return {
         "hypothesis": f"Start {task_ref}: {title}",
         "next_step": "continue the work session with one bounded model/tool step, then verify or record the next blocker",
+        "plan_items": [],
         "open_questions": [],
         "source": "session_startup",
         "goal": goal,
@@ -2051,6 +2052,24 @@ def _coerce_working_memory_target_paths(value):
     return paths
 
 
+def _coerce_working_memory_plan_items(value):
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list):
+        candidates = value
+    else:
+        candidates = []
+    items = []
+    for item in candidates:
+        text = clip_output(str(item or "").strip(), 240)
+        if not text or text in items:
+            continue
+        items.append(text)
+        if len(items) >= 3:
+            break
+    return items
+
+
 def _turn_action_target_paths(turn):
     if not turn:
         return []
@@ -2075,6 +2094,7 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
     memory = {
         "hypothesis": clip_output(str(raw.get("hypothesis") or raw.get("current_hypothesis") or "").strip(), 600),
         "next_step": clip_output(str(raw.get("next_step") or raw.get("next_intended_step") or "").strip(), 600),
+        "plan_items": _coerce_working_memory_plan_items(raw.get("plan_items") or raw.get("checklist") or []),
         "open_questions": _coerce_open_questions(raw.get("open_questions") or raw.get("questions") or []),
         "last_verified_state": clip_output(
             observed_verified_state or str(raw.get("last_verified_state") or "").strip(),
@@ -2089,7 +2109,10 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             break
     if not memory["last_verified_state"]:
         memory["last_verified_state"] = clip_output(format_work_verification_state(verification_state), 600)
-    if not any(memory.get(key) for key in ("hypothesis", "next_step", "open_questions", "last_verified_state", "target_paths")):
+    if not any(
+        memory.get(key)
+        for key in ("hypothesis", "next_step", "plan_items", "open_questions", "last_verified_state", "target_paths")
+    ):
         return {}
     if turn:
         memory["model_turn_id"] = turn.get("id")
@@ -4248,6 +4271,10 @@ def format_work_session_resume(resume):
         if memory.get("next_step"):
             label = "stale_next_step" if stale_memory else "next_step"
             lines.append(f"{label}: {memory.get('next_step')}")
+        plan_items = memory.get("plan_items") or []
+        if plan_items:
+            lines.append("plan_items:")
+            lines.extend(f"- {item}" for item in plan_items)
         if memory.get("target_paths"):
             lines.append(f"target_paths: {', '.join(str(path) for path in memory.get('target_paths') or [])}")
         questions = memory.get("open_questions") or []
