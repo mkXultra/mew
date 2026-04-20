@@ -12977,6 +12977,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state", prompt)
         self.assertIn("prefer search_text for symbols or option names before broad read_file", prompt)
         self.assertIn("line_start and line_count", prompt)
+        self.assertIn("Explicit line_start/line_count reads auto-scale max_chars for edit preparation", prompt)
         self.assertIn("search the broader project tree or allowed read root", prompt)
         self.assertIn("instead of repeating same-file searches", prompt)
         self.assertIn("prefer one batch action", prompt)
@@ -13410,6 +13411,12 @@ class WorkSessionTests(unittest.TestCase):
         line_parameters = work_tool_parameters_from_action(line_action)
         self.assertEqual(line_parameters["line_start"], 42)
         self.assertEqual(line_parameters["line_count"], 12)
+        self.assertEqual(line_parameters["max_chars"], 12000)
+
+        large_line_parameters = work_tool_parameters_from_action(
+            {"type": "read_file", "path": "README.md", "line_start": 1, "line_count": 200}
+        )
+        self.assertEqual(large_line_parameters["max_chars"], 40000)
 
         diff_parameters = work_tool_parameters_from_action({"type": "git_diff"})
         self.assertTrue(diff_parameters["stat"])
@@ -13617,6 +13624,31 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(work_context["recent_read_file_windows"][0]["text"], text)
         self.assertEqual(work_context["recent_read_file_windows"][0]["tool_call_id"], 1)
         self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
+
+    def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):
+        from mew.work_loop import work_tool_call_for_model
+
+        text = "bridging recent-decisions window\n" * 900
+        call = {
+            "id": 1,
+            "tool": "read_file",
+            "status": "completed",
+            "parameters": {"path": "src/mew/work_session.py", "line_start": 3862, "line_count": 553, "max_chars": 50000},
+            "result": {
+                "path": "src/mew/work_session.py",
+                "line_start": 3862,
+                "line_end": 4414,
+                "text": text,
+                "truncated": False,
+            },
+            "summary": "read bridging line window",
+        }
+
+        item = work_tool_call_for_model(call)
+
+        self.assertEqual(item["result"]["text"], text)
+        self.assertEqual(item["result"]["visible_chars"], len(text))
+        self.assertFalse(item["result"]["context_truncated"])
 
     def test_work_prompt_context_mode_high_effort_uses_full_context(self):
         from mew.work_loop import work_prompt_context_mode

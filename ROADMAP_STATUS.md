@@ -758,6 +758,26 @@ Evidence:
   -m unittest tests.test_work_session`, `ruff`, `py_compile`, and `git diff
   --check` passed. This is product progress aimed at the #339 blocker, not
   mew-side evidence.
+- M6.6 task #340 / session #327 then tested that same-path rule with a fresh
+  `src/mew/work_session.py` paired source/test slice. The native loop obeyed
+  the rule: it moved from batched narrow searches to exact line-window reads,
+  realized the source change needed one consolidated `src/mew/work_session.py`
+  edit rather than duplicate same-file writes, and after one interrupt steer
+  chose a no-change finish instead of proposing an unsafe batch. That is
+  blocker evidence, not no-rescue credit: the bridging source window
+  `3862-4414` spans about 27.9k chars, so with the current 12k `read_file`
+  default and 12k/6k full-prompt/recent-window context caps the exact old text
+  remained prompt-truncated even after the correct single-file plan was found.
+- A direct supervisor patch then targeted that new #340 blocker: explicit
+  `read_file` line-window requests now auto-scale `max_chars` from `line_count`
+  when the model does not provide one, and full-prompt work context now keeps
+  the larger line-window result visible in `tool_calls` instead of clipping it
+  back to the old 12k display cap. The THINK prompt now tells mew that
+  line-window reads auto-scale `max_chars` for edit preparation. Focused
+  read-parameter/context tests plus `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #340 blocker, not mew-side
+  evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -809,9 +829,14 @@ Missing proof:
   the real recovery path after a sibling-tool failure. A further direct patch
   now rejects duplicate same-path writes inside a code batch and tells THINK to
   collapse same-file hunks into one file-level edit, which should reduce the
-  `old text was not found` failure mode observed in #339. Those reductions
-  still have not yet been proven by a fresh no-rescue work-session task. The
-  native loop is therefore improved but not yet self-sufficient.
+  `old text was not found` failure mode observed in #339. #340 then showed the
+  next blocker more precisely: once mew obeyed the one-file rule, it still
+  could not form the consolidated src edit because the needed bridging
+  line-window text was clipped by the 12k default read budget and prompt
+  display cap. A direct follow-up patch now auto-scales explicit line-window
+  reads and preserves those larger windows in full prompt context. Those
+  reductions still have not yet been proven by a fresh no-rescue work-session
+  task. The native loop is therefore improved but not yet self-sufficient.
 
 Done when:
 
@@ -856,11 +881,13 @@ Next action:
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native proof task that exercises the landed blocker-reduction set:
   merged recent windows, partial-write refusal, stale-approval invalidation,
-  and duplicate same-path write rejection. Choose one narrow
-  `src/mew/work_session.py` paired source/test slice that would previously have
-  invited multiple same-file edits, and verify that mew now either produces a
-  stable consolidated dry-run batch or cleanly replans without rescue. Do not
-  return to comparator work until the mew-side implementation set is frozen.
+  duplicate same-path write rejection, and auto-scaled bridging line-window
+  reads. Choose one narrow `src/mew/work_session.py` paired source/test slice
+  that needs one consolidated source edit across two nearby surfaces, and
+  verify that mew now requests or reuses a large enough exact line window,
+  proposes a stable consolidated dry-run batch, and avoids the same-span reread
+  loop seen before #340. Do not return to comparator work until the mew-side
+  implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

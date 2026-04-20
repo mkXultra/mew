@@ -46,6 +46,7 @@ WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
+WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
@@ -221,6 +222,36 @@ def _reasoning_value_text(value):
     return _json_clip(value, 2000)
 
 
+def _line_window_auto_max_chars(parameters):
+    parameters = parameters or {}
+    try:
+        base = max(
+            1,
+            min(int(parameters.get("max_chars") or WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS), 50000),
+        )
+    except (TypeError, ValueError):
+        base = WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS
+    if parameters.get("line_start") is None or parameters.get("line_count") is None:
+        return base
+    if parameters.get("max_chars") is not None:
+        return base
+    try:
+        line_count = max(1, min(int(parameters.get("line_count")), 1000))
+    except (TypeError, ValueError):
+        return base
+    return max(base, min(50000, line_count * WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE))
+
+
+def _read_file_context_text_limit_for_call(call, *, compact_prompt):
+    base = WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_READ_FILE_CONTEXT_TEXT_LIMIT
+    if compact_prompt or (call or {}).get("tool") != "read_file":
+        return base
+    parameters = (call or {}).get("parameters") or {}
+    if parameters.get("line_start") is None or parameters.get("line_count") is None:
+        return base
+    return max(base, _line_window_auto_max_chars(parameters))
+
+
 def compact_turn_reasoning(turn):
     decision_plan = turn.get("decision_plan") or {}
     if not isinstance(decision_plan, dict) or not decision_plan:
@@ -237,9 +268,7 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
     tool = call.get("tool") or ""
     compact_prompt = prompt_context_mode != "full"
     result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
-    read_file_text_limit = (
-        WORK_COMPACT_READ_FILE_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_READ_FILE_CONTEXT_TEXT_LIMIT
-    )
+    read_file_text_limit = _read_file_context_text_limit_for_call(call, compact_prompt=compact_prompt)
     list_item_text_limit = (
         WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
     )
@@ -847,7 +876,7 @@ def build_work_think_prompt(context):
         "If working_memory.target_paths lists likely files or directories for the next step, and one already names the likely file or directory, prefer a direct read_file on one of those target_paths before repeating same-surface search_text; otherwise prefer those paths before a broader project search, and keep that list short and current. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
-        "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
+        "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. "
         "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple hunks, collapse them into one edit_file or write_file against the most recent exact window for that path. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
@@ -1211,10 +1240,7 @@ def work_tool_parameters_from_action(
     parameters.setdefault("verify_timeout", verify_timeout)
     if action_type == "read_file":
         try:
-            parameters["max_chars"] = max(
-                1,
-                min(int(parameters.get("max_chars") or WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS), 50000),
-            )
+            parameters["max_chars"] = _line_window_auto_max_chars(parameters)
         except (TypeError, ValueError):
             parameters["max_chars"] = WORK_MODEL_READ_FILE_DEFAULT_MAX_CHARS
         for key, maximum in (("line_start", 1_000_000), ("line_count", 1000)):
