@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:52 JST.
+Last assessed: 2026-04-20 18:54 JST.
 
 Active work: **M6 Body**.
 
@@ -284,14 +284,20 @@ Evidence:
   and processes the file change through `external_event`.
 - Validation: `m6-daemon-restart` dogfood passed in
   `/tmp/mew-m6-daemon-restart-proof`, along with the focused dogfood pytest.
+- `mew daemon pause|resume|inspect|repair` now exposes daemon-specific control
+  verbs. Pause/resume update the same autonomy gate used by the runtime, inspect
+  reports the daemon status surface, and repair delegates to the existing repair
+  path under the daemon namespace.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, and `./mew daemon inspect` passed.
 
 Missing proof:
 
 - No long-duration daemon proof has shown the watcher and passive loop staying
   healthy beyond the short dogfood scenario.
 - No multi-hour resident proof has run through the daemon path.
-- Pause/inspect/repair/resume controls still reuse existing commands rather
-  than a daemon-specific cockpit.
+- Daemon controls exist, but they have not yet been exercised in a longer
+  resident proof.
 
 Done when:
 

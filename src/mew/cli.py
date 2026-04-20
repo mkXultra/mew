@@ -421,12 +421,31 @@ def build_parser():
     daemon_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
     daemon_status_parser.set_defaults(func=cmd_daemon)
 
+    daemon_inspect_parser = daemon_subparsers.add_parser("inspect", help="inspect daemon state")
+    daemon_inspect_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_inspect_parser.set_defaults(func=cmd_daemon)
+
     daemon_stop_parser = daemon_subparsers.add_parser("stop", help="stop the runtime daemon")
     daemon_stop_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after sending SIGTERM")
     daemon_stop_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for shutdown")
     daemon_stop_parser.add_argument("--poll-interval", type=float, default=0.1, help="shutdown poll interval in seconds")
     daemon_stop_parser.set_defaults(wait=True)
     daemon_stop_parser.set_defaults(func=cmd_daemon)
+
+    daemon_pause_parser = daemon_subparsers.add_parser("pause", help="pause autonomous daemon work")
+    daemon_pause_parser.add_argument("reason", nargs="*", help="optional pause reason")
+    daemon_pause_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_pause_parser.set_defaults(func=cmd_daemon)
+
+    daemon_resume_parser = daemon_subparsers.add_parser("resume", help="resume autonomous daemon work")
+    daemon_resume_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_resume_parser.set_defaults(func=cmd_daemon)
+
+    daemon_repair_parser = daemon_subparsers.add_parser("repair", help="repair daemon/runtime state")
+    daemon_repair_parser.add_argument("--force", action="store_true", help="repair even when a runtime lock is active")
+    daemon_repair_parser.add_argument("--dry-run", action="store_true", help="preview repairs without saving state")
+    daemon_repair_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_repair_parser.set_defaults(func=cmd_daemon)
 
     daemon_logs_parser = daemon_subparsers.add_parser("logs", help="show daemon output log")
     daemon_logs_parser.add_argument("--lines", type=int, default=40, help="number of log lines to print")

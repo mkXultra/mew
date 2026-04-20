@@ -108,8 +108,11 @@ def build_daemon_status(state, lock, pid_alive_func, *, current_time=None):
         "controls": {
             "start": mew_command("daemon", "start", "--", "--autonomous"),
             "stop": mew_command("daemon", "stop"),
+            "pause": mew_command("daemon", "pause", "maintenance"),
+            "resume": mew_command("daemon", "resume"),
+            "inspect": mew_command("daemon", "inspect"),
             "logs": mew_command("daemon", "logs"),
-            "repair": mew_command("repair"),
+            "repair": mew_command("daemon", "repair"),
         },
     }
 
@@ -139,6 +142,9 @@ def format_daemon_status(data):
         f"output: {data.get('output_path')}",
         f"start: {(data.get('controls') or {}).get('start')}",
         f"stop: {(data.get('controls') or {}).get('stop')}",
+        f"pause: {(data.get('controls') or {}).get('pause')}",
+        f"resume: {(data.get('controls') or {}).get('resume')}",
+        f"inspect: {(data.get('controls') or {}).get('inspect')}",
         f"logs: {(data.get('controls') or {}).get('logs')}",
         f"repair: {(data.get('controls') or {}).get('repair')}",
     ]

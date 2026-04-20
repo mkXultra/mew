@@ -8642,6 +8642,20 @@ def cmd_daemon(args):
         return cmd_start(args)
     if daemon_command == "stop":
         return cmd_stop(args)
+    if daemon_command == "repair":
+        return cmd_repair(args)
+    if daemon_command in ("pause", "resume"):
+        reason = " ".join(getattr(args, "reason", []) or []).strip()
+        paused = daemon_command == "pause"
+        chat_set_paused(paused, reason)
+        state = load_state()
+        data = build_daemon_status(state, read_lock(), pid_alive)
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print("daemon autonomy paused" if paused else "daemon autonomy resumed")
+            print(format_daemon_status(data))
+        return 0
     if daemon_command == "logs":
         data = tail_daemon_log(lines=getattr(args, "lines", 40))
         if getattr(args, "json", False):

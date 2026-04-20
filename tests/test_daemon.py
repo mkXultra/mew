@@ -83,6 +83,31 @@ class DaemonTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_daemon_pause_resume_and_inspect_are_cli_controls(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["daemon", "pause", "--json", "maintenance window"]), 0)
+                paused = json.loads(stdout.getvalue())
+                self.assertTrue(paused["safety"]["autonomy_paused"])
+                self.assertIn("mew daemon resume", paused["controls"]["resume"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["daemon", "inspect"]), 0)
+                inspect_text = stdout.getvalue()
+                self.assertIn("daemon_state:", inspect_text)
+                self.assertIn("pause:", inspect_text)
+                self.assertIn("repair:", inspect_text)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["daemon", "resume", "--json"]), 0)
+                resumed = json.loads(stdout.getvalue())
+                self.assertFalse(resumed["safety"]["autonomy_paused"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_daemon_logs_tails_runtime_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
