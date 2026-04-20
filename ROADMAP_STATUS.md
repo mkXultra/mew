@@ -1284,6 +1284,12 @@ Evidence:
   the week-scale synthetic reentry layer in an isolated filesystem/process
   environment. The durable summary was appended to
   `docs/M3_AGED_REENTRY_7DAY_2026-04-20.md`.
+- The same Docker proof runner also passed `m3-reentry-gate` as
+  `mew-proof-m3-reentry-gate-20260420-1040`. The isolated run preserved a
+  strong `9/9` mew resume bundle with one pending approval, an unresolved
+  verifier failure, the decisive next action, and fresh CLI comparison assets.
+  The durable summary was appended to
+  `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
 
 Missing proof:
 

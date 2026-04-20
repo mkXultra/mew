@@ -82,3 +82,31 @@ Limit:
 This is still a tiny synthetic README task. It strengthens the M3
 context-reconstruction proof, but it does not replace several-hour or multi-day
 resident cadence evidence.
+
+Docker Isolation Follow-up:
+
+```bash
+MEW_PROOF_NAME=mew-proof-m3-reentry-gate-20260420-1040 \
+MEW_PROOF_SCENARIO=m3-reentry-gate \
+MEW_PROOF_IMAGE=mew-proof:m3-reentry-gate \
+scripts/run_proof_docker.sh
+docker wait mew-proof-m3-reentry-gate-20260420-1040
+scripts/collect_proof_docker.sh mew-proof-m3-reentry-gate-20260420-1040
+```
+
+Result: `pass`
+
+The isolated run proved the mew-side reentry gate and generated fresh CLI
+comparison assets with:
+
+- continuity status: `strong`
+- continuity score: `9/9`
+- pending approval count: `1`
+- unresolved failure: `run_tests` exit `7`
+- decisive next action: `approve_pending_readme_edit_then_rerun_verifier`
+- repo-only missing context:
+  - pending dry-run edit diff
+  - already-observed verifier failure
+  - queued follow-up to approve then verify
+- collected artifacts under
+  `proof-artifacts/mew-proof-m3-reentry-gate-20260420-1040/`
