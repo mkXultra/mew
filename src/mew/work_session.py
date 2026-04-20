@@ -21,6 +21,8 @@ from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .write_tools import (
+    build_write_intent,
+    classify_write_intent_world_state,
     edit_file,
     restore_write_snapshot,
     snapshot_write_path,
@@ -60,6 +62,8 @@ NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STA
 RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = (
     "needs_user_review",
+    "verify_completed_write",
+    "retry_apply_write",
     "retry_tool",
     "retry_dry_run_write",
     "retry_verification",
@@ -69,6 +73,10 @@ WORK_RECOVERY_EFFECT_PRIORITY = (
     "rollback_needed",
     "verify_pending",
     "write_started",
+    "completed_externally",
+    "not_started",
+    "partial",
+    "target_diverged",
     "action_committed",
     "no_action",
     "unknown",
@@ -79,6 +87,10 @@ WORK_RECOVERY_EFFECT_CLASSES = {
     "write_started",
     "verify_pending",
     "rollback_needed",
+    "completed_externally",
+    "not_started",
+    "partial",
+    "target_diverged",
     "unknown",
 }
 DEFAULT_DIFF_PREVIEW_MAX_CHARS = 1600
@@ -1010,6 +1022,13 @@ def mark_work_tool_call_interrupted(session, tool_call_id, current_time=None):
 
 def start_work_tool_call(state, session, tool, parameters):
     current_time = now_iso()
+    write_intent = None
+    write_intent_error = ""
+    if tool in WRITE_WORK_TOOLS and (parameters or {}).get("apply"):
+        try:
+            write_intent = build_write_intent(tool, parameters or {})
+        except (OSError, ValueError) as exc:
+            write_intent_error = str(exc)
     tool_call = {
         "id": next_id(state, "work_tool_call"),
         "session_id": session.get("id"),
@@ -1023,6 +1042,10 @@ def start_work_tool_call(state, session, tool, parameters):
         "started_at": current_time,
         "finished_at": None,
     }
+    if write_intent:
+        tool_call["write_intent"] = write_intent
+    if write_intent_error:
+        tool_call["write_intent_error"] = write_intent_error
     session.setdefault("tool_calls", []).append(tool_call)
     session["last_tool_call_id"] = tool_call["id"]
     session["updated_at"] = current_time
@@ -3199,6 +3222,36 @@ def work_interrupted_dry_run_write_retryable(call, *, effect_classification=None
     return True
 
 
+def work_write_recovery_world_state(call):
+    if (call or {}).get("tool") not in WRITE_WORK_TOOLS:
+        return {}
+    intent = (call or {}).get("write_intent") or {}
+    if not intent:
+        return {}
+    try:
+        return classify_write_intent_world_state(intent)
+    except (OSError, ValueError) as exc:
+        return {
+            "state": "unknown",
+            "path": intent.get("path") or work_call_path(call),
+            "reason": str(exc),
+        }
+
+
+def interrupted_apply_write_recovery_action(call, write_world_state):
+    if (call or {}).get("tool") not in WRITE_WORK_TOOLS:
+        return ""
+    parameters = (call or {}).get("parameters") or {}
+    if not parameters.get("apply"):
+        return ""
+    state = (write_world_state or {}).get("state")
+    if state == "not_started":
+        return "retry_apply_write"
+    if state == "completed_externally":
+        return "verify_completed_write"
+    return ""
+
+
 def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
@@ -3229,13 +3282,27 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         path = work_call_path(call)
         command = result.get("command") or parameters.get("command") or ""
         effect_classification = work_recovery_effect_classification(call)
+        write_world_state = work_write_recovery_world_state(call)
         if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
             action = "retry_tool"
             safety = "read_only"
             reason = "interrupted read/git inspection can be retried after verifying read roots"
             review_steps = []
         elif tool in WRITE_WORK_TOOLS:
-            if work_interrupted_dry_run_write_retryable(call, effect_classification=effect_classification):
+            apply_write_action = interrupted_apply_write_recovery_action(call, write_world_state)
+            if apply_write_action == "retry_apply_write":
+                action = "retry_apply_write"
+                safety = "write_resume"
+                effect_classification = "not_started"
+                reason = "interrupted apply-write can be resumed because the target still matches the pre-write state"
+                review_steps = []
+            elif apply_write_action == "verify_completed_write":
+                action = "verify_completed_write"
+                safety = "write_verify"
+                effect_classification = "completed_externally"
+                reason = "interrupted apply-write already reached the intended file content; skip the write and verify"
+                review_steps = []
+            elif work_interrupted_dry_run_write_retryable(call, effect_classification=effect_classification):
                 action = "retry_dry_run_write"
                 safety = "dry_run_write"
                 reason = "interrupted dry-run write preview can be retried after checking write roots"
@@ -3243,7 +3310,14 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             else:
                 action = "needs_user_review"
                 safety = "write"
-                reason = "interrupted write must be reviewed before retry or rollback"
+                if write_world_state.get("state") == "partial":
+                    effect_classification = "partial"
+                    reason = "interrupted write left an atomic temp file; cleanup or rollback needs user review"
+                elif write_world_state.get("state") == "target_diverged":
+                    effect_classification = "target_diverged"
+                    reason = "interrupted write target diverged from both pre-write and intended hashes"
+                else:
+                    reason = "interrupted write must be reviewed before retry or rollback"
                 review_steps = [
                     "open the resume with live world state",
                     "inspect git status/diff and the touched path before retrying",
@@ -3280,6 +3354,8 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             "source_error": call.get("error") or "",
             "recovery_hint": call.get("recovery_hint") or "",
         }
+        if write_world_state:
+            item["write_world_state"] = write_world_state
         if action == "retry_tool" and call.get("id") == latest_retryable_tool_id:
             read_root = work_recovery_read_root(call)
             read_arg = shlex.quote(read_root)
@@ -3308,6 +3384,26 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 f"--auto-recover-safe"
             )
             item["chat_auto_hint"] = f"/work-session resume{task_arg} --allow-write {write_arg} --auto-recover-safe"
+            if path:
+                item["path"] = path
+        if action == "retry_apply_write":
+            write_root = work_recovery_read_root(call)
+            write_arg = shlex.quote(write_root)
+            verify_command = parameters.get("verify_command") or (call.get("write_intent") or {}).get("verify_command") or ""
+            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-write {write_arg}"
+            if verify_command:
+                item["hint"] += f" --allow-verify --verify-command {shlex.quote(verify_command)}"
+                item["command"] = verify_command
+            if path:
+                item["path"] = path
+        if action == "verify_completed_write":
+            read_root = work_recovery_read_root(call)
+            read_arg = shlex.quote(read_root)
+            verify_command = parameters.get("verify_command") or (call.get("write_intent") or {}).get("verify_command") or ""
+            item["hint"] = f"{mew_executable()} work{task_arg} --recover-session --allow-read {read_arg}"
+            if verify_command:
+                item["hint"] += f" --allow-verify --verify-command {shlex.quote(verify_command)}"
+                item["command"] = verify_command
             if path:
                 item["path"] = path
         if action == "needs_user_review":
@@ -3345,6 +3441,10 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         return {}
     if any(item.get("action") == "needs_user_review" for item in items):
         next_action = "verify the world and review interrupted side-effecting work before retry"
+    elif any(item.get("action") == "verify_completed_write" for item in items):
+        next_action = "skip the already-completed write, then rerun the recorded verifier"
+    elif any(item.get("action") == "retry_apply_write" for item in items):
+        next_action = "verify the world, then resume the interrupted write with explicit write and verify gates"
     elif any(item.get("action") == "retry_tool" for item in items):
         next_action = "verify the world, then retry recoverable interrupted read/git tool after checking read roots"
     elif any(item.get("action") == "retry_dry_run_write" for item in items):
@@ -4180,6 +4280,14 @@ def format_work_session_resume(resume):
                 lines.append(f"  chat_auto: {item.get('chat_auto_hint')}")
             if item.get("path"):
                 lines.append(f"  path: {item.get('path')}")
+            write_world = item.get("write_world_state") or {}
+            if write_world:
+                lines.append(
+                    f"  write_world: {write_world.get('state')} "
+                    f"({write_world.get('reason') or 'no reason recorded'})"
+                )
+                if write_world.get("temp_paths"):
+                    lines.append(f"  temp_paths: {', '.join(write_world.get('temp_paths') or [])}")
             if item.get("command"):
                 lines.append(f"  command: {item.get('command')}")
             if item.get("review_hint"):

@@ -1,4 +1,5 @@
 import difflib
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -67,6 +68,20 @@ def _read_text_if_exists(path):
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _sha256_text(text):
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _sha256_file(path):
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _text_diff_line_counts(before, after):
     before_lines = before.splitlines()
     after_lines = after.splitlines()
@@ -109,6 +124,110 @@ def _atomic_write_text(path, content):
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+
+
+def _atomic_write_temp_paths(path):
+    if not path.parent.exists():
+        return []
+    return sorted(str(candidate) for candidate in path.parent.glob(f".{path.name}.*.tmp"))
+
+
+def _planned_write_after_text(tool, parameters, before):
+    parameters = parameters or {}
+    if tool == "write_file":
+        content = parameters.get("content", "")
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        return content
+    if tool == "edit_file":
+        old = parameters.get("old")
+        new = parameters.get("new")
+        if not isinstance(old, str) or old == "":
+            raise ValueError("old text must be a non-empty string")
+        if not isinstance(new, str):
+            raise ValueError("new text must be a string")
+        count = before.count(old)
+        if count == 0:
+            raise ValueError("old text was not found; confirm the exact existing text before retrying")
+        if count > 1 and not parameters.get("replace_all"):
+            raise ValueError(
+                f"old text matched {count} times; pass --replace-all to replace all matches "
+                "or include surrounding context to narrow the match"
+            )
+        return before.replace(old, new) if parameters.get("replace_all") else before.replace(old, new, 1)
+    raise ValueError(f"unsupported write tool: {tool}")
+
+
+def build_write_intent(tool, parameters):
+    """Build a small pre-execution write intent for crash recovery."""
+    parameters = parameters or {}
+    path = parameters.get("path") or ""
+    resolved = resolve_allowed_write_path(
+        path,
+        parameters.get("allowed_write_roots") or [],
+        create=tool == "write_file" and bool(parameters.get("create")),
+    )
+    existed = resolved.exists()
+    before = _read_text_if_exists(resolved) if existed else ""
+    after = _planned_write_after_text(tool, parameters, before)
+    return {
+        "schema_version": 1,
+        "kind": "file_write",
+        "operation": tool,
+        "path": str(resolved),
+        "apply_requested": bool(parameters.get("apply")),
+        "create": tool == "write_file" and bool(parameters.get("create")),
+        "before_existed": existed,
+        "before_sha256": _sha256_text(before),
+        "before_size": len(before),
+        "expected_sha256": _sha256_text(after),
+        "expected_size": len(after),
+        "verify_expected": bool(parameters.get("verify_command")),
+        "verify_command": parameters.get("verify_command") or "",
+        "verify_cwd": parameters.get("verify_cwd") or parameters.get("cwd") or ".",
+        "prepared_at": now_iso(),
+    }
+
+
+def classify_write_intent_world_state(intent):
+    intent = intent or {}
+    path = Path(intent.get("path") or "")
+    if not path.is_absolute():
+        return {
+            "state": "unknown",
+            "reason": "write intent path is missing or not absolute",
+        }
+    exists = path.exists()
+    current_sha = _sha256_file(path) if exists else None
+    temp_paths = _atomic_write_temp_paths(path)
+    before_existed = bool(intent.get("before_existed"))
+    before_sha = intent.get("before_sha256")
+    expected_sha = intent.get("expected_sha256")
+    if exists and current_sha == expected_sha:
+        state = "completed_externally"
+        reason = "target already matches the intended post-write content"
+    elif not exists and not before_existed and not temp_paths:
+        state = "not_started"
+        reason = "target still does not exist and no atomic temp file remains"
+    elif exists and current_sha == before_sha and not temp_paths:
+        state = "not_started"
+        reason = "target still matches the pre-write hash"
+    elif temp_paths:
+        state = "partial"
+        reason = "atomic write temp file remains near the target"
+    else:
+        state = "target_diverged"
+        reason = "target no longer matches the pre-write or intended post-write hash"
+    return {
+        "state": state,
+        "path": str(path),
+        "exists": exists,
+        "current_sha256": current_sha,
+        "before_sha256": before_sha,
+        "expected_sha256": expected_sha,
+        "temp_paths": temp_paths,
+        "reason": reason,
+    }
 
 
 def snapshot_write_path(path, allowed_roots, create=False):

@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, a half-hour resident cadence proof, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, and the first hash-based applied file-write recovery slice exist; broader shell/runtime side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
@@ -1357,24 +1357,15 @@ Missing proof:
 
 Next action:
 
-- Run or implement the first M3-focused native self-improvement slice:
-  `./mew self-improve --start-session --focus 'Prove M3 persistent advantage in resident reentry'`.
-  Prefer a true M3 comparison or evidence slice: long-running resident cadence,
-  automatic context reconstruction quality, project-memory recall that changes
-  model behavior, or passive next-action refinement. Treat M2 comparative
-  runbook polish as supporting work only unless it directly produces a M3
-  reentry-vs-fresh artifact.
-- Use the day-scale reentry proof as the basis for longer resident cadence
-  testing, but do not let that defer active M3 evidence work. Only promote
-  AgentMemorySnapshot from save/load skeleton to primary resume path after a
-  dogfood case shows snapshot load beats rebuilding from current state.
-- Continue virtual-time proof before spending longer real time: use
-  `scripts/run_proof_docker.sh` and `scripts/collect_proof_docker.sh
-  <container>` for another isolated time-dilated resident run, preferably with
-  a richer task shape or explicit resume/context reconstruction assertion. Once
-  virtual-time paths are stable, a good local real-time proof is
-  `MEW_PROOF_DURATION=21600 MEW_PROOF_INTERVAL=60` for 6h real cadence. Do not
-  count local Docker as a VPS-class real-week uptime proof.
+- Treat M3 as gated enough for the main implementation thread and keep the
+  real-time resident proof as background durability monitoring. Do not block
+  M4 work on wall-clock proof collection.
+- If a background real-time proof fails, pause M4 and record the failure as an
+  M3 durability blocker. If it passes, record it as supporting evidence rather
+  than as a reason to start a longer waiting session immediately.
+- Only promote AgentMemorySnapshot from save/load skeleton to primary resume
+  path after a dogfood case shows snapshot load beats rebuilding from current
+  state.
 
 ## Milestone 4: True Recovery
 
@@ -1455,23 +1446,40 @@ Evidence:
   processing the next event. It deliberately leaves running work-session items
   to explicit `mew repair`, avoiding accidental interruption of human-owned or
   still-live work.
+- Applied `write_file`/`edit_file` work tools now record a pre-execution
+  `write_intent` with pre-write and intended post-write hashes. Interrupted
+  applied writes can be classified from live world state as `not_started`,
+  `completed_externally`, `partial`, or `target_diverged`.
+- `mew work --recover-session` now performs the first side-effecting recovery
+  slice: if an interrupted applied write is `not_started`, it can re-run the
+  write with explicit write and verifier gates; if the target is already
+  `completed_externally`, it skips reapplying the write and reruns the recorded
+  verifier.
+- `dogfood --scenario m4-file-write-recovery` passed locally in
+  `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-1118`.
+  The proof covers both safe resumption of a not-started apply-write and
+  verification-only recovery of an already-completed write. Durable summary:
+  `docs/M4_FILE_WRITE_RECOVERY_2026-04-20.md`.
 
 Missing proof:
 
 - Automatic `ask_user` recovery exists for failed passive native-work advances,
-  and passive auto-retry now exists for selected interrupted verifier plus
-  safe read/git work-session tools, but not yet for all interrupted runtime
-  effects or side-effecting write/shell work items.
+  passive auto-retry now exists for selected interrupted verifier plus safe
+  read/git work-session tools, and explicit side-effect recovery now exists for
+  the narrow applied file-write class, but not yet for all interrupted runtime
+  effects or shell work items.
 - World-state revalidation before retry exists for safe read/git and
-  interrupted verifier work-session recovery, but not yet for runtime effects or
-  write/shell work.
+  interrupted verifier work-session recovery, and hash-based target
+  revalidation now exists for applied file writes, but not yet for runtime
+  effects or shell work.
 - Safe work-session auto-recovery is still opt-in and limited to one interrupted read/git tool per resume.
 
 Next action:
 
-- Extend safe next-action selection from work-session tool recovery into
-  broader interrupted runtime effects, while keeping side-effecting write/shell
-  recovery on explicit review until world-state validation is strong enough.
+- Extend the file-write recovery proof to `partial` and `target_diverged`
+  reporting, rollback-needed writes, or runtime-effect recovery. Keep shell
+  recovery on explicit review until a similarly deterministic world-state
+  validator exists.
 
 ## Milestone 5: Self-Improving Mew
 

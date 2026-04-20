@@ -2131,6 +2131,20 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
             ".",
             "--auto-recover-safe",
         )
+    elif action == "retry_apply_write":
+        kind = "retry_apply_write"
+        command = item.get("hint") or _work_task_command(task_id, "--recover-session", "--allow-write", ".")
+    elif action == "verify_completed_write":
+        kind = "verify_completed_write"
+        command = item.get("hint") or _work_task_command(
+            task_id,
+            "--recover-session",
+            "--allow-read",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            item.get("command") or "<command>",
+        )
     elif action == "replan":
         kind = "replannable"
         command = item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", ".")
@@ -5362,15 +5376,14 @@ def format_work_session_snapshot_summary(summary):
     if not summary:
         return ""
     status = summary.get("status") or "unknown"
-    path = summary.get("path") or ""
     if status == "absent":
-        return f"snapshot: absent path={path}"
+        return "snapshot: absent"
     if status == "error":
-        return f"snapshot: error path={path} error={summary.get('error') or ''}"
+        return f"snapshot: error error={summary.get('error') or ''}"
     drift = "; ".join(summary.get("drift_notes") or summary.get("partial_reasons") or [])
     suffix = f" drift={drift}" if drift else ""
     continuity = summary.get("continuity_score") or "-"
-    return f"snapshot: {status} continuity={continuity} path={path}{suffix}"
+    return f"snapshot: {status} continuity={continuity}{suffix}"
 
 
 def cmd_work_show_session(args):
@@ -6758,6 +6771,20 @@ def interrupted_run_tests_cwd(call):
     return result.get("cwd") or parameters.get("cwd") or "."
 
 
+def interrupted_write_verify_command(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    intent = (call or {}).get("write_intent") or {}
+    return result.get("verification_command") or parameters.get("verify_command") or intent.get("verify_command") or ""
+
+
+def interrupted_write_verify_cwd(call):
+    result = (call or {}).get("result") or {}
+    parameters = (call or {}).get("parameters") or {}
+    intent = (call or {}).get("write_intent") or {}
+    return result.get("verify_cwd") or parameters.get("verify_cwd") or intent.get("verify_cwd") or "."
+
+
 def work_recover_verification_blocker(args, session, source_call, *, safe_only=False):
     if safe_only:
         return {
@@ -6822,6 +6849,136 @@ def work_recover_verification_blocker(args, session, source_call, *, safe_only=F
             "command": source_command,
             "requested_command": requested_command,
             "cwd": source_cwd,
+        }
+    return None
+
+
+def work_recover_apply_write_blocker(args, source_call, recovery_item, *, safe_only=False):
+    if safe_only:
+        return {
+            "action": "needs_user",
+            "reason": "automatic safe recovery does not apply interrupted writes",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    write_state = (recovery_item or {}).get("write_world_state") or {}
+    if write_state.get("state") != "not_started":
+        return {
+            "action": "needs_user",
+            "reason": "apply-write recovery only retries when the target still matches the pre-write state",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "write_world_state": write_state,
+        }
+    write_root = work_recovery_read_root(source_call)
+    if not getattr(args, "allow_write", None):
+        return {
+            "action": "needs_write_gate",
+            "reason": "apply-write recovery needs explicit --allow-write roots",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "path": write_root,
+            "write_world_state": write_state,
+        }
+    try:
+        resolve_allowed_write_path(
+            write_root,
+            getattr(args, "allow_write", None) or [],
+            create=bool((source_call.get("parameters") or {}).get("create")),
+        )
+    except ValueError as exc:
+        return {
+            "action": "needs_write_gate",
+            "reason": "apply-write recovery needs --allow-write to cover the interrupted tool path",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "path": write_root,
+            "allow_write": list(getattr(args, "allow_write", None) or []),
+            "write_world_state": write_state,
+            "error": str(exc),
+        }
+    parameters = source_call.get("parameters") or {}
+    command = interrupted_write_verify_command(source_call)
+    if not parameters.get("defer_verify"):
+        if not getattr(args, "allow_verify", False):
+            return {
+                "action": "needs_verify_gate",
+                "reason": "apply-write recovery needs explicit --allow-verify",
+                "source_tool_call_id": source_call.get("id"),
+                "tool": source_call.get("tool"),
+                "path": write_root,
+                "write_world_state": write_state,
+            }
+        requested_command = getattr(args, "verify_command", None) or ""
+        if not requested_command:
+            return {
+                "action": "needs_verify_command",
+                "reason": "apply-write recovery needs the interrupted verifier passed as --verify-command",
+                "source_tool_call_id": source_call.get("id"),
+                "tool": source_call.get("tool"),
+                "command": command,
+                "path": write_root,
+                "write_world_state": write_state,
+            }
+        if not recovery_commands_match(command, requested_command):
+            return {
+                "action": "needs_matching_verifier",
+                "reason": "apply-write recovery only reruns the original verifier",
+                "source_tool_call_id": source_call.get("id"),
+                "tool": source_call.get("tool"),
+                "command": command,
+                "requested_command": requested_command,
+                "path": write_root,
+                "write_world_state": write_state,
+            }
+    return None
+
+
+def work_recover_completed_write_blocker(args, source_call, recovery_item, *, safe_only=False):
+    if safe_only:
+        return {
+            "action": "needs_user",
+            "reason": "automatic safe recovery does not verify interrupted writes",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+        }
+    write_state = (recovery_item or {}).get("write_world_state") or {}
+    if write_state.get("state") != "completed_externally":
+        return {
+            "action": "needs_user",
+            "reason": "completed-write recovery only verifies when the target matches the intended content",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "write_world_state": write_state,
+        }
+    if not getattr(args, "allow_verify", False):
+        return {
+            "action": "needs_verify_gate",
+            "reason": "completed-write recovery needs explicit --allow-verify",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "write_world_state": write_state,
+        }
+    command = interrupted_write_verify_command(source_call)
+    requested_command = getattr(args, "verify_command", None) or ""
+    if not requested_command:
+        return {
+            "action": "needs_verify_command",
+            "reason": "completed-write recovery needs the interrupted verifier passed as --verify-command",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "command": command,
+            "write_world_state": write_state,
+        }
+    if not recovery_commands_match(command, requested_command):
+        return {
+            "action": "needs_matching_verifier",
+            "reason": "completed-write recovery only reruns the original verifier",
+            "source_tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool"),
+            "command": command,
+            "requested_command": requested_command,
+            "write_world_state": write_state,
         }
     return None
 
@@ -6892,10 +7049,30 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             blocker = work_recover_verification_blocker(args, session, source_call, safe_only=safe_only)
             if blocker:
                 return 0, {"recovery": blocker}
-        elif tool in WRITE_WORK_TOOLS and recovery_item.get("action") == "retry_dry_run_write":
-            blocker = work_recover_dry_run_write_blocker(args, source_call)
-            if blocker:
-                return 0, {"recovery": blocker}
+        elif tool in WRITE_WORK_TOOLS:
+            if recovery_item.get("action") == "retry_dry_run_write":
+                blocker = work_recover_dry_run_write_blocker(args, source_call)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            elif recovery_item.get("action") == "retry_apply_write":
+                blocker = work_recover_apply_write_blocker(args, source_call, recovery_item, safe_only=safe_only)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            elif recovery_item.get("action") == "verify_completed_write":
+                blocker = work_recover_completed_write_blocker(args, source_call, recovery_item, safe_only=safe_only)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            else:
+                report = {
+                    "recovery": {
+                        "action": "needs_user",
+                        "reason": f"interrupted {tool} is not safe to retry automatically",
+                        "source_tool_call_id": source_call.get("id"),
+                        "tool": tool,
+                        "review_item": recovery_item,
+                    }
+                }
+                return 0, report
         elif tool not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
             report = {
                 "recovery": {
@@ -6944,7 +7121,19 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                 return 0, {"recovery": blocker}
         elif tool in WRITE_WORK_TOOLS:
             recovery_item = work_recovery_plan_item_for_call(state, session, source_call)
-            if recovery_item.get("action") != "retry_dry_run_write":
+            if recovery_item.get("action") == "retry_dry_run_write":
+                blocker = work_recover_dry_run_write_blocker(args, source_call)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            elif recovery_item.get("action") == "retry_apply_write":
+                blocker = work_recover_apply_write_blocker(args, source_call, recovery_item, safe_only=safe_only)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            elif recovery_item.get("action") == "verify_completed_write":
+                blocker = work_recover_completed_write_blocker(args, source_call, recovery_item, safe_only=safe_only)
+                if blocker:
+                    return 0, {"recovery": blocker}
+            else:
                 return 0, {
                     "recovery": {
                         "action": "needs_user",
@@ -6954,35 +7143,53 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                         "review_item": recovery_item,
                     }
                 }
-            blocker = work_recover_dry_run_write_blocker(args, source_call)
-            if blocker:
-                return 0, {"recovery": blocker}
+        recovery_tool = tool
         parameters = dict(source_call.get("parameters") or {})
         parameters["recovered_from_tool_call_id"] = source_call.get("id")
         if tool == "run_tests":
             parameters["command"] = interrupted_run_tests_command(source_call)
             parameters["allow_verify"] = True
         elif tool in WRITE_WORK_TOOLS:
-            parameters["apply"] = False
-            parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
-            for key in ("approved_from_tool_call_id", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
-                parameters.pop(key, None)
-        tool_call = start_work_tool_call(state, session, tool, parameters)
+            if recovery_item.get("action") == "retry_dry_run_write":
+                parameters["apply"] = False
+                parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
+                for key in ("approved_from_tool_call_id", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
+                    parameters.pop(key, None)
+            elif recovery_item.get("action") == "retry_apply_write":
+                parameters["apply"] = True
+                parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
+                parameters["allow_verify"] = bool(getattr(args, "allow_verify", False))
+                parameters["verify_command"] = getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call)
+                parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call)
+            elif recovery_item.get("action") == "verify_completed_write":
+                recovery_tool = "run_tests"
+                parameters = {
+                    "recovered_from_tool_call_id": source_call.get("id"),
+                    "command": getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call),
+                    "cwd": getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call),
+                    "allow_verify": True,
+                    "timeout": getattr(args, "verify_timeout", None),
+                }
+        tool_call = start_work_tool_call(state, session, recovery_tool, parameters)
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
         save_state(state)
 
-    recovery_action = "retry_dry_run_write" if tool in WRITE_WORK_TOOLS else "retry_tool"
+    recovery_action = (
+        recovery_item.get("action")
+        if tool in WRITE_WORK_TOOLS and recovery_item.get("action") in {"retry_dry_run_write", "retry_apply_write", "verify_completed_write"}
+        else "retry_tool"
+    )
     if progress:
-        progress(f"recover tool #{source_call.get('id')} -> #{tool_call_id} {tool} start")
+        progress(f"recover tool #{source_call.get('id')} -> #{tool_call_id} {recovery_tool} start")
     try:
         result = execute_work_tool_with_output(
-            tool,
+            recovery_tool,
             parameters,
             getattr(args, "allow_read", None) or [],
             work_tool_output_progress(progress, tool_call_id),
         )
-        error = work_tool_result_error(tool, result)
+        error = work_tool_result_error(recovery_tool, result)
     except KeyboardInterrupt:
         with state_lock():
             state = load_state()
@@ -7002,7 +7209,8 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
             "recovery": {
                 "action": recovery_action,
                 "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
-                "tool": tool,
+                "tool": recovery_tool,
+                "source_tool": tool,
                 "status": tool_call.get("status"),
             },
             "tool_call": tool_call,
@@ -7033,11 +7241,12 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         save_state(state)
     report = {
         "recovery": {
-            "action": recovery_action,
-            "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
-            "tool": tool,
-            "status": tool_call.get("status"),
-        },
+                "action": recovery_action,
+                "source_tool_call_id": parameters.get("recovered_from_tool_call_id"),
+                "tool": recovery_tool,
+                "source_tool": tool,
+                "status": tool_call.get("status"),
+            },
         "tool_call": tool_call,
     }
     if world_state_before:
@@ -7157,7 +7366,7 @@ def print_work_recovery_report(report):
         if recovery.get("requested_command"):
             print(f"requested_command: {recovery.get('requested_command')}")
         return
-    if action in {"retry_tool", "retry_dry_run_write"}:
+    if action in {"retry_tool", "retry_dry_run_write", "retry_apply_write", "verify_completed_write"}:
         tool_call = (report or {}).get("tool_call") or {}
         if report.get("interrupted") or tool_call.get("status") == "interrupted":
             print(

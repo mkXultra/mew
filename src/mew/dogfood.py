@@ -23,6 +23,7 @@ from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
 from .typed_memory import FileMemoryBackend
 from .work_session import build_work_session_effort, build_work_session_resume, find_work_session
+from .write_tools import build_write_intent
 
 
 DOGFOOD_SKIP_DIR_NAMES = {
@@ -53,6 +54,7 @@ DOGFOOD_SCENARIOS = (
     "passive-auto-recovery",
     "passive-auto-recovery-read",
     "passive-auto-recovery-write",
+    "m4-file-write-recovery",
     "day-reentry",
     "continuity",
     "m3-reentry-gate",
@@ -2756,6 +2758,237 @@ def run_passive_auto_recovery_write_scenario(workspace, env=None):
         expected="passive tick auto-recovers an interrupted dry-run write preview without changing the file",
     )
     return _scenario_report("passive-auto-recovery-write", workspace, commands, checks)
+
+
+def run_m4_file_write_recovery_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, scenario_env=None):
+        result = run_command(
+            _scenario_command(*args),
+            workspace,
+            timeout=timeout,
+            env=scenario_env if scenario_env is not None else env,
+        )
+        commands.append(result)
+        return result
+
+    target = Path(workspace) / "write-target.txt"
+    target.write_text("before\n", encoding="utf-8")
+    verify_code = "from pathlib import Path; assert Path('write-target.txt').read_text().startswith('after')"
+    verify_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(verify_code)}"
+    task_result = run(
+        [
+            "task",
+            "add",
+            "M4 file-write recovery task",
+            "--kind",
+            "coding",
+            "--ready",
+            "--priority",
+            "high",
+            "--json",
+        ],
+        timeout=15,
+    )
+    task_data = _json_stdout(task_result)
+    task = task_data.get("task") if isinstance(task_data.get("task"), dict) else task_data
+    task_id = task.get("id") if isinstance(task, dict) else None
+    start_result = run(
+        [
+            "work",
+            str(task_id),
+            "--start-session",
+            "--allow-read",
+            workspace,
+            "--allow-write",
+            workspace,
+            "--json",
+        ],
+        timeout=15,
+    )
+    start_data = _json_stdout(start_result)
+    session_id = (start_data.get("work_session") or {}).get("id")
+    state_path = Path(workspace) / STATE_FILE
+
+    write_parameters = {
+        "path": str(target),
+        "old": "before\n",
+        "new": "after\n",
+        "apply": True,
+        "allowed_write_roots": [str(workspace)],
+        "allow_verify": True,
+        "verify_command": verify_command,
+        "verify_cwd": str(workspace),
+    }
+    write_intent = build_write_intent("edit_file", write_parameters)
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    session = find_work_session(state, session_id)
+    retry_source_call_id = None
+    if session:
+        retry_source_call_id = next_id(state, "work_tool_call")
+        session.setdefault("tool_calls", []).append(
+            {
+                "id": retry_source_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "edit_file",
+                "status": "interrupted",
+                "parameters": write_parameters,
+                "write_intent": write_intent,
+                "summary": "interrupted before atomic write",
+                "error": "Interrupted before the apply-write completed.",
+                "started_at": "2026-04-20T00:00:00Z",
+            }
+        )
+        session["last_tool_call_id"] = retry_source_call_id
+        write_json_file(state_path, state)
+
+    retry_resume_result = run(["work", str(task_id), "--session", "--resume", "--json"], timeout=15)
+    retry_result = run(
+        [
+            "work",
+            str(task_id),
+            "--recover-session",
+            "--allow-write",
+            workspace,
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=30,
+    )
+    retry_resume = _json_stdout(retry_resume_result).get("resume") or {}
+    retry_report = _json_stdout(retry_result)
+    retry_state = read_json_file(state_path, {})
+    retry_session = find_work_session(retry_state, session_id)
+    retry_source_call = next(
+        (
+            call
+            for call in (retry_session or {}).get("tool_calls") or []
+            if str(call.get("id")) == str(retry_source_call_id)
+        ),
+        {},
+    )
+    retry_recovered_call = next(
+        (
+            call
+            for call in (retry_session or {}).get("tool_calls") or []
+            if str(call.get("id")) == str(retry_source_call.get("recovered_by_tool_call_id"))
+        ),
+        {},
+    )
+
+    target.write_text("before\n", encoding="utf-8")
+    completed_intent = build_write_intent("edit_file", write_parameters)
+    target.write_text("after\n", encoding="utf-8")
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    session = find_work_session(state, session_id)
+    completed_source_call_id = None
+    if session:
+        completed_source_call_id = next_id(state, "work_tool_call")
+        session.setdefault("tool_calls", []).append(
+            {
+                "id": completed_source_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "edit_file",
+                "status": "interrupted",
+                "parameters": write_parameters,
+                "write_intent": completed_intent,
+                "summary": "interrupted after atomic write",
+                "error": "Interrupted before verification completed.",
+                "started_at": "2026-04-20T00:01:00Z",
+            }
+        )
+        session["last_tool_call_id"] = completed_source_call_id
+        write_json_file(state_path, state)
+
+    completed_resume_result = run(["work", str(task_id), "--session", "--resume", "--json"], timeout=15)
+    completed_result = run(
+        [
+            "work",
+            str(task_id),
+            "--recover-session",
+            "--allow-read",
+            workspace,
+            "--allow-verify",
+            "--verify-command",
+            verify_command,
+            "--json",
+        ],
+        timeout=30,
+    )
+    completed_resume = _json_stdout(completed_resume_result).get("resume") or {}
+    completed_report = _json_stdout(completed_result)
+    completed_state = read_json_file(state_path, {})
+    completed_session = find_work_session(completed_state, session_id)
+    completed_source_call = next(
+        (
+            call
+            for call in (completed_session or {}).get("tool_calls") or []
+            if str(call.get("id")) == str(completed_source_call_id)
+        ),
+        {},
+    )
+    completed_recovered_call = next(
+        (
+            call
+            for call in (completed_session or {}).get("tool_calls") or []
+            if str(call.get("id")) == str(completed_source_call.get("recovered_by_tool_call_id"))
+        ),
+        {},
+    )
+
+    retry_item = ((retry_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
+    completed_item = ((completed_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
+    _scenario_check(
+        checks,
+        "m4_file_write_recovery_retries_not_started_apply_write",
+        task_result.get("exit_code") == 0
+        and start_result.get("exit_code") == 0
+        and retry_result.get("exit_code") == 0
+        and retry_item.get("action") == "retry_apply_write"
+        and (retry_item.get("write_world_state") or {}).get("state") == "not_started"
+        and (retry_report.get("recovery") or {}).get("action") == "retry_apply_write"
+        and retry_source_call.get("recovery_status") == "superseded"
+        and retry_recovered_call.get("tool") == "edit_file"
+        and retry_recovered_call.get("status") == "completed"
+        and ((retry_recovered_call.get("result") or {}).get("verification_exit_code") == 0)
+        and target.read_text(encoding="utf-8") == "after\n",
+        observed={
+            "resume_item": retry_item,
+            "recovery": retry_report.get("recovery"),
+            "source_call": retry_source_call,
+            "recovered_call": retry_recovered_call,
+            "target_text": target.read_text(encoding="utf-8"),
+        },
+        expected="interrupted apply-write whose target still matches pre-write hash is resumed with verifier",
+    )
+    _scenario_check(
+        checks,
+        "m4_file_write_recovery_skips_completed_write_and_verifies",
+        completed_result.get("exit_code") == 0
+        and completed_item.get("action") == "verify_completed_write"
+        and (completed_item.get("write_world_state") or {}).get("state") == "completed_externally"
+        and (completed_report.get("recovery") or {}).get("action") == "verify_completed_write"
+        and completed_source_call.get("recovery_status") == "superseded"
+        and completed_recovered_call.get("tool") == "run_tests"
+        and completed_recovered_call.get("status") == "completed"
+        and ((completed_recovered_call.get("result") or {}).get("exit_code") == 0)
+        and target.read_text(encoding="utf-8") == "after\n",
+        observed={
+            "resume_item": completed_item,
+            "recovery": completed_report.get("recovery"),
+            "source_call": completed_source_call,
+            "recovered_call": completed_recovered_call,
+            "target_text": target.read_text(encoding="utf-8"),
+        },
+        expected="interrupted apply-write whose target already matches intended hash skips reapply and verifies",
+    )
+    return _scenario_report("m4-file-write-recovery", workspace, commands, checks)
 
 
 def run_day_reentry_scenario(workspace, env=None):
@@ -8468,6 +8701,8 @@ def run_dogfood_scenario(args):
             reports.append(run_passive_auto_recovery_read_scenario(scenario_workspace, env=env))
         elif name == "passive-auto-recovery-write":
             reports.append(run_passive_auto_recovery_write_scenario(scenario_workspace, env=env))
+        elif name == "m4-file-write-recovery":
+            reports.append(run_m4_file_write_recovery_scenario(scenario_workspace, env=env))
         elif name == "day-reentry":
             reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
         elif name == "continuity":

@@ -50,6 +50,7 @@ from mew.work_session import (
     work_tool_repeat_guard,
     work_recovery_effect_classification,
 )
+from mew.write_tools import build_write_intent
 
 
 def add_coding_task(state):
@@ -8314,6 +8315,234 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(item["safety"], "write")
         self.assertEqual(item["effect_classification"], "verify_pending")
         self.assertIn("git status/diff", " ".join(item["review_steps"]))
+
+    def test_work_recovery_plan_classifies_apply_write_world_state(self):
+        from mew.work_session import build_work_session_resume
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("target.txt").write_text("before\n", encoding="utf-8")
+                command = f"{shlex.quote(sys.executable)} -c 'print(\"ok\")'"
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                }
+                intent = build_write_intent("edit_file", parameters)
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": "Recover apply write.",
+                    "created_at": "then",
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "edit_file",
+                            "status": "interrupted",
+                            "parameters": parameters,
+                            "write_intent": intent,
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                item = build_work_session_resume(session)["recovery_plan"]["items"][0]
+
+                self.assertEqual(item["action"], "retry_apply_write")
+                self.assertEqual(item["safety"], "write_resume")
+                self.assertEqual(item["effect_classification"], "not_started")
+                self.assertEqual(item["write_world_state"]["state"], "not_started")
+                self.assertIn("--allow-write target.txt", item["hint"])
+                self.assertIn("--allow-verify", item["hint"])
+
+                Path("target.txt").write_text("after\n", encoding="utf-8")
+                item = build_work_session_resume(session)["recovery_plan"]["items"][0]
+
+                self.assertEqual(item["action"], "verify_completed_write")
+                self.assertEqual(item["safety"], "write_verify")
+                self.assertEqual(item["effect_classification"], "completed_externally")
+                self.assertEqual(item["write_world_state"]["state"], "completed_externally")
+                self.assertIn("--allow-verify", item["hint"])
+
+                Path("target.txt").write_text("human edit\n", encoding="utf-8")
+                item = build_work_session_resume(session)["recovery_plan"]["items"][0]
+
+                self.assertEqual(item["action"], "needs_user_review")
+                self.assertEqual(item["effect_classification"], "target_diverged")
+                self.assertEqual(item["write_world_state"]["state"], "target_diverged")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_retries_not_started_apply_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("target.txt").write_text("before\n", encoding="utf-8")
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                }
+                intent = build_write_intent("edit_file", parameters)
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover apply write.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted apply write",
+                                    "error": "Interrupted before write completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "retry_apply_write")
+                self.assertEqual(report["recovery"]["source_tool"], "edit_file")
+                self.assertEqual(report["tool_call"]["tool"], "edit_file")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["verification_exit_code"], 0)
+                self.assertEqual(Path("target.txt").read_text(encoding="utf-8"), "after\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_skips_completed_write_and_verifies(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("target.txt").write_text("before\n", encoding="utf-8")
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                }
+                intent = build_write_intent("edit_file", parameters)
+                Path("target.txt").write_text("after\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover completed write.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted after write",
+                                    "error": "Interrupted before verifier completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-read",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "verify_completed_write")
+                self.assertEqual(report["recovery"]["source_tool"], "edit_file")
+                self.assertEqual(report["tool_call"]["tool"], "run_tests")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["exit_code"], 0)
+                self.assertEqual(Path("target.txt").read_text(encoding="utf-8"), "after\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
+                self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
 
     def test_work_recover_session_reports_review_context_for_side_effects(self):
         old_cwd = os.getcwd()

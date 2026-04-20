@@ -849,6 +849,10 @@ def native_work_recovery_suggestion_from_plan(recovery_plan, *, task_id=None):
     elif action == "needs_user_review":
         command = item.get("review_hint") or command
         label = "side-effect review"
+    elif action == "retry_apply_write":
+        label = "apply-write recovery"
+    elif action == "verify_completed_write":
+        label = "completed-write verification"
     elif action == "replan":
         label = "replan"
     if not command:
