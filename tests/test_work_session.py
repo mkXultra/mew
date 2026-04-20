@@ -8280,6 +8280,87 @@ class WorkSessionTests(unittest.TestCase):
         controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
         self.assertIn("Recovery\n- ./mew work 1 --session --resume --allow-read .", controls)
 
+    def test_work_recovery_plan_surfaces_failed_write_rollback_review(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover failed write.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "notes.md", "apply": True, "verify_command": "pytest -q"},
+                    "result": {
+                        "path": "notes.md",
+                        "written": True,
+                        "rolled_back": False,
+                        "rollback_error": "rollback boom",
+                        "verification": {"command": "pytest -q", "exit_code": 1},
+                    },
+                    "error": "verification failed; rollback failed: rollback boom",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        item = resume["recovery_plan"]["items"][0]
+
+        self.assertEqual(resume["phase"], "failed")
+        self.assertEqual(resume["next_action"], "verify the world and review interrupted side-effecting work before retry")
+        self.assertEqual(item["action"], "needs_user_review")
+        self.assertEqual(item["safety"], "write")
+        self.assertEqual(item["effect_classification"], "rollback_needed")
+        self.assertEqual(item["path"], "notes.md")
+        self.assertEqual(item["command"], "pytest -q")
+        self.assertIn("rollback was not confirmed", item["reason"])
+        self.assertIn("restore or intentionally keep", " ".join(item["review_steps"]))
+        self.assertIn("--session --resume --allow-read notes.md", item["review_hint"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("effect=rollback_needed", text)
+        self.assertIn("command: pytest -q", text)
+        self.assertIn("rollback was not confirmed", text)
+
+    def test_work_recovery_plan_does_not_treat_rolled_back_write_as_rollback_needed(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover rolled-back write.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "notes.md", "apply": True, "verify_command": "pytest -q"},
+                    "result": {
+                        "path": "notes.md",
+                        "written": True,
+                        "rolled_back": True,
+                        "verification": {"command": "pytest -q", "exit_code": 1},
+                    },
+                    "error": "verification failed; rolled back",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertFalse(resume["recovery_plan"])
+        self.assertEqual(resume["suggested_safe_reobserve"]["action"], "read_file")
+
     def test_work_recovery_plan_keeps_interrupted_apply_on_review_path(self):
         from mew.work_session import build_work_session_resume
 

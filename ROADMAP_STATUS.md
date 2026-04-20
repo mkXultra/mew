@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, a half-hour resident cadence proof, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, and the first hash-based applied file-write recovery slice exist; broader shell/runtime side-effect recovery is not implemented. |
+| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied file-write recovery, and rollback-needed write review exist; broader shell/runtime side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
@@ -1467,12 +1467,17 @@ Evidence:
   write with explicit write and verifier gates; if the target is already
   `completed_externally`, it skips reapplying the write and reruns the recorded
   verifier.
+- Failed applied writes whose verifier failed and whose rollback was not
+  confirmed now enter the recovery plan as `rollback_needed` review items.
+  The resume surfaces the touched path, verifier command, review hint, and
+  restore-or-keep review steps instead of leaving the resident to infer this
+  from a generic failed write.
 - `dogfood --scenario m4-file-write-recovery` passed locally in
-  `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-1130`.
+  `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-rollback`.
   The proof covers both safe resumption of a not-started apply-write and
   verification-only recovery of an already-completed write; it also proves
-  `target_diverged` and `partial` write states stay on the explicit review
-  path with live write-world evidence. Durable summary:
+  `target_diverged`, `partial`, and `rollback_needed` write states stay on the
+  explicit review path with live write-world evidence. Durable summary:
   `docs/M4_FILE_WRITE_RECOVERY_2026-04-20.md`.
 
 Missing proof:
@@ -1491,9 +1496,9 @@ Missing proof:
 
 Next action:
 
-- Extend file-write recovery toward rollback-needed writes or runtime-effect
-  recovery. Keep shell recovery on explicit review until a similarly
-  deterministic world-state validator exists.
+- Extend runtime-effect recovery consumption or the next deterministic
+  side-effect validator. Keep shell recovery on explicit review until a
+  similarly deterministic world-state validator exists.
 
 ## Milestone 5: Self-Improving Mew
 

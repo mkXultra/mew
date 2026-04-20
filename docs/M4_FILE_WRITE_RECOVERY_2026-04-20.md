@@ -22,13 +22,16 @@ interrupted apply-write work-session tool.
   - resume a `not_started` applied write with explicit `--allow-write`,
     `--allow-verify`, and matching `--verify-command`;
   - skip a `completed_externally` write and rerun the recorded verifier.
+- Failed writes whose verifier failed and whose rollback was not confirmed now
+  enter the recovery plan as `rollback_needed` review items, with the touched
+  path, verifier command, and restore-or-keep review steps visible from resume.
 
 ## Proof
 
 Command:
 
 ```bash
-./mew dogfood --scenario m4-file-write-recovery --workspace proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-1130 --json
+./mew dogfood --scenario m4-file-write-recovery --workspace proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-rollback --json
 ```
 
 Result:
@@ -39,6 +42,7 @@ Result:
   - `m4_file_write_recovery_skips_completed_write_and_verifies`
   - `m4_file_write_recovery_reports_target_diverged_review`
   - `m4_file_write_recovery_reports_partial_review`
+  - `m4_file_write_recovery_reports_rollback_needed_review`
 
 ## Interpretation
 
@@ -48,6 +52,6 @@ revalidate the world and safely choose a concrete recovery action instead of
 only narrating the interruption.
 
 This does not close M4. It covers applied file writes with hash-based recovery
-and explicit review reporting for diverged or partial targets. Runtime effects,
-shell commands, rollback-required writes, and broader passive auto-recovery
-remain future work.
+and explicit review reporting for diverged, partial, or rollback-needed targets.
+Runtime effects, shell commands, and broader passive auto-recovery remain future
+work.

@@ -497,6 +497,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m4_file_write_recovery_skips_completed_write_and_verifies", text)
             self.assertIn("m4_file_write_recovery_reports_target_diverged_review", text)
             self.assertIn("m4_file_write_recovery_reports_partial_review", text)
+            self.assertIn("m4_file_write_recovery_reports_rollback_needed_review", text)
 
     def test_run_dogfood_m4_runtime_effect_recovery_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -3022,6 +3022,60 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         {},
     )
 
+    rollback_target = Path(workspace) / "rollback-target.txt"
+    rollback_target.write_text("after\n", encoding="utf-8")
+    rollback_verify_command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import sys; sys.exit(1)')}"
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    session = find_work_session(state, session_id)
+    rollback_source_call_id = None
+    if session:
+        rollback_source_call_id = next_id(state, "work_tool_call")
+        session.setdefault("tool_calls", []).append(
+            {
+                "id": rollback_source_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "edit_file",
+                "status": "failed",
+                "parameters": {
+                    "path": str(rollback_target),
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "verify_command": rollback_verify_command,
+                    "verify_cwd": str(workspace),
+                },
+                "result": {
+                    "path": str(rollback_target),
+                    "written": True,
+                    "rolled_back": False,
+                    "rollback_error": "simulated rollback failure",
+                    "verification": {
+                        "command": rollback_verify_command,
+                        "cwd": str(workspace),
+                        "exit_code": 1,
+                    },
+                },
+                "summary": "verification failed after write",
+                "error": "verification failed; rollback failed: simulated rollback failure",
+                "started_at": "2026-04-20T00:04:00Z",
+                "finished_at": "2026-04-20T00:04:01Z",
+            }
+        )
+        session["last_tool_call_id"] = rollback_source_call_id
+        write_json_file(state_path, state)
+
+    rollback_resume_result = run(["work", str(task_id), "--session", "--resume", "--json"], timeout=15)
+    rollback_resume = _json_stdout(rollback_resume_result).get("resume") or {}
+    rollback_item = next(
+        (
+            item
+            for item in ((rollback_resume.get("recovery_plan") or {}).get("items") or [])
+            if str(item.get("tool_call_id")) == str(rollback_source_call_id)
+        ),
+        {},
+    )
+
     retry_item = ((retry_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
     completed_item = ((completed_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
     _scenario_check(
@@ -3103,6 +3157,22 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
             "target_text": target.read_text(encoding="utf-8"),
         },
         expected="partial applied write reports temp-file review context instead of retrying",
+    )
+    _scenario_check(
+        checks,
+        "m4_file_write_recovery_reports_rollback_needed_review",
+        rollback_resume_result.get("exit_code") == 0
+        and rollback_item.get("action") == "needs_user_review"
+        and rollback_item.get("effect_classification") == "rollback_needed"
+        and rollback_item.get("safety") == "write"
+        and rollback_item.get("path") == str(rollback_target)
+        and "rollback was not confirmed" in (rollback_item.get("reason") or "")
+        and "restore or intentionally keep" in " ".join(rollback_item.get("review_steps") or []),
+        observed={
+            "resume_item": rollback_item,
+            "target_text": rollback_target.read_text(encoding="utf-8"),
+        },
+        expected="failed write with unconfirmed rollback reports rollback_needed review context",
     )
     return _scenario_report("m4-file-write-recovery", workspace, commands, checks)
 

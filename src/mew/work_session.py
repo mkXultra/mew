@@ -3274,14 +3274,29 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             if result.get("command") or parameters.get("command"):
                 latest_verification_tool_id = call.get("id")
     for call in calls:
-        if call.get("status") != "interrupted" or call.get("recovery_status"):
+        effect_classification = work_recovery_effect_classification(call)
+        rollback_review_needed = (
+            call.get("status") == "failed"
+            and not call.get("recovery_status")
+            and call.get("tool") in WRITE_WORK_TOOLS
+            and effect_classification == "rollback_needed"
+        )
+        if (call.get("status") != "interrupted" and not rollback_review_needed) or call.get("recovery_status"):
             continue
         tool = call.get("tool") or "unknown"
         result = call.get("result") or {}
         parameters = call.get("parameters") or {}
         path = work_call_path(call)
         command = result.get("command") or parameters.get("command") or ""
-        effect_classification = work_recovery_effect_classification(call)
+        if tool in WRITE_WORK_TOOLS:
+            verification = result.get("verification") or {}
+            command = (
+                command
+                or verification.get("command")
+                or result.get("verification_command")
+                or parameters.get("verify_command")
+                or ""
+            )
         write_world_state = work_write_recovery_world_state(call)
         if tool in READ_ONLY_WORK_TOOLS or tool in GIT_WORK_TOOLS:
             action = "retry_tool"
@@ -3289,40 +3304,50 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
             reason = "interrupted read/git inspection can be retried after verifying read roots"
             review_steps = []
         elif tool in WRITE_WORK_TOOLS:
-            apply_write_action = interrupted_apply_write_recovery_action(call, write_world_state)
-            if apply_write_action == "retry_apply_write":
-                action = "retry_apply_write"
-                safety = "write_resume"
-                effect_classification = "not_started"
-                reason = "interrupted apply-write can be resumed because the target still matches the pre-write state"
-                review_steps = []
-            elif apply_write_action == "verify_completed_write":
-                action = "verify_completed_write"
-                safety = "write_verify"
-                effect_classification = "completed_externally"
-                reason = "interrupted apply-write already reached the intended file content; skip the write and verify"
-                review_steps = []
-            elif work_interrupted_dry_run_write_retryable(call, effect_classification=effect_classification):
-                action = "retry_dry_run_write"
-                safety = "dry_run_write"
-                reason = "interrupted dry-run write preview can be retried after checking write roots"
-                review_steps = []
-            else:
+            if rollback_review_needed:
                 action = "needs_user_review"
                 safety = "write"
-                if write_world_state.get("state") == "partial":
-                    effect_classification = "partial"
-                    reason = "interrupted write left an atomic temp file; cleanup or rollback needs user review"
-                elif write_world_state.get("state") == "target_diverged":
-                    effect_classification = "target_diverged"
-                    reason = "interrupted write target diverged from both pre-write and intended hashes"
-                else:
-                    reason = "interrupted write must be reviewed before retry or rollback"
+                reason = "write verification failed and rollback was not confirmed; inspect the target before continuing"
                 review_steps = [
                     "open the resume with live world state",
                     "inspect git status/diff and the touched path before retrying",
-                    "retry or re-apply only after the verifier is known",
+                    "restore or intentionally keep the written content, then rerun the verifier",
                 ]
+            else:
+                apply_write_action = interrupted_apply_write_recovery_action(call, write_world_state)
+                if apply_write_action == "retry_apply_write":
+                    action = "retry_apply_write"
+                    safety = "write_resume"
+                    effect_classification = "not_started"
+                    reason = "interrupted apply-write can be resumed because the target still matches the pre-write state"
+                    review_steps = []
+                elif apply_write_action == "verify_completed_write":
+                    action = "verify_completed_write"
+                    safety = "write_verify"
+                    effect_classification = "completed_externally"
+                    reason = "interrupted apply-write already reached the intended file content; skip the write and verify"
+                    review_steps = []
+                elif work_interrupted_dry_run_write_retryable(call, effect_classification=effect_classification):
+                    action = "retry_dry_run_write"
+                    safety = "dry_run_write"
+                    reason = "interrupted dry-run write preview can be retried after checking write roots"
+                    review_steps = []
+                else:
+                    action = "needs_user_review"
+                    safety = "write"
+                    if write_world_state.get("state") == "partial":
+                        effect_classification = "partial"
+                        reason = "interrupted write left an atomic temp file; cleanup or rollback needs user review"
+                    elif write_world_state.get("state") == "target_diverged":
+                        effect_classification = "target_diverged"
+                        reason = "interrupted write target diverged from both pre-write and intended hashes"
+                    else:
+                        reason = "interrupted write must be reviewed before retry or rollback"
+                    review_steps = [
+                        "open the resume with live world state",
+                        "inspect git status/diff and the touched path before retrying",
+                        "retry or re-apply only after the verifier is known",
+                    ]
         elif tool == "run_tests" and command:
             action = "retry_verification"
             safety = "verification"
