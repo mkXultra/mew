@@ -1035,9 +1035,17 @@ Missing proof:
   string form, `redundant_search_observations` now extracts the concrete anchor
   line instead of degrading `suggested_next` to `line_start=None`. That
   blocker-reduction patch landed through a fresh no-steer mew-side paired
-  src/test edit with native verification and same-surface audit. The remaining
-  M6.6 missing proof is broader durable plan/path recall and multi-file
-  normal-case autonomy with less targeted search churn.
+  src/test edit with native verification and same-surface audit. Task #354 then
+  converted one broader durable path-recall carry-forward decision into a fresh
+  no-rescue mew-side pass: `build_work_session_resume()` now surfaces
+  `target_path_cached_window_observations` by pairing
+  `working_memory.target_paths` with matching completed `read_file` windows, the
+  paired tests prove that cached window survives through resume/context, and
+  the native run closed with `uv run python -m unittest tests.test_work_session`
+  plus a same-surface audit on `format_work_session_resume()`. The remaining
+  M6.6 missing proof is no longer whether durable target paths can point at a
+  cached exact window; it is broader multi-file normal-case autonomy and
+  durable plan/path recall with less targeted search churn.
 
 Done when:
 
@@ -1082,17 +1090,20 @@ Next action:
 - Carry the landed #345 `open_questions` hygiene patch as product progress, but
   do not count it as no-rescue evidence because the run needed an exact-window
   interrupt steer.
+- Record task #354 / session #342 as fresh mew-side durable path-recall
+  evidence for the frozen M6.6 implementation set: cached exact `read_file`
+  windows can now be paired back to `working_memory.target_paths` without
+  supervisor hints, native verification passed, and same-surface audit closed.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
-  native no-steer proof task on a broader `src/mew/work_session.py` +
-  `tests/test_work_session.py` slice that exercises durable plan/path recall in
-  normal coding work rather than another prompt-only edit. Prefer a slice that
-  needs exact remembered src/test windows plus one concrete plan_items /
-  target_paths / open_questions carry-forward decision before the edit is
-  proposed, but avoid the adjacent-window reread creep seen in #349 and require
-  same-surface audit to close natively. Choose a fresh task whose premise is
-  not already satisfied by the current worktree, so the next rerun can count as
-  evidence. Do not return to comparator work until the mew-side implementation
-  set is frozen.
+  native no-steer proof task on a broader multi-file coding slice, ideally one
+  that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a
+  broader resume/recovery peer in addition to `tests/test_work_session.py`.
+  Prefer a task that forces mew to reuse the landed durable plan/path signals
+  instead of rediscovering files from scratch, but avoid turning back into
+  prompt-only guidance or comparator work. Choose a fresh task whose premise is
+  not already satisfied by the current worktree, require native verification
+  and same-surface audit, and keep comparator work deferred until the mew-side
+  implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

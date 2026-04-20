@@ -5647,6 +5647,23 @@ class WorkSessionTests(unittest.TestCase):
             "model_turns": [],
         }
         state["work_sessions"].append(session)
+        session["tool_calls"].append(
+            {
+                "id": 1,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/workbench.py", "line_start": 120, "line_count": 24},
+                "result": {
+                    "path": "src/mew/workbench.py",
+                    "line_start": 120,
+                    "line_end": 143,
+                    "next_line": 144,
+                    "context_truncated": False,
+                    "source_truncated": False,
+                    "truncated": False,
+                },
+            }
+        )
         decision_plan = {
             "summary": "continue approval UX",
             "working_memory": {
@@ -5741,6 +5758,32 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["target_paths"],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
+        )
+        self.assertEqual(
+            resume["target_path_cached_window_observations"],
+            [
+                {
+                    "path": "src/mew/workbench.py",
+                    "tool_call_id": 1,
+                    "line_start": 120,
+                    "line_end": 143,
+                    "reason": "recent read_file window already covered src/mew/workbench.py:120-143",
+                    "context_truncated": False,
+                }
+            ],
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["target_path_cached_window_observations"],
+            [
+                {
+                    "path": "src/mew/workbench.py",
+                    "tool_call_id": 1,
+                    "line_start": 120,
+                    "line_end": 143,
+                    "reason": "recent read_file window already covered src/mew/workbench.py:120-143",
+                    "context_truncated": False,
+                }
+            ],
         )
 
     def test_work_session_context_and_resume_surface_user_preferences(self):

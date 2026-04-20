@@ -4225,6 +4225,32 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         working_memory = dict(session.get("startup_memory") or {})
     if phase == "idle":
         next_action = refresh_stale_memory_next_action(next_action, working_memory)
+    target_path_cached_window_observations = []
+    target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
+    if target_paths:
+        for target_path in target_paths[:3]:
+            for call in reversed(calls):
+                if call.get("tool") != "read_file" or call.get("status") != "completed":
+                    continue
+                result = call.get("result") or {}
+                read_path = work_call_path(call) or result.get("path") or ""
+                if not read_path or not str(read_path).endswith(target_path):
+                    continue
+                line_start = result.get("line_start")
+                line_end = result.get("line_end")
+                if not isinstance(line_start, int) or not isinstance(line_end, int):
+                    continue
+                target_path_cached_window_observations.append(
+                    {
+                        "path": target_path,
+                        "tool_call_id": call.get("id"),
+                        "line_start": line_start,
+                        "line_end": line_end,
+                        "reason": f"recent read_file window already covered {target_path}:{line_start}-{line_end}",
+                        "context_truncated": bool(result.get("context_truncated")),
+                    }
+                )
+                break
     user_preferences = build_work_user_preferences(state, limit=limit)
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
@@ -4250,6 +4276,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": build_adjacent_read_observations(calls, limit=3),
+        "target_path_cached_window_observations": target_path_cached_window_observations,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
