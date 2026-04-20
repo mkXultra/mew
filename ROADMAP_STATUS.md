@@ -18,8 +18,9 @@ M5 was archived losslessly in
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
 | 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
 | 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
-| 6.5. Self-Hosting Speed | `foundation` | New gate: make mew fast enough to implement small mew changes inside mew before resuming feature expansion. |
-| 7. Senses: Inbound Signals | `foundation` | Signal source gates and journaling have started, but further source work is paused until M6.5 removes the self-hosting speed blocker. |
+| 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
+| 6.6. Coding Competence: Codex CLI Parity | `foundation` | First slice is coding plan state plus path recall; mew is still naive compared with Codex CLI. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring is deferred until M6.6. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -27,10 +28,10 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 20:11 JST.
+Last assessed: 2026-04-20 21:13 JST.
 
-Active work: **M6.5 Self-Hosting Speed** while the M6 enhanced proof runs in
-parallel.
+Active work: **M6.6 Coding Competence: Codex CLI Parity** while the M6 enhanced
+proof runs in parallel.
 
 Reasoning:
 
@@ -40,16 +41,28 @@ Reasoning:
   without retroactively changing the M5 done gate.
 - M6 core daemon work exists and the enhanced multi-hour Docker proof is
   running detached. Waiting for that proof should not block useful local work.
-- M7 signal registry foundation exists, but feature expansion exposed a more
-  important blocker: mew is still too slow to act as its own implementer.
+- M7 signal registry foundation exists. M6.5 was inserted before deeper M7
+  work because feature expansion exposed a speed blocker in mew-as-implementer
+  loops.
 - The first #320-class self-hosting attempts produced no reviewable edit
   proposal: xhigh had roughly 132s first THINK latency, high then stalled
   beyond three minutes, and the repaired model turns recorded interruption
   without edits.
 - After prompt-size instrumentation and approval-path cleanup, session #301 did
   produce and apply a reviewable paired src/tests patch, but its recorded
-  model metrics still used `high`/`full`; M6.5 remains open until a clean
-  `medium`/`compact_memory` rerun proves the speed path.
+  model metrics still used `high`/`full`.
+- Clean rerun session #306 proved the speed path: it used
+  `medium`/`compact_memory`, reached first useful output in 14.7s, proposed a
+  paired dry-run edit in the third model step, and verified the applied patch.
+- That closes the speed blocker, but it also exposes the next blocker: native
+  coding tasks are still too prompt-driven and naive compared with Codex CLI.
+  Recent dogfood showed path confusion, repeated search/read churn, and a model
+  turn that wanted to finish after identifying the next edit instead of
+  proposing it.
+- M6.6 is now the earliest unfinished enabling milestone. It should make coding
+  work plan, edit, verify, repair, self-review, and summarize with explicit
+  evidence, before M7 expands the resident's senses and creates more work for
+  the native implementer.
 - `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` identifies the structural
   cause: durable memory is currently used as prompt bulk instead of a fast
   pointer/index.
@@ -57,21 +70,20 @@ Reasoning:
   `f220b253-51d5-435e-ab24-520190e3f97e` and recommended prompt caching,
   reasoning-effort auto-adjustment, and differential context before deeper M7
   feature work. Codex agrees.
-- Broad polish and general refactor remain non-goals. M6.5 work must be
-  measured against self-hosting latency and edit-proposal outcomes.
+- Broad polish and general refactor remain non-goals. M6.6 work should target
+  coding-task structure, not cosmetic CLI refinements.
 
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Run a clean #320-class self-hosting rerun after the task-note policy fix and
-   compare first useful output, selected reasoning effort, prompt/context size,
-   and edit-proposal latency against the failed attempt and session #301.
-4. If the clean rerun still stalls, reduce context further or add Codex prompt
-   caching before adding new M7 features.
-5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
-   without dropping the M6.5 active focus.
+3. Start M6.6 with the first native coding-loop slice: durable coding plan
+   state plus anti-churn/path recall.
+4. Compare each M6.6 dogfood task against Codex CLI standards: correctness,
+   minimal edits, verifier choice, repair behavior, latency, and reviewability.
+5. If the M6 proof passes while M6.6 is in progress, write the M6 close gate
+   without dropping the M6.6 active focus.
 6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
@@ -82,12 +94,9 @@ Human-role transition rule:
   it did not count as autonomy credit.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
-- Low- and medium-risk implementation should move toward mew as primary
-  implementer only after M6.5 produces a reviewable edit proposal without
-  rescue edits.
-- Until then, Codex may implement the M6.5 infrastructure directly, but every
-  change should be aimed at making the next mew-as-implementer dogfood attempt
-  faster and more legible.
+- Low- and medium-risk implementation can now use mew as primary implementer
+  with Codex acting as human reviewer/approver. Rescue edits by Codex still
+  disqualify the loop from autonomy credit and should be recorded as blockers.
 
 ## Milestone Evidence
 
@@ -357,7 +366,7 @@ Done when:
 
 ### M6.5: Self-Hosting Speed
 
-Status: `foundation`.
+Status: `done`.
 
 Goal:
 
@@ -415,11 +424,11 @@ Evidence:
   `uv run pytest -q tests/test_signal_fetch.py tests/test_signals.py --no-testmon`.
 - The applied #320 slice added a minimal RSS/Atom feed parser and `rss`
   source-config fetch helper in `src/mew/signals.py`, plus mocked-fetch tests
-  in `tests/test_signal_fetch.py`. CLI `signals fetch` wiring and explicit
-  `atom` source-kind support are deferred M7 follow-up work, not part of the
-  M6.5 speed gate.
-- This did not close M6.5: `mew metrics --kind coding --limit 8` still records
-  the completed #320 model turns as `reasoning_efforts: high=2` and
+  in `tests/test_signal_fetch.py`. CLI `signals fetch` wiring remained a
+  deferred M7 follow-up, not part of the M6.5 speed gate.
+- The initial #320 dogfood did not close M6.5: `mew metrics --kind coding
+  --limit 8` still recorded the completed #320 model turns as
+  `reasoning_efforts: high=2` and
   `prompt_context_modes: full=2`, with first THINK latency `128.209s` and
   first tool output for session #301 at `140.0s`.
 - The root cause of the unexpected `high`/`full` rerun was task notes: the
@@ -428,17 +437,43 @@ Evidence:
   historical note prefixes such as `Dogfood note:`, `Long session checkpoint:`,
   and `Context save ` when selecting reasoning effort. A live policy check for
   task #320 now returns `medium` / `small_implementation`.
+- The policy also stopped treating milestone numbers such as `M6.5` as
+  inherently high risk. Real risk is now carried by terms such as daemon,
+  safety, recovery, policy, auth, and permission instead of numeric milestone
+  labels alone.
+- Work prompt guidance now says implementation tasks with write roots should
+  not finish merely because the next edit is clear; if exact old/new text or
+  file content is available, the model should propose a dry-run edit/write
+  action instead. This fixed the observed session #303 behavior where mew
+  stopped after planning the next edit.
+- Clean rerun session #306 closed the M6.5 gate. It used
+  `reasoning_effort=medium` and `prompt_context_mode=compact_memory` for all
+  three model turns. Metrics for the first turn were `context_chars=12182`,
+  `think.prompt_chars=24819`, `active_memory_chars=2693`, and
+  `think.elapsed_seconds=9.61`; first useful output arrived in 14.7s.
+- The edit-proposal turn in #306 had `context_chars=24051`,
+  `work_session_chars=22998`, `resume_chars=9540`, `tool_context_chars=7471`,
+  `active_memory_entries=3`, `think.prompt_chars=37412`, and
+  `think.elapsed_seconds=11.679`. It produced paired dry-run edits #2142/#2143
+  without manual file rescue, then approval applied #2144/#2145 and focused
+  verification passed.
+- Compared with the failed #320 baseline (`high`/`full`, first THINK
+  `128.209s`, `context_chars` about `104k`, THINK prompt about `138k`, first
+  tool output `140.0s`, and no fast edit proposal), #306 is a clear speed
+  improvement and reaches the normal reviewer approval surface.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
   targeted `ruff`, `uv run python -m py_compile`, and `git diff --check` passed.
 
-Missing proof:
+Closed proof:
 
-- No clean post-task-note-policy rerun has populated `medium` /
-  `compact_memory` self-hosting metrics yet.
-- The #320-class task has succeeded as a reviewable and verified edit proposal,
-  but not yet as a fast resident implementation loop.
+- A clean post-policy resident rerun populated `medium` / `compact_memory`
+  self-hosting metrics and reached a verified paired edit through the normal
+  work-session approval path.
+- Residual speed work remains, but it is no longer the active blocker. If
+  future resident loops regress, add Codex prompt caching or stronger
+  tool-choice guidance as a targeted follow-up.
 
 Done when:
 
@@ -456,10 +491,78 @@ Done when:
 
 Next action:
 
-- Rerun a clean #320-class self-hosting task after the historical task-note
-  policy fix and compare first useful output, edit-proposal latency, selected
-  effort, selected prompt mode, and the new `self_hosting` prompt-size
-  breakdown against the failed attempt and session #301.
+- Start M6.6 and treat the observed coding-loop naivete as the next blocker
+  before deeper M7 work.
+
+### M6.6: Coding Competence - Codex CLI Parity
+
+Status: `foundation`.
+
+Goal:
+
+- Make native coding tasks feel as capable as Codex CLI for small-to-medium
+  repo edits, while preserving mew's resident state and approval surfaces.
+
+Evidence:
+
+- M6.5 clean rerun proved that mew can reach a reviewable edit quickly enough
+  for self-hosting: session #306 used `medium` / `compact_memory`, produced
+  paired dry-run edits, and verified the applied patch.
+- The same dogfood sequence also exposed coding competence gaps that speed work
+  alone does not solve: path confusion in earlier attempts, repeated broad
+  search/read exploration, and a finish decision after the next edit was clear.
+- Current work-session prompts now discourage finishing merely because the next
+  edit is clear, and reasoning policy no longer escalates milestone numbers
+  alone to high-risk mode. These are useful guards, not a Codex CLI-level
+  coding architecture.
+- `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_M2_BLOCKERS_FROM_REFERENCES.md`, and
+  `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` remain the reference material
+  for adopting mature CLI patterns without losing mew's resident shape.
+- `claude-ultra` session `2923749a-f605-47fa-aa2a-ba01b38cfd0a` reviewed the
+  proposed M6.6 gate and returned "qualified yes": M6.6 should exist before M7,
+  but it must use a narrow first slice and measurable comparator evidence to
+  avoid becoming a grab-bag.
+- `docs/M6_6_CODEX_PARITY_COMPARE.md` now defines the M6.6 comparator template
+  and the three predeclared task shapes required for close-gate evidence.
+
+Missing proof:
+
+- Plan state: no durable plan/checklist exists at the work-session level yet.
+- Path recall: no first-class codebase map, symbol/path recall, or targeted
+  context selector exists beyond prompt instructions and normal search/read
+  tools.
+- Coding loop: no built-in edit planner, verifier discovery, repair loop, or
+  self-review phase exists at the work-session level.
+- Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
+  on correctness, tool churn, latency, and reviewability across representative
+  coding tasks.
+
+Done when:
+
+- Mew completes three predeclared representative coding tasks without Codex
+  rescue edits: one behavior-preserving refactor, one bug fix with a regression
+  test, and one small feature with paired source/test changes.
+- The same tasks are compared against Codex CLI in a checked-in comparator
+  artifact that records first-edit latency, model turns, search/read calls
+  before first edit, changed files, verifier commands, repair cycles, and
+  review outcome.
+- Every comparator task has `rescue_edits=0`, no obvious path hallucination, no
+  repeated identical broad search/read loop, and a focused verifier command
+  chosen by mew.
+- Resident state improves the second and third coding task by reducing at least
+  one of prompt size, repeated file discovery, or search/read count instead of
+  merely increasing context.
+- A coding task can plan, edit, verify, repair, self-review, and summarize with
+  clear approval surfaces.
+- Path recall and targeted context prevent obvious file/path hallucinations and
+  repeated read-only churn in the normal case.
+
+Next action:
+
+- Implement the first M6.6 slice: durable coding plan state and anti-churn/path
+  recall in the work session, then dogfood it on a small mew change and record
+  the trace in `docs/M6_6_CODEX_PARITY_COMPARE.md`.
 
 ### M7: Senses - Inbound Signals
 
@@ -477,16 +580,19 @@ Evidence:
 - `mew signals record` refuses unknown, disabled, or budget-exhausted sources.
   Successful observations can queue a `signal_observed` runtime event with
   provenance, while `--no-queue` records without waking the runtime.
+- `src/mew/signals.py` now has minimal RSS/Atom parsing and a gated feed-fetch
+  helper, with mocked tests in `tests/test_signal_fetch.py`.
+- Atom source-kind fetch support was dogfooded in the M6.5 clean rerun and
+  verified with focused signal tests.
 - Validation: `uv run pytest -q tests/test_signals.py --no-testmon`,
   targeted `ruff`, `./mew help signals record`, and `git diff --check` passed.
 
 Missing proof:
 
-- No real non-file-system source fetcher exists yet. RSS/calendar/mail/etc. can
-  now plug into the registry, but one source still needs an actual collector.
+- No CLI or daemon path fetches an enabled source on a resident schedule yet.
 - No real-day unsolicited observation has been collected from signal evidence.
-- Further M7 collector work is paused until M6.5 makes self-hosting fast enough
-  to produce reviewable edit proposals.
+- Further M7 collector work is paused until M6.6 makes self-hosted coding work
+  closer to Codex CLI level.
 
 Done when:
 
@@ -560,20 +666,23 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.5 Self-Hosting Speed**.
+Active focus: **M6.6 Coding Competence: Codex CLI Parity**.
 
 The next long session should not drift into broad polish or general refactor.
 The acceptable near-term work is:
 
 - collecting the running M6 enhanced Docker proof when it finishes;
-- self-hosting speed metrics for native work sessions;
-- rerunning a #320-class mew-as-implementer dogfood task and comparing latency
-  to the failed attempt;
+- adding explicit coding plan state, path recall, and anti-churn behavior to
+  native work sessions;
+- dogfooding representative coding tasks with mew as implementer and Codex as
+  reviewer/approver;
+- comparing mew traces against Codex CLI expectations for correctness, tool
+  churn, latency, verification, repair, and reviewability;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1 as the closed safety baseline and M6 as proof-pending while M6.5
-removes the self-hosting speed blocker.
+Keep M5.1 as the closed safety baseline and M6 as proof-pending while M6.6
+removes the coding-competence blocker before deeper M7 signal work.
 
 ## Maintenance Rule
 

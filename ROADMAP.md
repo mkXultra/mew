@@ -316,6 +316,58 @@ Why it matters:
   body. Mew's durable memory must become an index for faster work, not a large
   prompt that delays every turn.
 
+## Milestone 6.6: Coding Competence - Codex CLI Parity
+
+Make native coding tasks feel as capable as Codex CLI for small-to-medium repo
+edits, while preserving mew's resident advantages.
+
+Target:
+
+- explicit task decomposition and plan state for coding work
+- codebase map, path recall, and targeted context selection before reads
+- patch planning that prefers reviewable, minimal, paired source/test edits
+- verifier/test discovery, failure repair, and retest loop
+- self-review or critic pass before presenting edits for approval
+- anti-churn tool policy that avoids repeated broad search/read loops
+- coding-session evidence that separates model work from human rescue edits
+
+First slice:
+
+- durable coding plan state plus path recall inside the work session
+
+Non-goals:
+
+- no new general CLI surface unless it is required for the coding-loop evidence
+- no model-router rewrite or broad memory-schema rewrite
+- no M7 signal collector expansion until the M6.6 coding gate is credible
+
+Done when:
+
+- mew completes three predeclared representative coding tasks without Codex
+  rescue edits: one behavior-preserving refactor, one bug fix with a regression
+  test, and one small feature with paired source/test changes
+- the same tasks are compared against Codex CLI in a checked-in comparator
+  artifact that records first-edit latency, model turns, search/read calls
+  before first edit, changed files, verifier commands, repair cycles, and
+  review outcome
+- every comparator task has `rescue_edits=0`, no obvious path hallucination,
+  no repeated identical broad search/read loop, and a focused verifier command
+  chosen by mew
+- resident state improves the second and third coding task by reducing at least
+  one of prompt size, repeated file discovery, or search/read count instead of
+  merely increasing context
+- a coding task can plan, edit, verify, repair, self-review, and summarize with
+  clear approval surfaces
+- path recall and targeted context prevent obvious file/path hallucinations and
+  repeated read-only churn in the normal case
+
+Why it matters:
+
+- M6.5 proved that mew can become fast enough to self-host small work. It did
+  not prove that mew's coding loop is as mature as Codex CLI. Senses and
+  autonomy will amplify implementation mistakes if the native coding loop
+  remains naive.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only
