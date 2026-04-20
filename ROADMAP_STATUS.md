@@ -1450,6 +1450,8 @@ Evidence:
   runtime effects. Pre-commit statuses become `rerun_event` /
   `no_action_committed`; committing effects with write runs, verification runs,
   or only selected actions become explicit review decisions.
+  `mew doctor` previews those decisions for incomplete runtime effects before
+  repair mutates state.
   `mew brief` surfaces recent startup-repair decision actions alongside repair
   types, so reentry does not require opening raw state.
   `dogfood --scenario m4-runtime-effect-recovery` passed locally in

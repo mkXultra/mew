@@ -107,7 +107,7 @@ from .programmer import (
     latest_task_plan,
 )
 from .question_view import format_question_context
-from .repair import repair_incomplete_runtime_effects
+from .repair import repair_incomplete_runtime_effects, runtime_effect_recovery_decision
 from .self_improve import DEFAULT_SELF_IMPROVE_TITLE, create_self_improve_task, ensure_self_improve_plan
 from .self_memory import (
     build_self_memory_view_model,
@@ -8511,6 +8511,16 @@ def build_doctor_data(args):
     runtime_effects = list((state or {}).get("runtime_effects", []))
     incomplete_effects = incomplete_runtime_effects(state or {})
     latest_runtime_effect = runtime_effects[-1] if runtime_effects else None
+    incomplete_effect_items = [
+        {
+            "id": effect.get("id"),
+            "event_id": effect.get("event_id"),
+            "status": effect.get("status"),
+            "reason": effect.get("reason") or "",
+            "recovery_decision": runtime_effect_recovery_decision(effect, effect.get("status")),
+        }
+        for effect in incomplete_effects[-5:]
+    ]
     data["runtime"] = {
         "state": runtime_status.get("state"),
         "pid": runtime_status.get("pid"),
@@ -8525,6 +8535,7 @@ def build_doctor_data(args):
         "total": len(runtime_effects),
         "incomplete": len(incomplete_effects),
         "latest": latest_runtime_effect,
+        "incomplete_items": incomplete_effect_items,
     }
     if data["runtime_lock"]["state"] == "stale" or (
         incomplete_cycle and data["runtime_lock"]["state"] != "active"
@@ -8612,6 +8623,15 @@ def format_doctor_data(data):
         f"incomplete={runtime_effects.get('incomplete', 0)} "
         f"latest={latest_text}"
     )
+    for item in runtime_effects.get("incomplete_items") or []:
+        decision = item.get("recovery_decision") or {}
+        lines.append(
+            "runtime_effect_recovery: "
+            f"#{item.get('id')} status={item.get('status')} "
+            f"action={decision.get('action')} "
+            f"effect={decision.get('effect_classification')} "
+            f"safety={decision.get('safety')}"
+        )
 
     for executable in ("ai-cli", "rg"):
         tool = (data.get("tools") or {}).get(executable) or {}

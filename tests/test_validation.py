@@ -388,6 +388,41 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_doctor_previews_incomplete_runtime_effect_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect["action_types"] = ["write_file"]
+                effect["write_run_ids"] = [7]
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["doctor", "--json"])
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(code, 1)
+                self.assertFalse(data["ok"])
+                item = data["runtime_effects"]["incomplete_items"][0]
+                self.assertEqual(item["recovery_decision"]["action"], "review_writes")
+                self.assertEqual(item["recovery_decision"]["effect_classification"], "write_may_have_started")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["doctor"])
+                self.assertEqual(code, 1)
+                self.assertIn(
+                    "runtime_effect_recovery: #1 status=committing "
+                    "action=review_writes effect=write_may_have_started safety=needs_user_review",
+                    stdout.getvalue(),
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_repair_classifies_committing_runtime_write_effect(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

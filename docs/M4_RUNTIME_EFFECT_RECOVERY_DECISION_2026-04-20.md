@@ -15,6 +15,9 @@ effect and repair record now include `recovery_decision`.
 or human can see whether the repaired effect was `rerun_event` or a review path
 without opening raw state.
 
+`mew doctor` previews the same recovery decision for incomplete runtime effects
+before repair mutates state.
+
 Current classifications:
 
 - pre-commit statuses (`planning`, `planned`, `precomputing`, `precomputed`)
@@ -34,6 +37,7 @@ Focused tests:
 
 ```bash
 uv run pytest --testmon -q tests/test_validation.py -k 'repair_marks_incomplete_runtime_effect_interrupted or repair_classifies_committing_runtime_write_effect'
+uv run pytest --testmon -q tests/test_validation.py -k 'doctor_previews_incomplete_runtime_effect_recovery'
 uv run pytest --testmon -q tests/test_runtime.py -k 'startup_repairs_incomplete_effects'
 ```
 
