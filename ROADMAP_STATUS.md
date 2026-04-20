@@ -10,13 +10,13 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, day-scale reentry, a scoped M3 reentry gate with fresh-restart comparison merge, and a half-hour resident cadence proof now exist; several-hour and multi-day resident cadence remain unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, day-scale reentry, a scoped M3 reentry gate with fresh-restart comparison merge, a richer reentry-burden comparator where fresh `codex-ultra` chose `mew_preferred`, and a half-hour resident cadence proof now exist; several-hour and multi-day resident cadence remain unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 08:42 JST.
+Last assessed: 2026-04-20 09:20 JST.
 
 Active milestone: Milestone 3, Persistent Advantage.
 
@@ -35,10 +35,11 @@ focus to the next earliest unfinished milestone: proving mew's persistent
 advantage over fresh CLI sessions across longer-running resident cadence. Since
 then, M3 gained a scoped fresh-restart comparator prompt/template, a merge path
 for completed fresh reports, one parity fresh `codex-ultra` comparator leg on
-the synthetic M3 reentry gate, and a half-hour resident-loop cadence proof. This
-is enough to make M3 materially stronger, but not enough to close it: the
-remaining bar is still several-hour or multi-day cadence and richer
-context-reconstruction comparisons where persistence changes outcome, not only
+the synthetic M3 reentry gate, a richer reentry-burden comparator where fresh
+`codex-ultra` chose `mew_preferred`, and a half-hour resident-loop cadence
+proof. This is enough to make M3 materially stronger, but not enough to close
+it: the remaining bar is still several-hour or multi-day cadence and richer
+context-reconstruction comparisons on less synthetic task shapes, not only
 ceremony.
 
 Closed M2 evidence gate:
@@ -1185,6 +1186,17 @@ Evidence:
   repository-only compliance, verifier exit code, comparison choice, and reason.
   `/tmp/mew-m3-reentry-merge-fresh-report` passed using the fresh `codex-ultra`
   report above and exposed `comparison_choice=parity` in JSON.
+- A richer M3 reentry-burden comparator now records whether the fresh restart
+  had to reconstruct context that mew preserved. The prompt no longer prints
+  the verifier command inline, the report template is `schema_version: 2`, and
+  merged reports include `reconstruction_burden` plus
+  `persistent_advantage_signal`. A fresh `codex-ultra` true-restart run at
+  `/private/tmp/mew-m3-reentry-burden-20260420-0922/fresh-codex-ultra-report.json`
+  completed without manual rebrief, passed verification, recorded
+  `repository_only_steps_before_first_correct_action=4`, and chose
+  `comparison_result.choice=mew_preferred` because mew preserved the decisive
+  pending edit / verifier sequence. The durable summary is in
+  `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
 - `mew dogfood --scenario resident-loop` now honors `--duration`,
   `--interval`, and `--poll-interval` for scenario runs and records the
   requested duration/interval in JSON artifacts. This turns the short
@@ -1211,9 +1223,10 @@ Missing proof:
   requested duration/interval. A half-hour resident-loop proof exists, but
   there is still no several-hour or multi-day cadence proof.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
-  prompt/template and merge the completed report, and one fresh `codex-ultra`
-  leg has run to parity, but that comparison is still a tiny synthetic README
-  task rather than a long-running resident cadence proof.
+  prompt/template and merge the completed report. One fresh `codex-ultra` leg
+  has run to parity and one richer burden leg has run to `mew_preferred`, but
+  both comparisons are still tiny synthetic README tasks rather than larger
+  coding tasks or long-running resident cadence proof.
 
 Next action:
 

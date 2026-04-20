@@ -513,14 +513,23 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m3_reentry_gate_can_advance_to_verification_after_reentry", text)
             self.assertIn("m3_reentry_gate_writes_fresh_cli_comparison_assets", text)
             self.assertIn("M3 gate pending", (fresh_cli_workspace / "README.md").read_text(encoding="utf-8"))
+            self.assertEqual(fresh_cli_template["schema_version"], 2)
             self.assertEqual(fresh_cli_template["context_mode"], "true_restart")
             self.assertIn("manual_rebrief_needed", fresh_cli_template)
             self.assertIn("repository_only_compliance", fresh_cli_template)
+            self.assertIn("reconstruction_burden", fresh_cli_template)
+            self.assertIn("persistent_advantage_signal", fresh_cli_template)
             self.assertEqual(fresh_cli_template["comparison_result"]["choice"], "unknown")
             self.assertEqual(fresh_cli_template["mew_evidence"]["continuity_status"], "strong")
+            self.assertEqual(
+                fresh_cli_template["mew_evidence"]["decisive_next_action"],
+                "approve_pending_readme_edit_then_rerun_verifier",
+            )
             self.assertIn("M3 Fresh CLI Reentry Comparator", fresh_cli_prompt)
             self.assertIn(str(fresh_cli_workspace), fresh_cli_prompt)
-            self.assertIn("M3 gate complete", fresh_cli_prompt)
+            self.assertIn("VERIFY_COMMAND.txt", fresh_cli_prompt)
+            self.assertIn("reconstruction_burden", fresh_cli_prompt)
+            self.assertNotIn("M3 gate complete", fresh_cli_prompt)
             self.assertNotIn("Approve the README.md dry-run edit", fresh_cli_prompt)
 
     def test_run_dogfood_m3_reentry_gate_merges_fresh_cli_report(self):
@@ -534,6 +543,20 @@ class DogfoodTests(unittest.TestCase):
                         "manual_rebrief_needed": False,
                         "repository_only_compliance": True,
                         "verification_exit_code": 0,
+                        "reconstruction_burden": {
+                            "repository_only_steps_before_first_correct_action": 2,
+                            "needed_to_read_verifier_before_action": True,
+                            "needed_to_run_verifier_before_action": True,
+                            "missing_context_that_mew_resume_had": ["pending dry-run edit diff"],
+                            "mew_resume_would_have_changed_first_action": True,
+                            "notes": "fresh had to reconstruct the pending edit from repo/test state",
+                        },
+                        "persistent_advantage_signal": {
+                            "mew_saved_reconstruction": True,
+                            "mew_saved_verifier_rerun": True,
+                            "mew_prevented_wrong_first_action": False,
+                            "reason": "mew resume already named the approval and verifier sequence",
+                        },
                         "comparison_result": {
                             "choice": "parity",
                             "reason": "fresh restart and mew reached the same next action",
@@ -561,6 +584,11 @@ class DogfoodTests(unittest.TestCase):
             self.assertFalse(fresh_cli_report["manual_rebrief_needed"])
             self.assertTrue(fresh_cli_report["repository_only_compliance"])
             self.assertEqual(fresh_cli_report["comparison_choice"], "parity")
+            self.assertEqual(
+                fresh_cli_report["reconstruction_burden"]["repository_only_steps_before_first_correct_action"],
+                2,
+            )
+            self.assertTrue(fresh_cli_report["persistent_advantage_signal"]["mew_saved_reconstruction"])
 
     def test_run_dogfood_chat_cockpit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

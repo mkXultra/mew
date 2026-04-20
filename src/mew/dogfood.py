@@ -3547,10 +3547,18 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
         "unresolved_failure_exit_code": unresolved_failure.get("exit_code"),
         "working_memory_next_step": (resume.get("working_memory") or {}).get("next_step"),
         "verification_command": verify_command,
+        "decisive_next_action": "approve_pending_readme_edit_then_rerun_verifier",
+        "decisive_next_action_source": "resume.pending_approvals + resume.working_memory.next_step",
+        "repo_only_missing_context": [
+            "pending dry-run edit diff",
+            "already-observed verifier failure",
+            "queued follow-up to approve then verify",
+        ],
     }
     write_json_file(
         fresh_cli_template_path,
         {
+            "schema_version": 2,
             "status": "unknown",
             "context_mode": "true_restart",
             "fresh_cli_tool": "",
@@ -3569,6 +3577,20 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
             "verification_command_used": "",
             "verification_exit_code": None,
             "verification_result": "",
+            "reconstruction_burden": {
+                "repository_only_steps_before_first_correct_action": None,
+                "needed_to_read_verifier_before_action": None,
+                "needed_to_run_verifier_before_action": None,
+                "missing_context_that_mew_resume_had": [],
+                "mew_resume_would_have_changed_first_action": None,
+                "notes": "",
+            },
+            "persistent_advantage_signal": {
+                "mew_saved_reconstruction": None,
+                "mew_saved_verifier_rerun": None,
+                "mew_prevented_wrong_first_action": None,
+                "reason": "",
+            },
             "unfairness_notes": [],
             "comparison_result": {
                 "choice": "unknown",
@@ -3592,7 +3614,8 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
                 "Do not inspect the parent `.mew` directory or the report template's `mew_evidence` before your independent attempt.",
                 "If you inspect either before solving, set `manual_rebrief_needed=true` and record the inspected source.",
                 "",
-                f"Acceptance command from the fresh workspace: `{verify_command}`",
+                "Acceptance command: read and run the command stored in `VERIFY_COMMAND.txt` from the fresh workspace.",
+                "Record whether reading or running that verifier was required before your first correct action.",
                 "",
                 "Fresh restart task:",
                 "1. Reconstruct what changed, what is risky, and the next action from repository files alone.",
@@ -3600,6 +3623,7 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
                 "3. Record how many reconstruction steps were needed and whether manual rebrief was needed.",
                 "",
                 f"After your independent attempt, compare against the `mew_evidence` in `{fresh_cli_template_path}`.",
+                "Fill `reconstruction_burden` and `persistent_advantage_signal` in the completed report.",
                 f"Write the completed JSON report to `{fresh_cli_template_path}` or another explicit path.",
             ]
         )
@@ -3622,6 +3646,8 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
             "verification_exit_code": loaded_report.get("verification_exit_code"),
             "comparison_choice": comparison_result.get("choice"),
             "comparison_reason": comparison_result.get("reason"),
+            "reconstruction_burden": loaded_report.get("reconstruction_burden") or {},
+            "persistent_advantage_signal": loaded_report.get("persistent_advantage_signal") or {},
         }
 
     _scenario_check(
@@ -3697,14 +3723,16 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
         and fresh_cli_workspace.exists()
         and "M3 gate pending" in (fresh_cli_workspace / "README.md").read_text(encoding="utf-8")
         and "manual_rebrief_needed" in fresh_cli_template_path.read_text(encoding="utf-8")
+        and "reconstruction_burden" in fresh_cli_template_path.read_text(encoding="utf-8")
         and "M3 Fresh CLI Reentry Comparator" in fresh_cli_prompt_path.read_text(encoding="utf-8")
-        and "M3 gate complete" in fresh_cli_prompt_path.read_text(encoding="utf-8"),
+        and "VERIFY_COMMAND.txt" in fresh_cli_prompt_path.read_text(encoding="utf-8")
+        and "M3 gate complete" not in fresh_cli_prompt_path.read_text(encoding="utf-8"),
         observed={
             "template": str(fresh_cli_template_path),
             "prompt": str(fresh_cli_prompt_path),
             "mew_evidence": mew_resume_evidence,
         },
-        expected="fresh CLI comparator prompt and report template preserve mew-side reentry evidence",
+        expected="fresh CLI comparator prompt avoids leaking the answer and records reconstruction burden",
     )
     if comparison_report_path:
         _scenario_check(
