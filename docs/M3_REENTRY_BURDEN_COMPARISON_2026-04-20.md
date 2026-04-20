@@ -167,3 +167,57 @@ the core pattern again: the fresh restart inferred the semantic direction from
 README.md, but made a wrong first edit before reading the verifier. mew had the
 pending approval, failed verifier, queued follow-up, exact next action, and
 verifier context already preserved.
+
+Strict Fresh Comparator:
+
+The comparator was repeated from a non-git `/tmp` workspace with stricter rules:
+
+- use only `README.md` and `VERIFY_COMMAND.txt` before the independent attempt
+- do not run git commands
+- do not inspect parent directories
+- inspect the report template only after the README recovery and verifier pass
+
+Workspace:
+
+```text
+/tmp/mew-m3-fresh-strict-20260420-1049
+```
+
+Durable report copy:
+
+```text
+docs/M3_FRESH_STRICT_COMPARATOR_2026-04-20.json
+```
+
+Merged result:
+
+```bash
+./mew dogfood --scenario m3-reentry-gate \
+  --workspace proof-workspace/mew-proof-m3-reentry-gate-strict-merged-20260420-1052 \
+  --m3-comparison-report /tmp/mew-m3-fresh-strict-20260420-1049/fresh-codex-ultra-strict-report.json \
+  --json
+```
+
+Result: `pass`
+
+Clean comparator evidence:
+
+- `manual_rebrief_needed=false`
+- `repository_only_compliance=true`
+- `verification_exit_code=0`
+- comparison choice: `mew_preferred`
+- repository-only steps before first correct action: `2`
+- needed to read verifier before first correct action: `true`
+- needed to run verifier before first correct action: `false`
+- mew resume would have changed first action: `true`
+- `mew_saved_reconstruction=true`
+- `mew_saved_verifier_rerun=true`
+- `mew_prevented_wrong_first_action=false`
+
+Interpretation:
+
+This is the cleanest M3 comparator in this sequence. Fresh CLI did not make a
+wrong turn, but it still needed two repository-only reads before the first
+correct action and depended on `VERIFY_COMMAND.txt` to recover the exact marker.
+mew's resume already held the pending edit, prior failed verifier, queued
+follow-up, and exact next action, so the comparator still chose `mew_preferred`.

@@ -1301,6 +1301,15 @@ Evidence:
   and `repository_only_compliance=false` after running git metadata commands
   outside the fresh workspace. Details are in
   `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
+- A cleaner strict fresh comparator then ran from non-git workspace
+  `/tmp/mew-m3-fresh-strict-20260420-1049` with git and parent-directory
+  inspection forbidden. It passed and merged with `comparison_choice=mew_preferred`,
+  `manual_rebrief_needed=false`, `repository_only_compliance=true`,
+  `verification_exit_code=0`,
+  `repository_only_steps_before_first_correct_action=2`,
+  `mew_saved_reconstruction=true`, and `mew_saved_verifier_rerun=true`. The
+  durable report copy is `docs/M3_FRESH_STRICT_COMPARATOR_2026-04-20.json`, and
+  interpretation is in `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
 
 Missing proof:
 

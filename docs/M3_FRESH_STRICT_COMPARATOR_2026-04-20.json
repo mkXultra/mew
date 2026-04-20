@@ -1,0 +1,96 @@
+{
+  "schema_version": 2,
+  "status": "passed",
+  "context_mode": "true_restart",
+  "fresh_cli_tool": "codex",
+  "fresh_model": "gpt-5",
+  "manual_rebrief_needed": false,
+  "fresh_elapsed_seconds": 210,
+  "active_reconstruction_seconds": 30,
+  "fresh_cli_summary": "From README.md alone, the gate was pending because the interrupted resident had not applied the recovery edit. VERIFY_COMMAND.txt exposed the exact acceptance condition: README.md needed to contain \"M3 gate complete\". I changed README.md to mark the M3 gate complete, ran the verifier once after the edit, and it passed.",
+  "files_inspected": [
+    "README.md (pre-attempt)",
+    "VERIFY_COMMAND.txt (pre-attempt)",
+    "/tmp/mew-m3-fresh-strict-20260420-1049/m3-fresh-cli-report-template.json (post-verification)"
+  ],
+  "commands_run": [
+    "sed -n '1,240p' README.md",
+    "sed -n '1,200p' VERIFY_COMMAND.txt",
+    "apply_patch README.md",
+    "/Library/Developer/CommandLineTools/usr/bin/python3 -c \"from pathlib import Path; raise SystemExit(0 if 'M3 gate complete' in Path('README.md').read_text() else 7)\"",
+    "sed -n '1,260p' /tmp/mew-m3-fresh-strict-20260420-1049/m3-fresh-cli-report-template.json"
+  ],
+  "mew_artifacts_inspected": [
+    "/tmp/mew-m3-fresh-strict-20260420-1049/m3-fresh-cli-report-template.json",
+    "m3-fresh-cli-report-template.json:mew_evidence"
+  ],
+  "prompt_mew_evidence_used": [
+    "No mew evidence was used before the independent README edit and verifier pass.",
+    "Post-attempt comparison used template.mew_evidence: continuity_score=9/9, pending_approval_count=1, unresolved_failure_exit_code=7, working_memory_next_step=\"Approve the README.md dry-run edit with deferred verification, then run the verifier command.\""
+  ],
+  "repository_only_compliance": true,
+  "reconstruction_steps": [
+    "Read README.md only and found the repository-local state: M3 gate pending because the interrupted resident had not applied the recovery edit.",
+    "Read VERIFY_COMMAND.txt only and identified the exact required marker: README.md must contain \"M3 gate complete\".",
+    "Applied the smallest README.md recovery edit by replacing the pending sentence with a completion sentence containing the required marker.",
+    "Ran the verifier command from VERIFY_COMMAND.txt after the edit; it exited 0.",
+    "After the independent attempt was complete, read the report template and compared the fresh result against the embedded mew_evidence."
+  ],
+  "change_summary": "README.md now says \"M3 gate complete\" and states that the interrupted resident recovery edit has been applied.",
+  "verification_command_used": "/Library/Developer/CommandLineTools/usr/bin/python3 -c \"from pathlib import Path; raise SystemExit(0 if 'M3 gate complete' in Path('README.md').read_text() else 7)\"",
+  "verification_exit_code": 0,
+  "verification_result": "passed",
+  "reconstruction_burden": {
+    "repository_only_steps_before_first_correct_action": 2,
+    "needed_to_read_verifier_before_action": true,
+    "needed_to_run_verifier_before_action": false,
+    "missing_context_that_mew_resume_had": [
+      "pending dry-run edit diff",
+      "already-observed verifier failure",
+      "queued follow-up to approve then verify"
+    ],
+    "mew_resume_would_have_changed_first_action": true,
+    "notes": "The first correct action was the README.md edit. Reading VERIFY_COMMAND.txt was required to know the exact acceptance marker before making that edit; running the verifier was not required before the edit and was only done after the edit."
+  },
+  "persistent_advantage_signal": {
+    "mew_saved_reconstruction": true,
+    "mew_saved_verifier_rerun": true,
+    "mew_prevented_wrong_first_action": false,
+    "reason": "Mew preserved the pending README dry-run edit, the previous verifier failure with exit code 7, and the approve-then-rerun next action. The fresh CLI still reached the correct action without a wrong turn, but it had to rediscover the marker from VERIFY_COMMAND.txt and did not have the pending diff or failure history."
+  },
+  "unfairness_notes": [
+    "VERIFY_COMMAND.txt exposed the exact literal marker required for acceptance, so the fresh restart had enough repository-local information to pass.",
+    "The template and mew_evidence were inspected only after the README recovery edit and successful verifier run.",
+    "No git commands were run and no parent directory was inspected."
+  ],
+  "comparison_result": {
+    "choice": "mew_preferred",
+    "allowed_values": [
+      "mew_preferred",
+      "fresh_cli_preferred",
+      "parity",
+      "inconclusive",
+      "blocked"
+    ],
+    "reason": "Fresh CLI passed, but Mew is preferred for reentry because its resume state already contained the pending edit, prior verifier failure, and exact next action. Fresh required two repository-only reads before the first correct action and depended on the verifier text for the exact marker."
+  },
+  "mew_evidence": {
+    "task_id": 1,
+    "work_session_id": 1,
+    "continuity_status": "strong",
+    "continuity_score": "9/9",
+    "resume_chars": 6092,
+    "pending_approval_count": 1,
+    "unresolved_failure_tool": "run_tests",
+    "unresolved_failure_exit_code": 7,
+    "working_memory_next_step": "Approve the README.md dry-run edit with deferred verification, then run the verifier command.",
+    "verification_command": "/Library/Developer/CommandLineTools/usr/bin/python3 -c \"from pathlib import Path; raise SystemExit(0 if 'M3 gate complete' in Path('README.md').read_text() else 7)\"",
+    "decisive_next_action": "approve_pending_readme_edit_then_rerun_verifier",
+    "decisive_next_action_source": "resume.pending_approvals + resume.working_memory.next_step",
+    "repo_only_missing_context": [
+      "pending dry-run edit diff",
+      "already-observed verifier failure",
+      "queued follow-up to approve then verify"
+    ]
+  }
+}
