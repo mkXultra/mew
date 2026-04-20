@@ -177,13 +177,25 @@ Evidence:
 - Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`,
   `uv run ruff check src/mew/self_improve_audit.py tests/test_self_improve.py`,
   `git diff --check`, and `./mew self-improve --audit 319`.
+- `accept-edits` auto-approval now refuses to auto-apply self-improvement
+  governance/policy edits and leaves them as pending approvals requiring
+  explicit `mew work --approve-tool`. A regression test covers
+  `ROADMAP_STATUS.md`: auto-approval is `safety_blocked`, the file stays
+  unchanged, and explicit approval still applies the edit.
+- The `mew-adversarial-verifier` criteria were applied manually by Codex to
+  review the audit visibility and auto-approval escalation slices; decision:
+  approve. This proves the review shape is usable, but not yet as part of a
+  mew-native self-improvement loop.
+- Validation: the targeted accept-edits work-session tests passed with
+  `--no-testmon`.
 
 Missing proof:
 
-- The adversarial verifier exists as a skill, but it has not yet been used to
-  review a later self-improvement loop.
-- Hook-based safety boundaries currently provide audit visibility only; they do
-  not yet block or require explicit escalation before approval.
+- The adversarial verifier exists and has been used manually, but it has not yet
+  reviewed a later mew-native self-improvement loop.
+- Hook-based safety boundaries now escalate governance/policy edits away from
+  automatic approval, but external-visible side effects, budget exhaustion, and
+  ambiguous recovery are not yet fully blocked across every execution path.
 - No M5.1 loop has yet exercised both adversarial review and mechanical safety
   hooks in one readable audit bundle.
 

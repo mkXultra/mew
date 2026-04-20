@@ -336,11 +336,12 @@ def _command_texts_for_call(call):
     for container in (call.get("parameters") or {}, call.get("result") or {}):
         if not isinstance(container, dict):
             continue
-        command = container.get("command")
-        if isinstance(command, str):
-            texts.append(command)
-        elif isinstance(command, list):
-            texts.append(" ".join(str(part) for part in command))
+        for key in ("command", "verify_command"):
+            command = container.get(key)
+            if isinstance(command, str):
+                texts.append(command)
+            elif isinstance(command, list):
+                texts.append(" ".join(str(part) for part in command))
     return _unique_non_empty(texts)
 
 
@@ -423,6 +424,27 @@ def build_m5_safety_boundary_report(session, permission_context, effect_budget):
         "ambiguous_recovery_action": effect_budget.get("ambiguous_recovery_action") or "",
         "findings": findings,
     }
+
+
+def m5_self_improve_auto_approval_blocker(task, source_call):
+    if not is_self_improve_task_record(task):
+        return ""
+    single_call_session = {"tool_calls": [source_call] if source_call else []}
+    external_side_effects = _external_visible_side_effect_records(single_call_session)
+    if external_side_effects:
+        marker = external_side_effects[0].get("marker") or "external-visible side effect"
+        return (
+            "M5 safety boundary blocks automatic approval of external-visible "
+            f"side-effect command ({marker}); require explicit human approval"
+        )
+    governance_edits = _governance_or_policy_edit_records(single_call_session)
+    if governance_edits:
+        first = governance_edits[0]
+        return (
+            "M5 safety boundary blocks automatic approval of governance/policy "
+            f"edit ({first.get('category')} {first.get('path')}); require explicit human approval"
+        )
+    return ""
 
 
 def classify_human_intervention(session):

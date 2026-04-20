@@ -119,6 +119,7 @@ from .self_improve_audit import (
     build_m5_self_improve_audit_sequence,
     format_m5_self_improve_audit_bundle,
     format_m5_self_improve_audit_sequence,
+    m5_self_improve_auto_approval_blocker,
     seed_m5_self_improve_audit,
 )
 from .self_memory import (
@@ -1017,6 +1018,8 @@ def format_work_ai_report(report, compact=False):
             line += f" error={step.get('error')}"
         if step.get("inline_approval"):
             line += f" inline_approval={step.get('inline_approval')}"
+        if step.get("inline_approval_error"):
+            line += f" approval_error={clip_inline_text(step.get('inline_approval_error') or '', 180)}"
         if step.get("inline_approval_tool_call_id"):
             line += f" approval_tool_call=#{step.get('inline_approval_tool_call_id')}"
         if step.get("inline_approval_status"):
@@ -4522,26 +4525,31 @@ def cmd_work_ai(args):
             and not tool_call.get("approval_status")
         )
         if pending_approval and work_auto_approve_edits_enabled(effective_args):
-            approve_args = SimpleNamespace(
-                task_id=task_id,
-                approve_tool=tool_call.get("id"),
-                allow_write=effective_args.allow_write or [],
-                allow_verify=effective_args.allow_verify,
-                verify_command=effective_args.verify_command or "",
-                verify_cwd=args.verify_cwd,
-                verify_timeout=effective_args.verify_timeout,
-                progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
-                json=False,
-                defer_verify=False,
-                allow_unpaired_source_edit=False,
-            )
-            approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
-            report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
-            if approval_data:
-                _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
-                applied_tool = approval_data.get("tool_call") or {}
-                report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
-                report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
+            safety_blocker = m5_self_improve_auto_approval_blocker(task, tool_call)
+            if safety_blocker:
+                report["steps"][-1]["inline_approval"] = "safety_blocked"
+                report["steps"][-1]["inline_approval_error"] = safety_blocker
+            else:
+                approve_args = SimpleNamespace(
+                    task_id=task_id,
+                    approve_tool=tool_call.get("id"),
+                    allow_write=effective_args.allow_write or [],
+                    allow_verify=effective_args.allow_verify,
+                    verify_command=effective_args.verify_command or "",
+                    verify_cwd=args.verify_cwd,
+                    verify_timeout=effective_args.verify_timeout,
+                    progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
+                    json=False,
+                    defer_verify=False,
+                    allow_unpaired_source_edit=False,
+                )
+                approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
+                report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_data:
+                    _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
+                    applied_tool = approval_data.get("tool_call") or {}
+                    report["steps"][-1]["inline_approval_tool_call_id"] = applied_tool.get("id")
+                    report["steps"][-1]["inline_approval_status"] = applied_tool.get("status")
         if getattr(args, "live", False):
             with state_lock():
                 state = load_state()
