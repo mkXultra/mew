@@ -107,6 +107,22 @@ def latest_session_for_task(state, task_id):
     return None
 
 
+def work_sessions_for_task(state, task_id):
+    wanted = str(task_id)
+    return [
+        session for session in (state.get("work_sessions") or [])
+        if str(session.get("task_id")) == wanted
+    ]
+
+
+def combined_audit_session(sessions):
+    combined = {"notes": [], "tool_calls": []}
+    for session in sessions or []:
+        combined["notes"].extend(session.get("notes") or [])
+        combined["tool_calls"].extend(session.get("tool_calls") or [])
+    return combined
+
+
 def self_improve_audit_controls(task):
     task_id = task.get("id")
     return {
@@ -274,15 +290,17 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
             "status": "missing_task",
             "task_ref": task_ref or "latest",
         }
-    session = latest_session_for_task(state, task.get("id"))
+    sessions = work_sessions_for_task(state, task.get("id"))
+    session = sessions[-1] if sessions else None
     if session:
         seed_m5_self_improve_audit(session, task)
+    combined_session = combined_audit_session(sessions)
     audit = (session or {}).get("m5_self_improve_audit") or {}
     defaults = (session or {}).get("default_options") or {}
     permission_context = self_improve_permission_context(defaults)
-    verification_records = _verification_records(state, task, session or {})
+    verification_records = _verification_records(state, task, combined_session)
     latest_verification = verification_records[-1] if verification_records else None
-    human_intervention = classify_human_intervention(session or {})
+    human_intervention = classify_human_intervention(combined_session)
     bundle = {
         "schema_version": M5_AUDIT_SCHEMA_VERSION,
         "status": "ready" if session else "missing_session",
@@ -299,6 +317,15 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
             "created_at": (session or {}).get("created_at"),
             "updated_at": (session or {}).get("updated_at"),
         },
+        "work_sessions": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "created_at": item.get("created_at"),
+                "updated_at": item.get("updated_at"),
+            }
+            for item in sessions
+        ],
         "product_rationale": task.get("description") or task.get("title") or "",
         "permission_context": {
             "frozen": audit.get("frozen_permission_context") or permission_context,
@@ -307,8 +334,8 @@ def build_m5_self_improve_audit_bundle(state, task_ref=None):
         },
         "effect_budget": audit.get("effect_budget") or self_improve_effect_budget(defaults),
         "human_intervention": human_intervention,
-        "approvals": _tool_approval_records(session or {}),
-        "recovery_events": _recovery_records(session or {}),
+        "approvals": _tool_approval_records(combined_session),
+        "recovery_events": _recovery_records(combined_session),
         "verification": {
             "verify_command": defaults.get("verify_command") or "",
             "allow_verify": bool(defaults.get("allow_verify")),

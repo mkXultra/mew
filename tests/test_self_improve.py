@@ -616,6 +616,28 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(recovery_event["recovery_status"], "rolled_back")
 
                 state = load_state()
+                latest_session = dict(state["work_sessions"][0])
+                latest_session["id"] = 2
+                latest_session["status"] = "closed"
+                latest_session["created_at"] = now_iso()
+                latest_session["updated_at"] = now_iso()
+                latest_session["notes"] = []
+                latest_session["tool_calls"] = []
+                latest_session.pop("m5_self_improve_audit", None)
+                state["work_sessions"].append(latest_session)
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as multi_session_stdout:
+                    multi_session_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(multi_session_code, 0)
+                multi_session_bundle = json.loads(multi_session_stdout.getvalue())
+                self.assertEqual(multi_session_bundle["work_session"]["id"], 2)
+                self.assertEqual([item["id"] for item in multi_session_bundle["work_sessions"]], [1, 2])
+                self.assertTrue(any(item["id"] == 52 for item in multi_session_bundle["approvals"]))
+                self.assertTrue(any(item["id"] == 52 for item in multi_session_bundle["recovery_events"]))
+
+                state = load_state()
                 state["work_sessions"][0]["notes"].append(
                     {
                         "created_at": now_iso(),

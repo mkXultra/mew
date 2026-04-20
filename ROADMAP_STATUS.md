@@ -1735,6 +1735,15 @@ Evidence:
   supervisor implemented the final source/test patch. A remaining follow-up is
   task-level multi-session aggregation: `#313`'s rollback happened in session
   `#292`, while audit `#313` selects latest session `#293`.
+- Task `#317` closed that multi-session audit gap. M5 audit bundles still keep
+  the latest `work_session` as the headline session, but now include a
+  `work_sessions` list and aggregate approvals, recovery events, verification,
+  and human intervention across every work session for the task. Live
+  `mew self-improve --audit 313 --json` now includes sessions `#292` and
+  `#293`, failed verification `#2014`, rollback recovery event `#2014`, and
+  the later green `run_tests` `#2030`. This is not M5 credit: the resident
+  found the right surface and preserved the plan, but the supervisor applied
+  the final paired patch.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
