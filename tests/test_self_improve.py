@@ -531,6 +531,24 @@ class SelfImproveTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_self_improve_audit_missing_task_text_is_concise(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    audit_code = main(["self-improve", "--audit", "999"])
+
+                self.assertEqual(audit_code, 1)
+                output = stdout.getvalue()
+                self.assertIn("M5 self-improve audit", output)
+                self.assertIn("status: missing_task", output)
+                self.assertIn("task_ref: 999", output)
+                self.assertNotIn("#None", output)
+                self.assertNotIn("None None", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_self_improve_start_session_seeds_mew_project_write_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

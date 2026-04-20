@@ -219,30 +219,37 @@ def format_m5_self_improve_audit_bundle(bundle):
     lines = [
         "M5 self-improve audit",
         f"status: {bundle.get('status')}",
-        f"task: #{task.get('id')} {task.get('title')} [{task.get('status')}]",
-        f"work_session: #{session.get('id')} [{session.get('status')}]",
-        (
-            "permission: "
-            f"read={current.get('allow_read')} "
-            f"write={current.get('allow_write')} "
-            f"verify={current.get('allow_verify')} "
-            f"approval={current.get('approval_mode')} "
-            f"drift={permission.get('drift')}"
-        ),
-        (
-            "budget: "
-            f"continue_steps={budget.get('continue_max_steps')} "
-            f"follow_steps={budget.get('follow_max_steps')} "
-            f"exhaustion={budget.get('budget_exhaustion_action')}"
-        ),
-        (
-            "human_intervention: "
-            f"{intervention.get('classification')} "
-            f"rescue={intervention.get('rescue_edit_status')} "
-            f"credit={intervention.get('m5_credit')}"
-        ),
-        f"loop_credit_status: {bundle.get('loop_credit_status')}",
     ]
+    if bundle.get("status") == "missing_task":
+        lines.append(f"task_ref: {bundle.get('task_ref')}")
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f"task: #{task.get('id')} {task.get('title')} [{task.get('status')}]",
+            f"work_session: #{session.get('id')} [{session.get('status')}]",
+            (
+                "permission: "
+                f"read={current.get('allow_read')} "
+                f"write={current.get('allow_write')} "
+                f"verify={current.get('allow_verify')} "
+                f"approval={current.get('approval_mode')} "
+                f"drift={permission.get('drift')}"
+            ),
+            (
+                "budget: "
+                f"continue_steps={budget.get('continue_max_steps')} "
+                f"follow_steps={budget.get('follow_max_steps')} "
+                f"exhaustion={budget.get('budget_exhaustion_action')}"
+            ),
+            (
+                "human_intervention: "
+                f"{intervention.get('classification')} "
+                f"rescue={intervention.get('rescue_edit_status')} "
+                f"credit={intervention.get('m5_credit')}"
+            ),
+            f"loop_credit_status: {bundle.get('loop_credit_status')}",
+        ]
+    )
     controls = bundle.get("controls") or {}
     if controls.get("audit_json"):
         lines.append(f"audit_json: {controls['audit_json']}")
