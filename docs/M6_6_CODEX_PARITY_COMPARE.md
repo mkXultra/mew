@@ -11,7 +11,7 @@ M6.6 closes only after three predeclared representative coding tasks pass:
 | Task | Shape | Status | Mew run | Codex CLI comparator | Rescue edits |
 |---|---|---|---|---|---|
 | M6.6-A | Behavior-preserving refactor | `not_started` | | | |
-| M6.6-B | Bug fix with regression test | `not_started` | | | |
+| M6.6-B | Bug fix with regression test | `mew_passed_pending_codex` | #324 / session #310 | pending | 0 |
 | M6.6-C | Small feature with paired source/test changes | `not_started` | | | |
 
 Required pass conditions for each task:
@@ -128,8 +128,49 @@ Review:
 Verdict:
 ```
 
-## Current First Slice
+### M6.6-B mew run
 
-Implement durable coding plan state plus path recall in the work session before
-attempting the three comparator tasks. This should make the second and third
-tasks need less repeated discovery rather than merely adding prompt context.
+Task: #324 `M6.6-B comparator: docs-only prompt safety bugfix`
+
+Predeclared success criteria:
+
+- Fix the prompt-safety ambiguity observed in #323 where docs-only single
+  `edit_file` work was blocked by code-write batch guidance.
+- Add a focused regression test in `tests/test_work_session.py`.
+- Codex may review, steer, and approve only; no rescue edits.
+
+Start time: 2026-04-20 22:08 JST
+End time: 2026-04-20 22:15 JST
+
+Metrics:
+
+- first_edit_latency_seconds: about 296
+- model_turns: 5 before first edit proposal
+- search_calls_before_first_edit: 7
+- read_calls_before_first_edit: 3
+- changed_files: `src/mew/work_loop.py`,
+  `tests/test_work_session.py`
+- verifier_commands:
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch --no-testmon`
+- repair_cycles: 0
+- prompt_context_chars: not recorded
+- rescue_edits: 0
+- adopted_reference_patterns: Codex patch/review loop, focused regression test,
+  approval-gated paired source/test edits
+
+Review:
+
+- correctness: passed focused regression plus ruff, py_compile, and diff check
+- minimality: one prompt sentence expanded and one existing prompt test extended
+- reviewability: dry-run diffs #2207/#2208 were reviewable and approved as
+  #2209/#2210
+- resident_state_reuse: reused #323 friction as the next M6.6 comparator target
+- notes: this is the mew-side run only; Codex CLI comparator is still pending
+
+Verdict: mew run passed; Codex CLI comparator pending.
+
+## Current Comparator State
+
+Bootstrap is complete. M6.6-B has a mew-side passing run and still needs the
+matching Codex CLI comparator run before it can count as side-by-side evidence.
+M6.6-A and M6.6-C have not started.

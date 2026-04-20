@@ -549,6 +549,10 @@ Evidence:
   read-root permission repair were still needed. This is recorded in
   `docs/M6_6_CODEX_PARITY_COMPARE.md` as bootstrap evidence for a small slice,
   not full M6.6 closure.
+- M6.6-B mew-side comparator task #324 / session #310 passed as a bugfix with
+  regression test: mew authored dry-run edits #2207/#2208, Codex
+  reviewed/approved/applied them as #2209/#2210, focused pytest passed, and
+  `rescue_edits=0`. The Codex CLI comparator run is still pending.
 
 Missing proof:
 
@@ -560,6 +564,7 @@ Missing proof:
 - Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
   on correctness, tool churn, latency, and reviewability across representative
   coding tasks.
+- M6.6-B comparator: mew-side run passed; Codex CLI comparator is pending.
 - Robustness: the successful retry still needed reviewer steering and one
   read-root permission repair, so the native loop is not yet self-sufficient.
 
@@ -586,9 +591,9 @@ Done when:
 
 Next action:
 
-- Use the #323 bootstrap retry as the new baseline, then start the first
-  predeclared M6.6 comparator task while targeting the remaining
-  steering/permission-repair gaps.
+- Use the #324 M6.6-B mew-side run as the first comparator datum, then run the
+  matching Codex CLI comparator or start M6.6-A/M6.6-C while keeping the
+  side-by-side evidence complete.
 
 ### M7: Senses - Inbound Signals
 
