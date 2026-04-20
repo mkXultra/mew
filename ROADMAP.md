@@ -278,6 +278,44 @@ Why it matters:
 - A resident that dies with the terminal is still a tool. Persistent presence is
   the first milestone that makes mew feel like a body a model could inhabit.
 
+## Milestone 6.5: Self-Hosting Speed
+
+Make mew fast enough that a resident model can implement small mew changes
+inside mew instead of falling back to a fresh external coding CLI.
+
+Target:
+
+- self-hosting speed gate for native work sessions
+- first THINK latency, prompt size, injected memory size, and time-to-edit
+  metrics
+- automatic reasoning-effort policy by work type and risk
+- small implementation prompt mode that does not inject the whole resident
+  memory bundle
+- pointer-based or differential context so mew reuses persistence without
+  rereading everything
+- dogfood loop where mew implements a small mew change and Codex acts as the
+  human reviewer/approver
+
+Done when:
+
+- a self-hosting dogfood report records first THINK latency, prompt/context
+  size, memory injection size, time to first tool, and time to first edit
+  proposal
+- small implementation and exploration work default to a lower reasoning effort
+  than safety, recovery, and roadmap work, with the chosen effort recorded
+- a small implementation task reaches a reviewable edit proposal without human
+  rescue edits or repeated broad read-only exploration
+- the same #320-class task that previously stalled can be rerun with a clear
+  improvement in first useful output and edit-proposal latency
+- the reviewer can approve, reject, or steer the mew-generated change from the
+  normal work-session surfaces
+
+Why it matters:
+
+- A body that is persistent but slower than a fresh CLI is still not a better
+  body. Mew's durable memory must become an index for faster work, not a large
+  prompt that delays every turn.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

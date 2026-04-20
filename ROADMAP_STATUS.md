@@ -18,7 +18,8 @@ M5 was archived losslessly in
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
 | 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
 | 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
-| 7. Senses: Inbound Signals | `foundation` | Signal source gates and journaling have started while M6 proof runs. |
+| 6.5. Self-Hosting Speed | `foundation` | New gate: make mew fast enough to implement small mew changes inside mew before resuming feature expansion. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates and journaling have started, but further source work is paused until M6.5 removes the self-hosting speed blocker. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -26,9 +27,10 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 19:10 JST.
+Last assessed: 2026-04-20 19:51 JST.
 
-Active work: **M6 Body**.
+Active work: **M6.5 Self-Hosting Speed** while the M6 enhanced proof runs in
+parallel.
 
 Reasoning:
 
@@ -36,21 +38,37 @@ Reasoning:
   2026-04-20 after M3 and M4 were already closed.
 - M5.1 closed as a bounded patch that makes future self-improvement safer
   without retroactively changing the M5 done gate.
+- M6 core daemon work exists and the enhanced multi-hour Docker proof is
+  running detached. Waiting for that proof should not block useful local work.
+- M7 signal registry foundation exists, but feature expansion exposed a more
+  important blocker: mew is still too slow to act as its own implementer.
+- The #320-class self-hosting attempt produced no reviewable edit proposal:
+  xhigh had roughly 132s first THINK latency, high then stalled beyond three
+  minutes, and the repaired model turns recorded interruption without edits.
+- `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` identifies the structural
+  cause: durable memory is currently used as prompt bulk instead of a fast
+  pointer/index.
 - `claude-ultra` was consulted in session
-  `831f34ca-4610-4c9b-9d10-b99f467d5f5f` and argued that the next real
-  inhabitation milestone should be a persistent body: daemon, restart, and
-  passive event handling. Codex agrees.
-- Broad refactor work is not a milestone. Refactor only where it directly
-  enables M6 daemon work or a directly observed blocker.
+  `f220b253-51d5-435e-ab24-520190e3f97e` and recommended prompt caching,
+  reasoning-effort auto-adjustment, and differential context before deeper M7
+  feature work. Codex agrees.
+- Broad polish and general refactor remain non-goals. M6.5 work must be
+  measured against self-hosting latency and edit-proposal outcomes.
 
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
 2. Let the enhanced M6 Docker proof finish, collect it, and run
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. If that strict proof passes with the expected cadence and all seven checks,
-   write the M6 close gate and move active focus to M7 Senses.
-4. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+3. Build the first M6.5 slice: self-hosting speed metrics and a gate that
+   records first THINK latency, prompt/context size, memory injection size, time
+   to first tool, and time to first edit proposal.
+4. Add the reasoning-effort policy needed for small implementation work, then
+   rerun a #320-class self-hosting task and compare first useful output and
+   edit-proposal latency.
+5. If the M6 proof passes while M6.5 is in progress, write the M6 close gate
+   without dropping the M6.5 active focus.
+6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -60,12 +78,12 @@ Human-role transition rule:
   it did not count as autonomy credit.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
-- Low- and medium-risk implementation should now default to mew as primary
-  implementer. Codex should increasingly act as requester, reviewer, approver,
-  and product judge.
-- Keep Codex as direct implementer for daemon, safety-hook, permission,
-  recovery, roadmap/evaluator, and other high-risk architecture until M6 Body
-  proves durable resident operation.
+- Low- and medium-risk implementation should move toward mew as primary
+  implementer only after M6.5 produces a reviewable edit proposal without
+  rescue edits.
+- Until then, Codex may implement the M6.5 infrastructure directly, but every
+  change should be aimed at making the next mew-as-implementer dogfood attempt
+  faster and more legible.
 
 ## Milestone Evidence
 
@@ -333,6 +351,60 @@ Done when:
   foreground loop.
 - The daemon can be paused, inspected, repaired, and resumed from CLI/chat.
 
+### M6.5: Self-Hosting Speed
+
+Status: `foundation`.
+
+Goal:
+
+- Make mew fast enough that a resident model can implement small mew changes
+  inside mew instead of falling back to a fresh external coding CLI.
+
+Evidence:
+
+- `ROADMAP.md` now defines M6.5 as the gate between a durable body and deeper
+  M7 feature expansion.
+- `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` diagnosed the current speed
+  blocker: prompt construction and persistent memory injection are too heavy
+  for small implementation loops.
+- The final committed default Codex reasoning effort is `high` in `84a2a99`,
+  after `xhigh` proved too slow for the self-hosting path.
+- The #320-class mew self-implementation attempt recorded the right failure:
+  no reviewable edit proposal, model turns repaired after interruption, and no
+  silent Codex rescue edits counted as autonomy.
+- `claude-ultra` session `f220b253-51d5-435e-ab24-520190e3f97e` agreed that
+  prompt pipeline speed work should precede further M7 collectors.
+
+Missing proof:
+
+- No self-hosting speed gate yet records first THINK latency, prompt/context
+  size, memory injection size, time to first tool, and time to first edit
+  proposal.
+- No reasoning-effort auto policy exists yet for small implementation versus
+  safety/recovery/roadmap work.
+- No small implementation prompt mode or differential/pointer context path
+  exists yet.
+- The #320-class task has not yet been rerun successfully after speed changes.
+
+Done when:
+
+- A self-hosting dogfood report records first THINK latency, prompt/context
+  size, memory injection size, time to first tool, and time to first edit
+  proposal.
+- Small implementation and exploration work default to a lower reasoning effort
+  than safety, recovery, and roadmap work, with the chosen effort recorded.
+- A small implementation task reaches a reviewable edit proposal without human
+  rescue edits or repeated broad read-only exploration.
+- The same #320-class task that previously stalled can be rerun with a clear
+  improvement in first useful output and edit-proposal latency.
+- The reviewer can approve, reject, or steer the mew-generated change from the
+  normal work-session surfaces.
+
+Next action:
+
+- Implement the M6.5 speed metric report first, then add reasoning-effort
+  policy and rerun a #320-class self-hosting task.
+
 ### M7: Senses - Inbound Signals
 
 Status: `foundation`.
@@ -357,6 +429,8 @@ Missing proof:
 - No real non-file-system source fetcher exists yet. RSS/calendar/mail/etc. can
   now plug into the registry, but one source still needs an actual collector.
 - No real-day unsolicited observation has been collected from signal evidence.
+- Further M7 collector work is paused until M6.5 makes self-hosting fast enough
+  to produce reviewable edit proposals.
 
 Done when:
 
@@ -430,19 +504,24 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6 Body**.
+Active focus: **M6.5 Self-Hosting Speed**.
 
 The next long session should not drift into broad polish or general refactor.
 The acceptable near-term work is:
 
-- daemon status and resident lifecycle controls;
-- a supervised passive tick loop that survives ordinary CLI session boundaries;
-- one real file or git watcher-triggered passive turn;
-- pause, inspect, repair, and resume controls for the resident;
+- collecting the running M6 enhanced Docker proof when it finishes;
+- self-hosting speed metrics for native work sessions;
+- reasoning-effort policy for small implementation, exploration, safety,
+  recovery, and roadmap work;
+- a small implementation prompt/context path that avoids injecting the full
+  resident memory bundle;
+- rerunning a #320-class mew-as-implementer dogfood task and comparing latency
+  to the failed attempt;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1 as the closed safety baseline while M6 work begins.
+Keep M5.1 as the closed safety baseline and M6 as proof-pending while M6.5
+removes the self-hosting speed blocker.
 
 ## Maintenance Rule
 
