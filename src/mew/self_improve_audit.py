@@ -14,6 +14,12 @@ RESCUE_INTERVENTION_MARKERS = (
     "rescue_edit",
 )
 
+NO_RESCUE_REVIEW_MARKERS = (
+    "no supervisor file patch was used",
+    "no supervisor file patch",
+    "approvals only",
+)
+
 
 def is_self_improve_task_record(task):
     if not isinstance(task, dict):
@@ -192,11 +198,17 @@ def classify_human_intervention(session):
         note for note in notes
         if isinstance(note, dict) and (note.get("source") or "").strip().casefold() in {"human", "user"}
     ]
+    human_texts = [(note.get("text") or "").casefold() for note in human_notes]
     approvals = _tool_approval_records(session)
     rescue_recorded = any(
-        marker in (note.get("text") or "").casefold()
-        for note in human_notes
+        marker in text
+        for text in human_texts
         for marker in RESCUE_INTERVENTION_MARKERS
+    )
+    no_rescue_review_recorded = any(
+        marker in text
+        for text in human_texts
+        for marker in NO_RESCUE_REVIEW_MARKERS
     )
     if human_notes:
         classification = "human_guidance_recorded"
@@ -204,16 +216,22 @@ def classify_human_intervention(session):
         classification = "approval_or_rejection_recorded"
     else:
         classification = "none_recorded"
+    if rescue_recorded:
+        no_rescue_review_status = "rescue_recorded"
+        m5_credit = "not_counted_due_to_rescue"
+    elif no_rescue_review_recorded:
+        no_rescue_review_status = "no_rescue_review_recorded"
+        m5_credit = "candidate_no_rescue_reviewed_pending_m3"
+    else:
+        no_rescue_review_status = "pending_human_review"
+        m5_credit = "not_counted_until_human_review_confirms_no_rescue_edits"
     return {
         "classification": classification,
         "human_note_count": len(human_notes),
         "approval_record_count": len(approvals),
         "rescue_edit_status": "rescue_recorded" if rescue_recorded else "not_assessed",
-        "m5_credit": (
-            "not_counted_due_to_rescue"
-            if rescue_recorded
-            else "not_counted_until_human_review_confirms_no_rescue_edits"
-        ),
+        "no_rescue_review_status": no_rescue_review_status,
+        "m5_credit": m5_credit,
     }
 
 
@@ -310,6 +328,7 @@ def format_m5_self_improve_audit_bundle(bundle):
                 "human_intervention: "
                 f"{intervention.get('classification')} "
                 f"rescue={intervention.get('rescue_edit_status')} "
+                f"no_rescue_review={intervention.get('no_rescue_review_status')} "
                 f"credit={intervention.get('m5_credit')}"
             ),
             (

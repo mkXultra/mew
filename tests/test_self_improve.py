@@ -546,16 +546,45 @@ class SelfImproveTests(unittest.TestCase):
                     bundle["human_intervention"]["m5_credit"],
                     "not_counted_until_human_review_confirms_no_rescue_edits",
                 )
+                self.assertEqual(
+                    bundle["human_intervention"]["no_rescue_review_status"],
+                    "pending_human_review",
+                )
                 self.assertEqual(bundle["verification"]["status"], "passed")
                 self.assertEqual(bundle["verification"]["latest"]["source"], "work_tool")
                 self.assertEqual(bundle["verification"]["latest"]["tool_call_id"], 50)
                 self.assertEqual(bundle["verification"]["latest"]["exit_code"], 0)
+
+                state = load_state()
+                state["work_sessions"][0]["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "user",
+                        "text": "No supervisor file patch was used; approvals only.",
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as reviewed_stdout:
+                    reviewed_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(reviewed_code, 0)
+                reviewed_bundle = json.loads(reviewed_stdout.getvalue())
+                self.assertEqual(
+                    reviewed_bundle["human_intervention"]["no_rescue_review_status"],
+                    "no_rescue_review_recorded",
+                )
+                self.assertEqual(
+                    reviewed_bundle["human_intervention"]["m5_credit"],
+                    "candidate_no_rescue_reviewed_pending_m3",
+                )
 
                 with redirect_stdout(StringIO()) as text_stdout:
                     text_code = main(["self-improve", "--audit", "1"])
 
                 self.assertEqual(text_code, 0)
                 self.assertIn("verification: passed exit_code=0", text_stdout.getvalue())
+                self.assertIn("no_rescue_review=no_rescue_review_recorded", text_stdout.getvalue())
 
                 state = load_state()
                 state["work_sessions"][0]["notes"].append(
@@ -574,6 +603,10 @@ class SelfImproveTests(unittest.TestCase):
                 rescue_bundle = json.loads(rescue_stdout.getvalue())
                 self.assertEqual(
                     rescue_bundle["human_intervention"]["rescue_edit_status"],
+                    "rescue_recorded",
+                )
+                self.assertEqual(
+                    rescue_bundle["human_intervention"]["no_rescue_review_status"],
                     "rescue_recorded",
                 )
                 self.assertEqual(

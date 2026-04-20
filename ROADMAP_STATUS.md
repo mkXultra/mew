@@ -1653,6 +1653,15 @@ Evidence:
   obeyed paired-test steering, proposed both the test and source edits, and the
   supervisor only approved previews. `mew self-improve --audit 305` records
   `verification: passed`, two applied approvals, and no rescue marker.
+- Task `#306` closed the no-rescue review accounting gap. Audit bundles now
+  expose `no_rescue_review_status`: `pending_human_review` until a human note
+  explicitly records no supervisor file patch, `no_rescue_review_recorded` for
+  reviewed no-rescue candidates, and `rescue_recorded` when rescue markers are
+  present. Reviewed candidates get `candidate_no_rescue_reviewed_pending_m3`
+  rather than final M5 credit, so task `#305` is now visible as the first
+  reviewed no-rescue candidate while M3 remains open. Task `#306` itself is not
+  no-rescue credit because the supervisor completed the final source/test patch
+  after the resident stopped at context pressure.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1706,13 +1715,11 @@ Missing proof:
 
 Next action:
 
-- Start the next bounded M5 entry-rehearsal loop from `mew-product-evaluator`
-  or `./mew self-improve --start-session --focus 'Advance M5 audited
-  self-improvement loop'`. The next best gap is no-rescue review accounting:
-  task `#305` is a plausible no-rescue candidate, but the audit still reports
-  `rescue=not_assessed` and `not_counted_until_human_review_confirms_no_rescue_edits`.
-  The next loop should make explicit human no-rescue review visible without
-  auto-counting loops before M3 closes.
+- Keep the M3 4h proof as background-only until task `#300` can collect and
+  summarize it. In parallel, run another deliberately small M5 entry-rehearsal
+  loop and try to close it without supervisor file patches; the target evidence
+  is a second `mew self-improve --audit <task>` bundle with verification passed,
+  `no_rescue_review_recorded`, and `candidate_no_rescue_reviewed_pending_m3`.
 
 ## Latest Validation
 
