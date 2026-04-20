@@ -53,6 +53,20 @@ Current next action:
    - only the refactor-readiness needed to make those changes safe.
 3. After M5.1 is bounded and recorded, open M6 Body.
 
+Human-role transition rule:
+
+- During M5.1, dogfood the first small slice with **mew as implementer** and
+  Codex acting as the human reviewer/approver whenever the task is scoped,
+  low-risk, and has clear verification.
+- Treat rescue edits by Codex as a signal that mew is not ready to own that
+  class of task yet. Record the blocker instead of silently fixing around it.
+- After M5.1 closes, low- and medium-risk implementation should default to mew
+  as primary implementer. Codex should increasingly act as requester, reviewer,
+  approver, and product judge.
+- Keep Codex as direct implementer for daemon, safety-hook, permission,
+  recovery, roadmap/evaluator, and other high-risk architecture until M6 Body
+  proves durable resident operation.
+
 ## Milestone Evidence
 
 ### M1: Native Hands
