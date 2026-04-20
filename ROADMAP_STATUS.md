@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-20
+Last updated: 2026-04-21
 
 This file is the operational roadmap dashboard. It should stay short enough to
 survive context compression and long-session reentry. Historical detail through
@@ -629,6 +629,17 @@ Evidence:
   before broader project search. Focused working-memory/prompt tests, `ruff`,
   `py_compile`, and `git diff --check` passed. This is product progress, not
   mew-side comparator evidence.
+- M6.6 task #332 / session #319 then turned that `working_memory.target_paths`
+  surface into fresh mew-side anti-churn evidence: after one steer away from a
+  repeated same-symbol `search_text`, mew stayed on the known src/test paths,
+  proposed a paired dry-run edit batch (#2345/#2346), Codex only
+  approved/applied it as #2347/#2348, chose
+  `uv run python -m unittest tests.test_work_session` as the focused verifier,
+  passed it with `396 tests`, performed one narrow same-surface audit read, and
+  finished cleanly. The resulting prompt change in `src/mew/work_loop.py` and
+  `tests/test_work_session.py` tells THINK to issue a direct `read_file` on a
+  known `working_memory.target_paths` entry before repeating same-surface
+  `search_text`. `rescue_edits=0`.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -643,10 +654,10 @@ Evidence:
 Missing proof:
 
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
-  but broader durable checklist/path-recall behavior is not yet proven across
-  normal coding tasks. `working_memory.target_paths` now exists as a machine-
-  readable surface, but no fresh mew-side task has yet shown that it reduces
-  repeated read/search churn in the normal case.
+  and #332 now proves one normal-case anti-churn/path-recall behavior for
+  `working_memory.target_paths`, but broader durable checklist/path-recall
+  behavior is still not proven across multi-file normal coding tasks or resume
+  after context compression.
 - Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
   and prompt-level same-surface self-review are now improved, but there is
   still no broader work-session self-review phase beyond the `src/mew`
@@ -657,9 +668,10 @@ Missing proof:
 - M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
   caveat.
 - Robustness: the successful retries still needed reviewer steering, one
-  read-root permission repair, in #330 one incorrect line-window guess, and in
-  #331 an exact-old-string reread loop under high context pressure, so the
-  native loop is not yet self-sufficient.
+  read-root permission repair, in #330 one incorrect line-window guess, in
+  #331 an exact-old-string reread loop under high context pressure, and in
+  #332 one steer to stop repeated same-symbol search before the exact read, so
+  the native loop is not yet self-sufficient.
 
 Done when:
 
@@ -688,21 +700,13 @@ Next action:
 - Carry the landed suggested-verifier fallback as product progress, but do not
   count task #326 as comparator evidence; use task #327 as the M6.6-C mew-side
   replacement run.
-- Commit the finished M6.6-C mew-side slice and continue the next mew-side
-  M6.6 implementation task toward built-in verifier discovery, repair, or
-  self-review.
-- After task #328, keep M6.6 on the mew-side critical path and choose the next
-  slice from repair loop or self-review rather than comparator work.
-- After task #329, keep M6.6 on the mew-side critical path and choose the next
-  slice from self-review or same-surface audit behavior rather than comparator
-  work.
-- After task #330, keep M6.6 on the mew-side critical path and choose the next
-  slice from durable plan/path recall or another normal-case anti-churn proof
-  rather than comparator work or more same-surface polish.
-- After task #331 and the direct `target_paths` patch, run a fresh mew-side
-  coding task that should reuse `working_memory.target_paths` to reduce one of
-  repeated file discovery, rereads, or broad search churn before returning to
-  comparator work.
+- Record task #332 / session #319 as fresh mew-side path-recall/anti-churn
+  proof for the frozen M6.6 implementation set, but not as one of the three
+  comparator slots.
+- Keep M6.6 on the mew-side critical path and use the next slice to widen
+  durable plan/path recall or broader work-session self-review beyond prompt-
+  only guidance, with no comparator work until the mew-side implementation set
+  is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

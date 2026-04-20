@@ -410,3 +410,12 @@ decision on 2026-04-21, the remaining/final Codex CLI comparator runs are
 deferred until the M6.6 mew-side implementation set is frozen, then they should
 run in parallel detached worktrees as gate evidence rather than per-slice
 critical-path work.
+
+After the direct `working_memory.target_paths` patch from task #331, task #332
+/ session #319 added fresh mew-side implementation evidence for that path-
+recall surface: mew proposed paired dry-run edits (#2345/#2346), Codex only
+approved/applied them as #2347/#2348, mew chose
+`uv run python -m unittest tests.test_work_session`, passed it with `396
+tests`, performed one same-surface audit read, and finished with
+`rescue_edits=0`. This is implementation evidence for the frozen M6.6 set, not
+an extra comparator slot.

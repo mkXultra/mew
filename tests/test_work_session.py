@@ -12800,6 +12800,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
         self.assertIn("working_memory.target_paths", prompt)
+        self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
