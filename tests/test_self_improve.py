@@ -556,6 +556,30 @@ class SelfImproveTests(unittest.TestCase):
 
                 self.assertEqual(text_code, 0)
                 self.assertIn("verification: passed exit_code=0", text_stdout.getvalue())
+
+                state = load_state()
+                state["work_sessions"][0]["notes"].append(
+                    {
+                        "created_at": now_iso(),
+                        "source": "user",
+                        "text": "Supervisor rescue: manual patch applied after a failed paired edit.",
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as rescue_stdout:
+                    rescue_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(rescue_code, 0)
+                rescue_bundle = json.loads(rescue_stdout.getvalue())
+                self.assertEqual(
+                    rescue_bundle["human_intervention"]["rescue_edit_status"],
+                    "rescue_recorded",
+                )
+                self.assertEqual(
+                    rescue_bundle["human_intervention"]["m5_credit"],
+                    "not_counted_due_to_rescue",
+                )
             finally:
                 os.chdir(old_cwd)
 

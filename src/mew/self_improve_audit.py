@@ -6,6 +6,14 @@ from .timeutil import now_iso
 
 M5_AUDIT_SCHEMA_VERSION = 1
 
+RESCUE_INTERVENTION_MARKERS = (
+    "supervisor rescue",
+    "manual patch",
+    "manual file patch",
+    "rescue edit",
+    "rescue_edit",
+)
+
 
 def is_self_improve_task_record(task):
     if not isinstance(task, dict):
@@ -185,6 +193,11 @@ def classify_human_intervention(session):
         if isinstance(note, dict) and (note.get("source") or "").strip().casefold() in {"human", "user"}
     ]
     approvals = _tool_approval_records(session)
+    rescue_recorded = any(
+        marker in (note.get("text") or "").casefold()
+        for note in human_notes
+        for marker in RESCUE_INTERVENTION_MARKERS
+    )
     if human_notes:
         classification = "human_guidance_recorded"
     elif approvals:
@@ -195,8 +208,12 @@ def classify_human_intervention(session):
         "classification": classification,
         "human_note_count": len(human_notes),
         "approval_record_count": len(approvals),
-        "rescue_edit_status": "not_assessed",
-        "m5_credit": "not_counted_until_human_review_confirms_no_rescue_edits",
+        "rescue_edit_status": "rescue_recorded" if rescue_recorded else "not_assessed",
+        "m5_credit": (
+            "not_counted_due_to_rescue"
+            if rescue_recorded
+            else "not_counted_until_human_review_confirms_no_rescue_edits"
+        ),
     }
 
 
