@@ -6,6 +6,7 @@ from mew.write_tools import (
     edit_file,
     restore_write_snapshot,
     snapshot_write_path,
+    summarize_write_result,
     write_file,
 )
 
@@ -43,6 +44,8 @@ class WriteToolsTests(unittest.TestCase):
             path.write_text("hello mew\n", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "old text was not found; confirm the exact existing text before retrying"):
+                edit_file(str(path), "missing", "shell", [tmp])
+            with self.assertRaisesRegex(ValueError, "use read_file on the latest target window first"):
                 edit_file(str(path), "missing", "shell", [tmp])
 
     def test_edit_refuses_multiple_matches_without_replace_all(self):
@@ -103,6 +106,22 @@ class WriteToolsTests(unittest.TestCase):
             self.assertTrue(result["changed"])
             self.assertEqual(result["diff_stats"], {"added": 1, "removed": 1})
             self.assertIn("... output truncated ...", result["diff"])
+
+    def test_edit_marks_no_op_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+            path.write_text("hello mew\n", encoding="utf-8")
+
+            result = edit_file(str(path), "hello", "hello", [tmp], dry_run=True)
+
+            self.assertFalse(result["changed"])
+            self.assertTrue(result["no_op"])
+            self.assertEqual(result["no_op_reason"], "old and new text are identical")
+            self.assertFalse(result["written"])
+
+            summary = summarize_write_result(result)
+            self.assertIn("no_op: old and new text are identical", summary)
+            self.assertIn("re-read the target window", summary)
 
     def test_snapshot_restore_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:

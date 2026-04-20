@@ -148,7 +148,10 @@ def _planned_write_after_text(tool, parameters, before):
             raise ValueError("new text must be a string")
         count = before.count(old)
         if count == 0:
-            raise ValueError("old text was not found; confirm the exact existing text before retrying")
+            raise ValueError(
+                "old text was not found; confirm the exact existing text before retrying; "
+                "use read_file on the latest target window first"
+            )
         if count > 1 and not parameters.get("replace_all"):
             raise ValueError(
                 f"old text matched {count} times; pass --replace-all to replace all matches "
@@ -322,7 +325,10 @@ def edit_file(
     before = _read_text_if_exists(resolved)
     count = before.count(old)
     if count == 0:
-        raise ValueError("old text was not found; confirm the exact existing text before retrying")
+        raise ValueError(
+            "old text was not found; confirm the exact existing text before retrying; "
+            "use read_file on the latest target window first"
+        )
     if count > 1 and not replace_all:
         raise ValueError(
             f"old text matched {count} times; pass --replace-all to replace all matches "
@@ -330,27 +336,35 @@ def edit_file(
         )
 
     after = before.replace(old, new) if replace_all else before.replace(old, new, 1)
+    changed = before != after
+    no_op_reason = ""
+    if not changed:
+        no_op_reason = "old and new text are identical" if old == new else "replacement produced no file changes"
     edit_size = max(len(new), abs(len(after) - len(before)))
     if edit_size > max_chars:
         raise ValueError(f"edited content is too large: {edit_size} chars; max={max_chars}")
     started_at = now_iso()
     diff = _unified_diff_text(resolved, before, after)
-    if before != after and not dry_run:
+    if changed and not dry_run:
         _atomic_write_text(resolved, after)
 
-    return {
+    result = {
         "operation": "edit_file",
         "path": str(resolved),
         "matched": count,
         "replaced": count if replace_all else 1,
-        "changed": before != after,
+        "changed": changed,
+        "no_op": not changed,
         "dry_run": bool(dry_run),
-        "written": bool(before != after and not dry_run),
+        "written": bool(changed and not dry_run),
         "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
         "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
     }
+    if no_op_reason:
+        result["no_op_reason"] = no_op_reason
+    return result
 
 
 def summarize_write_result(result):
@@ -362,6 +376,9 @@ def summarize_write_result(result):
         lines.append("created: True")
     if result.get("matched") is not None:
         lines.append(f"matched: {result.get('matched')} replaced: {result.get('replaced')}")
+    if result.get("no_op"):
+        lines.append(f"no_op: {result.get('no_op_reason') or 'replacement produced no file changes'}")
+        lines.append("next: re-read the target window and retry with an edit that changes file content")
     if result.get("diff"):
         lines.extend(["diff:", result["diff"]])
     return "\n".join(lines)
