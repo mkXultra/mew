@@ -18,7 +18,7 @@ M5 was archived losslessly in
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
 | 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
 | 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
-| 7. Senses: Inbound Signals | `not_started` | Let the resident notice audited external signals, not only its own state. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates and journaling have started while M6 proof runs. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -335,11 +335,28 @@ Done when:
 
 ### M7: Senses - Inbound Signals
 
-Status: `not_started`.
+Status: `foundation`.
 
 Goal:
 
 - Give the resident audited read-only signals from the user's working world.
+
+Evidence:
+
+- `mew signals enable|disable|sources|record|journal` now provides an explicit
+  gate and journal for inbound signal sources. A source has a kind, reason,
+  daily budget, enabled/disabled state, config, and durable journal entries.
+- `mew signals record` refuses unknown, disabled, or budget-exhausted sources.
+  Successful observations can queue a `signal_observed` runtime event with
+  provenance, while `--no-queue` records without waking the runtime.
+- Validation: `uv run pytest -q tests/test_signals.py --no-testmon`,
+  targeted `ruff`, `./mew help signals record`, and `git diff --check` passed.
+
+Missing proof:
+
+- No real non-file-system source fetcher exists yet. RSS/calendar/mail/etc. can
+  now plug into the registry, but one source still needs an actual collector.
+- No real-day unsolicited observation has been collected from signal evidence.
 
 Done when:
 

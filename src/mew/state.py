@@ -110,6 +110,10 @@ def default_state():
         "watchers": {
             "items": [],
         },
+        "signals": {
+            "sources": [],
+            "journal": [],
+        },
         "autonomy": {
             "enabled": False,
             "level": "off",
@@ -168,6 +172,8 @@ def default_state():
             "work_model_turn": 1,
             "step_run": 1,
             "thought": 1,
+            "signal_source": 1,
+            "signal": 1,
         },
     }
 
@@ -365,6 +371,9 @@ def migrate_state(state):
     state.setdefault("thought_journal", [])
     state.setdefault("watchers", {"items": []})
     state["watchers"].setdefault("items", [])
+    state.setdefault("signals", {"sources": [], "journal": []})
+    state["signals"].setdefault("sources", [])
+    state["signals"].setdefault("journal", [])
 
     for name in (
         "question",

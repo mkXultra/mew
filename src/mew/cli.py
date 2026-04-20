@@ -63,6 +63,7 @@ from .commands import (
     cmd_self_memory,
     cmd_self_show,
     cmd_session,
+    cmd_signals,
     cmd_snapshot,
     cmd_start,
     cmd_status,
@@ -497,6 +498,44 @@ def build_parser():
     )
     event_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     event_parser.set_defaults(func=cmd_event)
+
+    signals_parser = subparsers.add_parser("signals", help="manage audited inbound signal sources")
+    signals_subparsers = signals_parser.add_subparsers(dest="signals_command")
+    signals_parser.set_defaults(func=cmd_signals)
+
+    signals_sources_parser = signals_subparsers.add_parser("sources", help="list configured signal sources")
+    signals_sources_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_sources_parser.set_defaults(func=cmd_signals)
+
+    signals_enable_parser = signals_subparsers.add_parser("enable", help="enable a gated signal source")
+    signals_enable_parser.add_argument("name", help="source name, for example hn")
+    signals_enable_parser.add_argument("--kind", required=True, help="source kind, for example rss or calendar")
+    signals_enable_parser.add_argument("--reason", default="", help="why mew may use this source")
+    signals_enable_parser.add_argument("--budget", type=int, default=None, help="daily observation budget")
+    signals_enable_parser.add_argument("--config", default="", help="JSON source config")
+    signals_enable_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_enable_parser.set_defaults(func=cmd_signals)
+
+    signals_disable_parser = signals_subparsers.add_parser("disable", help="disable a signal source")
+    signals_disable_parser.add_argument("name", help="source name")
+    signals_disable_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_disable_parser.set_defaults(func=cmd_signals)
+
+    signals_record_parser = signals_subparsers.add_parser("record", help="record an observation from an enabled source")
+    signals_record_parser.add_argument("source", help="enabled source name")
+    signals_record_parser.add_argument("--kind", default="observation", help="observation kind")
+    signals_record_parser.add_argument("--summary", default="", help="short human-readable observation")
+    signals_record_parser.add_argument("--reason", default="", help="why this observation is useful")
+    signals_record_parser.add_argument("--payload", default="", help="JSON observation payload")
+    signals_record_parser.add_argument("--cost", type=int, default=1, help="budget units consumed")
+    signals_record_parser.add_argument("--no-queue", action="store_true", help="record without queueing a runtime event")
+    signals_record_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_record_parser.set_defaults(func=cmd_signals)
+
+    signals_journal_parser = signals_subparsers.add_parser("journal", help="show recent signal observations")
+    signals_journal_parser.add_argument("--limit", type=int, default=20, help="number of observations to show")
+    signals_journal_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_journal_parser.set_defaults(func=cmd_signals)
 
     webhook_parser = subparsers.add_parser("webhook", help="serve HTTP external event ingress")
     webhook_parser.add_argument("--host", default="127.0.0.1", help="bind host")

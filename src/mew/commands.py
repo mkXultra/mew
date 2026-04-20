@@ -130,6 +130,16 @@ from .self_memory import (
     render_self_memory_markdown,
     write_self_memory_report,
 )
+from .signals import (
+    disable_signal_source,
+    enable_signal_source,
+    find_signal_source,
+    format_signal_journal,
+    format_signal_sources,
+    list_signal_journal,
+    list_signal_sources,
+    record_signal_observation,
+)
 from .state import (
     add_attention_item,
     add_outbox_message,
@@ -7967,6 +7977,113 @@ def cmd_event(args):
         mark_read=getattr(args, "mark_read", False),
         event_label=f"{event['type']} event",
     )
+
+
+def cmd_signals(args):
+    command = getattr(args, "signals_command", None) or "sources"
+    if command == "sources":
+        with state_lock():
+            state = load_state()
+            sources = list_signal_sources(state)
+        if getattr(args, "json", False):
+            print(json.dumps({"sources": sources}, ensure_ascii=False, indent=2))
+        else:
+            print(format_signal_sources(sources))
+        return 0
+
+    if command == "journal":
+        with state_lock():
+            state = load_state()
+            items = list_signal_journal(state, limit=getattr(args, "limit", 20))
+        if getattr(args, "json", False):
+            print(json.dumps({"journal": items}, ensure_ascii=False, indent=2))
+        else:
+            print(format_signal_journal(items))
+        return 0
+
+    if command == "enable":
+        try:
+            config = parse_event_payload(getattr(args, "config", ""))
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        try:
+            with state_lock():
+                state = load_state()
+                source = enable_signal_source(
+                    state,
+                    args.name,
+                    kind=args.kind,
+                    reason=getattr(args, "reason", "") or "",
+                    budget_limit=getattr(args, "budget", None),
+                    config=config,
+                )
+                save_state(state)
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
+        else:
+            print(f"enabled signal source {source['name']} kind={source['kind']}")
+        return 0
+
+    if command == "disable":
+        with state_lock():
+            state = load_state()
+            source = disable_signal_source(state, args.name)
+            save_state(state)
+        if source is None:
+            print(f"mew: signal source not found: {args.name}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
+        else:
+            print(f"disabled signal source {source['name']}")
+        return 0
+
+    if command == "record":
+        try:
+            payload = parse_event_payload(getattr(args, "payload", ""))
+        except MewError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        with state_lock():
+            state = load_state()
+            if find_signal_source(state, args.source) is None:
+                print(f"mew: signal source not found: {args.source}", file=sys.stderr)
+                return 1
+            result = record_signal_observation(
+                state,
+                args.source,
+                kind=getattr(args, "kind", "") or "observation",
+                summary=getattr(args, "summary", "") or "",
+                reason_for_use=getattr(args, "reason", "") or "",
+                payload=payload,
+                budget_cost=getattr(args, "cost", 1),
+                queue_event=not getattr(args, "no_queue", False),
+            )
+            if result.get("status") == "recorded":
+                save_state(state)
+            else:
+                save_state(state)
+        if result.get("status") != "recorded":
+            if getattr(args, "json", False):
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: signal blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            signal_item = result.get("signal") or {}
+            event_text = f" event=#{signal_item.get('event_id')}" if signal_item.get("event_id") else ""
+            print(f"recorded signal #{signal_item.get('id')} source={args.source}{event_text}")
+        return 0
+
+    print(f"mew: unknown signals command: {command}", file=sys.stderr)
+    return 1
+
 
 def webhook_authorized(headers, token):
     if not token:
