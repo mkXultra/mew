@@ -1371,8 +1371,14 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     startup_repairs = runtime.get("last_startup_repairs") or []
     if startup_repairs:
         repair_types = ", ".join(repair.get("type") or "unknown" for repair in startup_repairs[:3])
+        repair_decisions = [
+            (repair.get("recovery_decision") or {}).get("action")
+            for repair in startup_repairs[:3]
+            if (repair.get("recovery_decision") or {}).get("action")
+        ]
+        decisions = f" decisions={','.join(repair_decisions)}" if repair_decisions else ""
         suffix = f" at={runtime.get('last_startup_repair_at')}" if runtime.get("last_startup_repair_at") else ""
-        lines.insert(-1, f"startup_repair: {len(startup_repairs)} item(s){suffix} types={repair_types}")
+        lines.insert(-1, f"startup_repair: {len(startup_repairs)} item(s){suffix} types={repair_types}{decisions}")
     snapshot_item = _project_snapshot_item(deep.get("project_snapshot"))
     if snapshot_item:
         project_types = ", ".join(snapshot_item.get("project_types") or []) or "(unknown)"

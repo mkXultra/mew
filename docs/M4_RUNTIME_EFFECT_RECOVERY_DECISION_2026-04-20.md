@@ -11,6 +11,10 @@ structured recovery decision.
 When `mew repair` marks an incomplete runtime effect as `interrupted`, the
 effect and repair record now include `recovery_decision`.
 
+`mew brief` also surfaces recent startup-repair decisions, so a resident model
+or human can see whether the repaired effect was `rerun_event` or a review path
+without opening raw state.
+
 Current classifications:
 
 - pre-commit statuses (`planning`, `planned`, `precomputing`, `precomputed`)

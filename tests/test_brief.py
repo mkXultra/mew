@@ -418,6 +418,10 @@ class BriefTests(unittest.TestCase):
                 "effect_id": 1,
                 "old_status": "planning",
                 "new_status": "interrupted",
+                "recovery_decision": {
+                    "action": "rerun_event",
+                    "effect_classification": "no_action_committed",
+                },
             }
         ]
 
@@ -432,7 +436,8 @@ class BriefTests(unittest.TestCase):
             brief,
         )
         self.assertIn(
-            "startup_repair: 1 item(s) at=2026-04-18T09:00:00Z types=interrupted_runtime_effect",
+            "startup_repair: 1 item(s) at=2026-04-18T09:00:00Z "
+            "types=interrupted_runtime_effect decisions=rerun_event",
             brief,
         )
 
