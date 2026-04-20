@@ -10802,6 +10802,10 @@ class WorkSessionTests(unittest.TestCase):
                         session = state["work_sessions"][0]
                         self.assertEqual(session["model_turns"][0]["status"], "running")
                         self.assertEqual(session["model_turns"][0]["action"]["type"], "planning")
+                        metrics = session["model_turns"][0].get("model_metrics") or {}
+                        self.assertGreater(metrics.get("context_chars") or 0, 0)
+                        self.assertGreater(metrics.get("think", {}).get("prompt_chars") or 0, 0)
+                        self.assertIsNone(metrics.get("think", {}).get("elapsed_seconds"))
                         self.assertEqual(build_work_session_resume(session, task=state["tasks"][0])["phase"], "planning")
                     prompt_context = json.loads(prompt.split("Context JSON:\n", 1)[1])
                     self.assertEqual(prompt_context["work_session"]["model_turns"], [])

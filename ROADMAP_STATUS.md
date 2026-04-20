@@ -396,6 +396,9 @@ Evidence:
 - `mew metrics` now breaks down self-hosting prompt size into work-session,
   resume, tool-context, and model-turn context chars so future reruns can show
   which part still dominates.
+- Running work model turns now save preflight prompt-size metrics before the
+  THINK API call completes, so interrupted or timed-out self-hosting attempts
+  can still report context size and chosen reasoning policy.
 - Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
   `tests/test_reasoning_policy.py`,
   `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,

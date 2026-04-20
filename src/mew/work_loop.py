@@ -1132,6 +1132,7 @@ def plan_work_model_turn(
     stream_model=False,
     model_delta_sink=None,
     progress_model_deltas=True,
+    pre_model_metrics_sink=None,
 ):
     current_time = now_iso()
     capabilities = {
@@ -1175,6 +1176,23 @@ def plan_work_model_turn(
     think_delta = model_delta_progress(delta_progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
     think_prompt = build_work_think_prompt(context)
+    work_session_context = (context or {}).get("work_session") or {}
+    model_metrics = {
+        "context_chars": _json_size(context),
+        "work_session_chars": _json_size(work_session_context),
+        "resume_chars": _json_size(work_session_context.get("resume")),
+        "tool_context_chars": _json_size(work_session_context.get("tool_calls")),
+        "model_turn_context_chars": _json_size(work_session_context.get("model_turns")),
+        **_active_memory_metrics(context),
+        "think": {
+            "prompt_chars": len(think_prompt),
+        },
+        "reasoning_policy": reasoning_policy,
+        "reasoning_effort": reasoning_policy.get("effort") or "",
+        "prompt_context_mode": prompt_context_mode,
+    }
+    if pre_model_metrics_sink:
+        pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
     with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
         decision_plan = call_model_json_with_retries(
@@ -1190,22 +1208,7 @@ def plan_work_model_turn(
     think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
-    work_session_context = (context or {}).get("work_session") or {}
-    model_metrics = {
-        "context_chars": _json_size(context),
-        "work_session_chars": _json_size(work_session_context),
-        "resume_chars": _json_size(work_session_context.get("resume")),
-        "tool_context_chars": _json_size(work_session_context.get("tool_calls")),
-        "model_turn_context_chars": _json_size(work_session_context.get("model_turns")),
-        **_active_memory_metrics(context),
-        "think": {
-            "prompt_chars": len(think_prompt),
-            "elapsed_seconds": _round_seconds(think_elapsed),
-        },
-        "reasoning_policy": reasoning_policy,
-        "reasoning_effort": reasoning_policy.get("effort") or "",
-        "prompt_context_mode": prompt_context_mode,
-    }
+    model_metrics["think"]["elapsed_seconds"] = _round_seconds(think_elapsed)
     if act_mode == "deterministic":
         action = normalize_work_model_action(decision_plan, verify_command=verify_command)
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""

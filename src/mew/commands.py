@@ -3906,6 +3906,16 @@ def cmd_work_ai(args):
         refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "model_turn", planning_turn_id)
 
+        def record_pre_model_metrics(model_metrics):
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                for turn in session.get("model_turns") or []:
+                    if turn.get("id") == planning_turn_id:
+                        turn["model_metrics"] = dict(model_metrics or {})
+                        break
+                save_state(state)
+
         try:
             planned = plan_work_model_turn(
                 prompt_state,
@@ -3929,6 +3939,7 @@ def cmd_work_ai(args):
                     live_model_delta if bool(getattr(args, "stream_model", False)) else None
                 ),
                 progress_model_deltas=not bool(getattr(effective_args, "compact_live", False)),
+                pre_model_metrics_sink=record_pre_model_metrics,
             )
             flush_live_model_delta()
         except KeyboardInterrupt:
