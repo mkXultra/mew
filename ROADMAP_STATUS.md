@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:49 JST.
+Last assessed: 2026-04-20 18:52 JST.
 
 Active work: **M6 Body**.
 
@@ -278,12 +278,17 @@ Evidence:
   daemon with watcher state returning to idle.
 - Validation: `m6-daemon-watch` dogfood passed in
   `/tmp/mew-m6-daemon-watch-proof`, along with the focused dogfood pytest.
+- Dogfood scenario `m6-daemon-restart` now starts a daemon, baselines a watcher,
+  stops cleanly, changes the watched file while stopped, starts again, and
+  verifies the restarted daemon compares against the previous process snapshot
+  and processes the file change through `external_event`.
+- Validation: `m6-daemon-restart` dogfood passed in
+  `/tmp/mew-m6-daemon-restart-proof`, along with the focused dogfood pytest.
 
 Missing proof:
 
 - No long-duration daemon proof has shown the watcher and passive loop staying
   healthy beyond the short dogfood scenario.
-- No daemon restart proof has shown reattachment without user rebrief.
 - No multi-hour resident proof has run through the daemon path.
 - Pause/inspect/repair/resume controls still reuse existing commands rather
   than a daemon-specific cockpit.

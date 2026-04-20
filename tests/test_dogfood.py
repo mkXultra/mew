@@ -434,6 +434,23 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_daemon_watcher_queues_processed_file_event", text)
             self.assertIn("m6_daemon_log_records_external_event", text)
 
+    def test_run_dogfood_m6_daemon_restart_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6-daemon-restart",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m6-daemon-restart")
+            self.assertIn("m6_daemon_restart_reattaches_watcher_snapshot", text)
+            self.assertIn("m6_daemon_restart_uses_external_event_path", text)
+            self.assertIn("m6_daemon_restart_final_stop_is_clean", text)
+
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
