@@ -1859,7 +1859,9 @@ def apply_propose_task_action(state, event, action, current_time, autonomous, au
 
 def apply_self_review_action(state, event, action, current_time, autonomous, autonomy_level):
     summary = action.get("summary") or action.get("text") or "Self review completed without details."
-    record_deep_memory(state, "decisions", f"Self review: {summary}", current_time)
+    memory_text = f"Self review: {summary}"
+    if not has_recent_deep_memory(state, "decisions", memory_text):
+        record_deep_memory(state, "decisions", memory_text, current_time)
     autonomy = state.setdefault("autonomy", {})
     autonomy["last_self_review_at"] = current_time
     autonomy["last_autonomous_action_at"] = current_time if autonomous else autonomy.get("last_autonomous_action_at")

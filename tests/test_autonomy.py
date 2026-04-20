@@ -265,9 +265,10 @@ class AutonomyTests(unittest.TestCase):
             "actions": [
                 {"type": "record_memory", "summary": "Waiting."},
                 {"type": "wait_for_user", "task_id": 1, "reason": "Question #1 is still unanswered."},
+                {"type": "self_review", "summary": "Still waiting."},
             ],
         }
-        counts = {"actions": 2, "messages": 0, "executed": 0, "waits": 1}
+        counts = {"actions": 3, "messages": 0, "executed": 0, "waits": 1}
 
         first = record_thought_journal_entry(
             state,
@@ -295,6 +296,47 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(second["last_event_id"], 2)
         self.assertEqual(second["last_repeated_at"], "2026-04-18T00:01:00Z")
         self.assertIn("repeats=2", format_thought_entry(second))
+
+    def test_passive_self_review_deduplicates_deep_memory(self):
+        state = default_state()
+        decision_plan = {
+            "summary": "Waiting.",
+            "decisions": [{"type": "remember", "summary": "Waiting."}],
+        }
+        action_plan = {
+            "summary": "Waiting.",
+            "actions": [
+                {"type": "record_memory", "summary": "Waiting."},
+                {"type": "wait_for_user", "task_id": 1, "reason": "Question #1 is still unanswered."},
+                {"type": "self_review", "summary": "Autonomous self review: Keep the task list useful and current."},
+            ],
+        }
+
+        for event_id, current_time in (
+            (1, "2026-04-18T00:00:00Z"),
+            (2, "2026-04-18T02:00:00Z"),
+        ):
+            apply_action_plan(
+                state,
+                {"id": event_id, "type": "passive_tick"},
+                decision_plan,
+                action_plan,
+                current_time,
+                autonomous=True,
+                allow_task_execution=False,
+                task_timeout=1,
+                cycle_reason="passive_tick",
+            )
+
+        self.assertEqual(len(state["thought_journal"]), 1)
+        self.assertEqual(state["thought_journal"][0]["repeat_count"], 2)
+        self.assertEqual(
+            state["memory"]["deep"]["decisions"].count(
+                "2026-04-18T00:00:00Z: Self review: Autonomous self review: Keep the task list useful and current."
+            ),
+            1,
+        )
+        self.assertEqual(len(state["memory"]["deep"]["decisions"]), 1)
 
     def test_thought_journal_keeps_task_threads_when_wording_changes(self):
         state = default_state()

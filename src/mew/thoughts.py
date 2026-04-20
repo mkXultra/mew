@@ -262,8 +262,15 @@ def repeated_passive_wait_thought(state, previous, entry):
         return False
     action_types = _thought_action_types(entry)
     previous_action_types = _thought_action_types(previous)
-    allowed = {"record_memory", "wait_for_user"}
+    allowed = {"record_memory", "wait_for_user", "self_review"}
     if "wait_for_user" not in action_types or "wait_for_user" not in previous_action_types:
+        return False
+    actions = [
+        action
+        for action in list(entry.get("actions", [])) + list(previous.get("actions", []))
+        if isinstance(action, dict)
+    ]
+    if any(action.get("type") == "self_review" and action.get("proposed_task_title") for action in actions):
         return False
     if any(action_type not in allowed for action_type in action_types):
         return False

@@ -10,7 +10,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 |---|---|---|
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
-| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, a richer reentry-burden comparator where fresh `codex-ultra` chose `mew_preferred`, work-session close snapshots, a half-hour resident cadence proof, and resident-loop time dilation foundation now exist; several-hour and multi-day resident cadence remain unproven. |
+| 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, a richer reentry-burden comparator where fresh `codex-ultra` chose `mew_preferred`, work-session close snapshots, a half-hour resident cadence proof, resident-loop time dilation foundation, and high-dilation passive self-review compaction now exist; several-hour and multi-day resident cadence remain unproven. |
 | 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, and batched CLI/chat/runtime safe auto-recovery exist; broader automatic side-effect recovery is not implemented. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, expose active-memory/cell reentry controls, and preserve recent completed work, but closed-loop self-improvement is not yet reliable. |
 
@@ -1240,6 +1240,16 @@ Evidence:
   working memory and live README.md world-state, and kept old work events
   visible for audit. The durable summary is in
   `docs/M3_AGED_REENTRY_7DAY_2026-04-20.md`.
+- High-dilation resident-loop dogfood exposed and fixed a day-scale passive
+  memory-bloat issue: recurring passive `self_review` actions were not part of
+  repeated-wait thought compaction and appended duplicate deep-memory decisions
+  every logical few hours. Passive wait compaction now admits self-review-only
+  waits, and duplicate self-review decisions are skipped. The targeted
+  high-dilation smoke at `/tmp/mew-dilation-self-review-compact-20260420`
+  passed with `time_dilation=3600.0`, `passive_span_seconds=14579.0`, thought
+  compaction to `repeat_count=3`, and one duplicate-free deep-memory
+  self-review entry. The durable summary is in
+  `docs/M3_DILATED_SELF_REVIEW_COMPACTION_2026-04-20.md`.
 
 Missing proof:
 
@@ -1252,7 +1262,9 @@ Missing proof:
   proofs, and resident-loop JSON now carries explicit cadence counts plus
   requested duration/interval/time-dilation metadata. A half-hour resident-loop
   proof exists and the time-dilation foundation can accelerate aged timestamp
-  proof runs, but there is still no several-hour or multi-day cadence proof.
+  proof runs. A high-dilation run also proved duplicate passive self-review
+  compaction, but there is still no isolated several-hour or multi-day
+  real-time cadence proof.
 - The scoped M3 reentry gate can now hand a fresh CLI run an explicit comparator
   prompt/template and merge the completed report. One fresh `codex-ultra` leg
   has run to parity and one richer burden leg has run to `mew_preferred`, but
