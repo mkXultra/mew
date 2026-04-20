@@ -3913,6 +3913,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 "plan_items": _coerce_working_memory_plan_items(memory.get("plan_items") or []),
                 "target_paths": _coerce_working_memory_target_paths(memory.get("target_paths") or []),
                 "open_questions": [clip_inline_text(str(item), 160) for item in (memory.get("open_questions") or [])[:3]],
+                "last_verified_state": clip_inline_text(str(memory.get("last_verified_state") or ""), 240),
             }
         )
     compressed_prior_think = build_compressed_prior_think(turns, recent_limit=limit, limit=4)
@@ -4420,6 +4421,9 @@ def format_work_session_resume(resume):
             target_paths = decision.get("target_paths") or []
             if target_paths:
                 lines.append(f"  target_paths: {', '.join(target_paths)}")
+            last_verified_state = decision.get("last_verified_state")
+            if last_verified_state:
+                lines.append(f"  last_verified_state: {last_verified_state}")
             open_questions = decision.get("open_questions") or []
             if open_questions:
                 lines.append("  open_questions:")

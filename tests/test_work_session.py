@@ -5800,8 +5800,13 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(memory["stale_after_model_turn_id"], 1)
         self.assertEqual(memory["latest_model_turn_id"], 2)
         self.assertEqual(memory["stale_turns"], 1)
+        self.assertEqual(
+            resume["recent_decisions"][0]["last_verified_state"],
+            "model claimed tests passed",
+        )
         text = format_work_session_resume(resume)
         self.assertIn("last_verified_state: last verification failed exit=1: uv run pytest -q", text)
+        self.assertIn("  last_verified_state: model claimed tests passed", text)
         self.assertIn("stale_next_step: Ship it.", text)
         self.assertNotIn("\nnext_step: Ship it.", text)
         self.assertIn("stale_after_model_turn: #1 (1 later turn(s) without working_memory; latest=#2)", text)
@@ -14195,6 +14200,66 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(windows[4]["line_start"], 3217)
         self.assertEqual(windows[4]["line_end"], 3248)
+
+    def test_work_model_context_merges_large_overlapping_recent_line_windows(self):
+        from mew.work_loop import build_work_model_context
+
+        def make_read_file(call_id, path, line_start, line_end, summary):
+            text = "".join(
+                f"{path}:{line}: {'x' * 40}\n" for line in range(line_start, line_end + 1)
+            )
+            return {
+                "id": call_id,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": path, "line_start": line_start, "line_count": line_end - line_start + 1},
+                "result": {
+                    "path": path,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "text": text,
+                    "truncated": False,
+                },
+                "summary": summary,
+            }
+
+        tool_calls = [
+            make_read_file(1, "tests/test_work_session.py", 5770, 5814, "paired test"),
+            make_read_file(2, "src/mew/work_session.py", 3890, 3921, "builder"),
+            make_read_file(3, "src/mew/work_session.py", 4040, 4179, "builder bridge"),
+            make_read_file(4, "src/mew/work_session.py", 4160, 4299, "formatter bridge"),
+            make_read_file(5, "src/mew/work_session.py", 4280, 4419, "formatter wide"),
+            make_read_file(6, "src/mew/work_session.py", 4388, 4457, "formatter repair"),
+        ]
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Keep large overlapping formatter windows available for same-file multi-span edits.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Large merged recent windows",
+            "description": "Retain overlapping explicit line windows even when they exceed the default text limit.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        work_context = build_work_model_context({}, session, task, "now")["work_session"]
+        windows = work_context["recent_read_file_windows"]
+
+        self.assertEqual(len(windows), 3)
+        self.assertEqual([item["tool_call_id"] for item in windows], [6, 2, 1])
+        self.assertEqual(windows[0]["path"], "src/mew/work_session.py")
+        self.assertEqual(windows[0]["line_start"], 4040)
+        self.assertEqual(windows[0]["line_end"], 4457)
+        self.assertTrue(windows[0]["context_truncated"])
+        self.assertIn("src/mew/work_session.py:4426:", windows[0]["text"])
+        self.assertNotIn("src/mew/work_session.py:4457:", windows[0]["text"])
 
     def test_work_model_context_clips_large_search_matches(self):
         from mew.work_loop import WORK_CONTEXT_BUDGET, build_work_model_context

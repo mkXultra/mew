@@ -419,3 +419,17 @@ approved/applied them as #2347/#2348, mew chose
 tests`, performed one same-surface audit read, and finished with
 `rescue_edits=0`. This is implementation evidence for the frozen M6.6 set, not
 an extra comparator slot.
+
+After the direct large-window merge-budget patch for
+`build_recent_read_file_windows()`, task #343 / session #331 added fresh
+mew-side implementation evidence for the same-file multi-hunk
+`edit_file_hunks` surface. Mew recovered the formatter and builder anchors,
+read the exact source/test windows, proposed one paired dry-run batch with
+`edit_file` for `tests/test_work_session.py` and `edit_file_hunks` for
+`src/mew/work_session.py`, auto-applied both writes, passed
+`uv run python -m unittest tests.test_work_session` with `407 tests`, completed
+the required same-surface audit, and finished with `rescue_edits=0`. The landed
+feature now carries `working_memory.last_verified_state` through
+`recent_decisions` and renders that field in the Recent decisions block. This
+is implementation evidence for the frozen M6.6 set, not an extra comparator
+slot.

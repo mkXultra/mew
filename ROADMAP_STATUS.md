@@ -799,6 +799,26 @@ Evidence:
   recent-window/context tests plus `ruff`, `py_compile`, and broader
   `uv run python -m unittest tests.test_work_session` passed. This is product
   progress aimed at the #341 blocker, not mew-side evidence.
+- A direct supervisor patch then refined that same-file retention policy for
+  large overlapping explicit line-window reads: when
+  `build_recent_read_file_windows()` merges adjacent or overlapping same-path
+  windows, it now uses the larger effective text budget from those explicit
+  line-window reads instead of refusing the merge once one window exceeds the
+  default 6k cap. Focused prompt-window regressions, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is product progress aimed at the #343
+  blocker, not mew-side evidence.
+- M6.6 task #343 / session #331 then turned that direct patch into fresh
+  mew-side same-file multi-span evidence on the long-blocked
+  `last_verified_state` slice. The native loop recovered the formatter anchor,
+  read the exact formatter and builder windows, proposed one paired dry-run
+  batch with `edit_file` for `tests/test_work_session.py` and
+  `edit_file_hunks` for `src/mew/work_session.py`, auto-applied both writes,
+  passed `uv run python -m unittest tests.test_work_session` with `407 tests`,
+  completed the required same-surface audit inside `src/mew/work_session.py`,
+  and finished cleanly with `rescue_edits=0`. The landed feature now carries
+  `working_memory.last_verified_state` through `recent_decisions` and renders
+  that field in the Recent decisions block. This is implementation evidence
+  for the frozen M6.6 set, not an extra comparator slot.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -858,23 +878,15 @@ Missing proof:
   reads and preserves those larger windows in full prompt context. #341 then
   showed one more contradiction: the full bridged text was visible in
   `tool_calls[#2503]`, but `recent_read_file_windows` still stored only a
-  truncated cache, so the model treated the single-file boundary as
-  unrecoverable and finished. A direct follow-up patch now preserves full text
-  in `recent_read_file_windows` for these explicit untruncated line-window
-  reads and tells THINK to fall back to matching `tool_calls` text before
-  declaring old text unrecoverable. Fresh task #342 / session #329 then showed
-  the next blocker clearly: even with the bridged source window and widened
-  paired-test window preserved, the native loop still closed with a no-change
-  summary because the remaining same-file multi-span source change could not be
-  expressed safely as one contiguous `edit_file old/new` bridge. A direct
-  follow-up patch now adds `edit_file_hunks`, a single-path atomic write
-  surface for multiple disjoint exact old/new hunks, and wires it through the
-  work-loop paired-write rules, approvals, metrics, and prompts so same-file
-  multi-span edits no longer depend on restating the full bridged text as one
-  contiguous block. Focused write-tool, work-session, approval-path, `ruff`,
-  `py_compile`, and `git diff --check` validation passed. That reduction still
-  has not yet been proven by a fresh no-rescue work-session task. The native
-  loop is therefore improved but not yet self-sufficient.
+  truncated cache for the overlapping formatter repair window under the five
+  slot cap. The follow-up merge-budget patch fixed that retention policy for
+  large explicit line windows, and #343 / session #331 converted it into a
+  no-rescue mew-side pass for the same-file multi-hunk `edit_file_hunks`
+  feature slice. That removes this exact retention blocker for
+  `last_verified_state`, but broader normal-case autonomy is still not proven:
+  #343 still used some exploratory search/read steps before the final batch,
+  and durable plan/path recall across broader multi-file coding work remains
+  open.
 
 Done when:
 

@@ -419,18 +419,17 @@ def _recent_read_line_window_map(window):
     return {line_start + index: piece for index, piece in enumerate(pieces)}
 
 
-def _merge_recent_read_line_window(existing, candidate, *, text_limit):
+def _merge_recent_read_line_window(
+    existing,
+    candidate,
+    *,
+    text_limit,
+    existing_text_limit,
+    candidate_text_limit,
+):
     if not isinstance(existing, dict) or not isinstance(candidate, dict):
         return False
     if existing.get("path") != candidate.get("path"):
-        return False
-    if (
-        not existing.get("context_truncated")
-        and int(existing.get("source_text_chars") or 0) > text_limit
-    ) or (
-        not candidate.get("context_truncated")
-        and int(candidate.get("source_text_chars") or 0) > text_limit
-    ):
         return False
     existing_start = existing.get("line_start")
     existing_end = existing.get("line_end")
@@ -452,12 +451,13 @@ def _merge_recent_read_line_window(existing, candidate, *, text_limit):
     if sorted(merged_map) != expected_lines:
         return False
     merged_text = "".join(merged_map[line] for line in expected_lines)
+    merge_text_limit = max(text_limit, existing_text_limit, candidate_text_limit)
     existing["line_start"] = merged_start
     existing["line_end"] = merged_end
-    existing["text"] = clip_output(merged_text, text_limit)
-    existing["visible_chars"] = min(len(merged_text), text_limit)
+    existing["text"] = clip_output(merged_text, merge_text_limit)
+    existing["visible_chars"] = min(len(merged_text), merge_text_limit)
     existing["source_text_chars"] = len(merged_text)
-    existing["context_truncated"] = len(merged_text) > text_limit
+    existing["context_truncated"] = len(merged_text) > merge_text_limit
     return True
 
 
@@ -480,6 +480,7 @@ def build_recent_read_file_windows(
     text_limit=WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT,
 ):
     windows = []
+    window_text_limits = []
     for call in reversed(list(calls or [])):
         if call.get("tool") != "read_file" or call.get("status") != "completed":
             continue
@@ -501,12 +502,20 @@ def build_recent_read_file_windows(
             "context_truncated": len(text) > window_text_limit,
         }
         merged = False
-        for existing in windows:
-            if _merge_recent_read_line_window(existing, candidate, text_limit=text_limit):
+        for index, existing in enumerate(windows):
+            if _merge_recent_read_line_window(
+                existing,
+                candidate,
+                text_limit=text_limit,
+                existing_text_limit=window_text_limits[index],
+                candidate_text_limit=window_text_limit,
+            ):
+                window_text_limits[index] = max(window_text_limits[index], window_text_limit)
                 merged = True
                 break
         if not merged and len(windows) < limit:
             windows.append(candidate)
+            window_text_limits.append(window_text_limit)
     return windows
 
 
