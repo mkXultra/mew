@@ -150,7 +150,7 @@ from .state import (
     state_digest,
     state_lock,
 )
-from .snapshot import save_snapshot, take_snapshot
+from .snapshot import load_snapshot, save_snapshot, snapshot_path, take_snapshot
 from .sweep import format_sweep_report, sweep_agent_runs
 from .step_loop import format_step_loop_report, run_step_loop
 from .read_tools import (
@@ -5326,6 +5326,53 @@ def print_no_active_work_session_response(state, args=None, limit=5, kind=None):
             print(f"one-shot: {command}")
 
 
+def work_session_snapshot_summary(session, state):
+    if not session:
+        return {}
+    session_id = session.get("id")
+    try:
+        loaded = load_snapshot(session_id, state=state)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "error",
+            "path": str(snapshot_path(session_id)),
+            "error": str(exc),
+        }
+    if not loaded:
+        return {
+            "status": "absent",
+            "path": str(snapshot_path(session_id)),
+        }
+    snapshot = loaded.snapshot
+    return {
+        "status": "usable" if loaded.usable else "partial",
+        "path": loaded.path,
+        "session_id": snapshot.session_id,
+        "task_id": snapshot.task_id,
+        "saved_at": snapshot.saved_at,
+        "closed_at": snapshot.closed_at,
+        "continuity_score": snapshot.continuity_score,
+        "continuity_status": snapshot.continuity_status,
+        "drift_notes": loaded.drift_notes,
+        "partial_reasons": loaded.partial_reasons,
+    }
+
+
+def format_work_session_snapshot_summary(summary):
+    if not summary:
+        return ""
+    status = summary.get("status") or "unknown"
+    path = summary.get("path") or ""
+    if status == "absent":
+        return f"snapshot: absent path={path}"
+    if status == "error":
+        return f"snapshot: error path={path} error={summary.get('error') or ''}"
+    drift = "; ".join(summary.get("drift_notes") or summary.get("partial_reasons") or [])
+    suffix = f" drift={drift}" if drift else ""
+    continuity = summary.get("continuity_score") or "-"
+    return f"snapshot: {status} continuity={continuity} path={path}{suffix}"
+
+
 def cmd_work_show_session(args):
     state = load_state()
     session = active_work_session(state)
@@ -5349,6 +5396,7 @@ def cmd_work_show_session(args):
         resume = build_work_session_resume(session, task=task, state=state)
         if resume and getattr(args, "allow_read", None):
             attach_work_resume_world_state(resume, build_work_world_state(resume, args.allow_read))
+        snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not getattr(args, "task_id", None):
             if args.json:
                 payload = {
@@ -5372,6 +5420,7 @@ def cmd_work_show_session(args):
         if args.json:
             payload = {
                 "resume": resume,
+                "snapshot": snapshot_summary,
                 "next_cli_controls": work_cli_control_commands(session, args, task=task) if resume else [],
             }
             if auto_recovery is not None:
@@ -5383,6 +5432,9 @@ def cmd_work_show_session(args):
                 print_work_recovery_report(auto_recovery)
                 print("")
             print(format_work_session_resume(resume))
+            snapshot_text = format_work_session_snapshot_summary(snapshot_summary)
+            if snapshot_text:
+                print(snapshot_text)
             if resume:
                 print(format_work_cli_controls(session, args, task=task))
         return auto_recovery_code
@@ -12375,6 +12427,7 @@ def chat_work_session(rest, chat_state=None):
         resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
         if resume and allow_read:
             attach_work_resume_world_state(resume, build_work_world_state(resume, allow_read))
+        snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not task_id:
             if auto_recovery is not None:
                 print("Auto recovery")
@@ -12395,6 +12448,9 @@ def chat_work_session(rest, chat_state=None):
                     "choose another with /work-session resume <task-id>"
                 )
         print(format_work_session_resume(resume))
+        snapshot_text = format_work_session_snapshot_summary(snapshot_summary)
+        if snapshot_text:
+            print(snapshot_text)
         if resume:
             continue_options = (chat_state or {}).get("work_continue_options", "") or work_chat_continue_options(session)
             if allow_read:
