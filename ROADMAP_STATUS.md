@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:44 JST.
+Last assessed: 2026-04-20 18:49 JST.
 
 Active work: **M6 Body**.
 
@@ -271,11 +271,18 @@ Evidence:
   passive tick.
 - Validation: targeted watcher/runtime pytest, targeted `ruff`,
   `./mew daemon status --json`, and `git diff --check` passed.
+- Dogfood scenario `m6-daemon-watch` now starts a background daemon with
+  `--watch-path`, observes active watcher status and uptime via
+  `mew daemon status --json`, modifies the watched file, verifies a processed
+  `file_change` event through the `external_event` runtime path, and stops the
+  daemon with watcher state returning to idle.
+- Validation: `m6-daemon-watch` dogfood passed in
+  `/tmp/mew-m6-daemon-watch-proof`, along with the focused dogfood pytest.
 
 Missing proof:
 
-- No long-running daemon proof has shown the watcher firing in a resident
-  background process; current proof is deterministic and single-cycle.
+- No long-duration daemon proof has shown the watcher and passive loop staying
+  healthy beyond the short dogfood scenario.
 - No daemon restart proof has shown reattachment without user rebrief.
 - No multi-hour resident proof has run through the daemon path.
 - Pause/inspect/repair/resume controls still reuse existing commands rather

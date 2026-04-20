@@ -65,6 +65,7 @@ DOGFOOD_SCENARIOS = (
     "work-session",
     "m2-comparative",
     "m5-safety-hooks",
+    "m6-daemon-watch",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -1716,6 +1717,156 @@ print(
     report["artifacts"] = {
         "governance_task_id": ((data.get("governance_audit_data") or {}).get("task") or {}).get("id"),
         "external_task_id": ((data.get("external_audit_data") or {}).get("task") or {}).get("id"),
+    }
+    return report
+
+
+def run_m6_daemon_watch_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    watched = workspace / "watched.txt"
+    watched.write_text("before\n", encoding="utf-8")
+
+    def run(args, timeout=30, record=True):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        if record:
+            commands.append(result)
+        return result
+
+    def wait_for(predicate, timeout=5.0, interval=0.05):
+        deadline = time.monotonic() + timeout
+        latest = None
+        while time.monotonic() < deadline:
+            latest = predicate()
+            if latest:
+                return latest
+            time.sleep(interval)
+        return latest
+
+    start_result = run(
+        [
+            "daemon",
+            "start",
+            "--timeout",
+            "5",
+            "--poll-interval",
+            "0.05",
+            "--",
+            "--interval",
+            "999",
+            "--poll-interval",
+            "0.05",
+            "--watch-path",
+            "watched.txt",
+            "--echo-effects",
+        ],
+        timeout=10,
+    )
+    daemon_started = start_result.get("exit_code") == 0
+    status_data = {}
+    status_json = {}
+    processed_event = None
+    final_state = {}
+    stop_result = None
+    try:
+        status_data = wait_for(
+            lambda: (
+                data
+                if (data := read_json_file(workspace / STATE_FILE, {})).get("watchers", {}).get("active_count", 0) >= 1
+                else None
+            ),
+            timeout=5.0,
+        ) or {}
+        status_result = run(["daemon", "status", "--json"], timeout=5)
+        status_json = _json_stdout(status_result)
+        watched.write_text("after changed\n", encoding="utf-8")
+
+        processed_event = wait_for(
+            lambda: next(
+                (
+                    event
+                    for event in (read_json_file(workspace / STATE_FILE, {}).get("inbox") or [])
+                    if event.get("type") == "file_change" and event.get("processed_at")
+                ),
+                None,
+            ),
+            timeout=5.0,
+        )
+        final_state = read_json_file(workspace / STATE_FILE, {})
+    finally:
+        if daemon_started:
+            stop_result = run(["daemon", "stop", "--timeout", "5", "--poll-interval", "0.05"], timeout=10)
+        else:
+            stop_result = {"exit_code": None, "stdout": "", "stderr": "daemon was not started"}
+
+    final_status = run(["daemon", "status", "--json"], timeout=5)
+    final_status_json = _json_stdout(final_status)
+    log_text = read_text_file(workspace / STATE_DIR / "runtime.out")
+    runtime_effects = final_state.get("runtime_effects") or []
+    external_effects = [effect for effect in runtime_effects if effect.get("reason") == "external_event"]
+    watcher_items = ((final_status_json.get("watchers") or {}).get("items")) or []
+
+    _scenario_check(
+        checks,
+        "m6_daemon_watch_start_reports_active",
+        daemon_started and "runtime is active" in (start_result.get("stdout") or ""),
+        observed=start_result.get("stdout"),
+        expected="daemon start reports runtime is active",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_status_reports_active_watcher",
+        (status_json.get("watchers") or {}).get("active_count", 0) >= 1
+        and status_json.get("uptime_seconds") is not None,
+        observed={
+            "state": status_json.get("state"),
+            "uptime_seconds": status_json.get("uptime_seconds"),
+            "watchers": status_json.get("watchers"),
+        },
+        expected="daemon status reports uptime and at least one active watcher",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_watcher_queues_processed_file_event",
+        bool(processed_event)
+        and processed_event.get("source") == "daemon_watch"
+        and (processed_event.get("payload") or {}).get("change_kind") == "modified",
+        observed=processed_event,
+        expected="file_change event from daemon_watch is processed",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_watcher_uses_external_event_runtime_path",
+        bool(external_effects),
+        observed=external_effects[-1] if external_effects else None,
+        expected="runtime effect reason external_event exists",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_stop_marks_watchers_idle",
+        stop_result.get("exit_code") == 0
+        and final_status_json.get("state") == "stopped"
+        and all(item.get("status") != "active" for item in watcher_items),
+        observed={
+            "stop": command_result_tail(stop_result),
+            "final_status": final_status_json,
+            "watchers": watcher_items,
+        },
+        expected="daemon stop succeeds and watcher state is no longer active",
+    )
+    _scenario_check(
+        checks,
+        "m6_daemon_log_records_external_event",
+        "reason=external_event" in log_text,
+        observed=log_text[-400:],
+        expected="runtime output mentions reason=external_event",
+    )
+    report = _scenario_report("m6-daemon-watch", workspace, commands, checks)
+    report["artifacts"] = {
+        "watched_path": str(watched),
+        "event_id": (processed_event or {}).get("id"),
+        "status_before_change": status_data,
+        "final_status": final_status_json,
     }
     return report
 
@@ -9661,6 +9812,8 @@ def run_dogfood_scenario(args):
             reports.append(run_self_improve_controls_scenario(scenario_workspace, env=env))
         elif name == "m5-safety-hooks":
             reports.append(run_m5_safety_hooks_scenario(scenario_workspace, env=env))
+        elif name == "m6-daemon-watch":
+            reports.append(run_m6_daemon_watch_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
