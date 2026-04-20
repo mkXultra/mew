@@ -9,8 +9,6 @@ HIGH_RISK_TERMS = (
     "auth",
     "daemon",
     "governance",
-    "m5",
-    "m6",
     "permission",
     "policy",
     "recovery",

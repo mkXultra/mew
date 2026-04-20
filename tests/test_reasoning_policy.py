@@ -79,6 +79,23 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["effort"], "medium")
         self.assertEqual(policy["work_type"], "small_implementation")
 
+    def test_milestone_number_alone_does_not_make_work_high_risk(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Improve mew itself",
+                "kind": "coding",
+                "description": (
+                    "Focus:\n"
+                    "M6.5 clean speed dogfood: add explicit atom source kind support."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "medium")
+        self.assertEqual(policy["work_type"], "small_implementation")
+
     def test_env_override_wins(self):
         policy = select_work_reasoning_policy(
             {"title": "Inspect project shape", "kind": "coding"},

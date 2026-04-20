@@ -12811,6 +12811,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer a module-level command unless you have confirmed the exact class and method name", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
+        self.assertIn("do not finish merely because the next edit is clear", prompt)
+        self.assertIn("propose the dry-run edit_file/write_file action instead", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn('"working_memory": {"hypothesis"', prompt)

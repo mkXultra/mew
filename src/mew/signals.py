@@ -243,7 +243,8 @@ def fetch_signal_source(state, source_name, *, opener=None, current_time=None):
         return {"status": "blocked", "reason": "unknown_source", "source": None}
     if not source.get("enabled"):
         return {"status": "blocked", "reason": "source_disabled", "source": source}
-    if (source.get("kind") or "").strip() != "rss":
+    source_kind = (source.get("kind") or "").strip()
+    if source_kind not in {"rss", "atom"}:
         return {"status": "blocked", "reason": "unsupported_source_kind", "source": source}
     url = ((source.get("config") or {}).get("url") or "").strip()
     if not url:

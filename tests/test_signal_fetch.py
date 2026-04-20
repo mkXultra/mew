@@ -42,7 +42,7 @@ class SignalFetchTests(unittest.TestCase):
         enable_signal_source(
             state,
             "hn",
-            kind="rss",
+            kind="atom",
             reason="track engineering stories",
             config={"url": "https://example.test/feed.xml"},
             current_time="2026-04-20T00:00:00Z",
