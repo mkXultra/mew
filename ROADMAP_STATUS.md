@@ -17,7 +17,7 @@ M5 was archived losslessly in
 | 4. True Recovery | `done` | Crashed/interrupted runtime and work-session effects can be classified, safely retried/requeued when deterministic, or surfaced for durable review. |
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
 | 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
-| 6. Body: Daemon & Persistent Presence | `in_progress` | Make mew a resident process rather than a CLI that exists only when summoned. |
+| 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
 | 7. Senses: Inbound Signals | `not_started` | Let the resident notice audited external signals, not only its own state. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:57 JST.
+Last assessed: 2026-04-20 19:10 JST.
 
 Active work: **M6 Body**.
 
@@ -46,10 +46,11 @@ Reasoning:
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
-2. Start M6 Body in small slices: daemon status, resident tick supervision,
-   durable pause/inspect/repair/resume controls, and one real watcher-triggered
-   passive turn.
-3. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+2. Let the enhanced M6 Docker proof finish, collect it, and run
+   `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
+3. If that strict proof passes with the expected cadence and all seven checks,
+   write the M6 close gate and move active focus to M7 Senses.
+4. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -291,28 +292,45 @@ Evidence:
 - Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
   `ruff`, and `./mew daemon inspect` passed.
 - Dogfood scenario `m6-daemon-loop` now starts a background daemon, lets it run
-  repeated passive ticks, stops it cleanly, checks applied passive effects and
-  daemon output logs, and verifies `mew focus` can reenter the stopped daemon
-  state.
+  repeated passive ticks, processes a real watched file change through
+  `external_event`, exercises `pause`, `inspect`, and `resume` against the
+  running daemon, stops cleanly, checks applied passive effects and daemon
+  output logs, and verifies `mew focus` can reenter the stopped daemon state.
 - Validation: `m6-daemon-loop` passed in `/tmp/mew-m6-daemon-loop-proof` with
   `duration=6`, `interval=2`, `processed_events=4`, `passive_events=3`, and
   passive gaps `[2.0, 2.0]`; the focused dogfood pytest also passed.
+- Docker proof tooling now supports `m6-daemon-loop` duration/interval args and
+  writes `/proof/artifacts/report.json`. `mew proof-summary` prefers that
+  report, surfaces the source path, and rejects weak long proofs whose passive
+  event count is far below the requested cadence.
+- Validation: `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_m6_daemon_loop_scenario --no-testmon`,
+  targeted `ruff`, `bash -n scripts/run_proof_docker.sh`, `git diff --check`,
+  and short Docker smoke
+  `proof-artifacts/mew-proof-m6-daemon-loop-smoke-20260420-1913` all passed.
+- Enhanced multi-hour Docker proof is running detached:
+  `mew-proof-m6-daemon-loop-enhanced-20260420-1910`, scenario
+  `m6-daemon-loop`, duration `14400`, interval `60`, poll interval `0.2`.
+  On completion, collect with
+  `scripts/collect_proof_docker.sh mew-proof-m6-daemon-loop-enhanced-20260420-1910`.
 
 Missing proof:
 
-- No multi-hour resident proof has run through the daemon path.
-- No long-duration daemon proof has shown the watcher and passive loop staying
-  healthy beyond short dogfood scenarios.
-- Daemon controls exist, but they have not yet been exercised in a longer
-  resident proof.
+- The enhanced multi-hour resident proof is running but not complete yet.
+- M6 should not close until the collected Docker artifacts pass
+  `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`
+  with actual passive counts near the requested 4h/60s cadence.
 
 Done when:
 
-- `mew daemon status` reports uptime and active watchers.
+- `mew daemon status` reports uptime, active watchers, last tick, last event,
+  current task, and safety state.
 - A real file or git event triggers a passive turn end to end without manual
   polling.
 - A restart after terminal close, process stop, or reboot reattaches without
   user rebrief.
+- A multi-hour resident proof runs through the daemon path, not only a direct
+  foreground loop.
 - The daemon can be paused, inspected, repaired, and resumed from CLI/chat.
 
 ### M7: Senses - Inbound Signals
