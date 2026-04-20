@@ -849,7 +849,7 @@ def build_work_think_prompt(context):
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple hunks, collapse them into one edit_file or write_file against the most recent exact window for that path. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -953,6 +953,9 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
                 }
+            paired_reason = paired_write_batch_rejection_reason(normalized_tools)
+            if paired_reason:
+                return {"type": "wait", "reason": paired_reason}
             paired_tools = normalize_paired_write_batch_tools(normalized_tools)
             if not paired_tools:
                 return {
@@ -1116,6 +1119,39 @@ def _work_batch_path_is_mew_source(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
+def duplicate_paired_write_batch_paths(tools):
+    seen = set()
+    duplicates = []
+    for tool in tools or []:
+        path = _normalized_work_path((tool or {}).get("path"))
+        if not path:
+            continue
+        if path in seen and path not in duplicates:
+            duplicates.append(path)
+            continue
+        seen.add(path)
+    return duplicates
+
+
+def paired_write_batch_rejection_reason(tools):
+    write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
+    if len(write_tools) < 2:
+        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+    if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
+        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+    duplicates = duplicate_paired_write_batch_paths(write_tools)
+    if duplicates:
+        return (
+            "write batch may include at most one write/edit per file path; "
+            f"collapse same-file hunks into a single edit for {duplicates[0]}"
+        )
+    tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
+    source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
+    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
+        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+    return ""
+
+
 def valid_paired_write_batch_sub_action(action):
     action_type = (action or {}).get("type")
     if action_type == "write_file":
@@ -1135,6 +1171,8 @@ def normalize_paired_write_batch_tools(tools):
     if len(write_tools) < 2:
         return []
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
+        return []
+    if duplicate_paired_write_batch_paths(write_tools):
         return []
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]

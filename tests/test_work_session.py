@@ -12984,6 +12984,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("do not reread the full file solely to prepare edit_file", prompt)
         self.assertIn("include a paired tests/ change", prompt)
         self.assertIn("paired-write constraint applies to code write batches", prompt)
+        self.assertIn("Use at most one write/edit per file path in the batch", prompt)
+        self.assertIn("collapse them into one edit_file or write_file", prompt)
         self.assertIn("If the full required write set would exceed five tools", prompt)
         self.assertIn("do not propose a partial batch that drops sibling edits", prompt)
         self.assertIn("Docs-only single edit_file/write_file actions", prompt)
@@ -13203,6 +13205,27 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["type"], "wait")
         self.assertIn("write batch exceeds 5 tools", action["reason"])
         self.assertIn("narrower complete slice", action["reason"])
+
+    def test_work_model_batch_refuses_same_path_write_edits(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                    ],
+                    "reason": "preview paired edits with two source hunks",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "wait")
+        self.assertIn("at most one write/edit per file path", action["reason"])
+        self.assertIn("single edit for src/mew/alpha.py", action["reason"])
 
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result

@@ -750,6 +750,14 @@ Evidence:
   tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
   passed. This is product progress aimed at the #339 blocker, not mew-side
   evidence.
+- A direct supervisor patch then tightened same-file write-batch planning for
+  M6.6: code write batches may now contain at most one write/edit per file
+  path, and the THINK prompt now tells mew to collapse multiple hunks for the
+  same file into one `edit_file` or `write_file` against the most recent exact
+  window for that path. Focused prompt/normalization tests plus `uv run python
+  -m unittest tests.test_work_session`, `ruff`, `py_compile`, and `git diff
+  --check` passed. This is product progress aimed at the #339 blocker, not
+  mew-side evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -798,9 +806,12 @@ Missing proof:
   surface. The partial-write-batch refusal patch should reduce one source of
   that failure by stopping incomplete dry-run batches before approval, and the
   batch-failure cleanup patch now prevents stale pending approvals from hiding
-  the real recovery path after a sibling-tool failure. Those reductions still
-  have not yet been proven by a fresh no-rescue work-session task. The native
-  loop is therefore improved but not yet self-sufficient.
+  the real recovery path after a sibling-tool failure. A further direct patch
+  now rejects duplicate same-path writes inside a code batch and tells THINK to
+  collapse same-file hunks into one file-level edit, which should reduce the
+  `old text was not found` failure mode observed in #339. Those reductions
+  still have not yet been proven by a fresh no-rescue work-session task. The
+  native loop is therefore improved but not yet self-sufficient.
 
 Done when:
 
@@ -842,12 +853,14 @@ Next action:
   not count it as no-rescue evidence.
 - Carry the landed recent-read-window limit expansion as product progress, but
   do not count it as no-rescue evidence.
-- Keep M6.6 on the mew-side critical path. The next task should attack the
-  remaining blocker directly inside `src/mew/work_session.py`: same-file
-  multi-span exact-old-text reuse after exact windows are already read. That
-  likely means a narrow blocker-reduction slice in the native coding loop
-  rather than replaying more summary-surfacing features. Do not return to
-  comparator work until the mew-side implementation set is frozen.
+- Keep M6.6 on the mew-side critical path. The next task should be a fresh
+  native proof task that exercises the landed blocker-reduction set:
+  merged recent windows, partial-write refusal, stale-approval invalidation,
+  and duplicate same-path write rejection. Choose one narrow
+  `src/mew/work_session.py` paired source/test slice that would previously have
+  invited multiple same-file edits, and verify that mew now either produces a
+  stable consolidated dry-run batch or cleanly replans without rescue. Do not
+  return to comparator work until the mew-side implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
