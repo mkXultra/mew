@@ -520,6 +520,25 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m4_runtime_effect_recovery_reviews_completed_write_intent", text)
             self.assertIn("m4_runtime_effect_recovery_seeds_review_question", text)
 
+    def test_run_dogfood_m4_close_gate_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m4-close-gate",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m4-close-gate")
+            self.assertIn("m4_close_gate_runtime_write_intent_auto_requeued", text)
+            self.assertIn("m4_close_gate_verifier_auto_retried_and_superseded", text)
+            self.assertIn("m4_close_gate_durable_approval_visible_in_focus_and_brief", text)
+            self.assertIn("m4_close_gate_completed_external_write_stays_on_review", text)
+            self.assertIn("m4_close_gate_no_manual_reconstruction_required", text)
+
     def test_run_dogfood_day_reentry_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

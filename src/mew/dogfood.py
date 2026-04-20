@@ -17,7 +17,7 @@ from .config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
-from .state import default_state, migrate_state, next_id, reconcile_next_ids
+from .state import add_question, default_state, migrate_state, next_id, reconcile_next_ids
 from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
@@ -56,6 +56,7 @@ DOGFOOD_SCENARIOS = (
     "passive-auto-recovery-write",
     "m4-file-write-recovery",
     "m4-runtime-effect-recovery",
+    "m4-close-gate",
     "day-reentry",
     "continuity",
     "m3-reentry-gate",
@@ -3570,6 +3571,205 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
         expected="commit-phase runtime-effect review follow-up is consumed as a durable open question",
     )
     return _scenario_report("m4-runtime-effect-recovery", workspace, commands, checks)
+
+
+def _dogfood_check_passed(report, name):
+    return any(check.get("name") == name and check.get("passed") for check in (report or {}).get("checks") or [])
+
+
+def _fresh_dogfood_subworkspace(workspace, name):
+    path = Path(workspace) / name
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def run_m4_close_gate_scenario(workspace, env=None):
+    commands = []
+    checks = []
+
+    def run(args, timeout=30, scenario_workspace=None):
+        result = run_command(
+            _scenario_command(*args),
+            scenario_workspace or workspace,
+            timeout=timeout,
+            env=env,
+        )
+        commands.append(result)
+        return result
+
+    runtime_workspace = _fresh_dogfood_subworkspace(workspace, "runtime-effect")
+    runtime_report = run_m4_runtime_effect_recovery_scenario(runtime_workspace, env=env)
+    commands.extend(runtime_report.get("commands") or [])
+
+    verifier_workspace = _fresh_dogfood_subworkspace(workspace, "verifier-auto-recovery")
+    verifier_report = run_passive_auto_recovery_scenario(verifier_workspace, env=env)
+    commands.extend(verifier_report.get("commands") or [])
+
+    approval_workspace = _fresh_dogfood_subworkspace(workspace, "durable-approval")
+    (approval_workspace / "README.md").write_text("old text\n", encoding="utf-8")
+    approval_task_result = run(
+        ["task", "add", "M4 close gate approval task", "--kind", "coding", "--ready", "--json"],
+        timeout=15,
+        scenario_workspace=approval_workspace,
+    )
+    approval_task_data = _json_stdout(approval_task_result)
+    approval_task = (
+        approval_task_data.get("task")
+        if isinstance(approval_task_data.get("task"), dict)
+        else approval_task_data
+    )
+    approval_task_id = approval_task.get("id") if isinstance(approval_task, dict) else None
+    approval_start_result = run(
+        [
+            "work",
+            str(approval_task_id),
+            "--start-session",
+            "--allow-write",
+            ".",
+            "--allow-verify",
+            "--verify-command",
+            f"{sys.executable} -V",
+            "--json",
+        ],
+        timeout=15,
+        scenario_workspace=approval_workspace,
+    )
+    approval_preview_result = run(
+        [
+            "work",
+            str(approval_task_id),
+            "--tool",
+            "edit_file",
+            "--path",
+            "README.md",
+            "--old",
+            "old text",
+            "--new",
+            "new text",
+            "--allow-write",
+            ".",
+            "--json",
+        ],
+        timeout=15,
+        scenario_workspace=approval_workspace,
+    )
+    approval_state_path = approval_workspace / STATE_FILE
+    approval_state = reconcile_next_ids(migrate_state(read_json_file(approval_state_path, default_state())))
+    approval_session = (approval_state.get("work_sessions") or [{}])[0]
+    approval_task_record = (approval_state.get("tasks") or [{}])[0]
+    approval_resume = build_work_session_resume(
+        approval_session,
+        task=approval_task_record,
+        state=approval_state,
+    )
+    approval_item = ((approval_resume or {}).get("pending_approvals") or [{}])[0]
+    approval_call = (approval_session.get("tool_calls") or [{}])[0]
+    approval_question_text = "\n".join(
+        [
+            f"Work session #{approval_session.get('id')} tool #{approval_call.get('id')} is waiting for approval.",
+            f"tool: {approval_call.get('tool')} path: {approval_item.get('path') or 'README.md'}",
+            f"task: #{approval_task_id} M4 close gate approval task",
+            f"approve: `{approval_item.get('cli_approve_hint')}`",
+            f"reject: `{approval_item.get('cli_reject_hint')}`",
+            "If this prompt was interrupted, inspect the pending approval before retrying.",
+        ]
+    )
+    approval_question, _created = add_question(
+        approval_state,
+        approval_question_text,
+        related_task_id=approval_task_id,
+        source="work_approval",
+    )
+    approval_call["approval_question_id"] = approval_question.get("id")
+    approval_call["approval_prompt_status"] = "open"
+    approval_call["approval_prompted_at"] = now_iso()
+    approval_session["updated_at"] = now_iso()
+    write_json_file(approval_state_path, approval_state)
+
+    approval_focus_result = run(["focus", "--kind", "coding"], timeout=15, scenario_workspace=approval_workspace)
+    approval_brief_result = run(["brief", "--kind", "coding"], timeout=15, scenario_workspace=approval_workspace)
+    approval_questions_result = run(["questions", "--json"], timeout=15, scenario_workspace=approval_workspace)
+    approval_resume_result = run(
+        ["work", str(approval_task_id), "--session", "--resume", "--json"],
+        timeout=15,
+        scenario_workspace=approval_workspace,
+    )
+    approval_questions_data = _json_stdout(approval_questions_result)
+    approval_resume_data = _json_stdout(approval_resume_result)
+    approval_final_state = read_json_file(approval_state_path, {})
+    approval_question_records = approval_final_state.get("questions") or []
+    approval_question_record = (approval_question_records[:1] or [{}])[0]
+    approval_attention = (approval_final_state.get("attention") or {}).get("items") or []
+    approval_outbox = approval_final_state.get("outbox") or []
+
+    _scenario_check(
+        checks,
+        "m4_close_gate_runtime_write_intent_auto_requeued",
+        runtime_report.get("status") == "pass"
+        and _dogfood_check_passed(runtime_report, "m4_runtime_effect_recovery_requeues_not_started_write_intent"),
+        observed={"runtime_checks": runtime_report.get("checks")},
+        expected="runtime write intent not_started class requeues the event without manual reconstruction",
+    )
+    _scenario_check(
+        checks,
+        "m4_close_gate_verifier_auto_retried_and_superseded",
+        verifier_report.get("status") == "pass"
+        and _dogfood_check_passed(verifier_report, "passive_auto_recovery_reruns_interrupted_verifier"),
+        observed={"verifier_checks": verifier_report.get("checks")},
+        expected="passive runtime auto-recovers a matching interrupted verifier and supersedes the old call",
+    )
+    _scenario_check(
+        checks,
+        "m4_close_gate_durable_approval_visible_in_focus_and_brief",
+        approval_task_result.get("exit_code") == 0
+        and approval_start_result.get("exit_code") == 0
+        and approval_preview_result.get("exit_code") == 0
+        and approval_focus_result.get("exit_code") == 0
+        and approval_brief_result.get("exit_code") == 0
+        and approval_questions_result.get("exit_code") == 0
+        and "Work session #1 tool #1 is waiting for approval." in (approval_focus_result.get("stdout") or "")
+        and "Work session #1 tool #1 is waiting for approval." in (approval_brief_result.get("stdout") or "")
+        and (approval_questions_data.get("count") or 0) == 1
+        and approval_question_record.get("source") == "work_approval"
+        and approval_question_record.get("status") == "open"
+        and any(item.get("question_id") == approval_question.get("id") for item in approval_attention)
+        and any(message.get("question_id") == approval_question.get("id") for message in approval_outbox)
+        and ((approval_resume_data.get("resume") or {}).get("phase") == "awaiting_approval"),
+        observed={
+            "focus": command_result_tail(approval_focus_result, limit=10),
+            "brief": command_result_tail(approval_brief_result, limit=10),
+            "questions": approval_questions_data,
+            "resume": approval_resume_data.get("resume"),
+            "attention": approval_attention,
+            "outbox": approval_outbox,
+        },
+        expected="interrupted approval prompt is recoverable from focus, brief, questions, outbox, attention, and resume",
+    )
+    _scenario_check(
+        checks,
+        "m4_close_gate_completed_external_write_stays_on_review",
+        runtime_report.get("status") == "pass"
+        and _dogfood_check_passed(runtime_report, "m4_runtime_effect_recovery_reviews_completed_write_intent"),
+        observed={"runtime_checks": runtime_report.get("checks")},
+        expected="completed runtime write intent is reviewed rather than blindly reapplied",
+    )
+    _scenario_check(
+        checks,
+        "m4_close_gate_no_manual_reconstruction_required",
+        all(check.get("passed") for check in checks)
+        and approval_resume_result.get("exit_code") == 0
+        and verifier_report.get("status") == "pass"
+        and runtime_report.get("status") == "pass",
+        observed={
+            "runtime_status": runtime_report.get("status"),
+            "verifier_status": verifier_report.get("status"),
+            "approval_resume_exit": approval_resume_result.get("exit_code"),
+        },
+        expected="all close-gate recovery surfaces are derived from durable state and CLI reentry surfaces",
+    )
+    return _scenario_report("m4-close-gate", workspace, commands, checks)
 
 
 def run_day_reentry_scenario(workspace, env=None):
@@ -9286,6 +9486,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m4_file_write_recovery_scenario(scenario_workspace, env=env))
         elif name == "m4-runtime-effect-recovery":
             reports.append(run_m4_runtime_effect_recovery_scenario(scenario_workspace, env=env))
+        elif name == "m4-close-gate":
+            reports.append(run_m4_close_gate_scenario(scenario_workspace, env=env))
         elif name == "day-reentry":
             reports.append(run_day_reentry_scenario(scenario_workspace, env=env))
         elif name == "continuity":

@@ -11,7 +11,7 @@ This file tracks progress against `ROADMAP.md`. Keep it evidence-based and conse
 | 1. Native Hands | `done` | `mew work --ai` can inspect, edit, verify, resume, and expose an audit trail without delegating to an external coding agent. |
 | 2. Interactive Parity | `done` | `mew work --ai` now has deterministic live steps, command/model streaming with readable compact model deltas, persisted work-session gates, phase/elapsed progress anchors, grouped action/result panes, focused multi-pane views, compact/quiet chat controls, work-mode/follow cockpit controls, one-time steer, interrupt/max-step reentry notes, approval/live controls, chat transcript logging, work-session/global ledgers, repeated-action guardrails, effort budget signals, prioritized desk actions, paired-test source-edit steering, paired-test approval auto-defer, paired verifier promotion, stale reentry labeling, same-surface source-edit audit checkpoints, verification-confidence checkpoints, external-cwd/default-preserving observer recovery hints, proved mew-side interruption/process-stop comparative gates, post-finish task closure controls, stale follow-snapshot detection, and a final paired true-restart comparator artifact recording `parity` with mew continuity advantage. |
 | 3. Persistent Advantage | `in_progress` | Task-local resume, working memory, compressed prior think, durable work notes, typed/scoped active memory, user preferences, unresolved-risk reentry, continuity scoring, live world-state context, task-kind scoped reentry views, passive native-work advancement, deterministic continuity dogfood, isolated week-scale synthetic reentry, a scoped M3 reentry gate with fresh-restart comparison merge, strict fresh `codex-ultra` comparison choosing `mew_preferred`, source/test reentry proof, work-session close snapshots, half-hour and one-hour real-time resident cadence proofs, resident-loop time dilation foundation, high-dilation passive self-review compaction, and an isolated 10-day virtual-time proof with post-runtime reentry checks now exist; several-hour and multi-day resident cadence remain unproven. |
-| 4. True Recovery | `in_progress` | `doctor`, `repair`, runtime effect journal, `recovery_hint`, structured runtime-effect recovery decisions/follow-ups, recovery plans, safe read/git and verifier retries, passive auto-recovery, direct Ctrl-C capture, batched CLI/chat/runtime safe auto-recovery, hash-based applied/runtime file-write recovery, durable approval elicitation, rollback-needed write review, and failed-command review recovery exist; broader shell side-effect retry is not implemented. |
+| 4. True Recovery | `done` | M4 close gate passed: crashed/interrupted runtime and work-session state can be classified, safely requeued/retried when deterministic, or surfaced as durable review without manual reconstruction; opaque shell side-effect retry remains a deliberate non-goal. |
 | 5. Self-Improving Mew | `foundation` | Native self-improvement dogfood can produce useful implementation targets, but M5 is explicitly gated behind persistent continuity, true recovery, and a no-rescue multi-loop proof. |
 
 ## Active Milestone Decision
@@ -1373,7 +1373,7 @@ Next action:
 
 ## Milestone 4: True Recovery
 
-Status: `in_progress`
+Status: `done`
 
 Evidence:
 
@@ -1533,36 +1533,36 @@ Evidence:
   `target_diverged`, `partial`, and `rollback_needed` write states stay on the
   explicit review path with live write-world evidence. Durable summary:
   `docs/M4_FILE_WRITE_RECOVERY_2026-04-20.md`.
+- `dogfood --scenario m4-close-gate` passed locally in
+  `proof-workspace/mew-proof-m4-close-gate-local-20260420`. The close gate
+  proves a runtime write-intent auto-requeue, interrupted verifier auto-retry
+  and superseding, durable approval visibility in focus/brief/questions/outbox/
+  attention/resume, completed runtime-write review instead of blind reapply,
+  and no-manual-reconstruction recovery from durable state. Durable summary:
+  `docs/M4_CLOSE_GATE_2026-04-20.md`.
 
-Missing proof:
+Residual non-goals:
 
-- Automatic `ask_user` recovery exists for failed passive native-work advances,
-  passive auto-retry now exists for selected interrupted verifier plus safe
-  read/git work-session tools, and explicit side-effect recovery now exists for
-  the narrow applied file-write class plus failed shell-command review.
-  Commit-phase runtime-effect review follow-ups now become durable review
-  questions, and runtime write intents can safely requeue when the intended
-  target is still unchanged, but automatic retry still does not exist for all
-  interrupted runtime effects or shell commands.
+- Automatic retry is intentionally limited to deterministic classes: pre-commit
+  runtime requeue, unchanged runtime write intent requeue, selected verifier
+  retry, selected safe read/git retry, and hash-validated file-write recovery.
+  Opaque runtime actions and shell commands stay on explicit review.
 - Durable approval elicitation now exists for live write/edit prompts, but
   broader elicitation types beyond work approvals are not yet persisted.
 - World-state revalidation before retry exists for safe read/git and
   interrupted verifier work-session recovery, and hash-based target
   revalidation now exists for applied work-session file writes plus runtime
   write intents. Runtime effects now have structured recovery decisions and
-  follow-ups; the pre-commit rerun class and unchanged runtime write-intent
-  class are consumed automatically by requeueing their events, while opaque
-  commit-phase runtime effects still remain explicit review.
-- Safe work-session auto-recovery is still opt-in and limited to selected
-  safe read/git tools; write/apply/shell recovery still stays behind explicit
-  gates or review unless a deterministic validator exists.
+  follow-ups; opaque commit-phase runtime effects still remain explicit review.
+- Safe work-session auto-recovery remains opt-in and limited to selected
+  safe read/git/verifier tools; write/apply/shell recovery stays behind
+  explicit gates or review unless a deterministic validator exists.
 
 Next action:
 
-- Extend the next deterministic M4 recovery validator or define the remaining
-  M4 close gate. Keep shell recovery on explicit review until a similarly
-  deterministic world-state validator exists; next useful shell work should
-  improve the review surface or add a deterministic validator, not blind retry.
+- Return active product work to the earliest unfinished entry gate: Milestone 3
+  persistent advantage. M5 remains blocked until M3 is closed, even though M4 is
+  now done.
 
 ## Milestone 5: Self-Improving Mew
 
@@ -1570,10 +1570,10 @@ Status: `foundation`
 
 Operational gate:
 
-- Entry gate is not met yet. Milestone 3 must prove long-running resident
-  continuity against comparable fresh CLI restarts, and Milestone 4 must prove
-  recovery from interrupted, crashed, or failed runtime effects without manual
-  reconstruction.
+- Entry gate is not met yet. Milestone 3 must still prove long-running
+  resident continuity against comparable fresh CLI restarts. Milestone 4's
+  recovery entry-gate requirement is now satisfied by
+  `docs/M4_CLOSE_GATE_2026-04-20.md`.
 - Entry also requires each self-improvement loop to run with a frozen
   permission context, explicit effect budget, and readable audit trail before
   file edits are allowed.
@@ -1647,8 +1647,8 @@ Missing proof:
 
 - Milestone 3 is still in progress; long-running resident continuity is not
   closed against comparable fresh CLI restarts.
-- Milestone 4 is still in progress; broader shell/runtime side-effect recovery
-  is not yet implemented.
+- Milestone 4 is done for the M5 entry gate; broader opaque shell/runtime
+  side-effect auto-retry is a deliberate non-goal rather than an M5 blocker.
 - mew has not yet produced five consecutive closed self-improvement loops with
   native/delegated implementation, verification, review, and readable audit
   bundles.
