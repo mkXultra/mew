@@ -14545,6 +14545,22 @@ def format_runtime_effect(effect):
     recovery_hint = effect.get("recovery_hint")
     if recovery_hint:
         text += f" next={recovery_hint}"
+    recovery_decision = effect.get("recovery_decision") or {}
+    if recovery_decision:
+        text += (
+            f" recovery={recovery_decision.get('action')} "
+            f"effect={recovery_decision.get('effect_classification')} "
+            f"safety={recovery_decision.get('safety')}"
+        )
+    recovery_followup = effect.get("recovery_followup") or {}
+    if recovery_followup:
+        text += (
+            f" followup={recovery_followup.get('action')} "
+            f"status={recovery_followup.get('status')} "
+            f"command={recovery_followup.get('command') or ''}"
+        )
+        if recovery_followup.get("question_id"):
+            text += f" question=#{recovery_followup.get('question_id')}"
     return text
 
 def cmd_runtime_effects(args):

@@ -647,6 +647,44 @@ class ValidationTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_runtime_effects_command_surfaces_recovery_decision_and_followup(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect.update(
+                    {
+                        "status": "interrupted",
+                        "finished_at": "done",
+                        "action_types": ["write_file"],
+                        "recovery_decision": {
+                            "action": "review_writes",
+                            "effect_classification": "write_may_have_started",
+                            "safety": "needs_user_review",
+                        },
+                        "recovery_followup": {
+                            "action": "ask_user_review",
+                            "status": "needs_user_review",
+                            "command": "mew writes",
+                            "question_id": 3,
+                        },
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["runtime-effects"]), 0)
+                output = stdout.getvalue()
+                self.assertIn("recovery=review_writes effect=write_may_have_started safety=needs_user_review", output)
+                self.assertIn("followup=ask_user_review status=needs_user_review command=mew writes question=#3", output)
+            finally:
+                os.chdir(old_cwd)
+
     def test_repair_refuses_active_runtime_without_force(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

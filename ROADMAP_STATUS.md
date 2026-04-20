@@ -1460,6 +1460,9 @@ Evidence:
   explicit review follow-ups.
   `mew doctor` previews those decisions and follow-ups for incomplete runtime
   effects before repair mutates state.
+  `mew runtime-effects` now prints stored recovery decisions and follow-ups,
+  including review question ids, so the inspection command referenced by
+  recovery follow-ups carries the same structured review context.
   `mew brief` surfaces recent startup-repair decision and follow-up actions
   alongside repair types, so reentry does not require opening raw state.
   Commit-phase runtime-effect review follow-ups now also seed a durable open

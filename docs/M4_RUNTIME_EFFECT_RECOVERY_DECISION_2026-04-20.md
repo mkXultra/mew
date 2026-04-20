@@ -18,6 +18,11 @@ without opening raw state.
 `mew doctor` previews the same recovery decision for incomplete runtime effects
 and follow-up action before repair mutates state.
 
+`mew runtime-effects` now prints stored `recovery_decision` and
+`recovery_followup` fields, including `question_id` when present, so the
+inspection command referenced by recovery follow-ups contains the same
+structured review context as `doctor` and `repair`.
+
 Current classifications:
 
 - pre-commit statuses (`planning`, `planned`, `precomputing`, `precomputed`)
@@ -50,6 +55,7 @@ Focused tests:
 uv run pytest --testmon -q tests/test_validation.py -k 'repair_marks_incomplete_runtime_effect_interrupted or repair_classifies_committing_runtime_write_effect'
 uv run pytest --testmon -q tests/test_validation.py -k 'doctor_previews_incomplete_runtime_effect_recovery'
 uv run pytest --testmon -q tests/test_runtime.py -k 'startup_repairs_incomplete_effects'
+uv run pytest --testmon -q tests/test_validation.py -k runtime_effects_command
 ```
 
 Both passed.
