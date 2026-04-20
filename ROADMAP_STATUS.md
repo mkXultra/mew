@@ -26,7 +26,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 18:34 JST.
+Last assessed: 2026-04-20 18:40 JST.
 
 Active work: **M6 Body**.
 
@@ -252,6 +252,25 @@ Status: `in_progress`.
 Goal:
 
 - Turn mew from a summonable CLI into a durable resident process.
+
+Evidence:
+
+- `mew daemon status|start|stop|logs` now provides a daemon-shaped control
+  surface over the existing runtime.
+- `mew daemon status --json` reports runtime state, pid, uptime, lock state,
+  current cycle, last tick, watcher counts/items, safety/autonomy state, output
+  path, and repair/start/stop/log controls.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, `./mew daemon status --json`, `./mew help daemon status`,
+  `./mew daemon logs --lines 3`, and `git diff --check` passed.
+
+Missing proof:
+
+- No real file/git watcher has triggered a passive turn yet.
+- No daemon restart proof has shown reattachment without user rebrief.
+- No multi-hour resident proof has run through the daemon path.
+- Pause/inspect/repair/resume controls still reuse existing commands rather
+  than a daemon-specific cockpit.
 
 Done when:
 

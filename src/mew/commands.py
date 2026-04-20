@@ -51,6 +51,7 @@ from .context_checkpoint import (
     load_context_checkpoints,
 )
 from .desk import build_desk_view_model, format_desk_view, write_desk_view
+from .daemon import build_daemon_status, format_daemon_log, format_daemon_status, tail_daemon_log
 from .dogfood import (
     format_dogfood_loop_report,
     format_dogfood_report,
@@ -8633,6 +8634,29 @@ def cmd_stop(args):
 
     print(f"mew: timed out waiting for runtime pid={pid} to stop", file=sys.stderr)
     return 1
+
+
+def cmd_daemon(args):
+    daemon_command = getattr(args, "daemon_command", None) or "status"
+    if daemon_command == "start":
+        return cmd_start(args)
+    if daemon_command == "stop":
+        return cmd_stop(args)
+    if daemon_command == "logs":
+        data = tail_daemon_log(lines=getattr(args, "lines", 40))
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(format_daemon_log(data))
+        return 0
+
+    state = load_state()
+    data = build_daemon_status(state, read_lock(), pid_alive)
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(format_daemon_status(data))
+    return 0
 
 def build_doctor_data(args):
     data = {"ok": True}

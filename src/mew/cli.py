@@ -25,6 +25,7 @@ from .commands import (
     cmd_chat_log,
     cmd_code,
     cmd_context,
+    cmd_daemon,
     cmd_digest,
     cmd_do,
     cmd_desires_init,
@@ -393,6 +394,38 @@ def build_parser():
     stop_parser.add_argument("--poll-interval", type=float, default=0.1, help="shutdown poll interval in seconds")
     stop_parser.set_defaults(wait=True)
     stop_parser.set_defaults(func=cmd_stop)
+
+    daemon_parser = subparsers.add_parser("daemon", help="manage the resident runtime daemon")
+    daemon_subparsers = daemon_parser.add_subparsers(dest="daemon_command")
+    daemon_parser.set_defaults(func=cmd_daemon)
+
+    daemon_start_parser = daemon_subparsers.add_parser("start", help="start the runtime daemon")
+    daemon_start_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after spawning")
+    daemon_start_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for startup")
+    daemon_start_parser.add_argument("--poll-interval", type=float, default=0.1, help="startup poll interval in seconds")
+    daemon_start_parser.add_argument(
+        "run_args",
+        nargs=argparse.REMAINDER,
+        help="arguments passed to `mew run`; use `mew daemon start -- --autonomous`",
+    )
+    daemon_start_parser.set_defaults(wait=True)
+    daemon_start_parser.set_defaults(func=cmd_daemon)
+
+    daemon_status_parser = daemon_subparsers.add_parser("status", help="show daemon status")
+    daemon_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_status_parser.set_defaults(func=cmd_daemon)
+
+    daemon_stop_parser = daemon_subparsers.add_parser("stop", help="stop the runtime daemon")
+    daemon_stop_parser.add_argument("--no-wait", dest="wait", action="store_false", help="return after sending SIGTERM")
+    daemon_stop_parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for shutdown")
+    daemon_stop_parser.add_argument("--poll-interval", type=float, default=0.1, help="shutdown poll interval in seconds")
+    daemon_stop_parser.set_defaults(wait=True)
+    daemon_stop_parser.set_defaults(func=cmd_daemon)
+
+    daemon_logs_parser = daemon_subparsers.add_parser("logs", help="show daemon output log")
+    daemon_logs_parser.add_argument("--lines", type=int, default=40, help="number of log lines to print")
+    daemon_logs_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    daemon_logs_parser.set_defaults(func=cmd_daemon)
 
     doctor_parser = subparsers.add_parser("doctor", help="check local mew dependencies and state")
     doctor_parser.add_argument("--auth", help="path to Codex OAuth auth.json")
