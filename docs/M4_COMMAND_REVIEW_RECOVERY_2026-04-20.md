@@ -14,6 +14,10 @@ failure list.
   - `safety=command`
   - `effect_classification=action_committed`
 - the recovery item carries the recorded command, review hint, and review steps;
+- the recovery item also carries `cwd`, `exit_code`, and captured
+  `stdout_tail`/`stderr_tail` when available, so JSON consumers can review the
+  selected shell recovery item without separately joining against the command
+  pane;
 - the failure list still keeps `recorded_output_review` so stdout/stderr remain
   visible before any rerun;
 - the shared recovery next action now says to review side-effecting work, not
@@ -23,11 +27,13 @@ failure list.
 
 ```bash
 uv run pytest -q tests/test_work_session.py -k 'failed_command or side_effect_review_context or recovery_suggestions_prefer_side_effect_review'
+uv run pytest --testmon -q tests/test_work_session.py -k 'recorded_output_review_after_failed_command or side_effect_review_context'
 ```
 
 Result:
 
 - `3 passed`
+- `2 passed`
 
 ## Interpretation
 

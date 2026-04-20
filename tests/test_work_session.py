@@ -7622,11 +7622,16 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(item["safety"], "command")
         self.assertEqual(item["effect_classification"], "action_committed")
         self.assertEqual(item["command"], "uv run pytest -q")
+        self.assertEqual(item["cwd"], ".")
+        self.assertEqual(item["exit_code"], 1)
+        self.assertEqual(item["stdout_tail"], "failed")
         self.assertIn("failed after execution", item["reason"])
 
         text = format_work_session_resume(resume)
         self.assertIn("review: recorded_output_review", text)
         self.assertIn("effect=action_committed", text)
+        self.assertIn("cwd: .", text)
+        self.assertIn("exit: 1", text)
         self.assertNotIn("review_command_output", text)
 
     def test_work_session_resume_auto_recovers_safe_read_tool(self):
@@ -8269,6 +8274,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(items[0]["safety"], "command")
         self.assertEqual(items[0]["effect_classification"], "action_committed")
         self.assertEqual(items[0]["command"], "python mutate.py")
+        self.assertEqual(items[0]["cwd"], ".")
         self.assertIn("--session --resume --allow-read", items[0]["review_hint"])
         self.assertIn("idempotent", " ".join(items[0]["review_steps"]))
         self.assertEqual(items[1]["action"], "retry_dry_run_write")

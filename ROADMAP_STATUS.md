@@ -1490,6 +1490,9 @@ Evidence:
   `action_committed` / `needs_user_review` items with the recorded command and
   review steps. This keeps shell recovery manual while putting failed shell
   side effects on the same recovery-plan surface as interrupted command review.
+  The shell review item now also carries cwd, exit code, and captured
+  stdout/stderr tails when available, so JSON consumers can evaluate the
+  selected recovery item without separately joining against the commands pane.
   Durable summary: `docs/M4_COMMAND_REVIEW_RECOVERY_2026-04-20.md`.
 - `dogfood --scenario m4-file-write-recovery` passed locally in
   `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-rollback`.

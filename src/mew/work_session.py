@@ -3452,6 +3452,25 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
                 item["path"] = path
             if command:
                 item["command"] = command
+            if tool in COMMAND_WORK_TOOLS:
+                running_output = call.get("running_output") or {}
+                cwd = result.get("cwd") or parameters.get("cwd")
+                if cwd:
+                    item["cwd"] = cwd
+                if "exit_code" in result:
+                    item["exit_code"] = result.get("exit_code")
+                stdout_tail = clip_tail(
+                    result.get("stdout") or running_output.get("stdout") or "",
+                    DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
+                )
+                stderr_tail = clip_tail(
+                    result.get("stderr") or running_output.get("stderr") or "",
+                    DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
+                )
+                if stdout_tail:
+                    item["stdout_tail"] = stdout_tail
+                if stderr_tail:
+                    item["stderr_tail"] = stderr_tail
         items.append(item)
 
     for turn in turns:
@@ -4328,6 +4347,10 @@ def format_work_session_resume(resume):
                     lines.append(f"  temp_paths: {', '.join(write_world.get('temp_paths') or [])}")
             if item.get("command"):
                 lines.append(f"  command: {item.get('command')}")
+            if item.get("cwd"):
+                lines.append(f"  cwd: {item.get('cwd')}")
+            if "exit_code" in item:
+                lines.append(f"  exit: {format_exit_code(item.get('exit_code'))}")
             if item.get("review_hint"):
                 lines.append(f"  review: {item.get('review_hint')}")
             for step in item.get("review_steps") or []:
