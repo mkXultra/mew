@@ -52,6 +52,7 @@ from .commands import (
     cmd_perceive,
     cmd_policy_init,
     cmd_policy_show,
+    cmd_proof_summary,
     cmd_questions,
     cmd_repair,
     cmd_reply,
@@ -838,6 +839,16 @@ def build_parser():
         help="print structured JSON report; scenario mode prints a compact summary, use --report for full details",
     )
     dogfood_parser.set_defaults(func=cmd_dogfood)
+
+    proof_summary_parser = subparsers.add_parser("proof-summary", help="summarize collected proof artifacts")
+    proof_summary_parser.add_argument("artifact_dir", help="artifact directory created by scripts/collect_proof_docker.sh")
+    proof_summary_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    proof_summary_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="return non-zero when the collected proof did not pass cleanly",
+    )
+    proof_summary_parser.set_defaults(func=cmd_proof_summary)
 
     perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")
     perceive_parser.add_argument("--cwd", default=".", help="workspace directory to observe")

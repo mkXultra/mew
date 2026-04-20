@@ -83,6 +83,7 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
+from .proof_summary import format_proof_summary, summarize_proof_artifacts
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
     build_morning_paper_view_model,
@@ -9655,6 +9656,16 @@ def cmd_dogfood(args):
     print(format_dogfood_report(report))
     if report_path:
         print(f"report_path: {report_path}")
+    return 0
+
+def cmd_proof_summary(args):
+    summary = summarize_proof_artifacts(args.artifact_dir)
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+    else:
+        print(format_proof_summary(summary))
+    if getattr(args, "strict", False) and not summary.get("ok"):
+        return 1
     return 0
 
 def write_report_if_requested(args, report):
