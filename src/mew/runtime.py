@@ -57,7 +57,7 @@ from .repair import repair_incomplete_runtime_effects
 from .sweep import sweep_agent_runs
 from .timeutil import now_iso, parse_time
 from .toolbox import run_command_record
-from .write_tools import resolve_allowed_write_path
+from .write_tools import build_write_intent, resolve_allowed_write_path
 from .work_session import (
     active_work_sessions,
     add_work_session_note,
@@ -1120,6 +1120,38 @@ def action_types_for_plan(action_plan):
         if isinstance(action, dict)
     ]
 
+def runtime_write_intents_for_plan(action_plan, args):
+    if not isinstance(action_plan, dict):
+        return [], []
+    intents = []
+    errors = []
+    for action in action_plan.get("actions", []):
+        if not isinstance(action, dict):
+            continue
+        action_type = action.get("type")
+        if action_type not in ("write_file", "edit_file"):
+            continue
+        if action.get("dry_run") is not False:
+            continue
+        parameters = dict(action)
+        parameters["apply"] = True
+        parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
+        parameters["verify_command"] = getattr(args, "verify_command", None) or ""
+        parameters["verify_cwd"] = "."
+        try:
+            intent = build_write_intent(action_type, parameters)
+        except (OSError, ValueError) as exc:
+            errors.append(
+                {
+                    "operation": action_type,
+                    "path": action.get("path") or "",
+                    "error": str(exc),
+                }
+            )
+            continue
+        intents.append(intent)
+    return intents, errors
+
 def runtime_effect_outcome_for_plan(action_plan):
     if not isinstance(action_plan, dict):
         return ""
@@ -1602,12 +1634,15 @@ def run_runtime(args):
                 state = load_state()
                 if event_id is not None and decision_plan is not None and action_plan is not None:
                     commit_time = now_iso()
+                    runtime_write_intents, runtime_write_intent_errors = runtime_write_intents_for_plan(action_plan, args)
                     state["runtime_status"]["current_phase"] = "committing"
                     update_runtime_effect(
                         state,
                         effect_id,
                         current_time=commit_time,
                         status="committing",
+                        runtime_write_intents=runtime_write_intents,
+                        runtime_write_intent_errors=runtime_write_intent_errors,
                     )
                     save_state(state)
                     if should_defer_commit_for_user_message(

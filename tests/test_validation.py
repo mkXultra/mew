@@ -5,6 +5,7 @@ import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from mew.cli import main
@@ -433,6 +434,7 @@ class ValidationTests(unittest.TestCase):
                 effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
                 effect["action_types"] = ["write_file"]
                 effect["write_run_ids"] = [7]
+                effect["runtime_write_intents"] = [{"path": "missing.md"}]
                 save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -531,6 +533,99 @@ class ValidationTests(unittest.TestCase):
                 self.assertIn("verification --details --limit 5", followup["command"])
                 self.assertEqual(followup["question_id"], 1)
                 self.assertIn("verification --details --limit 5", repaired["questions"][0]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_requeues_runtime_write_intent_when_target_not_started(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+                from mew.write_tools import build_write_intent
+
+                Path("notes.md").write_text("old\n", encoding="utf-8")
+                intent = build_write_intent(
+                    "edit_file",
+                    {
+                        "path": "notes.md",
+                        "old": "old\n",
+                        "new": "new\n",
+                        "apply": True,
+                        "allowed_write_roots": ["."],
+                        "verify_command": "python -m pytest",
+                    },
+                )
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                event["processed_at"] = "then"
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect["action_types"] = ["edit_file"]
+                effect["runtime_write_intents"] = [intent]
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                repaired = load_state()
+                decision = data["repairs"][0]["recovery_decision"]
+                followup = data["repairs"][0]["recovery_followup"]
+
+                self.assertEqual(decision["action"], "rerun_event")
+                self.assertEqual(decision["effect_classification"], "runtime_write_not_started")
+                self.assertEqual(decision["safety"], "safe_to_replan")
+                self.assertEqual(decision["runtime_write_world_states"][0]["state"], "not_started")
+                self.assertEqual(followup["action"], "requeue_event")
+                self.assertEqual(followup["status"], "requeued")
+                self.assertIsNone(repaired["inbox"][0]["processed_at"])
+                self.assertEqual(repaired["questions"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_reviews_runtime_write_intent_when_target_changed(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+                from mew.write_tools import build_write_intent
+
+                Path("notes.md").write_text("old\n", encoding="utf-8")
+                intent = build_write_intent(
+                    "edit_file",
+                    {
+                        "path": "notes.md",
+                        "old": "old\n",
+                        "new": "new\n",
+                        "apply": True,
+                        "allowed_write_roots": ["."],
+                        "verify_command": "python -m pytest",
+                    },
+                )
+                Path("notes.md").write_text("new\n", encoding="utf-8")
+                state = default_state()
+                event = add_event(state, "passive_tick", "runtime", {})
+                event["processed_at"] = "then"
+                effect = add_runtime_effect(state, event, "passive_tick", "committing", "then")
+                effect["action_types"] = ["edit_file"]
+                effect["runtime_write_intents"] = [intent]
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                repaired = load_state()
+                decision = data["repairs"][0]["recovery_decision"]
+                followup = data["repairs"][0]["recovery_followup"]
+
+                self.assertEqual(decision["action"], "review_writes")
+                self.assertEqual(decision["effect_classification"], "runtime_write_completed_externally")
+                self.assertEqual(decision["runtime_write_world_states"][0]["state"], "completed_externally")
+                self.assertEqual(followup["action"], "ask_user_review")
+                self.assertIn("runtime-effects --limit 5", followup["command"])
+                self.assertEqual(followup["question_id"], 1)
+                self.assertIn("Write states: completed_externally", repaired["questions"][0]["text"])
+                self.assertIn("notes.md", repaired["questions"][0]["text"])
             finally:
                 os.chdir(old_cwd)
 
@@ -694,6 +789,12 @@ class ValidationTests(unittest.TestCase):
                             "action": "review_writes",
                             "effect_classification": "write_may_have_started",
                             "safety": "needs_user_review",
+                            "runtime_write_world_states": [
+                                {
+                                    "state": "completed_externally",
+                                    "path": "notes.md",
+                                }
+                            ],
                         },
                         "recovery_followup": {
                             "action": "ask_user_review",
@@ -709,6 +810,7 @@ class ValidationTests(unittest.TestCase):
                     self.assertEqual(main(["runtime-effects"]), 0)
                 output = stdout.getvalue()
                 self.assertIn("recovery=review_writes effect=write_may_have_started safety=needs_user_review", output)
+                self.assertIn("write_world=completed_externally:notes.md", output)
                 self.assertIn("followup=ask_user_review status=needs_user_review command=mew writes question=#3", output)
             finally:
                 os.chdir(old_cwd)

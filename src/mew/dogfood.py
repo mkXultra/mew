@@ -3180,16 +3180,45 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
 def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     commands = []
     checks = []
+    workspace_path = Path(workspace)
 
     def run(args, timeout=30):
         result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
         commands.append(result)
         return result
 
+    not_started_path = workspace_path / "runtime-intent-not-started.txt"
+    not_started_path.write_text("old\n", encoding="utf-8")
+    not_started_intent = build_write_intent(
+        "edit_file",
+        {
+            "path": str(not_started_path),
+            "old": "old\n",
+            "new": "new\n",
+            "apply": True,
+            "allowed_write_roots": [str(workspace_path)],
+        },
+    )
+    completed_path = workspace_path / "runtime-intent-completed.txt"
+    completed_path.write_text("old\n", encoding="utf-8")
+    completed_intent = build_write_intent(
+        "edit_file",
+        {
+            "path": str(completed_path),
+            "old": "old\n",
+            "new": "new\n",
+            "apply": True,
+            "allowed_write_roots": [str(workspace_path)],
+        },
+    )
+    completed_path.write_text("new\n", encoding="utf-8")
+
     state = default_state()
     planning_event_id = next_id(state, "event")
     committing_event_id = next_id(state, "event")
     verification_event_id = next_id(state, "event")
+    not_started_intent_event_id = next_id(state, "event")
+    completed_intent_event_id = next_id(state, "event")
     state["inbox"].extend(
         [
             {
@@ -3216,11 +3245,29 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
                 "created_at": "then",
                 "processed_at": "then",
             },
+            {
+                "id": not_started_intent_event_id,
+                "type": "passive_tick",
+                "source": "runtime",
+                "payload": {},
+                "created_at": "then",
+                "processed_at": "then",
+            },
+            {
+                "id": completed_intent_event_id,
+                "type": "passive_tick",
+                "source": "runtime",
+                "payload": {},
+                "created_at": "then",
+                "processed_at": "then",
+            },
         ]
     )
     planning_effect_id = next_id(state, "runtime_effect")
     committing_effect_id = next_id(state, "runtime_effect")
     verification_effect_id = next_id(state, "runtime_effect")
+    not_started_intent_effect_id = next_id(state, "runtime_effect")
+    completed_intent_effect_id = next_id(state, "runtime_effect")
     state["runtime_effects"].extend(
         [
             {
@@ -3265,6 +3312,38 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
                 "updated_at": "then",
                 "finished_at": None,
             },
+            {
+                "id": not_started_intent_effect_id,
+                "event_id": not_started_intent_event_id,
+                "event_type": "passive_tick",
+                "reason": "passive_tick",
+                "status": "committing",
+                "phase": "committing",
+                "action_types": ["edit_file"],
+                "verification_run_ids": [],
+                "write_run_ids": [],
+                "runtime_write_intents": [not_started_intent],
+                "runtime_write_intent_errors": [],
+                "started_at": "then",
+                "updated_at": "then",
+                "finished_at": None,
+            },
+            {
+                "id": completed_intent_effect_id,
+                "event_id": completed_intent_event_id,
+                "event_type": "passive_tick",
+                "reason": "passive_tick",
+                "status": "committing",
+                "phase": "committing",
+                "action_types": ["edit_file"],
+                "verification_run_ids": [],
+                "write_run_ids": [],
+                "runtime_write_intents": [completed_intent],
+                "runtime_write_intent_errors": [],
+                "started_at": "then",
+                "updated_at": "then",
+                "finished_at": None,
+            },
         ]
     )
     state["write_runs"].append(
@@ -3291,6 +3370,7 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     doctor_result = run(["doctor", "--json"], timeout=15)
     doctor_data = _json_stdout(doctor_result)
     doctor_items = (doctor_data.get("runtime_effects") or {}).get("incomplete_items") or []
+    doctor_by_effect = {item.get("id"): item for item in doctor_items}
     repair_result = run(["repair", "--json"], timeout=15)
     repaired_state = read_json_file(Path(workspace) / STATE_FILE, {})
     repaired_effects = {effect.get("id"): effect for effect in repaired_state.get("runtime_effects") or []}
@@ -3299,9 +3379,21 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     planning_decision = (repaired_effects.get(planning_effect_id) or {}).get("recovery_decision") or {}
     committing_decision = (repaired_effects.get(committing_effect_id) or {}).get("recovery_decision") or {}
     verification_decision = (repaired_effects.get(verification_effect_id) or {}).get("recovery_decision") or {}
+    not_started_intent_decision = (
+        (repaired_effects.get(not_started_intent_effect_id) or {}).get("recovery_decision") or {}
+    )
+    completed_intent_decision = (
+        (repaired_effects.get(completed_intent_effect_id) or {}).get("recovery_decision") or {}
+    )
     planning_followup = (repaired_effects.get(planning_effect_id) or {}).get("recovery_followup") or {}
     committing_followup = (repaired_effects.get(committing_effect_id) or {}).get("recovery_followup") or {}
     verification_followup = (repaired_effects.get(verification_effect_id) or {}).get("recovery_followup") or {}
+    not_started_intent_followup = (
+        (repaired_effects.get(not_started_intent_effect_id) or {}).get("recovery_followup") or {}
+    )
+    completed_intent_followup = (
+        (repaired_effects.get(completed_intent_effect_id) or {}).get("recovery_followup") or {}
+    )
     repaired_events = {event.get("id"): event for event in repaired_state.get("inbox") or []}
     review_questions = list(repaired_state.get("questions") or [])
 
@@ -3309,13 +3401,27 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
         checks,
         "m4_runtime_effect_recovery_doctor_previews_decisions",
         doctor_result.get("exit_code") == 1
-        and len(doctor_items) == 3
-        and ((doctor_items[0].get("recovery_decision") or {}).get("action") == "rerun_event")
-        and ((doctor_items[0].get("recovery_followup") or {}).get("action") == "requeue_event")
-        and ((doctor_items[1].get("recovery_decision") or {}).get("action") == "review_writes")
-        and ((doctor_items[1].get("recovery_followup") or {}).get("action") == "ask_user_review")
-        and ((doctor_items[2].get("recovery_decision") or {}).get("action") == "review_verification")
-        and "verification --details --limit 5" in (((doctor_items[2].get("recovery_followup") or {}).get("command")) or ""),
+        and len(doctor_items) == 5
+        and ((doctor_by_effect.get(planning_effect_id) or {}).get("recovery_decision") or {}).get("action")
+        == "rerun_event"
+        and ((doctor_by_effect.get(planning_effect_id) or {}).get("recovery_followup") or {}).get("action")
+        == "requeue_event"
+        and ((doctor_by_effect.get(committing_effect_id) or {}).get("recovery_decision") or {}).get("action")
+        == "review_writes"
+        and ((doctor_by_effect.get(committing_effect_id) or {}).get("recovery_followup") or {}).get("action")
+        == "ask_user_review"
+        and ((doctor_by_effect.get(verification_effect_id) or {}).get("recovery_decision") or {}).get("action")
+        == "review_verification"
+        and "verification --details --limit 5"
+        in (((doctor_by_effect.get(verification_effect_id) or {}).get("recovery_followup") or {}).get("command") or "")
+        and ((doctor_by_effect.get(not_started_intent_effect_id) or {}).get("recovery_decision") or {}).get(
+            "effect_classification"
+        )
+        == "runtime_write_not_started"
+        and ((doctor_by_effect.get(completed_intent_effect_id) or {}).get("recovery_decision") or {}).get(
+            "effect_classification"
+        )
+        == "runtime_write_completed_externally",
         observed={
             "doctor_runtime_effects": doctor_data.get("runtime_effects"),
         },
@@ -3382,12 +3488,58 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
+        "m4_runtime_effect_recovery_requeues_not_started_write_intent",
+        repair_result.get("exit_code") == 0
+        and not_started_intent_decision.get("action") == "rerun_event"
+        and not_started_intent_decision.get("effect_classification") == "runtime_write_not_started"
+        and not_started_intent_decision.get("safety") == "safe_to_replan"
+        and (not_started_intent_decision.get("runtime_write_world_states") or [{}])[0].get("state")
+        == "not_started"
+        and not_started_intent_followup.get("action") == "requeue_event"
+        and not_started_intent_followup.get("status") == "requeued"
+        and (repaired_events.get(not_started_intent_event_id) or {}).get("processed_at") is None
+        and (repaired_effects.get(not_started_intent_effect_id) or {}).get("status") == "interrupted",
+        observed={
+            "decision": not_started_intent_decision,
+            "followup": not_started_intent_followup,
+            "event": repaired_events.get(not_started_intent_event_id),
+            "effect": repaired_effects.get(not_started_intent_effect_id),
+            "target_text": not_started_path.read_text(encoding="utf-8"),
+            "repairs": repairs,
+        },
+        expected="runtime write intent with unchanged target is safely requeued instead of sent to review",
+    )
+    _scenario_check(
+        checks,
+        "m4_runtime_effect_recovery_reviews_completed_write_intent",
+        repair_result.get("exit_code") == 0
+        and completed_intent_decision.get("action") == "review_writes"
+        and completed_intent_decision.get("effect_classification") == "runtime_write_completed_externally"
+        and completed_intent_decision.get("safety") == "needs_user_review"
+        and (completed_intent_decision.get("runtime_write_world_states") or [{}])[0].get("state")
+        == "completed_externally"
+        and completed_intent_followup.get("action") == "ask_user_review"
+        and "runtime-effects --limit 5" in (completed_intent_followup.get("command") or "")
+        and completed_intent_followup.get("question_id")
+        and (repaired_effects.get(completed_intent_effect_id) or {}).get("status") == "interrupted",
+        observed={
+            "decision": completed_intent_decision,
+            "followup": completed_intent_followup,
+            "effect": repaired_effects.get(completed_intent_effect_id),
+            "target_text": completed_path.read_text(encoding="utf-8"),
+            "repairs": repairs,
+        },
+        expected="runtime write intent with externally completed target is routed to human review",
+    )
+    _scenario_check(
+        checks,
         "m4_runtime_effect_recovery_seeds_review_question",
         repair_result.get("exit_code") == 0
         and committing_followup.get("action") == "ask_user_review"
         and committing_followup.get("question_id")
         and verification_followup.get("question_id")
-        and len(review_questions) == 2
+        and completed_intent_followup.get("question_id")
+        and len(review_questions) == 3
         and any(
             question.get("id") == committing_followup.get("question_id")
             and question.get("source") == "runtime"
@@ -3400,10 +3552,18 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
             and question.get("source") == "runtime"
             and "verification --details --limit 5" in (question.get("text") or "")
             for question in review_questions
+        )
+        and any(
+            question.get("id") == completed_intent_followup.get("question_id")
+            and question.get("source") == "runtime"
+            and "completed_externally" in (question.get("text") or "")
+            and "runtime-intent-completed.txt" in (question.get("text") or "")
+            for question in review_questions
         ),
         observed={
             "followup": committing_followup,
             "verification_followup": verification_followup,
+            "completed_intent_followup": completed_intent_followup,
             "questions": review_questions,
             "repairs": repairs,
         },
