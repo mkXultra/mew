@@ -128,16 +128,20 @@ def _tool_approval_records(session):
         if not isinstance(call, dict):
             continue
         approval = call.get("approval_status")
-        if approval or (call.get("result") or {}).get("dry_run"):
-            records.append(
-                {
-                    "id": call.get("id"),
-                    "tool": call.get("tool"),
-                    "status": call.get("status"),
-                    "approval_status": approval or "",
-                    "dry_run": bool((call.get("result") or {}).get("dry_run")),
-                }
-            )
+        result = call.get("result") or {}
+        if approval or result.get("dry_run"):
+            record = {
+                "id": call.get("id"),
+                "tool": call.get("tool"),
+                "status": call.get("status"),
+                "approval_status": approval or "",
+                "dry_run": bool(result.get("dry_run")),
+            }
+            if "rolled_back" in result:
+                record["rolled_back"] = result.get("rolled_back")
+            if result.get("rollback_error"):
+                record["rollback_error"] = result.get("rollback_error")
+            records.append(record)
     return records
 
 
@@ -146,6 +150,8 @@ def _recovery_records(session):
     for call in session.get("tool_calls") or []:
         if not isinstance(call, dict):
             continue
+        result = call.get("result") or {}
+        rollback_recorded = "rolled_back" in result or bool(result.get("rollback_error"))
         if call.get("status") == "interrupted" or call.get("recovery_status") or call.get("recovered_by_tool_call_id"):
             records.append(
                 {
@@ -154,6 +160,18 @@ def _recovery_records(session):
                     "status": call.get("status"),
                     "recovery_status": call.get("recovery_status") or "",
                     "recovered_by_tool_call_id": call.get("recovered_by_tool_call_id"),
+                }
+            )
+        elif call.get("status") == "failed" and rollback_recorded:
+            records.append(
+                {
+                    "id": call.get("id"),
+                    "tool": call.get("tool"),
+                    "status": call.get("status"),
+                    "recovery_status": "rolled_back" if result.get("rolled_back") else "rollback_failed",
+                    "recovered_by_tool_call_id": None,
+                    "rolled_back": result.get("rolled_back"),
+                    "rollback_error": result.get("rollback_error") or "",
                 }
             )
     return records

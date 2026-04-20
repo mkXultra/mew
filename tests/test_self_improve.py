@@ -588,6 +588,34 @@ class SelfImproveTests(unittest.TestCase):
                 self.assertEqual(run_tests_bundle["verification"]["latest"]["exit_code"], 0)
 
                 state = load_state()
+                state["work_sessions"][0]["tool_calls"].append(
+                    {
+                        "id": 52,
+                        "tool": "edit_file",
+                        "status": "failed",
+                        "approval_status": "failed",
+                        "result": {
+                            "dry_run": False,
+                            "rolled_back": True,
+                            "rollback_error": "",
+                        },
+                    }
+                )
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as rollback_stdout:
+                    rollback_code = main(["self-improve", "--audit", "1", "--json"])
+
+                self.assertEqual(rollback_code, 0)
+                rollback_bundle = json.loads(rollback_stdout.getvalue())
+                failed_approval = rollback_bundle["approvals"][-1]
+                self.assertEqual(failed_approval["id"], 52)
+                self.assertTrue(failed_approval["rolled_back"])
+                recovery_event = rollback_bundle["recovery_events"][-1]
+                self.assertEqual(recovery_event["id"], 52)
+                self.assertEqual(recovery_event["recovery_status"], "rolled_back")
+
+                state = load_state()
                 state["work_sessions"][0]["notes"].append(
                     {
                         "created_at": now_iso(),

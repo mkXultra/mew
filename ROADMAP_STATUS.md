@@ -1727,6 +1727,14 @@ Evidence:
   retrying an identical tool call. `mew self-improve --audit 315` reports
   `verification: passed`, `no_rescue_review_recorded`, and
   `candidate_no_rescue_reviewed_pending_m3`.
+- Task `#316` added the same-session foundation for M5 recovery evidence in
+  audit bundles. Failed work-session tool calls that record rollback state now
+  appear in `recovery_events`, and approval records preserve `rolled_back` /
+  `rollback_error` details. This task is not M5 credit: the resident identified
+  the gap but repeatedly paired the test with the wrong source file, so the
+  supervisor implemented the final source/test patch. A remaining follow-up is
+  task-level multi-session aggregation: `#313`'s rollback happened in session
+  `#292`, while audit `#313` selects latest session `#293`.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
