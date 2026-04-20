@@ -156,6 +156,28 @@ Missing proof:
 
 Status: `in_progress`.
 
+Evidence:
+
+- Task `#319` / work session `#299` created
+  `.codex/skills/mew-adversarial-verifier/SKILL.md` through a mew-native
+  self-improvement loop. Codex acted as human reviewer/approver and did not
+  directly edit the file.
+- Verification passed with
+  `rg -n 'product-goal drift|safety boundaries|evidence quality|missing verification|hidden rescue|approve|reject|revise' .codex/skills/mew-adversarial-verifier/SKILL.md`.
+- This is useful M5.1 implementation evidence but not autonomy credit:
+  `./mew self-improve --audit 319` reports
+  `loop_credit_status: not_counted_due_to_rescue` because reviewer steer was
+  needed for a missing new-file read, missing `create=true`, and an invalid
+  shell-style verifier.
+
+Missing proof:
+
+- The adversarial verifier exists as a skill, but it has not yet been used to
+  review a later self-improvement loop.
+- Hook-based safety boundaries are still not implemented.
+- No M5.1 loop has yet exercised both adversarial review and mechanical safety
+  hooks in one readable audit bundle.
+
 Goal:
 
 - Raise post-M5 safety and review quality without turning M5.1 into an
@@ -176,8 +198,8 @@ Done when:
 
 Next action:
 
-- Start with the adversarial verifier because it improves decision quality
-  without large runtime risk. Then implement hook-based enforcement.
+- Use `mew-adversarial-verifier` on the next small self-improvement proposal,
+  then start hook-based enforcement.
 
 ### M6: Body - Daemon & Persistent Presence
 
