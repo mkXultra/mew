@@ -25,11 +25,14 @@ Result: `pass`
 
 Evidence:
 
+- Latest proof container: `mew-proof-virtual-reentry-10day-20260420-1030`
 - Real run duration: about 90 seconds
-- Logical passive span: `814680.0` seconds, about 9.4 days between the first
+- Logical passive span: `813473.0` seconds, about 9.4 days between the first
   and last passive tick
 - Processed events: `18`
 - Passive events: `17`
+- Open questions: `1`
+- Deferred questions: `3`
 - Time dilation: `10080.0`
 - Resident-loop checks passed:
   - starts and stops cleanly
@@ -37,11 +40,14 @@ Evidence:
   - records passive effects
   - compacts repeated wait thoughts
   - echoes passive output
+  - `mew focus` reconstructs the next action and task after runtime stops
+  - `mew brief` summarizes the stopped resident state and next useful move
+  - `mew context --save` can preserve a reentry checkpoint after runtime stops
 - Collected artifacts:
-  - `proof-artifacts/mew-proof-virtual-10day-backoff-20260420-1024/stdout.log`
-  - `proof-artifacts/mew-proof-virtual-10day-backoff-20260420-1024/stderr.log`
-  - `proof-artifacts/mew-proof-virtual-10day-backoff-20260420-1024/inspect.json`
-  - `proof-artifacts/mew-proof-virtual-10day-backoff-20260420-1024/summary.txt`
+  - `proof-artifacts/mew-proof-virtual-reentry-10day-20260420-1030/stdout.log`
+  - `proof-artifacts/mew-proof-virtual-reentry-10day-20260420-1030/stderr.log`
+  - `proof-artifacts/mew-proof-virtual-reentry-10day-20260420-1030/inspect.json`
+  - `proof-artifacts/mew-proof-virtual-reentry-10day-20260420-1030/summary.txt`
 
 Bug Found First:
 
@@ -64,6 +70,19 @@ The passing run ended with only four task questions across the virtual span:
 three deferred questions with 24h/48h/96h backoff and one currently open
 question. Repeated wait thoughts compacted into repeat counts `3`, `6`, and
 `4`.
+
+Reentry Surface:
+
+After the resident runtime stopped, the scenario now invokes:
+
+- `mew focus --kind coding`
+- `mew brief --kind coding`
+- `mew context --save ...`
+
+The latest isolated run passed all three checks. This matters for M3 because
+the useful resident advantage is not only that passive ticks continue; it is
+that a model or human returning later can recover the current task, open
+question, and next action from mew itself.
 
 Boundary:
 

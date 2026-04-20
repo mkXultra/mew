@@ -1008,6 +1008,20 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
             "stderr": "",
         }
     )
+    focus_result = run(["focus", "--kind", "coding"], timeout=15)
+    brief_result = run(["brief", "--kind", "coding"], timeout=15)
+    context_result = run(
+        [
+            "context",
+            "--save",
+            "resident-loop dogfood reentry probe",
+            "--name",
+            "Resident loop dogfood reentry probe",
+            "--description",
+            "Dogfood probe for M3 resident-loop reentry surfaces.",
+        ],
+        timeout=20,
+    )
 
     state = read_json_file(Path(workspace) / STATE_FILE, {})
     processed_events = [
@@ -1027,6 +1041,10 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         if int(thought.get("repeat_count") or 1) >= 2
     ]
     runtime_output = "\n".join(resident_report.get("runtime_output_tail") or [])
+    focus_output = focus_result.get("stdout") or ""
+    brief_output = brief_result.get("stdout") or ""
+    context_output = context_result.get("stdout") or ""
+    questions = state.get("questions", [])
     passive_times = [
         parsed
         for parsed in (
@@ -1102,6 +1120,33 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         observed=resident_report.get("runtime_output_tail"),
         expected="runtime stdout includes repeated passive_tick summaries",
     )
+    _scenario_check(
+        checks,
+        "resident_loop_reentry_focus_surfaces_next_action",
+        focus_result.get("exit_code") == 0
+        and "Next:" in focus_output
+        and "Resident loop cadence task" in focus_output,
+        observed=focus_output.splitlines()[:12],
+        expected="mew focus reconstructs the next action and task after resident runtime stops",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_reentry_brief_surfaces_current_state",
+        brief_result.get("exit_code") == 0
+        and "Next useful move:" in brief_output
+        and "Resident loop cadence task" in brief_output,
+        observed=brief_output.splitlines()[:16],
+        expected="mew brief summarizes the stopped resident state and next useful move",
+    )
+    _scenario_check(
+        checks,
+        "resident_loop_reentry_context_saves_checkpoint",
+        context_result.get("exit_code") == 0
+        and "saved_memory:" in context_output
+        and "unanswered_questions" in context_output,
+        observed=context_output.splitlines()[:20],
+        expected="mew context can save a reentry checkpoint after resident runtime stops",
+    )
     report = _scenario_report("resident-loop", workspace, commands, checks)
     report["artifacts"] = {
         "requested_duration_seconds": float(duration),
@@ -1109,6 +1154,8 @@ def run_resident_loop_scenario(workspace, env=None, duration=6.0, interval=2.0, 
         "time_dilation": multiplier,
         "processed_events": len(processed_events),
         "passive_events": len(passive_events),
+        "open_questions": len([question for question in questions if question.get("status") == "open"]),
+        "deferred_questions": len([question for question in questions if question.get("status") == "deferred"]),
         "passive_span_seconds": passive_span_seconds,
         "passive_gaps_seconds": passive_gaps,
     }

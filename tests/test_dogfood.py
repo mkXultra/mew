@@ -362,7 +362,11 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["requested_interval_seconds"], 2.0)
             self.assertEqual(scenario["artifacts"]["time_dilation"], 24.0)
             self.assertGreaterEqual(scenario["artifacts"]["passive_events"], 2)
+            self.assertGreaterEqual(scenario["artifacts"]["open_questions"], 1)
             self.assertGreaterEqual(scenario["artifacts"]["passive_span_seconds"], 40.0)
+            self.assertIn("resident_loop_reentry_focus_surfaces_next_action", text)
+            self.assertIn("resident_loop_reentry_brief_surfaces_current_state", text)
+            self.assertIn("resident_loop_reentry_context_saves_checkpoint", text)
 
     def test_run_dogfood_native_work_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

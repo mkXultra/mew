@@ -84,3 +84,5 @@ Follow-up virtual-time proof:
 - A first 10-day logical isolated run found repeated stale-question refresh
   spam; after adding passive question refresh backoff, the same short isolated
   run passed with 17 passive events and repeated wait compaction.
+- The resident-loop dogfood now also verifies post-runtime reentry surfaces:
+  `mew focus`, `mew brief`, and `mew context --save`.
