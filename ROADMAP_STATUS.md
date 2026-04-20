@@ -28,7 +28,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 21:13 JST.
+Last assessed: 2026-04-20 21:25 JST.
 
 Active work: **M6.6 Coding Competence: Codex CLI Parity** while the M6 enhanced
 proof runs in parallel.
@@ -80,11 +80,15 @@ Current next action:
    `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
 3. Start M6.6 with the first native coding-loop slice: durable coding plan
    state plus anti-churn/path recall.
-4. Compare each M6.6 dogfood task against Codex CLI standards: correctness,
+4. Before counting the three comparator tasks, run the M6.6 bootstrap
+   integration gate: have mew implement one small reference-grounded
+   coding-loop slice itself, with Codex only reviewing/approving. Any Codex
+   rescue edit fails this bootstrap gate and is recorded as a blocker.
+5. Compare each M6.6 dogfood task against Codex CLI standards: correctness,
    minimal edits, verifier choice, repair behavior, latency, and reviewability.
-5. If the M6 proof passes while M6.6 is in progress, write the M6 close gate
+6. If the M6 proof passes while M6.6 is in progress, write the M6 close gate
    without dropping the M6.6 active focus.
-6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+7. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -525,6 +529,16 @@ Evidence:
   avoid becoming a grab-bag.
 - `docs/M6_6_CODEX_PARITY_COMPARE.md` now defines the M6.6 comparator template
   and the three predeclared task shapes required for close-gate evidence.
+- The comparator now has a reference-grounded gate. M6.6 evidence must map each
+  implementation slice back to `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, and concrete
+  `references/fresh-cli/{claude-code,codex}` files such as TodoWriteTool,
+  exploreAgent, verificationAgent, StreamingToolExecutor, agentMemorySnapshot,
+  and Codex patch/review prompts.
+- `claude-ultra` session `2a605115-1a2f-4114-9a41-2062ddbcc4e2` reviewed the
+  new gates and agreed they are conceptually correct. It recommended making the
+  bootstrap a prerequisite, treating any Codex rescue edit as a failed
+  bootstrap blocker, and adding a dedicated bootstrap record section.
 
 Missing proof:
 
@@ -534,6 +548,8 @@ Missing proof:
   tools.
 - Coding loop: no built-in edit planner, verifier discovery, repair loop, or
   self-review phase exists at the work-session level.
+- Bootstrap integration: mew has not yet used the M6.6 reference-grounded gate
+  to implement a small M6.6 infrastructure slice itself.
 - Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
   on correctness, tool churn, latency, and reviewability across representative
   coding tasks.
@@ -543,6 +559,10 @@ Done when:
 - Mew completes three predeclared representative coding tasks without Codex
   rescue edits: one behavior-preserving refactor, one bug fix with a regression
   test, and one small feature with paired source/test changes.
+- The M6.6 bootstrap integration task is completed before the three comparator
+  tasks are counted: mew reads the reference-grounded gate, implements one
+  small coding-loop slice, proposes a reviewable edit, verifies it, and records
+  the trace without Codex rescue edits.
 - The same tasks are compared against Codex CLI in a checked-in comparator
   artifact that records first-edit latency, model turns, search/read calls
   before first edit, changed files, verifier commands, repair cycles, and
@@ -560,9 +580,10 @@ Done when:
 
 Next action:
 
-- Implement the first M6.6 slice: durable coding plan state and anti-churn/path
-  recall in the work session, then dogfood it on a small mew change and record
-  the trace in `docs/M6_6_CODEX_PARITY_COMPARE.md`.
+- Use mew as implementer for the bootstrap integration task: a small,
+  reference-grounded coding-loop slice, preferably durable coding plan state
+  plus path recall, and record the trace in
+  `docs/M6_6_CODEX_PARITY_COMPARE.md`.
 
 ### M7: Senses - Inbound Signals
 

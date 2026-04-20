@@ -24,6 +24,54 @@ Required pass conditions for each task:
 - if verification fails, mew performs or proposes a repair loop before asking
   Codex to rescue the implementation
 
+## Reference-Grounded Gate
+
+Do not count M6.6 implementation evidence unless the slice states which
+reference pattern it adopts or deliberately rejects.
+
+| Pattern | Reference | M6.6 expectation |
+|---|---|---|
+| Durable plan state | `references/fresh-cli/claude-code/src/tools/TodoWriteTool/TodoWriteTool.ts` and `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` Pattern D | Work sessions keep a durable coding checklist instead of re-deriving intent every turn. |
+| Read-only exploration discipline | `references/fresh-cli/claude-code/src/tools/AgentTool/built-in/exploreAgent.ts` and Missing Patterns Pattern A | Implementation starts from scoped exploration and records known paths before editing. |
+| Verification agent behavior | `references/fresh-cli/claude-code/src/tools/AgentTool/built-in/verificationAgent.ts` and `docs/REVIEW_2026-04-20_M2_BLOCKERS_FROM_REFERENCES.md` B5 | Mew discovers focused verifier commands and repairs failures before asking for rescue. |
+| Streaming/multi-tool execution | `references/fresh-cli/claude-code/src/services/tools/StreamingToolExecutor.ts` and ADOPT §5.1 | Later M6.6 speed-parity slices should support concurrent safe reads or justify deferral. |
+| Snapshot/reentry | `references/fresh-cli/claude-code/src/tools/AgentTool/agentMemorySnapshot.ts` and ADOPT §5.11 | Coding plans survive context compression and resume without rebuilding from chat. |
+| Codex patch/review loop | `references/fresh-cli/codex/codex-rs/core/prompt_with_apply_patch_instructions.md`, `references/fresh-cli/codex/codex-rs/core/review_prompt.md`, and Codex core tests | Comparator evidence records patch quality, reviewability, approval behavior, and verifier choice. |
+
+## Bootstrap Integration Gate
+
+Before the three comparator tasks count, mew must implement one small M6.6
+infrastructure slice itself. This is the integration test for the gate:
+
+1. Codex creates or approves a small task whose prompt points at this document,
+   `ROADMAP.md`, `ROADMAP_STATUS.md`, and the relevant reference docs.
+2. Mew runs the work session as implementer and proposes the code/doc edit
+   through the normal approval surface.
+3. Codex may approve, reject, or steer. Any Codex rescue edit fails the
+   bootstrap gate and must be recorded as a blocker instead of being retried or
+   counted silently.
+4. Focused verification passes.
+5. The run is recorded below with the adopted reference pattern, metrics, and
+   `rescue_edits=0`.
+
+## Bootstrap Run Record
+
+Status: `not_started`
+
+Task:
+
+Adopted reference patterns:
+
+Mew run:
+
+Verification:
+
+Rescue edits:
+
+Blocker if failed:
+
+Verdict:
+
 ## Run Template
 
 Copy this section for each mew and Codex CLI comparator run.
@@ -49,6 +97,7 @@ Metrics:
 - repair_cycles:
 - prompt_context_chars:
 - rescue_edits:
+- adopted_reference_patterns:
 
 Review:
 

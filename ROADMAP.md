@@ -335,6 +335,17 @@ First slice:
 
 - durable coding plan state plus path recall inside the work session
 
+Reference gate:
+
+- M6.6 requirements must be mapped back to concrete patterns in
+  `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, and
+  `references/fresh-cli/{claude-code,codex}` before implementation evidence is
+  counted
+- the first M6.6 infrastructure slice must be implemented by mew itself, with
+  Codex acting as reviewer/approver, so the gate tests the full resident coding
+  loop instead of only documenting an intention
+
 Non-goals:
 
 - no new general CLI surface unless it is required for the coding-loop evidence
@@ -343,6 +354,10 @@ Non-goals:
 
 Done when:
 
+- the M6.6 bootstrap integration task is completed before the three comparator
+  tasks are counted: mew reads the reference-grounded gate, implements one
+  small coding-loop slice, proposes a reviewable edit, verifies it, and records
+  the trace without Codex rescue edits
 - mew completes three predeclared representative coding tasks without Codex
   rescue edits: one behavior-preserving refactor, one bug fix with a regression
   test, and one small feature with paired source/test changes
