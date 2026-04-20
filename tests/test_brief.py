@@ -422,6 +422,11 @@ class BriefTests(unittest.TestCase):
                     "action": "rerun_event",
                     "effect_classification": "no_action_committed",
                 },
+                "recovery_followup": {
+                    "action": "requeue_event",
+                    "status": "requeued",
+                    "command": "./mew run --once",
+                },
             }
         ]
 
@@ -437,7 +442,7 @@ class BriefTests(unittest.TestCase):
         )
         self.assertIn(
             "startup_repair: 1 item(s) at=2026-04-18T09:00:00Z "
-            "types=interrupted_runtime_effect decisions=rerun_event",
+            "types=interrupted_runtime_effect decisions=rerun_event followups=requeue_event",
             brief,
         )
 

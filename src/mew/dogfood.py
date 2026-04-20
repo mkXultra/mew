@@ -3264,6 +3264,9 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
     repairs = repair_data.get("repairs") or []
     planning_decision = (repaired_effects.get(planning_effect_id) or {}).get("recovery_decision") or {}
     committing_decision = (repaired_effects.get(committing_effect_id) or {}).get("recovery_decision") or {}
+    planning_followup = (repaired_effects.get(planning_effect_id) or {}).get("recovery_followup") or {}
+    committing_followup = (repaired_effects.get(committing_effect_id) or {}).get("recovery_followup") or {}
+    repaired_events = {event.get("id"): event for event in repaired_state.get("inbox") or []}
 
     _scenario_check(
         checks,
@@ -3271,26 +3274,34 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
         doctor_result.get("exit_code") == 1
         and len(doctor_items) == 2
         and ((doctor_items[0].get("recovery_decision") or {}).get("action") == "rerun_event")
-        and ((doctor_items[1].get("recovery_decision") or {}).get("action") == "review_writes"),
+        and ((doctor_items[0].get("recovery_followup") or {}).get("action") == "requeue_event")
+        and ((doctor_items[1].get("recovery_decision") or {}).get("action") == "review_writes")
+        and ((doctor_items[1].get("recovery_followup") or {}).get("action") == "ask_user_review"),
         observed={
             "doctor_runtime_effects": doctor_data.get("runtime_effects"),
         },
-        expected="doctor previews structured recovery decisions before repair mutates state",
+        expected="doctor previews structured recovery decisions and follow-ups before repair mutates state",
     )
     _scenario_check(
         checks,
-        "m4_runtime_effect_recovery_classifies_precommit_rerun",
+        "m4_runtime_effect_recovery_requeues_precommit_event",
         repair_result.get("exit_code") == 0
         and planning_decision.get("action") == "rerun_event"
         and planning_decision.get("effect_classification") == "no_action_committed"
         and planning_decision.get("safety") == "safe_to_replan"
+        and planning_followup.get("action") == "requeue_event"
+        and planning_followup.get("status") == "requeued"
+        and (repaired_events.get(planning_event_id) or {}).get("processed_at") is None
+        and (repaired_events.get(planning_event_id) or {}).get("requeued_from_effect_id") == planning_effect_id
         and (repaired_effects.get(planning_effect_id) or {}).get("status") == "interrupted",
         observed={
             "decision": planning_decision,
+            "followup": planning_followup,
+            "event": repaired_events.get(planning_event_id),
             "effect": repaired_effects.get(planning_effect_id),
             "repairs": repairs,
         },
-        expected="pre-commit runtime effect is classified as safe to rerun/replan",
+        expected="pre-commit runtime effect is classified as safe and the processed event is requeued",
     )
     _scenario_check(
         checks,
@@ -3300,9 +3311,12 @@ def run_m4_runtime_effect_recovery_scenario(workspace, env=None):
         and committing_decision.get("effect_classification") == "write_may_have_started"
         and committing_decision.get("safety") == "needs_user_review"
         and committing_decision.get("write_run_ids") == [7]
+        and committing_followup.get("action") == "ask_user_review"
+        and committing_followup.get("command")
         and (repaired_effects.get(committing_effect_id) or {}).get("status") == "interrupted",
         observed={
             "decision": committing_decision,
+            "followup": committing_followup,
             "effect": repaired_effects.get(committing_effect_id),
             "repairs": repairs,
         },

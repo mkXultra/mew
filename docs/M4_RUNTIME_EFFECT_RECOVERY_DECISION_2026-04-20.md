@@ -2,9 +2,9 @@
 
 Status: unit and dogfood proof passed.
 
-This is a narrow M4 slice for runtime-effect recovery. It does not retry runtime
-effects yet. It upgrades `mew repair` from a string-only `recovery_hint` to a
-structured recovery decision.
+This is a narrow M4 slice for runtime-effect recovery. It upgrades `mew repair`
+from a string-only `recovery_hint` to a structured recovery decision and a
+follow-up action.
 
 ## Behavior
 
@@ -16,7 +16,7 @@ or human can see whether the repaired effect was `rerun_event` or a review path
 without opening raw state.
 
 `mew doctor` previews the same recovery decision for incomplete runtime effects
-before repair mutates state.
+and follow-up action before repair mutates state.
 
 Current classifications:
 
@@ -30,6 +30,14 @@ Current classifications:
 - `committing` effects with only `action_types` become `review_actions` with
   `effect_classification=action_may_have_committed`.
 - unknown commit state stays on `review_unknown_commit`.
+
+Follow-up consumption:
+
+- pre-commit `rerun_event` decisions requeue the original event when it had
+  already been marked processed and no later terminal effect exists;
+- events that are already pending stay pending and record `already_pending`;
+- committing write/verification/action decisions stay on explicit review
+  follow-ups, pointing to the relevant inspection command instead of retrying.
 
 ## Validation
 
@@ -46,7 +54,7 @@ Both passed.
 Dogfood:
 
 ```bash
-./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-1142 --json
+./mew dogfood --scenario m4-runtime-effect-recovery --workspace proof-workspace/mew-proof-m4-runtime-effect-recovery-local-20260420-followup --json
 ```
 
 Result:
@@ -54,11 +62,12 @@ Result:
 - status: `pass`
 - checks:
   - `m4_runtime_effect_recovery_doctor_previews_decisions`
-  - `m4_runtime_effect_recovery_classifies_precommit_rerun`
+  - `m4_runtime_effect_recovery_requeues_precommit_event`
   - `m4_runtime_effect_recovery_classifies_committing_write_review`
 
 ## Interpretation
 
-This connects M4's recovery language to machine-readable state. A future
-runtime-effect recovery command can now select from `recovery_decision` instead
-of parsing prose hints.
+This connects M4's recovery language to machine-readable state and lets repair
+consume the safest class directly: a pre-commit runtime effect can make its
+original event pending again. Commit-phase effects still require explicit
+review.

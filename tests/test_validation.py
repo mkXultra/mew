@@ -377,14 +377,47 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn("interrupted_runtime_effect effect=#1 event=#1 planning->interrupted", stdout.getvalue())
                 self.assertIn("decision: rerun_event effect=no_action_committed safety=safe_to_replan", stdout.getvalue())
+                self.assertIn("followup: requeue_event status=already_pending command=mew run --once", stdout.getvalue())
                 self.assertIn("next: Re-run event #1; no action was recorded as committed.", stdout.getvalue())
                 self.assertEqual(repaired["runtime_effects"][0]["status"], "interrupted")
                 self.assertEqual(repaired["runtime_effects"][0]["recovery_decision"]["action"], "rerun_event")
+                self.assertEqual(repaired["runtime_effects"][0]["recovery_followup"]["action"], "requeue_event")
+                self.assertEqual(repaired["runtime_effects"][0]["recovery_followup"]["status"], "already_pending")
                 self.assertEqual(
                     repaired["runtime_effects"][0]["recovery_hint"],
                     "Re-run event #1; no action was recorded as committed.",
                 )
                 self.assertTrue(repaired["runtime_effects"][0]["finished_at"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_requeues_processed_precommit_runtime_event(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.state import add_event, add_runtime_effect
+
+                state = default_state()
+                event = add_event(state, "user_message", "cli", {"text": "hello"})
+                event["processed_at"] = "then"
+                add_runtime_effect(state, event, "user_input", "planned", "then")
+                save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["repair", "--json"])
+                data = json.loads(stdout.getvalue())
+                repaired = load_state()
+                effect = repaired["runtime_effects"][0]
+                event = repaired["inbox"][0]
+
+                self.assertEqual(code, 0)
+                self.assertTrue(data["ok"])
+                self.assertIsNone(event["processed_at"])
+                self.assertEqual(event["requeued_from_effect_id"], 1)
+                self.assertEqual(effect["recovery_followup"]["action"], "requeue_event")
+                self.assertEqual(effect["recovery_followup"]["status"], "requeued")
+                self.assertEqual(data["repairs"][0]["recovery_followup"]["command"], "mew run --once")
             finally:
                 os.chdir(old_cwd)
 
@@ -411,6 +444,8 @@ class ValidationTests(unittest.TestCase):
                 item = data["runtime_effects"]["incomplete_items"][0]
                 self.assertEqual(item["recovery_decision"]["action"], "review_writes")
                 self.assertEqual(item["recovery_decision"]["effect_classification"], "write_may_have_started")
+                self.assertEqual(item["recovery_followup"]["action"], "ask_user_review")
+                self.assertEqual(item["recovery_followup"]["command"], "mew writes")
 
                 with redirect_stdout(StringIO()) as stdout:
                     code = main(["doctor"])
@@ -418,6 +453,11 @@ class ValidationTests(unittest.TestCase):
                 self.assertIn(
                     "runtime_effect_recovery: #1 status=committing "
                     "action=review_writes effect=write_may_have_started safety=needs_user_review",
+                    stdout.getvalue(),
+                )
+                self.assertIn(
+                    "runtime_effect_followup: #1 action=ask_user_review "
+                    "status=needs_user_review command=mew writes",
                     stdout.getvalue(),
                 )
             finally:
@@ -446,9 +486,12 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertTrue(data["ok"])
                 self.assertEqual(data["repairs"][0]["recovery_decision"]["action"], "review_writes")
+                self.assertEqual(data["repairs"][0]["recovery_followup"]["action"], "ask_user_review")
+                self.assertEqual(data["repairs"][0]["recovery_followup"]["command"], "mew writes")
                 self.assertEqual(decision["effect_classification"], "write_may_have_started")
                 self.assertEqual(decision["safety"], "needs_user_review")
                 self.assertEqual(decision["write_run_ids"], [7])
+                self.assertEqual(repaired["runtime_effects"][0]["recovery_followup"]["status"], "needs_user_review")
                 self.assertIn("write_may_have_started", repaired["runtime_effects"][0]["recovery_hint"])
             finally:
                 os.chdir(old_cwd)

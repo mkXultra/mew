@@ -1,8 +1,43 @@
+from .cli_command import mew_command
 from .state import incomplete_runtime_effects, update_runtime_effect
 from .timeutil import now_iso
 
 
 PRECOMMIT_RUNTIME_STATUSES = {"planning", "planned", "precomputing", "precomputed"}
+TERMINAL_RUNTIME_EFFECT_STATUSES = {
+    "applied",
+    "verified",
+    "failed",
+    "recovered",
+    "skipped",
+    "deferred",
+}
+
+
+def _find_event(state, event_id):
+    if event_id is None:
+        return None
+    for event in (state or {}).get("inbox", []) or []:
+        if str(event.get("id")) == str(event_id):
+            return event
+    return None
+
+
+def _has_later_terminal_effect(state, effect):
+    event_id = (effect or {}).get("event_id")
+    effect_id = (effect or {}).get("id")
+    if event_id is None or effect_id is None:
+        return False
+    for candidate in (state or {}).get("runtime_effects", []) or []:
+        if str(candidate.get("event_id")) != str(event_id):
+            continue
+        try:
+            later = int(candidate.get("id")) > int(effect_id)
+        except (TypeError, ValueError):
+            later = str(candidate.get("id")) != str(effect_id)
+        if later and candidate.get("status") in TERMINAL_RUNTIME_EFFECT_STATUSES and candidate.get("finished_at"):
+            return True
+    return False
 
 
 def runtime_effect_recovery_decision(effect, old_status):
@@ -73,6 +108,69 @@ def runtime_effect_recovery_hint(effect, old_status):
     return f"Inspect effect #{effect.get('id')} before retrying {event_ref}."
 
 
+def runtime_effect_recovery_followup(state, effect, decision=None, current_time=None, mutate=False):
+    decision = decision or runtime_effect_recovery_decision(effect, (effect or {}).get("status"))
+    action = decision.get("action")
+    event_id = (effect or {}).get("event_id")
+    if action == "rerun_event":
+        followup = {
+            "action": "requeue_event",
+            "event_id": event_id,
+            "effect_id": (effect or {}).get("id"),
+            "command": mew_command("run", "--once"),
+            "reason": decision.get("reason") or "effect stopped before commit",
+        }
+        event = _find_event(state, event_id)
+        if not event:
+            followup.update(
+                {
+                    "status": "blocked_missing_event",
+                    "reason": f"event #{event_id} is no longer in the inbox",
+                }
+            )
+            return followup
+        if _has_later_terminal_effect(state, effect):
+            followup.update(
+                {
+                    "status": "blocked_later_effect",
+                    "reason": f"event #{event_id} already has a later terminal runtime effect",
+                }
+            )
+            return followup
+        if event.get("processed_at") is None:
+            followup["status"] = "already_pending"
+            return followup
+        if mutate:
+            event["processed_at"] = None
+            event["requeued_at"] = current_time or now_iso()
+            event["requeued_from_effect_id"] = (effect or {}).get("id")
+            followup["status"] = "requeued"
+            followup["requeued_at"] = event["requeued_at"]
+        else:
+            followup["status"] = "would_requeue"
+        return followup
+    if decision.get("safety") == "needs_user_review":
+        command = mew_command("runtime-effects", "--limit", "5")
+        if action == "review_writes":
+            command = mew_command("writes")
+        return {
+            "action": "ask_user_review",
+            "status": "needs_user_review",
+            "event_id": event_id,
+            "effect_id": (effect or {}).get("id"),
+            "command": command,
+            "reason": decision.get("reason") or "effect stopped during commit",
+        }
+    return {
+        "action": "inspect_effect",
+        "status": "needs_user_review",
+        "event_id": event_id,
+        "effect_id": (effect or {}).get("id"),
+        "command": mew_command("runtime-effects", "--limit", "5"),
+        "reason": decision.get("reason") or "effect recovery needs inspection",
+    }
+
+
 def repair_incomplete_runtime_effects(state, current_time=None):
     current_time = current_time or now_iso()
     repairs = []
@@ -80,6 +178,13 @@ def repair_incomplete_runtime_effects(state, current_time=None):
         old_status = effect.get("status")
         recovery_decision = runtime_effect_recovery_decision(effect, old_status)
         recovery_hint = runtime_effect_recovery_hint(effect, old_status)
+        recovery_followup = runtime_effect_recovery_followup(
+            state,
+            effect,
+            recovery_decision,
+            current_time=current_time,
+            mutate=True,
+        )
         update_runtime_effect(
             state,
             effect.get("id"),
@@ -87,6 +192,7 @@ def repair_incomplete_runtime_effects(state, current_time=None):
             status="interrupted",
             error="Runtime stopped before this effect reached a terminal state.",
             recovery_decision=recovery_decision,
+            recovery_followup=recovery_followup,
             recovery_hint=recovery_hint,
             finished_at=current_time,
         )
@@ -98,6 +204,7 @@ def repair_incomplete_runtime_effects(state, current_time=None):
                 "old_status": old_status,
                 "new_status": "interrupted",
                 "recovery_decision": recovery_decision,
+                "recovery_followup": recovery_followup,
                 "recovery_hint": recovery_hint,
             }
         )
