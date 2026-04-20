@@ -571,7 +571,7 @@ class DogfoodTests(unittest.TestCase):
             report_path.write_text(
                 json.dumps(
                     {
-                        "status": "passed",
+                        "status": "complete_with_environment_note",
                         "manual_rebrief_needed": False,
                         "repository_only_compliance": True,
                         "verification_exit_code": 0,

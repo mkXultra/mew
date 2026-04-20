@@ -1290,6 +1290,17 @@ Evidence:
   verifier failure, the decisive next action, and fresh CLI comparison assets.
   The durable summary was appended to
   `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
+- A fresh `codex-ultra` comparator then used the isolated
+  `mew-proof-m3-reentry-gate-20260420-1040` fresh restart workspace and wrote
+  `fresh-codex-ultra-docker-report.json`. The merged
+  `m3-reentry-gate` run passed with `comparison_choice=mew_preferred`,
+  `repository_only_steps_before_first_correct_action=5`,
+  `mew_saved_reconstruction=true`, `mew_saved_verifier_rerun=true`, and
+  `mew_prevented_wrong_first_action=true`. This is useful but not clean enough
+  to close M3 because the fresh comparator recorded `manual_rebrief_needed=true`
+  and `repository_only_compliance=false` after running git metadata commands
+  outside the fresh workspace. Details are in
+  `docs/M3_REENTRY_BURDEN_COMPARISON_2026-04-20.md`.
 
 Missing proof:
 

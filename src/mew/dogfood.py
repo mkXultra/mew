@@ -3847,7 +3847,8 @@ def run_m3_reentry_gate_scenario(workspace, env=None, comparison_report_path=Non
             checks,
             "m3_reentry_gate_merges_fresh_cli_comparison_report",
             fresh_cli_report.get("status") == "loaded"
-            and fresh_cli_report.get("report_status") in {"passed", "failed", "inconclusive", "blocked"}
+            and fresh_cli_report.get("report_status")
+            in {"passed", "failed", "inconclusive", "blocked", "complete_with_environment_note"}
             and fresh_cli_report.get("comparison_choice")
             in {"mew_preferred", "fresh_cli_preferred", "parity", "inconclusive", "blocked"}
             and fresh_cli_report.get("manual_rebrief_needed") in {True, False}

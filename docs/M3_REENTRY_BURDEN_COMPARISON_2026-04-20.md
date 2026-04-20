@@ -110,3 +110,60 @@ comparison assets with:
   - queued follow-up to approve then verify
 - collected artifacts under
   `proof-artifacts/mew-proof-m3-reentry-gate-20260420-1040/`
+
+Fresh Comparator on Isolated Artifact:
+
+A fresh `codex-ultra` comparator was then run from the generated fresh restart
+workspace:
+
+```text
+proof-workspace/mew-proof-m3-reentry-gate-20260420-1040/m3-fresh-cli-restart-workspace
+```
+
+It wrote:
+
+```text
+proof-workspace/mew-proof-m3-reentry-gate-20260420-1040/.mew/dogfood/fresh-codex-ultra-docker-report.json
+```
+
+The report was merged with:
+
+```bash
+./mew dogfood --scenario m3-reentry-gate \
+  --workspace proof-workspace/mew-proof-m3-reentry-gate-merged-20260420-1045 \
+  --m3-comparison-report proof-workspace/mew-proof-m3-reentry-gate-20260420-1040/.mew/dogfood/fresh-codex-ultra-docker-report.json \
+  --json
+```
+
+Merged result: `pass`
+
+Important caveat:
+
+- `manual_rebrief_needed=true`
+- `repository_only_compliance=false`
+- reason: the fresh comparator ran git metadata commands before realizing the
+  git root was outside the current work folder
+- it did not inspect parent `.mew` or the report template before the independent
+  attempt, but this is still recorded as a strict-rule violation
+- the Docker-specific verifier path `/mew/.venv/bin/python` was not available
+  on the host; the same verifier predicate passed with `python3`
+
+Fresh reconstruction burden from this run:
+
+- comparison choice: `mew_preferred`
+- repository-only steps before first verifier-correct action: `5`
+- needed to read verifier before first correct action: `true`
+- needed to run verifier before first correct action: `false`
+- mew resume would have changed first action: `true`
+- persistent advantage:
+  - `mew_saved_reconstruction=true`
+  - `mew_saved_verifier_rerun=true`
+  - `mew_prevented_wrong_first_action=true`
+
+Interpretation of this comparator:
+
+The result is useful but not clean enough to close M3 by itself. It confirms
+the core pattern again: the fresh restart inferred the semantic direction from
+README.md, but made a wrong first edit before reading the verifier. mew had the
+pending approval, failed verifier, queued follow-up, exact next action, and
+verifier context already preserved.
