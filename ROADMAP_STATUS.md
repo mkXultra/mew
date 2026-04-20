@@ -1642,6 +1642,17 @@ Evidence:
   manual patch, or rescue edit as `rescue_recorded` and set M5 credit to
   `not_counted_due_to_rescue`. `mew self-improve --audit 303` now makes the
   rescue visible next to verification status.
+- Task `#304` reduced the concrete no-rescue blocker in commit `200e545`.
+  `edit_file` no-op dry-runs now carry `no_op` / `no_op_reason`, summaries tell
+  the resident to re-read the target window before retrying, and old-text
+  mismatch errors explicitly point at `read_file` on the latest target window.
+  This loop is not M5 done-gate credit because the implementation was a
+  supervisor patch to reduce the blocker.
+- Task `#305` then produced the first no-rescue candidate loop in commit
+  `037d0d8`. The resident independently found the `write_tools` / test surface,
+  obeyed paired-test steering, proposed both the test and source edits, and the
+  supervisor only approved previews. `mew self-improve --audit 305` records
+  `verification: passed`, two applied approvals, and no rescue marker.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1697,11 +1708,11 @@ Next action:
 
 - Start the next bounded M5 entry-rehearsal loop from `mew-product-evaluator`
   or `./mew self-improve --start-session --focus 'Advance M5 audited
-  self-improvement loop'`. The next best gap is no-rescue feasibility: tasks
-  `#302` and `#303` both needed supervisor rescue because paired edits hit
-  no-op or old-text-mismatch failures. The next loop should reduce that concrete
-  resident edit failure mode, or run a deliberately tiny no-rescue loop to
-  check whether the latest audit trail can honestly record no rescue.
+  self-improvement loop'`. The next best gap is no-rescue review accounting:
+  task `#305` is a plausible no-rescue candidate, but the audit still reports
+  `rescue=not_assessed` and `not_counted_until_human_review_confirms_no_rescue_edits`.
+  The next loop should make explicit human no-rescue review visible without
+  auto-counting loops before M3 closes.
 
 ## Latest Validation
 
