@@ -2880,6 +2880,7 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         ),
         {},
     )
+    retry_target_text = target.read_text(encoding="utf-8")
 
     target.write_text("before\n", encoding="utf-8")
     completed_intent = build_write_intent("edit_file", write_parameters)
@@ -2941,6 +2942,84 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         ),
         {},
     )
+    completed_target_text = target.read_text(encoding="utf-8")
+
+    target.write_text("before\n", encoding="utf-8")
+    diverged_intent = build_write_intent("edit_file", write_parameters)
+    target.write_text("human edit\n", encoding="utf-8")
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    session = find_work_session(state, session_id)
+    diverged_source_call_id = None
+    if session:
+        diverged_source_call_id = next_id(state, "work_tool_call")
+        session.setdefault("tool_calls", []).append(
+            {
+                "id": diverged_source_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "edit_file",
+                "status": "interrupted",
+                "parameters": write_parameters,
+                "write_intent": diverged_intent,
+                "summary": "interrupted with diverged target",
+                "error": "Target changed before recovery.",
+                "started_at": "2026-04-20T00:02:00Z",
+            }
+        )
+        session["last_tool_call_id"] = diverged_source_call_id
+        write_json_file(state_path, state)
+
+    diverged_resume_result = run(["work", str(task_id), "--session", "--resume", "--json"], timeout=15)
+    diverged_result = run(["work", str(task_id), "--recover-session", "--json"], timeout=15)
+    diverged_resume = _json_stdout(diverged_resume_result).get("resume") or {}
+    diverged_report = _json_stdout(diverged_result)
+    diverged_item = next(
+        (
+            item
+            for item in ((diverged_resume.get("recovery_plan") or {}).get("items") or [])
+            if str(item.get("tool_call_id")) == str(diverged_source_call_id)
+        ),
+        {},
+    )
+
+    target.write_text("before\n", encoding="utf-8")
+    partial_intent = build_write_intent("edit_file", write_parameters)
+    temp_path = target.parent / f".{target.name}.m4.tmp"
+    temp_path.write_text("after\n", encoding="utf-8")
+    state = reconcile_next_ids(migrate_state(read_json_file(state_path, {})))
+    session = find_work_session(state, session_id)
+    partial_source_call_id = None
+    if session:
+        partial_source_call_id = next_id(state, "work_tool_call")
+        session.setdefault("tool_calls", []).append(
+            {
+                "id": partial_source_call_id,
+                "session_id": session_id,
+                "task_id": task_id,
+                "tool": "edit_file",
+                "status": "interrupted",
+                "parameters": write_parameters,
+                "write_intent": partial_intent,
+                "summary": "interrupted with temp file",
+                "error": "Atomic temp file survived recovery.",
+                "started_at": "2026-04-20T00:03:00Z",
+            }
+        )
+        session["last_tool_call_id"] = partial_source_call_id
+        write_json_file(state_path, state)
+
+    partial_resume_result = run(["work", str(task_id), "--session", "--resume", "--json"], timeout=15)
+    partial_result = run(["work", str(task_id), "--recover-session", "--json"], timeout=15)
+    partial_resume = _json_stdout(partial_resume_result).get("resume") or {}
+    partial_report = _json_stdout(partial_result)
+    partial_item = next(
+        (
+            item
+            for item in ((partial_resume.get("recovery_plan") or {}).get("items") or [])
+            if str(item.get("tool_call_id")) == str(partial_source_call_id)
+        ),
+        {},
+    )
 
     retry_item = ((retry_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
     completed_item = ((completed_resume.get("recovery_plan") or {}).get("items") or [{}])[0]
@@ -2957,13 +3036,13 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         and retry_recovered_call.get("tool") == "edit_file"
         and retry_recovered_call.get("status") == "completed"
         and ((retry_recovered_call.get("result") or {}).get("verification_exit_code") == 0)
-        and target.read_text(encoding="utf-8") == "after\n",
+        and retry_target_text == "after\n",
         observed={
             "resume_item": retry_item,
             "recovery": retry_report.get("recovery"),
             "source_call": retry_source_call,
             "recovered_call": retry_recovered_call,
-            "target_text": target.read_text(encoding="utf-8"),
+            "target_text": retry_target_text,
         },
         expected="interrupted apply-write whose target still matches pre-write hash is resumed with verifier",
     )
@@ -2978,15 +3057,51 @@ def run_m4_file_write_recovery_scenario(workspace, env=None):
         and completed_recovered_call.get("tool") == "run_tests"
         and completed_recovered_call.get("status") == "completed"
         and ((completed_recovered_call.get("result") or {}).get("exit_code") == 0)
-        and target.read_text(encoding="utf-8") == "after\n",
+        and completed_target_text == "after\n",
         observed={
             "resume_item": completed_item,
             "recovery": completed_report.get("recovery"),
             "source_call": completed_source_call,
             "recovered_call": completed_recovered_call,
-            "target_text": target.read_text(encoding="utf-8"),
+            "target_text": completed_target_text,
         },
         expected="interrupted apply-write whose target already matches intended hash skips reapply and verifies",
+    )
+    _scenario_check(
+        checks,
+        "m4_file_write_recovery_reports_target_diverged_review",
+        diverged_result.get("exit_code") == 0
+        and diverged_item.get("action") == "needs_user_review"
+        and diverged_item.get("effect_classification") == "target_diverged"
+        and (diverged_item.get("write_world_state") or {}).get("state") == "target_diverged"
+        and (diverged_report.get("recovery") or {}).get("action") == "needs_user"
+        and (((diverged_report.get("recovery") or {}).get("review_item") or {}).get("write_world_state") or {}).get("state")
+        == "target_diverged",
+        observed={
+            "resume_item": diverged_item,
+            "recovery": diverged_report.get("recovery"),
+            "target_text": target.read_text(encoding="utf-8"),
+        },
+        expected="diverged applied write reports review context instead of retrying",
+    )
+    _scenario_check(
+        checks,
+        "m4_file_write_recovery_reports_partial_review",
+        partial_result.get("exit_code") == 0
+        and partial_item.get("action") == "needs_user_review"
+        and partial_item.get("effect_classification") == "partial"
+        and (partial_item.get("write_world_state") or {}).get("state") == "partial"
+        and bool((partial_item.get("write_world_state") or {}).get("temp_paths"))
+        and (partial_report.get("recovery") or {}).get("action") == "needs_user"
+        and (((partial_report.get("recovery") or {}).get("review_item") or {}).get("write_world_state") or {}).get("state")
+        == "partial",
+        observed={
+            "resume_item": partial_item,
+            "recovery": partial_report.get("recovery"),
+            "temp_path": str(temp_path),
+            "target_text": target.read_text(encoding="utf-8"),
+        },
+        expected="partial applied write reports temp-file review context instead of retrying",
     )
     return _scenario_report("m4-file-write-recovery", workspace, commands, checks)
 

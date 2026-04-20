@@ -495,6 +495,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["scenarios"][0]["name"], "m4-file-write-recovery")
             self.assertIn("m4_file_write_recovery_retries_not_started_apply_write", text)
             self.assertIn("m4_file_write_recovery_skips_completed_write_and_verifies", text)
+            self.assertIn("m4_file_write_recovery_reports_target_diverged_review", text)
+            self.assertIn("m4_file_write_recovery_reports_partial_review", text)
 
     def test_run_dogfood_day_reentry_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

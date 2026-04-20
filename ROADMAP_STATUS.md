@@ -1456,9 +1456,11 @@ Evidence:
   `completed_externally`, it skips reapplying the write and reruns the recorded
   verifier.
 - `dogfood --scenario m4-file-write-recovery` passed locally in
-  `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-1118`.
+  `proof-workspace/mew-proof-m4-file-write-recovery-local-20260420-1130`.
   The proof covers both safe resumption of a not-started apply-write and
-  verification-only recovery of an already-completed write. Durable summary:
+  verification-only recovery of an already-completed write; it also proves
+  `target_diverged` and `partial` write states stay on the explicit review
+  path with live write-world evidence. Durable summary:
   `docs/M4_FILE_WRITE_RECOVERY_2026-04-20.md`.
 
 Missing proof:
@@ -1476,10 +1478,9 @@ Missing proof:
 
 Next action:
 
-- Extend the file-write recovery proof to `partial` and `target_diverged`
-  reporting, rollback-needed writes, or runtime-effect recovery. Keep shell
-  recovery on explicit review until a similarly deterministic world-state
-  validator exists.
+- Extend file-write recovery toward rollback-needed writes or runtime-effect
+  recovery. Keep shell recovery on explicit review until a similarly
+  deterministic world-state validator exists.
 
 ## Milestone 5: Self-Improving Mew
 
