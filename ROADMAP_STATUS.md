@@ -1624,6 +1624,13 @@ Evidence:
   intervention policy, and no-rescue loop credit status. `mew self-improve
   --audit <task-id>` renders the readable audit bundle, and task `#301` /
   session `#280` dogfooded the path for the active M5 focus.
+- Task `#301` then closed as a bounded M5 dogfood slice in commit `a78f271`.
+  The resident proposed a concise missing-task audit output, the supervisor
+  rejected the first draft because it incorrectly treated `missing_task` as
+  exit code `0`, the resident regenerated the paired source/test edit, and the
+  approved change kept the nonzero exit code and JSON shape while making text
+  output concise. This is useful entry-rehearsal evidence, but it is still not
+  M5 done-gate credit because it included supervisor redirection.
 - `mew-roadmap-status` skill and this status file exist to preserve roadmap progress across context compression.
 - Native self-improvement dogfood tasks #36-#39 produced and validated small mew fixes: low-intent research wait suppression, stale done-task work-session filtering/closing, and recent-commit/coding-focus context for future self-improvement sessions.
 - Native self-improvement dogfood task #44 used `mew work --live` with Codex Web API to discover and drive line-based reads, large-file edit support, and a cockpit `/continue` display improvement.
@@ -1677,11 +1684,13 @@ Missing proof:
 
 Next action:
 
-- Continue the M5 entry rehearsal from task `#301`: run one bounded
-  self-improvement loop through native/delegated implementation, validation,
-  audit-bundle capture, and human-intervention classification. It may be useful
-  evidence, but it must not count as M5 done-gate credit until M3 closes and a
-  no-rescue review confirms no manual rescue edits.
+- Start the next bounded M5 entry-rehearsal loop from `mew-product-evaluator`
+  or `./mew self-improve --start-session --focus 'Advance M5 audited
+  self-improvement loop'`. The loop should target a missing audit-bundle or
+  no-rescue classification gap, leave validation evidence, and record whether
+  any supervisor intervention was approval/redirection versus rescue. It must
+  not count as M5 done-gate credit until M3 closes and a no-rescue review
+  confirms the loop needed no rescue edits.
 
 ## Latest Validation
 
