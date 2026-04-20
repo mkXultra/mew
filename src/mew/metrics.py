@@ -1065,6 +1065,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
     model_turn_context_chars = []
     active_memory_chars = []
     active_memory_entries = []
+    recent_read_window_chars = []
+    recent_read_window_count = []
     think_prompt_chars = []
     act_prompt_chars = []
     total_model_seconds = []
@@ -1136,6 +1138,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
             model_turn_context_chars.append(_numeric_model_metric(turn, "model_turn_context_chars"))
             active_memory_chars.append(_numeric_model_metric(turn, "active_memory_chars"))
             active_memory_entries.append(_numeric_model_metric(turn, "active_memory_entries"))
+            recent_read_window_chars.append(_numeric_model_metric(turn, "recent_read_window_chars"))
+            recent_read_window_count.append(_numeric_model_metric(turn, "recent_read_window_count"))
             think_prompt_chars.append(_numeric_model_metric(turn, "think", "prompt_chars"))
             act_prompt_chars.append(_numeric_model_metric(turn, "act", "prompt_chars"))
             total_model_seconds.append(_numeric_model_metric(turn, "total_model_seconds"))
@@ -1197,6 +1201,8 @@ def build_observation_metrics(state, *, kind=None, limit=None, sample_limit=DEFA
         "model_turn_context_chars": _summary(model_turn_context_chars),
         "active_memory_chars": _summary(active_memory_chars),
         "active_memory_entries": _summary(active_memory_entries),
+        "recent_read_window_chars": _summary(recent_read_window_chars),
+        "recent_read_window_count": _summary(recent_read_window_count),
         "think_prompt_chars": _summary(think_prompt_chars),
         "act_prompt_chars": _summary(act_prompt_chars),
         "total_model_seconds": _summary(total_model_seconds),
@@ -1286,6 +1292,8 @@ def format_observation_metrics(data):
         ("model_turn_context_chars", "model_turn_context_chars"),
         ("active_memory_chars", "active_memory_chars"),
         ("active_memory_entries", "active_memory_entries"),
+        ("recent_read_window_chars", "recent_read_window_chars"),
+        ("recent_read_window_count", "recent_read_window_count"),
         ("think_prompt_chars", "think_prompt_chars"),
         ("act_prompt_chars", "act_prompt_chars"),
         ("total_model_seconds", "total_model_seconds"),

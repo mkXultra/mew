@@ -553,11 +553,47 @@ Evidence:
   regression test: mew authored dry-run edits #2207/#2208, Codex
   reviewed/approved/applied them as #2209/#2210, focused pytest passed, and
   `rescue_edits=0`.
+- M6.6-A mew-side comparator task #325 / session #311 passed as a
+  behavior-preserving refactor: after narrow source/test reads and one reviewer
+  steer to stop source rereads, mew produced a paired dry-run batch
+  (#2221/#2222), Codex approved/applied it as #2223/#2224, focused pytest
+  passed on apply, reviewer same-surface audit found the literal only in
+  `src/mew/work_loop.py` and `tests/test_work_session.py`, and broader
+  `uv run python -m unittest tests.test_work_session` passed. `rescue_edits=0`.
+- The matching Codex CLI comparator for M6.6-A ran in
+  `/tmp/mew-m66a-codex-20260420-2316` against commit `3ea02ea`, converged on
+  the same source refactor with a slightly smaller test delta, and passed the
+  preferred focused verifier
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch --no-testmon`
+  with `1 passed in 0.47s`. The run used one narrow search, four narrow reads,
+  and `rescue_edits=0`; `uv` created a local `.venv` in the detached worktree,
+  so this comparator completed without the environment caveat seen in M6.6-B.
 - The matching Codex CLI comparator ran in
   `/tmp/mew-m66b-codex-20260420-2218` against commit `ac8b7d6`, produced a
   comparable source/test patch, and passed the focused regression via an
   existing pytest environment. Normal `uv run` verification hit sandbox/cache
   dependency limits, so the comparator is recorded with an environment caveat.
+- Budget-based work-context compaction now preserves `recent_read_file_windows`
+  in full prompt mode, so high-effort or large-session turns still retain exact
+  recent line-window reads for edit preparation instead of dropping that
+  surface when the recent tool/model window is reduced. Focused and broader
+  context tests passed after the change.
+- M6.6-C task #326 tested a small-feature comparator slice for suggested
+  verifier fallback, but sessions #312 and #313 did not reach a dry-run edit.
+  The runs repeated targeted read/search recovery and one live planning turn
+  hung before edit proposal, so this attempt is recorded as blocker evidence
+  only and does not count toward M6.6 closure.
+- A direct supervisor patch then added the fallback: when `run_tests` is chosen
+  without an explicit command and no configured `verify_command` exists, the
+  loop now prefers
+  `work_session.resume.suggested_verify_command.command`. Focused and broader
+  validation passed, but this patch is not comparator evidence because mew did
+  not author a reviewable dry-run edit in #326.
+- On 2026-04-20, a proposed split to add `M6.5.2` as a separate
+  "mew can implement mew sanely enough" milestone was considered and rejected.
+  The current roadmap already assigns that role transition to the M6.6 first
+  slice and bootstrap gate, so splitting it out would blur the closed M6.5
+  speed gate and weaken the M6.6 evidence path.
 
 Missing proof:
 
@@ -566,9 +602,12 @@ Missing proof:
   normal coding tasks.
 - Coding loop: no built-in verifier discovery, repair loop, or self-review
   phase exists at the work-session level for general coding tasks yet.
-- Comparator: no checked-in side-by-side run has shown mew matching Codex CLI
-  on correctness, tool churn, latency, and reviewability across representative
-  coding tasks.
+- Comparator: M6.6-A and M6.6-B now have checked-in side-by-side evidence, but
+  the representative set is still incomplete and too small to claim stable
+  parity on correctness, tool churn, latency, and reviewability.
+- M6.6-C comparator: the first mew-side attempt is blocked and explicitly
+  non-counting; a fresh mew-authored run is still needed before any Codex CLI
+  side-by-side result can close the feature slice.
 - M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
   caveat.
 - Robustness: the successful retry still needed reviewer steering and one
@@ -597,8 +636,16 @@ Done when:
 
 Next action:
 
-- Start M6.6-A or M6.6-C while preserving the same side-by-side comparator
-  discipline used for M6.6-B.
+- Keep M6.6 active; do not introduce `M6.5.2`.
+- Carry the landed suggested-verifier fallback as product progress, but do not
+  count task #326 as comparator evidence.
+- Start a fresh mew-side M6.6-C small-feature run after this fallback fix, then
+  run the matching Codex CLI comparator in a clean worktree and record the same
+  side-by-side latency/tool-churn/reviewability evidence.
+- Continue to treat read-window / prompt-truncation fixes and other
+  mew-as-implementer readiness work as M6.6 first-slice sub-tasks, then
+  continue M6.6-C with the same side-by-side comparator discipline used for
+  M6.6-A and M6.6-B.
 
 ### M7: Senses - Inbound Signals
 

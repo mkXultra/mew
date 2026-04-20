@@ -429,6 +429,17 @@ def _active_memory_metrics(context):
     }
 
 
+def _recent_read_window_metrics(context):
+    work_session = (context or {}).get("work_session") or {}
+    windows = work_session.get("recent_read_file_windows") or []
+    if not isinstance(windows, list):
+        windows = []
+    return {
+        "recent_read_window_chars": _json_size(windows),
+        "recent_read_window_count": len(windows),
+    }
+
+
 def compact_active_memory_for_prompt(
     active_memory,
     *,
@@ -563,9 +574,15 @@ def build_work_session_context(
             for turn in model_turns[-recent_turn_count:]
         ],
     }
-    if prompt_compacted:
+    if compacted or prompt_compacted:
         work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
+        note = "Recent work context was compacted due to session size; use remember for durable observations."
+        if work_context.get("recent_read_file_windows"):
+            note = (
+                "Recent work context was reduced; use recent_read_file_windows for exact recent file text "
+                "and keep any new read_file window narrow."
+            )
         work_context["context_compaction"] = {
             "compacted": bool(compacted),
             "prompt_context_compacted": prompt_compacted,
@@ -575,11 +592,7 @@ def build_work_session_context(
             "recent_model_turns": recent_turn_count,
             "total_tool_calls": len(tool_calls),
             "total_model_turns": len(model_turns),
-            "note": (
-                "Recent work context uses compact prompt limits; use recent_read_file_windows for exact recent file text and keep any new read_file window narrow."
-                if prompt_compacted
-                else "Recent work context was compacted due to session size; use remember for durable observations."
-            ),
+            "note": note,
         }
     return work_context
 
@@ -785,6 +798,7 @@ def build_work_think_prompt(context):
         "If you can make a small safe edit, use edit_file or write_file. For edit_file you must include exact old and new strings; if you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
+        "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
         "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. "
         "If investigation shows the task premise is false, already covered, or intentionally handled by existing tests, do not force a source edit; prefer run_tests to validate the conclusion, then finish with a no-change summary and task_done=true only if the investigation task is complete. "
         "For unittest verification, prefer a module-level command unless you have confirmed the exact class and method name in the current file or just created that method in the applied write. "
@@ -793,7 +807,9 @@ def build_work_think_prompt(context):
         "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. "
         "For implementation tasks with allowed write roots, do not finish merely because the next edit is clear; if exact old/new text or file content is available, propose the dry-run edit_file/write_file action instead. "
         "When finishing after investigation, evaluation, or recommendation guidance, include the concrete conclusion in action.summary or action.reason so the user does not have to infer it from prior tool output. "
-        "Include a compact working_memory object that restates your current hypothesis, next intended step, open questions, and latest verified state for future reentry; keep it short and do not copy raw logs. "
+        "Include a compact working_memory object that restates your current hypothesis, "
+        "next intended step, open questions, and latest verified state for future reentry; "
+        "keep it short and do not copy raw logs. "
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
@@ -812,7 +828,7 @@ def build_work_act_prompt(context, decision_plan):
     )
 
 
-def normalize_work_model_action(action_plan, verify_command=""):
+def normalize_work_model_action(action_plan, verify_command="", suggested_verify_command=""):
     if not isinstance(action_plan, dict):
         action_plan = {}
     action = action_plan.get("action")
@@ -840,7 +856,11 @@ def normalize_work_model_action(action_plan, verify_command=""):
         for item in raw_tools:
             if not isinstance(item, dict):
                 continue
-            sub_action = normalize_work_model_action({"action": item}, verify_command=verify_command)
+            sub_action = normalize_work_model_action(
+                {"action": item},
+                verify_command=verify_command,
+                suggested_verify_command=suggested_verify_command,
+            )
             dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
             if sub_action.get("type") == "batch":
                 sub_actions = sub_action.get("tools") or []
@@ -986,8 +1006,11 @@ def normalize_work_model_action(action_plan, verify_command=""):
         dry_run = action.get("dry_run")
         normalized["apply"] = bool(action.get("apply")) or dry_run is False
     if action_type == "run_tests":
-        if not normalized.get("command") and verify_command:
-            normalized["command"] = verify_command
+        if not normalized.get("command"):
+            if verify_command:
+                normalized["command"] = verify_command
+            elif suggested_verify_command:
+                normalized["command"] = suggested_verify_command
         if is_resident_loop_command(normalized.get("command") or ""):
             return {
                 "type": "wait",
@@ -1217,6 +1240,12 @@ def plan_work_model_turn(
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
     think_prompt = build_work_think_prompt(context)
     work_session_context = (context or {}).get("work_session") or {}
+    resume_context = work_session_context.get("resume") or {}
+    suggested_verify_command = ""
+    if isinstance(resume_context.get("suggested_verify_command"), dict):
+        suggested_verify_command = str(
+            (resume_context.get("suggested_verify_command") or {}).get("command") or ""
+        )
     model_metrics = {
         "context_chars": _json_size(context),
         "work_session_chars": _json_size(work_session_context),
@@ -1224,6 +1253,7 @@ def plan_work_model_turn(
         "tool_context_chars": _json_size(work_session_context.get("tool_calls")),
         "model_turn_context_chars": _json_size(work_session_context.get("model_turns")),
         **_active_memory_metrics(context),
+        **_recent_read_window_metrics(context),
         "think": {
             "prompt_chars": len(think_prompt),
         },
@@ -1250,7 +1280,11 @@ def plan_work_model_turn(
         progress(f"session #{session.get('id')}: THINK ok")
     model_metrics["think"]["elapsed_seconds"] = _round_seconds(think_elapsed)
     if act_mode == "deterministic":
-        action = normalize_work_model_action(decision_plan, verify_command=verify_command)
+        action = normalize_work_model_action(
+            decision_plan,
+            verify_command=verify_command,
+            suggested_verify_command=suggested_verify_command,
+        )
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
             "summary": action_summary or decision_plan.get("summary") or action.get("summary") or action.get("reason") or "",
@@ -1288,7 +1322,11 @@ def plan_work_model_turn(
             "elapsed_seconds": _round_seconds(act_elapsed),
             "mode": "model",
         }
-    action = normalize_work_model_action(action_plan, verify_command=verify_command)
+    action = normalize_work_model_action(
+        action_plan,
+        verify_command=verify_command,
+        suggested_verify_command=suggested_verify_command,
+    )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
         + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)

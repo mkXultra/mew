@@ -35,6 +35,8 @@ class MetricsTests(unittest.TestCase):
                             "model_turn_context_chars": 500,
                             "active_memory_chars": 456,
                             "active_memory_entries": 2,
+                            "recent_read_window_chars": 789,
+                            "recent_read_window_count": 1,
                             "think": {"prompt_chars": 111, "elapsed_seconds": 7.5},
                             "act": {"prompt_chars": 222, "elapsed_seconds": 2.0, "mode": "model"},
                             "total_model_seconds": 9.5,
@@ -138,6 +140,8 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["self_hosting"]["model_turn_context_chars"]["avg"], 500.0)
         self.assertEqual(metrics["self_hosting"]["active_memory_chars"]["avg"], 456.0)
         self.assertEqual(metrics["self_hosting"]["active_memory_entries"]["avg"], 2.0)
+        self.assertEqual(metrics["self_hosting"]["recent_read_window_chars"]["avg"], 789.0)
+        self.assertEqual(metrics["self_hosting"]["recent_read_window_count"]["avg"], 1.0)
         self.assertEqual(metrics["self_hosting"]["think_prompt_chars"]["avg"], 111.0)
         self.assertEqual(metrics["self_hosting"]["act_prompt_chars"]["avg"], 222.0)
         self.assertEqual(metrics["self_hosting"]["total_model_seconds"]["avg"], 9.5)
@@ -159,6 +163,8 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("first_edit_proposal_seconds: count=1 avg=11.0", text)
         self.assertIn("context_chars: count=1 avg=12345.0", text)
         self.assertIn("tool_context_chars: count=1 avg=8000.0", text)
+        self.assertIn("recent_read_window_chars: count=1 avg=789.0", text)
+        self.assertIn("recent_read_window_count: count=1 avg=1.0", text)
         self.assertIn("signals:", text)
         self.assertIn("verification failures are frequent", text)
         self.assertIn("diagnostics:", text)
