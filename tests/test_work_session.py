@@ -5416,6 +5416,7 @@ class WorkSessionTests(unittest.TestCase):
             "working_memory": {
                 "hypothesis": "Approval UX still needs command output visibility.",
                 "next_step": "Add a focused command-output pane.",
+                "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
                 "open_questions": ["Should chat expose the same pane?"],
                 "last_verified_state": "full suite passed before this slice",
             },
@@ -5434,6 +5435,7 @@ class WorkSessionTests(unittest.TestCase):
         memory = resume["working_memory"]
         self.assertEqual(memory["hypothesis"], "Approval UX still needs command output visibility.")
         self.assertEqual(memory["next_step"], "Add a focused command-output pane.")
+        self.assertEqual(memory["target_paths"], ["src/mew/workbench.py", "tests/test_workbench.py"])
         self.assertEqual(memory["open_questions"], ["Should chat expose the same pane?"])
         self.assertEqual(memory["last_verified_state"], "full suite passed before this slice")
         self.assertEqual(memory["source"], "think")
@@ -5443,6 +5445,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Working memory", text)
         self.assertIn("hypothesis: Approval UX still needs command output visibility.", text)
         self.assertIn("next_step: Add a focused command-output pane.", text)
+        self.assertIn("target_paths: src/mew/workbench.py, tests/test_workbench.py", text)
         self.assertIn("- Should chat expose the same pane?", text)
 
         context = build_work_model_context(
@@ -5454,6 +5457,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["next_step"],
             "Add a focused command-output pane.",
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["working_memory"]["target_paths"],
+            ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
 
     def test_work_session_context_and_resume_surface_user_preferences(self):
@@ -10723,6 +10730,7 @@ class WorkSessionTests(unittest.TestCase):
                 memory = resume["working_memory"]
                 self.assertEqual(memory["hypothesis"], "README is the next evidence source.")
                 self.assertEqual(memory["next_step"], "Read README.md before editing.")
+                self.assertEqual(memory["target_paths"], ["README.md"])
                 self.assertEqual(memory["open_questions"], ["Does README mention the target behavior?"])
                 self.assertEqual(memory["source"], "think")
                 self.assertEqual(memory["latest_tool_call_id"], 1)
@@ -10735,6 +10743,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Working memory", text)
                 self.assertIn("hypothesis: README is the next evidence source.", text)
                 self.assertIn("stale_next_step: Read README.md before editing.", text)
+                self.assertIn("target_paths: README.md", text)
                 self.assertNotIn("\nnext_step: Read README.md before editing.", text)
                 self.assertIn("latest_tool_state: latest tool #1 completed read_file", text)
                 self.assertIn("stale_after_tool_call: #1", text)
@@ -12790,6 +12799,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Use work_session.effort as operational pressure", prompt)
         self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
+        self.assertIn("working_memory.target_paths", prompt)
+        self.assertIn("prefer those paths before a broader project search", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)
@@ -12829,6 +12840,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn('"working_memory": {"hypothesis"', prompt)
         self.assertIn('"next_step": "what to do after reentry"', prompt)
+        self.assertIn('"target_paths": ["narrow files or dirs to revisit first"]', prompt)
         self.assertIn('"type": "batch|inspect_dir', prompt)
         self.assertIn('"summary": "optional concrete result', prompt)
         self.assertIn('"max_chars": "optional read_file cap"', prompt)

@@ -620,6 +620,15 @@ Evidence:
   one narrow same-surface audit read on the nearby `ACT`/control surface in
   `src/mew/work_loop.py` before finishing, then recorded why that sibling
   surface was covered/out of scope for the THINK-only reminder. `rescue_edits=0`.
+- M6.6 task #331 / session #318 targeted durable path recall, but the mew-side
+  run stalled in an exact-old-string reread loop after narrow source/test
+  reads; bundle pressure rose to `high` before any dry-run edit was proposed.
+  A direct supervisor patch then added machine-readable
+  `working_memory.target_paths`, surfaced it in the resume/text bundle, and
+  taught `build_work_think_prompt` to prefer `working_memory.target_paths`
+  before broader project search. Focused working-memory/prompt tests, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress, not
+  mew-side comparator evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -635,7 +644,9 @@ Missing proof:
 
 - Plan state and path recall: the #323 retry shows one small bootstrap slice,
   but broader durable checklist/path-recall behavior is not yet proven across
-  normal coding tasks.
+  normal coding tasks. `working_memory.target_paths` now exists as a machine-
+  readable surface, but no fresh mew-side task has yet shown that it reduces
+  repeated read/search churn in the normal case.
 - Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
   and prompt-level same-surface self-review are now improved, but there is
   still no broader work-session self-review phase beyond the `src/mew`
@@ -646,8 +657,9 @@ Missing proof:
 - M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
   caveat.
 - Robustness: the successful retries still needed reviewer steering, one
-  read-root permission repair, and in #330 one incorrect line-window guess, so
-  the native loop is not yet self-sufficient.
+  read-root permission repair, in #330 one incorrect line-window guess, and in
+  #331 an exact-old-string reread loop under high context pressure, so the
+  native loop is not yet self-sufficient.
 
 Done when:
 
@@ -687,6 +699,10 @@ Next action:
 - After task #330, keep M6.6 on the mew-side critical path and choose the next
   slice from durable plan/path recall or another normal-case anti-churn proof
   rather than comparator work or more same-surface polish.
+- After task #331 and the direct `target_paths` patch, run a fresh mew-side
+  coding task that should reuse `working_memory.target_paths` to reduce one of
+  repeated file discovery, rereads, or broad search churn before returning to
+  comparator work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

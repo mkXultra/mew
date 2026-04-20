@@ -707,7 +707,7 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
-        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
@@ -790,6 +790,7 @@ def build_work_think_prompt(context):
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "Use work_session.resume.active_memory as durable typed recall about the user, project, feedback, or references; treat it as relevant context, but verify project facts with tools before relying on them for code changes. If active_memory.compacted_for_prompt is true, memory bodies were intentionally omitted; use id/path/name/description as pointers and read only the narrow source you need. "
         "Use work_session.effort as operational pressure. If effort.pressure is high, avoid broad exploration and prefer finish, remember, or ask_user with a concise state summary and a concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
+        "If working_memory.target_paths lists likely files or directories for the next step, prefer those paths before a broader project search and keep that list short and current. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "

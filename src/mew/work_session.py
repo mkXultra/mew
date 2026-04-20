@@ -2033,6 +2033,39 @@ def _coerce_open_questions(value):
     return []
 
 
+def _coerce_working_memory_target_paths(value):
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list):
+        candidates = value
+    else:
+        candidates = []
+    paths = []
+    for item in candidates:
+        path = _working_memory_target_path_text(item)
+        if not path or path in paths:
+            continue
+        paths.append(path)
+        if len(paths) >= 5:
+            break
+    return paths
+
+
+def _turn_action_target_paths(turn):
+    if not turn:
+        return []
+    action = turn.get("action") or {}
+    paths = []
+    for candidate in [action] + list(action.get("tools") or []):
+        path = _working_memory_target_path_text(candidate.get("path"))
+        if not path or path in paths:
+            continue
+        paths.append(path)
+        if len(paths) >= 5:
+            break
+    return paths
+
+
 def _normalize_working_memory(raw, turn=None, verification_state=None, source="model"):
     if not isinstance(raw, dict):
         return {}
@@ -2047,10 +2080,16 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             observed_verified_state or str(raw.get("last_verified_state") or "").strip(),
             600,
         ),
+        "target_paths": _coerce_working_memory_target_paths(raw.get("target_paths") or raw.get("paths") or []),
     }
+    for path in _turn_action_target_paths(turn):
+        if path not in memory["target_paths"]:
+            memory["target_paths"].append(path)
+        if len(memory["target_paths"]) >= 5:
+            break
     if not memory["last_verified_state"]:
         memory["last_verified_state"] = clip_output(format_work_verification_state(verification_state), 600)
-    if not any(memory.get(key) for key in ("hypothesis", "next_step", "open_questions", "last_verified_state")):
+    if not any(memory.get(key) for key in ("hypothesis", "next_step", "open_questions", "last_verified_state", "target_paths")):
         return {}
     if turn:
         memory["model_turn_id"] = turn.get("id")
@@ -2074,6 +2113,22 @@ def _turn_tool_call_ids(turn):
 
 def _normalized_work_path_text(path):
     return str(path or "").strip().replace("\\", "/")
+
+
+def _working_memory_target_path_text(path):
+    normalized = _normalized_work_path_text(path)
+    if not normalized:
+        return ""
+    try:
+        candidate = Path(normalized)
+        if candidate.is_absolute():
+            try:
+                normalized = candidate.relative_to(Path.cwd()).as_posix()
+            except ValueError:
+                normalized = candidate.as_posix()
+    except (OSError, RuntimeError, ValueError):
+        return normalized
+    return normalized
 
 
 def _is_mew_source_path(path):
@@ -2531,6 +2586,10 @@ def _annotate_working_memory_with_latest_tool(memory, turn, calls):
         return memory
     stale_call = _latest_tool_call_after_memory(turn, calls)
     if stale_call:
+        path = _working_memory_target_path_text(work_call_path(stale_call))
+        if path and path not in (memory.get("target_paths") or []):
+            memory.setdefault("target_paths", []).append(path)
+            memory["target_paths"] = memory["target_paths"][:5]
         memory["latest_tool_call_id"] = stale_call.get("id")
         memory["latest_tool_state"] = format_work_tool_observation_state(stale_call)
         memory["stale_after_tool_call_id"] = stale_call.get("id")
@@ -4189,6 +4248,8 @@ def format_work_session_resume(resume):
         if memory.get("next_step"):
             label = "stale_next_step" if stale_memory else "next_step"
             lines.append(f"{label}: {memory.get('next_step')}")
+        if memory.get("target_paths"):
+            lines.append(f"target_paths: {', '.join(str(path) for path in memory.get('target_paths') or [])}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append("open_questions:")
