@@ -195,6 +195,13 @@ Evidence:
   is visible in the readable audit bundle.
 - Validation: the targeted accept-edits work-session tests passed with
   `--no-testmon`.
+- Deterministic dogfood scenario `m5-safety-hooks` now exercises both hook
+  families through real `mew work --live` paths with mocked model output:
+  governance edits are held as pending approval under `accept-edits`, and
+  `git push origin main` is blocked before tool execution and surfaced in the
+  self-improve audit bundle.
+- Validation: `./mew dogfood --scenario m5-safety-hooks --json` passed, and
+  `uv run pytest -q tests/test_dogfood.py --no-testmon` passed.
 
 Missing proof:
 
@@ -204,8 +211,9 @@ Missing proof:
   automatic approval and block known external-visible command side effects
   before execution. Budget exhaustion and ambiguous recovery are not yet fully
   enforced across every execution path.
-- No M5.1 loop has yet exercised both adversarial review and mechanical safety
-  hooks in one readable audit bundle.
+- The new `m5-safety-hooks` scenario exercises mechanical safety hooks with a
+  readable audit bundle, but it does not yet include adversarial verifier review
+  inside the same loop/scenario.
 
 Goal:
 
@@ -227,10 +235,8 @@ Done when:
 
 Next action:
 
-- Use `mew-adversarial-verifier` on the next small self-improvement proposal,
-  then turn the audit-only safety boundary report into explicit
-  block/escalation behavior for governance/policy edits and external-visible
-  side effects.
+- Add the remaining budget-exhaustion / ambiguous-recovery safety evidence, then
+  decide whether M5.1 can close or needs one combined verifier + hooks scenario.
 
 ### M6: Body - Daemon & Persistent Presence
 

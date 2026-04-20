@@ -401,6 +401,22 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("self_improve_status_refresh_command_is_executable", text)
             self.assertIn("self_improve_reused_session_refreshes_reentry_note", text)
 
+    def test_run_dogfood_m5_safety_hooks_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m5-safety-hooks",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["scenarios"][0]["name"], "m5-safety-hooks")
+            self.assertIn("m5_safety_hooks_governance_auto_approval_escalates", text)
+            self.assertIn("m5_safety_hooks_external_side_effect_blocks_before_execution", text)
+
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
