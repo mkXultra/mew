@@ -899,6 +899,14 @@ Evidence:
   paired follow-up patch. Focused continuity pytest, the full unittest,
   `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
   evidence plus product progress, not fresh no-rescue mew-side evidence.
+- A direct supervisor patch then added `adjacent_read_observations` to
+  `src/mew/work_session.py`, rendered that signal in the formatted resume, and
+  taught `build_work_think_prompt()` to use the signal's merged `read_file`
+  suggestion instead of inching through overlapping or near-adjacent
+  same-path windows. Focused pytest, `ruff`, `py_compile`, and `git diff
+  --check` passed. A follow-up rerun task (#350) showed the new signal did
+  change behavior, but that attempted rerun overlapped with the already-landed
+  continuity diff in the working tree, so it does not count as fresh evidence.
 - Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
   Finish the mew-side M6.6 implementation set first, freeze a commit, then run
   the remaining comparator tasks in parallel detached worktrees as gate
@@ -981,7 +989,9 @@ Missing proof:
   multi-file normal-case autonomy, not this prompt-surface search loop. #349
   sharpened that remaining gap: on a broader `work_session.py` slice, mew can
   reach paired edit/verify, but adjacent source rereads before first edit and a
-  same-surface audit follow-up still block no-rescue credit.
+  same-surface audit follow-up still block no-rescue credit. The new
+  `adjacent_read_observations` signal should reduce that reread creep, but it
+  still needs a fresh unsatisfied rerun task to prove it.
 
 Done when:
 
@@ -1033,8 +1043,10 @@ Next action:
   needs exact remembered src/test windows plus one concrete plan_items /
   target_paths / open_questions carry-forward decision before the edit is
   proposed, but avoid the adjacent-window reread creep seen in #349 and require
-  same-surface audit to close natively. Do not return to comparator work until
-  the mew-side implementation set is frozen.
+  same-surface audit to close natively. Choose a fresh task whose premise is
+  not already satisfied by the current worktree, so the next rerun can count as
+  evidence. Do not return to comparator work until the mew-side implementation
+  set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

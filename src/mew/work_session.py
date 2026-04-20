@@ -1937,6 +1937,97 @@ def build_redundant_search_observations(calls, *, limit=3, read_line_count=20):
     return repeated[-limit:]
 
 
+def _read_file_call_line_window(call):
+    if not isinstance(call, dict) or call.get("tool") != "read_file":
+        return None
+    result = call.get("result") or {}
+    parameters = call.get("parameters") or {}
+    start = result.get("line_start")
+    end = result.get("line_end")
+    if start is None:
+        start = parameters.get("line_start")
+    if end is None and start is not None:
+        line_count = result.get("line_count")
+        if line_count is None:
+            line_count = parameters.get("line_count")
+        try:
+            if line_count is not None:
+                end = int(start) + int(line_count) - 1
+        except (TypeError, ValueError):
+            end = None
+    try:
+        if start is not None and end is not None:
+            return (int(start), int(end))
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
+    observations = []
+    cluster = None
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        path = result.get("path") or (call.get("parameters") or {}).get("path") or ""
+        line_window = _read_file_call_line_window(call)
+        if not path or line_window is None:
+            cluster = None
+            continue
+        start, end = line_window
+        if cluster and cluster.get("path") == path and start <= cluster["merged_end"] + gap_lines + 1:
+            cluster["count"] += 1
+            cluster["last_tool_call_id"] = call.get("id")
+            cluster["merged_start"] = min(cluster["merged_start"], start)
+            cluster["merged_end"] = max(cluster["merged_end"], end)
+            continue
+        if cluster and cluster.get("count", 0) >= 2:
+            observations.append(
+                {
+                    "tool": "read_file",
+                    "path": cluster["path"],
+                    "count": cluster["count"],
+                    "first_tool_call_id": cluster["first_tool_call_id"],
+                    "last_tool_call_id": cluster["last_tool_call_id"],
+                    "merged_line_start": cluster["merged_start"],
+                    "merged_line_end": cluster["merged_end"],
+                    "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans",
+                    "suggested_next": (
+                        f"read_file path={cluster['path']} line_start={cluster['merged_start']} "
+                        f"line_count={cluster['merged_end'] - cluster['merged_start'] + 1}"
+                    ),
+                }
+            )
+        cluster = {
+            "path": path,
+            "count": 1,
+            "first_tool_call_id": call.get("id"),
+            "last_tool_call_id": call.get("id"),
+            "merged_start": start,
+            "merged_end": end,
+        }
+    if cluster and cluster.get("count", 0) >= 2:
+        observations.append(
+            {
+                "tool": "read_file",
+                "path": cluster["path"],
+                "count": cluster["count"],
+                "first_tool_call_id": cluster["first_tool_call_id"],
+                "last_tool_call_id": cluster["last_tool_call_id"],
+                "merged_line_start": cluster["merged_start"],
+                "merged_line_end": cluster["merged_end"],
+                "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans",
+                "suggested_next": (
+                    f"read_file path={cluster['path']} line_start={cluster['merged_start']} "
+                    f"line_count={cluster['merged_end'] - cluster['merged_start'] + 1}"
+                ),
+            }
+        )
+    observations.sort(key=lambda item: item.get("last_tool_call_id") or 0)
+    return observations[-limit:]
+
+
 def latest_work_verify_command(calls, task=None):
     command = (task or {}).get("command") or ""
     for call in calls:
@@ -4078,6 +4169,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
+        "adjacent_read_observations": build_adjacent_read_observations(calls, limit=3),
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -4373,6 +4465,22 @@ def format_work_session_resume(resume):
             lines.append(
                 f"- {item.get('tool')}{target}{pattern}{query} repeated with matches "
                 f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}{line_text}"
+            )
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
+    adjacent_reads = resume.get("adjacent_read_observations") or []
+    if adjacent_reads:
+        lines.extend(["", "Adjacent read observations"])
+        for item in adjacent_reads:
+            line_range = (
+                f" lines={item.get('merged_line_start')}-{item.get('merged_line_end')}"
+                if item.get("merged_line_start") and item.get("merged_line_end")
+                else ""
+            )
+            lines.append(
+                f"- {item.get('tool')} {item.get('path')} repeated with adjacent windows "
+                f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}{line_range}"
             )
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")

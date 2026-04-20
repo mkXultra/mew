@@ -3245,6 +3245,64 @@ class WorkSessionTests(unittest.TestCase):
             text,
         )
 
+    def test_work_session_adjacent_read_observations_capture_merge_candidate(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Adjacent reads",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 3208, "line_count": 18},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 3208,
+                        "line_end": 3225,
+                        "text": "window one",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 3200, "line_count": 12},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 3200,
+                        "line_end": 3211,
+                        "text": "window two",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        warning = resume["adjacent_read_observations"][0]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(warning["path"], "src/mew/work_session.py")
+        self.assertEqual(warning["count"], 2)
+        self.assertEqual(warning["merged_line_start"], 3200)
+        self.assertEqual(warning["merged_line_end"], 3225)
+        self.assertEqual(
+            warning["suggested_next"],
+            "read_file path=src/mew/work_session.py line_start=3200 line_count=26",
+        )
+        self.assertIn("Adjacent read observations", text)
+        self.assertIn(
+            "read_file src/mew/work_session.py repeated with adjacent windows 2x; last_tool=#2 lines=3200-3225",
+            text,
+        )
+        self.assertIn(
+            "suggested_next: read_file path=src/mew/work_session.py line_start=3200 line_count=26",
+            text,
+        )
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -13166,6 +13224,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("work_session.resume.redundant_search_observations", prompt)
         self.assertIn("use its suggested_next read_file replacement instead of rerunning search_text again", prompt)
+        self.assertIn("work_session.resume.adjacent_read_observations", prompt)
+        self.assertIn("use its suggested_next merged read instead of inching through more small reads", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)
         self.assertIn("treat continuity.recommendation as the first repair queue", prompt)
         self.assertIn("missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state", prompt)
