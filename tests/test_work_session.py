@@ -2174,6 +2174,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], list(range(2, 10)))
         self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
         self.assertIn("hidden src/mew source edit", schema["reply_template"]["actions"][0]["text"])
+        self.assertFalse(any(action["type"] == "approve_all" for action in schema["supported_actions"]))
 
     def test_work_reply_template_steers_when_governance_blocks_approve_all(self):
         tool_calls = [
@@ -2218,6 +2219,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("governance/policy", schema["reply_template"]["actions"][0]["text"])
         self.assertIn("explicit per-tool approval", schema["reply_template"]["actions"][0]["text"])
         self.assertNotIn("allow_unpaired_source_edit", schema["reply_template"]["actions"][0]["text"])
+        self.assertFalse(any(action["type"] == "approve_all" for action in schema["supported_actions"]))
 
     def test_cockpit_controls_do_not_primary_approve_unpaired_source_edit(self):
         session = {

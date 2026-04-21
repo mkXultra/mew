@@ -64,8 +64,8 @@ Reasoning:
   same-surface audit are incomplete, and it closed only after focused plus
   paired-source verification and a narrow commands.py same-surface audit.
 - M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 still lacks dedicated scope-fence hardening and the
-  supervised 8-hour proof.
+  ahead while M6.7 still lacks a fresh no-rescue iteration proving the now-
+  landed scope-fence path and the supervised 8-hour proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
@@ -84,8 +84,8 @@ Current next action:
 4. Run the third M6.7 bounded roadmap task under the same shape: drift canary
    first, dry-run reviewable diff, reviewer decision, then focused plus
    broader verification before finish.
-5. Use that third task to harden dedicated scope-fence enforcement beyond the
-   current visible fence.
+5. Use that third task to prove the now-landed dedicated scope-fence
+   enforcement end to end, not to invent more fence variants.
 6. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
@@ -1403,12 +1403,34 @@ Evidence:
   `ruff`, `py_compile`, and `git diff --check` all passed in the same update
   session. This is product progress, not a no-rescue supervised-iteration
   proof.
+- Task `#368` / session `#356` then targeted the last contextual reply
+  secondary-surface gap in the same fence family: `build_work_reply_schema()`
+  still advertised the generic `approve_all` action in
+  `schema["supported_actions"]` even when hidden-unpaired-source or
+  governance/policy blockers meant the reviewer should steer or approve
+  per-tool instead. The native run anchored the correct
+  `_work_reply_supported_actions()` / `build_work_reply_schema()` source
+  surfaces and the reply-template regressions, but again spent its bounded
+  steps in planning without surfacing a reviewable dry-run diff. The product
+  patch then landed directly in `src/mew/commands.py` and
+  `tests/test_work_session.py`: `build_work_reply_schema(session, resume=...)`
+  now passes `resume` into `_work_reply_supported_actions()`, and the generic
+  `approve_all` action is omitted from `schema["supported_actions"]` whenever
+  `approve_all_blocked_reason` is present. The hidden-unpaired-source and
+  governance reply-template regressions now assert that omission directly.
+  Focused named pytest coverage, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
 
 Missing proof:
 
-- Dedicated scope-fence enforcement now exists in product behavior, but there
-  is still no fresh bounded no-rescue supervised iteration that lands and
-  verifies the scope-fence slice end to end without supervisor rescue.
+- Dedicated scope-fence enforcement now exists in product behavior across
+  CLI/runtime `approve-all`, reply-file actions, and reply-schema
+  `supported_actions`, but there is still no fresh bounded no-rescue
+  supervised iteration that lands and verifies the fence slice end to end
+  without supervisor rescue.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.

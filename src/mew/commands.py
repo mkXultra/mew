@@ -6120,8 +6120,8 @@ def _active_work_sessions_for_reply(state):
     return sessions
 
 
-def _work_reply_supported_actions():
-    return [
+def _work_reply_supported_actions(resume=None):
+    actions = [
         {
             "type": "steer",
             "description": "queue one-shot guidance for the next live/follow step",
@@ -6150,13 +6150,17 @@ def _work_reply_supported_actions():
             "required": ["tool_call_id"],
             "optional": ["allow_write", "allow_unpaired_source_edit", "defer_verify"],
         },
-        {
-            "type": "approve_all",
-            "description": "approve and apply all pending dry-run write_file/edit_file/edit_file_hunks tool calls",
-            "required": [],
-            "optional": ["allow_write", "allow_unpaired_source_edit"],
-        },
     ]
+    if not (resume or {}).get("approve_all_blocked_reason"):
+        actions.append(
+            {
+                "type": "approve_all",
+                "description": "approve and apply all pending dry-run write_file/edit_file/edit_file_hunks tool calls",
+                "required": [],
+                "optional": ["allow_write", "allow_unpaired_source_edit"],
+            }
+        )
+    return actions
 
 
 def _work_reply_template(session=None, resume=None):
@@ -6253,7 +6257,7 @@ def build_work_reply_schema(session=None, resume=None):
         "observed_session_updated_at": observed,
         "submit_ready": submit_ready,
         "schema_only": not submit_ready,
-        "supported_actions": _work_reply_supported_actions(),
+        "supported_actions": _work_reply_supported_actions(resume=resume),
         "reply_template": _work_reply_template(session, resume=resume),
     }
 
