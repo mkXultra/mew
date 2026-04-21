@@ -92,10 +92,13 @@ Reasoning:
   the only remaining M6.7 criterion is elapsed wall-clock time. Under this
   override, mainline may start real M6.9 D1 implementation while milestone
   honesty is preserved by the detached frozen close-watch copy.
-- The first real M6.9 D1 slice is now in progress on mainline: optional
-  project-only `memory_kind` support in typed memory, with `reasoning-trace`
-  still rejected as schema-only and no changes yet to recall ranking, write
-  gates, symbol index, reviewer diff capture, or veto behavior.
+- Bounded M6.9 Phase 1 work is now underway on mainline: D1 typed
+  `memory_kind`, D7 list/show inventory, D6 reviewer veto stub, D2 write
+  gates for reviewer-steering/task-template/failure-shield/file-pair, D3
+  bounded file-pair revise(), and D4 minimum file-pair durable index are all
+  landed; `reasoning-trace` remains schema-only and later recall-time
+  observability, reviewer-diff capture, and broader retrieval changes remain
+  deferred.
 - M7 signal registry foundation exists, but deeper signal work should not move
   ahead while M6.7 still lacks the supervised hybrid close-gate proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
@@ -128,13 +131,14 @@ Current next action:
    satisfied and are preserved in the detached frozen close-watch copy.
 8. Keep the frozen close-watch copy immutable except for reviewer-owned proof
    artifacts and close-out notes. Do not run new implementation work there.
-9. Mainline implementation may now move to **M6.9 D1** while M6.7 remains
+9. Mainline implementation may now move through bounded **M6.9 Phase 1**
+   slices while M6.7 remains
    `gate_pending`, because the user explicitly approved the split and the proof
    window was frozen before M6.9 code started.
-10. Treat the current M6.9 implementation target as **D1 taxonomy scaffolding
-   only**: optional project-only `memory_kind` support in
-   `typed_memory.py` / `memory.py` / `commands.py` / `cli.py`, with
-   `reasoning-trace` still schema-only until Phase 2.
+10. Treat the current M6.9 implementation target as bounded **Phase 1**
+   substrate only: D1/D7/D6/D2/D3/D4 are landed, `reasoning-trace` stays
+   schema-only until Phase 2, and the next separate slice is D5
+   reviewer-diff capture rather than broader recall-time rewrites.
 11. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
@@ -1835,14 +1839,19 @@ Missing proof:
   source/test paths are missing with `drop_reason=precondition_miss`, and
   surfaces those drops in `active_memory.dropped_items`; focused
   `tests/test_memory.py` coverage now exercises both kept and dropped paths
+- D4 minimum symbol/pair index is landed: new `src/mew/symbol_index.py`
+  rebuilds `.mew/durable/symbol_index.json` from typed-memory `file-pair`
+  entries only, writes `schema_version=1` atomically, and resolves a
+  `source_path` back to its paired `test_path` and `memory_ids`; focused
+  `tests/test_symbol_index.py` covers rebuild/save/resolve on a known pair
 - no comparator rerun exists yet for the post-split M6.9 slices
-- D4 minimum symbol/pair index and later observability remain unstarted
+- D5 reviewer-diff capture and later observability remain unstarted
 
 Next action:
 
-- keep D3 complete at the current bounded file-pair shape and take D4 minimum
-  symbol/pair index as the next separate Phase 1 slice
-- keep later observability and broader recall-time rewrites split out until D4
+- keep D4 complete at the current bounded file-pair shape and take D5
+  reviewer-diff capture as the next separate Phase 1 slice
+- keep later observability and broader recall-time rewrites split out until D5
   is landed and verified on its own
 
 ### M6.10: Execution Accelerators
