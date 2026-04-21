@@ -22,7 +22,7 @@ M5 was archived losslessly in
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves to M6.9 D1. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has started D1 typed-memory scaffolding; the first landed slice adds optional project-only `memory_kind` support for `mew memory --add/--search`. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, and D6 Phase 1 slices: typed `memory_kind`, read-only list/show by id, and a reviewer-owned veto stub. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -1815,13 +1815,17 @@ Missing proof:
 - D7 first slice is landed: `mew memory --list` and `mew memory --show <id>`
   now expose typed-memory inventory/read-only detail with stable JSON and human
   output
-- no D6 reviewer-veto surface exists yet
+- D6 first slice is landed: `mew memory --veto <id> --reason ...` appends a
+  standalone JSONL veto log, default list output suppresses vetoed entries, and
+  `mew memory --show <id>` surfaces veto status/reason while leaving the
+  original memory file unchanged
 - no comparator rerun exists yet for the post-split M6.9 slices
+- D2/D3 recall/write-gate work and later observability remain unstarted
 
 Next action:
 
 - continue with the next bounded Phase 1 slice only after reaffirming the
-  current D1/D7 landings and keeping later D2/D3/D6 work split into separate
+  current D1/D7/D6 landings and keeping later D2/D3 work split into separate
   proofable increments
 
 ### M7: Senses - Inbound Signals

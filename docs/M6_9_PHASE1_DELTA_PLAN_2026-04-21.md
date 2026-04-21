@@ -2,7 +2,8 @@
 
 Date: 2026-04-21  
 Status: active under split execution. M6.7 remains gate-pending in a frozen
-close-watch copy while mainline may land bounded D1/D7 slices from this plan.
+close-watch copy while mainline may land bounded D1/D7/D6 slices from this
+plan.
 
 ## Purpose
 

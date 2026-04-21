@@ -21,6 +21,7 @@ CODING_MEMORY_KINDS = (
 )
 FRONTMATTER_DELIMITER = "+++"
 MAX_DESCRIPTION_CHARS = 240
+VETO_LOG_FILENAME = "vetoes.jsonl"
 
 
 @dataclass(frozen=True)
@@ -91,16 +92,83 @@ class FileMemoryBackend:
                 entries.append(entry)
         return entries
 
+    def _veto_log_path(self) -> Path:
+        return self.base_dir / STATE_DIR / "durable" / VETO_LOG_FILENAME
+
+    def veto_log_entries(self) -> list[dict[str, str]]:
+        path = self._veto_log_path()
+        if not path.exists():
+            return []
+        entries: list[dict[str, str]] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            entry_id = normalize_text(payload.get("entry_id"))
+            reason = normalize_text(payload.get("reason"))
+            created_at = normalize_text(payload.get("created_at"))
+            if not entry_id or not reason:
+                continue
+            entries.append(
+                {
+                    "entry_id": entry_id,
+                    "reason": reason,
+                    "created_at": created_at,
+                }
+            )
+        return entries
+
+    def latest_vetoes(self) -> dict[str, dict[str, str]]:
+        latest: dict[str, dict[str, str]] = {}
+        for payload in self.veto_log_entries():
+            latest[payload["entry_id"]] = payload
+        return latest
+
+    def veto(
+        self,
+        entry_id: str,
+        *,
+        reason: str,
+    ) -> dict[str, str]:
+        entry = self.get(entry_id, include_vetoed=True)
+        if not entry:
+            raise ValueError(f"typed memory not found: {entry_id}")
+        reason = normalize_text(reason)
+        if not reason:
+            raise ValueError("veto reason must not be empty")
+        payload = {
+            "entry_id": entry.id,
+            "reason": reason,
+            "created_at": now_iso(),
+        }
+        path = self._veto_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        return payload
+
     def filtered_entries(
         self,
         *,
         scope: str | None = None,
         memory_type: str | None = None,
         memory_kind: str | None = None,
+        include_vetoed: bool = False,
     ) -> list[MemoryEntry]:
         scope = normalize_scope(scope) if scope else None
         memory_type = normalize_memory_type(memory_type) if memory_type else None
         memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type) if memory_kind else None
+        vetoes = {} if include_vetoed else self.latest_vetoes()
         entries = []
         for entry in self.entries():
             if scope and entry.scope != scope:
@@ -108,6 +176,8 @@ class FileMemoryBackend:
             if memory_type and entry.memory_type != memory_type:
                 continue
             if memory_kind and entry.memory_kind != memory_kind:
+                continue
+            if not include_vetoed and entry.id in vetoes:
                 continue
             entries.append(entry)
         entries.sort(key=lambda item: ((item.created_at or ""), item.id), reverse=True)
@@ -120,11 +190,17 @@ class FileMemoryBackend:
         scope: str | None = None,
         memory_type: str | None = None,
         memory_kind: str | None = None,
+        include_vetoed: bool = False,
     ) -> MemoryEntry | None:
         wanted = normalize_text(entry_id)
         if not wanted:
             return None
-        for entry in self.filtered_entries(scope=scope, memory_type=memory_type, memory_kind=memory_kind):
+        for entry in self.filtered_entries(
+            scope=scope,
+            memory_type=memory_type,
+            memory_kind=memory_kind,
+            include_vetoed=include_vetoed,
+        ):
             if entry.id == wanted:
                 return entry
         return None
@@ -329,7 +405,7 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
     return bool(terms) and all(term in haystack for term in terms)
 
 
-def entry_to_dict(entry: MemoryEntry) -> dict[str, Any]:
+def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> dict[str, Any]:
     data = {
         "id": entry.id,
         "scope": entry.scope,
@@ -343,7 +419,12 @@ def entry_to_dict(entry: MemoryEntry) -> dict[str, Any]:
         "text": entry.body,
         "created_at": entry.created_at,
         "storage": "file",
+        "vetoed": bool(veto),
     }
     if entry.path:
         data["path"] = str(entry.path)
+    if veto:
+        data["veto"] = dict(veto)
+        data["veto_reason"] = veto.get("reason") or ""
+        data["vetoed_at"] = veto.get("created_at") or ""
     return data

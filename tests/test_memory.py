@@ -386,6 +386,81 @@ class MemoryTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_memory_veto_hides_entry_from_list_and_surfaces_reason_in_show(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Remember this bad durable note just long enough to veto it.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "failure-shield",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Bad durable note",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--list", "--type", "project", "--json"]), 0)
+                entry = json.loads(stdout.getvalue())["entries"][0]
+                entry_path = Path(entry["path"])
+                before_text = entry_path.read_text(encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--veto",
+                                entry["id"],
+                                "--reason",
+                                "reviewer rejected this stale note",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                veto_data = json.loads(stdout.getvalue())
+                self.assertEqual(veto_data["veto"]["entry_id"], entry["id"])
+                self.assertEqual(veto_data["veto"]["reason"], "reviewer rejected this stale note")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--list", "--type", "project", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["entries"], [])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--show", entry["id"], "--json"]), 0)
+                show_data = json.loads(stdout.getvalue())
+                self.assertTrue(show_data["entry"]["vetoed"])
+                self.assertEqual(show_data["entry"]["veto_reason"], "reviewer rejected this stale note")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--show", entry["id"]]), 0)
+                text = stdout.getvalue()
+                self.assertIn("vetoed: yes", text)
+                self.assertIn("veto_reason: reviewer rejected this stale note", text)
+
+                self.assertEqual(entry_path.read_text(encoding="utf-8"), before_text)
+
+                veto_log = Path(".mew/durable/vetoes.jsonl")
+                self.assertTrue(veto_log.exists())
+                payload = json.loads(veto_log.read_text(encoding="utf-8").strip().splitlines()[-1])
+                self.assertEqual(payload["entry_id"], entry["id"])
+                self.assertEqual(payload["reason"], "reviewer rejected this stale note")
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_memory_add_rejects_reasoning_trace_direct_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

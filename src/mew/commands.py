@@ -11398,6 +11398,10 @@ def _format_memory_entry_show(item):
         f"description: {item.get('description') or ''}",
         f"created_at: {item.get('created_at') or ''}",
     ]
+    if item.get("vetoed"):
+        lines.append("vetoed: yes")
+        lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
+        lines.append(f"vetoed_at: {item.get('vetoed_at') or ''}")
     if item.get("path"):
         lines.append(f"path: {item.get('path')}")
     lines.extend(["", item.get("text") or ""])
@@ -11406,9 +11410,9 @@ def _format_memory_entry_show(item):
 
 def cmd_memory(args):
     if args.active:
-        if args.add or args.search or args.compact or args.list or args.show:
+        if args.add or args.search or args.compact or args.list or args.show or args.veto:
             print(
-                "mew: --active cannot be combined with --add, --search, --compact, --list, or --show",
+                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, or --veto",
                 file=sys.stderr,
             )
             return 1
@@ -11435,33 +11439,43 @@ def cmd_memory(args):
         print(format_active_memory(active_memory, task=task, session=session))
         return 0
 
-    if args.list or args.show:
+    if args.list or args.show or args.veto:
         if args.add or args.search or args.compact:
-            print("mew: --list/--show cannot be combined with --add, --search, or --compact", file=sys.stderr)
+            print("mew: --list/--show/--veto cannot be combined with --add, --search, or --compact", file=sys.stderr)
             return 1
-        if args.list and args.show:
-            print("mew: choose only one of --list or --show", file=sys.stderr)
+        chosen = [flag for flag in (args.list, bool(args.show), bool(args.veto)) if flag]
+        if len(chosen) > 1:
+            print("mew: choose only one of --list, --show, or --veto", file=sys.stderr)
             return 1
         try:
             backend = FileMemoryBackend(".")
+            vetoes = backend.latest_vetoes()
+            if args.veto:
+                payload = backend.veto(args.veto, reason=args.reason or "")
+                if args.json:
+                    print(json.dumps({"veto": payload}, ensure_ascii=False, indent=2))
+                else:
+                    print(f"vetoed {payload['entry_id']}: {payload['reason']}")
+                return 0
             if args.show:
                 entry = backend.get(
                     args.show,
                     scope=args.scope,
                     memory_type=args.memory_type,
                     memory_kind=args.memory_kind,
+                    include_vetoed=True,
                 )
                 if not entry:
                     print(f"mew: typed memory not found: {args.show}", file=sys.stderr)
                     return 1
-                data = entry_to_dict(entry)
+                data = entry_to_dict(entry, veto=vetoes.get(entry.id))
                 if args.json:
                     print(json.dumps({"entry": data}, ensure_ascii=False, indent=2))
                 else:
                     print(_format_memory_entry_show(data))
                 return 0
             entries = [
-                entry_to_dict(entry)
+                entry_to_dict(entry, veto=vetoes.get(entry.id))
                 for entry in backend.filtered_entries(
                     scope=args.scope,
                     memory_type=args.memory_type,
