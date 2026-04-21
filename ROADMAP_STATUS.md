@@ -1081,6 +1081,24 @@ Missing proof:
   tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
   passed. This is product progress aimed at the #356 repair-loop/test-anchor
   blocker, not yet fresh no-rescue evidence.
+- M6.6 task #357 / session #345 then turned that landed
+  `repair_anchor_observations` surface into fresh no-steer mew-side evidence.
+  Native mew reused the cached repair anchors to recover the exact
+  `src/mew/commands.py` and `tests/test_work_session.py` windows, proposed a
+  paired dry-run src/test batch, auto-applied it, passed
+  `uv run python -m unittest tests.test_work_session`, then chose and passed
+  the broader inferred verifier `uv run python -m unittest tests.test_commands`
+  before finish. The same session completed the required same-surface audit in
+  `src/mew/commands.py` and closed with `rescue_edits=0`. The landed patch now
+  makes `work --follow-status` prefer the first resume
+  `repair_anchor_observations` entry for dead/stale snapshots and emit
+  `recovery_path`, `recovery_line_start`, and `recovery_line_count` in text
+  output while preserving the no-anchor `inspect_resume` fallback. This is
+  implementation evidence for the frozen M6.6 set, not an extra comparator
+  slot. The remaining M6.6 missing proof is no longer repair-anchor reuse
+  after failure recovery; it stays broader multi-file normal-case autonomy and
+  durable plan/path recall on slices that need the right paired surfaces from
+  the start.
 
 Done when:
 
@@ -1140,10 +1158,12 @@ Next action:
   paired dry-run/apply attempt, but repeated test-anchor drift on
   `tests/test_work_session.py` forced supervisor takeover before the final
   passing patch was landed.
-- Carry the landed `repair_anchor_observations` resume/prompt patch as product
-  progress, but do not count it as no-rescue evidence until a fresh native M6.6
-  run proves that mew can reuse those repair anchors to return to the correct
-  paired source/test surfaces after a failed apply/verify turn.
+- Record task #357 / session #345 as fresh mew-side repair-anchor recovery
+  evidence for the frozen M6.6 set: native mew reused
+  `repair_anchor_observations` to return to the correct paired source/test
+  surfaces, landed the `work --follow-status` recovery patch, passed both
+  `tests.test_work_session` and the inferred broader verifier
+  `tests.test_commands`, and closed same-surface audit with `rescue_edits=0`.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native no-steer proof task on a broader multi-file coding slice, ideally one
   that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a

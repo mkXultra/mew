@@ -19701,6 +19701,61 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_status_dead_snapshot_prefers_repair_anchor_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "task_id": 7,
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "producer": {"pid": 999999},
+                            "resume": {
+                                "repair_anchor_observations": [
+                                    {
+                                        "action": "read_file",
+                                        "parameters": {
+                                            "path": "tests/test_work_session.py",
+                                            "line_start": 30,
+                                            "line_count": 6,
+                                        },
+                                        "reason": "failed mew source edit likely still needs its paired tests surface",
+                                    }
+                                ]
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "dead")
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
+                self.assertEqual(data["suggested_recovery"]["path"], "tests/test_work_session.py")
+                self.assertEqual(data["suggested_recovery"]["line_start"], 30)
+                self.assertEqual(data["suggested_recovery"]["line_count"], 6)
+                self.assertIn("--auto-recover-safe", data["suggested_recovery"]["command"])
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("recovery: inspect_resume", text)
+                self.assertIn("recovery_path: tests/test_work_session.py", text)
+                self.assertIn("recovery_line_start: 30", text)
+                self.assertIn("recovery_line_count: 6", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_status_marks_stopped_snapshot_completed_when_pid_missing(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

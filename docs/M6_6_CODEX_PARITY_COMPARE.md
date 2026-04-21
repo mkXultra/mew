@@ -433,3 +433,19 @@ feature now carries `working_memory.last_verified_state` through
 `recent_decisions` and renders that field in the Recent decisions block. This
 is implementation evidence for the frozen M6.6 set, not an extra comparator
 slot.
+
+After the direct `repair_anchor_observations` resume/prompt patch, task #357 /
+session #345 added fresh mew-side implementation evidence for repair-aware
+follow-status recovery. Mew reused the landed repair anchors to recover the
+exact `src/mew/commands.py` and `tests/test_work_session.py` windows, proposed
+and auto-applied a paired dry-run src/test batch, passed
+`uv run python -m unittest tests.test_work_session`, then chose and passed the
+broader inferred verifier `uv run python -m unittest tests.test_commands`
+before finish. The same session completed the required same-surface audit in
+`src/mew/commands.py` and finished with `rescue_edits=0`. The landed feature
+now makes `work --follow-status` prefer the first resume
+`repair_anchor_observations` entry for dead/stale snapshots and emit
+`recovery_path`, `recovery_line_start`, and `recovery_line_count` in text
+output while preserving the generic no-anchor `inspect_resume` fallback. This
+is implementation evidence for the frozen M6.6 set, not an extra comparator
+slot.

@@ -6272,8 +6272,9 @@ def _work_follow_status_inspect_command(task_id, session=None):
 def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=None, session=None):
     snapshot_data = snapshot_data or {}
     task_id = snapshot_data.get("task_id") or task_id or (session or {}).get("task_id")
+    resume = snapshot_data.get("resume") or {}
     planned = work_recovery_suggestion_from_plan(
-        ((snapshot_data.get("resume") or {}).get("recovery_plan") or {}),
+        (resume.get("recovery_plan") or {}),
         task_id=task_id,
     )
     if planned:
@@ -6291,6 +6292,26 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
             "reason": "write a fresh observer snapshot before replying",
         }
     if status in ("dead", "stale"):
+        selected_anchor = next(
+            (
+                anchor
+                for anchor in (resume.get("repair_anchor_observations") or [])
+                if isinstance(anchor, dict)
+                and isinstance(anchor.get("parameters"), dict)
+                and anchor["parameters"].get("path")
+            ),
+            None,
+        )
+        if selected_anchor is not None:
+            parameters = selected_anchor.get("parameters") or {}
+            return {
+                "kind": "inspect_resume",
+                "command": _work_follow_status_inspect_command(task_id, session=session),
+                "reason": "producer is not active; start recovery from the selected repair anchor before broader inspection",
+                "path": parameters.get("path"),
+                "line_start": parameters.get("line_start"),
+                "line_count": parameters.get("line_count"),
+            }
         return {
             "kind": "inspect_resume",
             "command": _work_follow_status_inspect_command(task_id, session=session),
@@ -6470,6 +6491,12 @@ def format_work_follow_status(data):
         lines.append(f"recovery: {recovery.get('kind') or '-'}")
         if recovery.get("command"):
             lines.append(f"recovery_command: {recovery.get('command')}")
+        if recovery.get("path"):
+            lines.append(f"recovery_path: {recovery.get('path')}")
+        if recovery.get("line_start") is not None:
+            lines.append(f"recovery_line_start: {recovery.get('line_start')}")
+        if recovery.get("line_count") is not None:
+            lines.append(f"recovery_line_count: {recovery.get('line_count')}")
     coverage_warning = data.get("verification_coverage_warning") or {}
     if coverage_warning:
         lines.append(_format_verification_coverage_warning_inline(coverage_warning))
