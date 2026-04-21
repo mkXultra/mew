@@ -6810,6 +6810,10 @@ class WorkSessionTests(unittest.TestCase):
                 resume = json.loads(stdout.getvalue())["resume"]
                 self.assertEqual(resume["phase"], "stop_requested")
                 self.assertEqual(resume["stop_request"]["reason"], "pause after this boundary")
+                self.assertEqual(
+                    resume["next_action"],
+                    "work session is paused; resume only when needed with mew work 1 --session --resume --allow-read .",
+                )
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)

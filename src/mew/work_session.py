@@ -4463,7 +4463,14 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     live_command = work_session_runtime_command(session, None)
                 next_action = f"continue to submit pending interrupt with /continue in chat or {live_command}"
         else:
-            next_action = "stop requested; the running work loop should pause at the next boundary"
+            if work_session_has_running_activity(session):
+                next_action = "stop requested; the running work loop should pause at the next boundary"
+            else:
+                if task_id:
+                    resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+                else:
+                    resume_command = mew_command("work", "--session", "--resume", "--allow-read", ".")
+                next_action = f"work session is paused; resume only when needed with {resume_command}"
     elif pending_approvals:
         next_action = "approve or reject pending write tool calls"
     elif phase == "running_tool":
