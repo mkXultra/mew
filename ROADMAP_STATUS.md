@@ -1511,6 +1511,22 @@ Evidence:
   `tests/test_work_session.py`. Count this as strong supervised-loop evidence
   plus product progress, but not yet as the clean post-fix milestone-closing
   proof because the live-verifier runtime changed mid-iteration.
+- Task `#373` / session `#361` then tried to turn the now-saved M6.7 context
+  checkpoint into a better coding reentry fallback for `mew focus` /
+  `mew brief`: prefer `./mew context --load --limit 1` over native
+  self-improve only while the user is actively waiting for agent work. The
+  bounded source/test intent was sound, but the run needed multiple reviewer
+  steers and eventually a direct reviewer takeover after verification noise, so
+  it does not count as supervised-loop proof. The landed direct patch stays
+  inside the same scope: `src/mew/brief.py` now prefers checkpoint recovery
+  only when `user_status.mode == waiting_for_agent` and the latest checkpoint
+  `created_at` is same-day, while `tests/test_brief.py` now covers both the
+  waiting/current-checkpoint path and the stale-checkpoint fallback, and fixes
+  brittle self-improve/continuity expectations so the suite is deterministic
+  again. Focused `uv run pytest -q tests/test_brief.py -k "next_move or focus
+  or brief" --no-testmon`, broader `uv run python -m unittest tests.test_brief`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. This is product
+  progress, not a fresh no-rescue supervised-iteration proof.
 
 Missing proof:
 

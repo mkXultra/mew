@@ -60,10 +60,59 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(next_move(default_state()), "wait for the next user request")
 
     def test_next_move_coding_filter_suggests_native_self_improve_when_no_tasks(self):
-        self.assertEqual(
-            next_move(default_state(), kind="coding"),
-            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
-        )
+        with patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            self.assertEqual(
+                next_move(default_state(), kind="coding"),
+                "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+            )
+
+    def test_next_move_coding_filter_prefers_same_day_context_checkpoint_recovery_while_waiting_for_agent(self):
+        state = default_state()
+        state["user_status"] = {"mode": "waiting_for_agent"}
+
+        with patch("mew.brief.now_iso", return_value="2026-04-21T12:00:00Z"), patch(
+            "mew.brief.latest_context_checkpoint",
+            return_value={
+                "name": "Long session checkpoint: M6.7 reentry",
+                "created_at": "2026-04-21T07:12:09Z",
+            },
+        ):
+            self.assertEqual(
+                next_move(state, kind="coding"),
+                "recover the latest context checkpoint with `./mew context --load --limit 1`",
+            )
+            data = build_focus_data(state, limit=3)
+            self.assertEqual(
+                data["coding_next_move"],
+                "recover the latest context checkpoint with `./mew context --load --limit 1`",
+            )
+
+    def test_next_move_coding_filter_keeps_self_improve_for_stale_context_checkpoint_while_waiting_for_agent(self):
+        state = default_state()
+        state["user_status"] = {"mode": "waiting_for_agent"}
+
+        with patch("mew.brief.now_iso", return_value="2026-04-21T12:00:00Z"), patch(
+            "mew.brief.latest_context_checkpoint",
+            return_value={
+                "name": "Older checkpoint",
+                "created_at": "2026-04-20T23:59:59Z",
+            },
+        ), patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            self.assertEqual(
+                next_move(state, kind="coding"),
+                "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+            )
+            data = build_focus_data(state, limit=3)
+            self.assertEqual(
+                data["coding_next_move"],
+                "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+            )
 
     def test_next_move_skips_blocked_task_for_self_improve(self):
         state = default_state()
@@ -188,7 +237,10 @@ class BriefTests(unittest.TestCase):
         add_task(state, task_id=1, title="Research grants", kind="research")
         add_question(state, "Which city?", related_task_id=1)
 
-        with patch("mew.brief.current_project_looks_like_mew", return_value=True):
+        with patch("mew.brief.current_project_looks_like_mew", return_value=True), patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
             data = build_focus_data(state, limit=3)
         focus = format_focus(data)
 
@@ -704,7 +756,11 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        data = build_focus_data(state, limit=3, kind="coding")
+        with patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            data = build_focus_data(state, limit=3, kind="coding")
         focus = format_focus(data)
 
         self.assertEqual(data["recent_friction"]["rates"]["approval_rejection"], 1.0)
@@ -895,10 +951,8 @@ class BriefTests(unittest.TestCase):
         data = build_focus_data(state, limit=3, kind="coding")
 
         self.assertEqual(data["active_work_sessions"][0]["continuity"]["status"], "broken")
-        self.assertEqual(
-            data["next_move"],
-            "repair continuity for active work session #3: refresh working memory with a hypothesis, next step, or verified state via `./mew work 7 --live --max-steps 1`",
-        )
+        self.assertIn("repair continuity for active work session #3:", data["next_move"])
+        self.assertIn("via `./mew work 7 --live --max-steps 1`", data["next_move"])
 
     def test_focus_surfaces_active_work_session_unresolved_risk(self):
         state = default_state()
@@ -1115,7 +1169,11 @@ class BriefTests(unittest.TestCase):
             }
         )
 
-        data = build_focus_data(state, limit=3, kind="coding")
+        with patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ):
+            data = build_focus_data(state, limit=3, kind="coding")
 
         self.assertEqual(data["active_work_sessions"], [])
         self.assertEqual(

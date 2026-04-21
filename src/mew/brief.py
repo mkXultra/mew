@@ -1292,6 +1292,16 @@ def next_move(state, kind=None):
                 "add a coding task with "
                 f"`{mew_command('task', 'add', '...', '--kind', 'coding', '--ready')}`"
             )
+        checkpoint = latest_context_checkpoint() or {}
+        user_status = state.get("user_status") or {}
+        if (
+            user_status.get("mode") == "waiting_for_agent"
+            and str(checkpoint.get("created_at") or "")[:10] == now_iso()[:10]
+        ):
+            return (
+                "recover the latest context checkpoint with "
+                f"`{mew_command('context', '--load', '--limit', '1')}`"
+            )
         focus = coding_self_improve_focus_from_friction(state, kind=kind)
         return (
             "start a native self-improvement session with "
