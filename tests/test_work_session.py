@@ -5626,7 +5626,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("\n... output truncated ...", model_guidance)
 
     def test_work_session_resume_surfaces_working_memory(self):
-        from mew.work_loop import build_work_model_context
+        from mew.work_loop import build_work_model_context, build_work_think_prompt
         from mew.work_session import (
             build_work_session_resume,
             finish_work_model_turn,
@@ -5658,6 +5658,40 @@ class WorkSessionTests(unittest.TestCase):
                     "line_start": 120,
                     "line_end": 143,
                     "next_line": 144,
+                    "context_truncated": False,
+                    "source_truncated": False,
+                    "truncated": False,
+                },
+            }
+        )
+        session["tool_calls"].append(
+            {
+                "id": 2,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "src/mew/workbench.py", "line_start": 144, "line_count": 17},
+                "result": {
+                    "path": "src/mew/workbench.py",
+                    "line_start": 144,
+                    "line_end": 160,
+                    "next_line": 161,
+                    "context_truncated": False,
+                    "source_truncated": False,
+                    "truncated": False,
+                },
+            }
+        )
+        session["tool_calls"].append(
+            {
+                "id": 3,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {"path": "tests/test_workbench.py", "line_start": 32, "line_count": 12},
+                "result": {
+                    "path": "tests/test_workbench.py",
+                    "line_start": 32,
+                    "line_end": 43,
+                    "next_line": 44,
                     "context_truncated": False,
                     "source_truncated": False,
                     "truncated": False,
@@ -5730,12 +5764,46 @@ class WorkSessionTests(unittest.TestCase):
                     "plan_item": "Capture the failing approval transcript.",
                     "target_path": "src/mew/workbench.py",
                     "cached_window": {
-                        "tool_call_id": 1,
-                        "line_start": 120,
-                        "line_end": 143,
+                        "tool_call_id": 2,
+                        "line_start": 144,
+                        "line_end": 160,
                         "context_truncated": False,
                     },
-                    "reason": "first remaining plan item paired to target path src/mew/workbench.py and its recent cached window",
+                    "cached_windows": [
+                        {
+                            "path": "src/mew/workbench.py",
+                            "tool_call_id": 2,
+                            "line_start": 144,
+                            "line_end": 160,
+                            "context_truncated": False,
+                        },
+                        {
+                            "path": "tests/test_workbench.py",
+                            "tool_call_id": 3,
+                            "line_start": 32,
+                            "line_end": 43,
+                            "context_truncated": False,
+                        },
+                    ],
+                    "edit_ready": True,
+                    "reason": "first remaining plan item is paired to fully cached target paths and is ready for one edit batch",
+                }
+            ],
+        )
+        self.assertEqual(resume["adjacent_read_observations"], [])
+        self.assertEqual(
+            resume["demoted_adjacent_read_observations"],
+            [
+                {
+                    "tool": "read_file",
+                    "path": "src/mew/workbench.py",
+                    "count": 2,
+                    "first_tool_call_id": 1,
+                    "last_tool_call_id": 2,
+                    "merged_line_start": 120,
+                    "merged_line_end": 160,
+                    "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans edit_ready is true for this paired target path, so the reread signal is demoted behind the pending edit batch",
+                    "suggested_next": "read_file path=src/mew/workbench.py line_start=120 line_count=41",
                 }
             ],
         )
@@ -5784,12 +5852,20 @@ class WorkSessionTests(unittest.TestCase):
             [
                 {
                     "path": "src/mew/workbench.py",
-                    "tool_call_id": 1,
-                    "line_start": 120,
-                    "line_end": 143,
-                    "reason": "recent read_file window already covered src/mew/workbench.py:120-143",
+                    "tool_call_id": 2,
+                    "line_start": 144,
+                    "line_end": 160,
+                    "reason": "recent read_file window already covered src/mew/workbench.py:144-160",
                     "context_truncated": False,
-                }
+                },
+                {
+                    "path": "tests/test_workbench.py",
+                    "tool_call_id": 3,
+                    "line_start": 32,
+                    "line_end": 43,
+                    "reason": "recent read_file window already covered tests/test_workbench.py:32-43",
+                    "context_truncated": False,
+                },
             ],
         )
         self.assertEqual(
@@ -5797,14 +5873,25 @@ class WorkSessionTests(unittest.TestCase):
             [
                 {
                     "path": "src/mew/workbench.py",
-                    "tool_call_id": 1,
-                    "line_start": 120,
-                    "line_end": 143,
-                    "reason": "recent read_file window already covered src/mew/workbench.py:120-143",
+                    "tool_call_id": 2,
+                    "line_start": 144,
+                    "line_end": 160,
+                    "reason": "recent read_file window already covered src/mew/workbench.py:144-160",
                     "context_truncated": False,
-                }
+                },
+                {
+                    "path": "tests/test_workbench.py",
+                    "tool_call_id": 3,
+                    "line_start": 32,
+                    "line_end": 43,
+                    "reason": "recent read_file window already covered tests/test_workbench.py:32-43",
+                    "context_truncated": False,
+                },
             ],
         )
+        prompt = build_work_think_prompt(context)
+        self.assertIn("plan_item_observations[0].edit_ready is true", prompt)
+        self.assertIn("prefer one paired dry-run edit over another same-path reread", prompt)
 
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()

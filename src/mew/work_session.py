@@ -4361,6 +4361,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     if phase == "idle":
         next_action = refresh_stale_memory_next_action(next_action, working_memory)
     target_path_cached_window_observations = []
+    cached_window_by_path = {}
     target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
     if target_paths:
         for target_path in target_paths[:3]:
@@ -4375,17 +4376,19 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 line_end = result.get("line_end")
                 if not isinstance(line_start, int) or not isinstance(line_end, int):
                     continue
-                target_path_cached_window_observations.append(
-                    {
-                        "path": target_path,
-                        "tool_call_id": call.get("id"),
-                        "line_start": line_start,
-                        "line_end": line_end,
-                        "reason": f"recent read_file window already covered {target_path}:{line_start}-{line_end}",
-                        "context_truncated": bool(result.get("context_truncated")),
-                    }
-                )
+                observation = {
+                    "path": target_path,
+                    "tool_call_id": call.get("id"),
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "reason": f"recent read_file window already covered {target_path}:{line_start}-{line_end}",
+                    "context_truncated": bool(result.get("context_truncated")),
+                }
+                target_path_cached_window_observations.append(observation)
+                cached_window_by_path[target_path] = observation
                 break
+    adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
+    demoted_adjacent_read_observations = []
     plan_item_observations = []
     plan_items = _coerce_working_memory_plan_items((working_memory or {}).get("plan_items") or [])
     if plan_items:
@@ -4393,13 +4396,11 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             "plan_item": plan_items[0],
             "reason": "first remaining working_memory.plan_items entry preserved from the latest THINK turn",
         }
-        if target_paths:
-            primary_target_path = target_paths[0]
+        relevant_target_paths = target_paths[:3]
+        if relevant_target_paths:
+            primary_target_path = relevant_target_paths[0]
             plan_item_observation["target_path"] = primary_target_path
-            cached_window = next(
-                (item for item in target_path_cached_window_observations if item.get("path") == primary_target_path),
-                None,
-            )
+            cached_window = cached_window_by_path.get(primary_target_path)
             if cached_window:
                 plan_item_observation["cached_window"] = {
                     "tool_call_id": cached_window.get("tool_call_id"),
@@ -4414,7 +4415,49 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 plan_item_observation["reason"] = (
                     f"first remaining plan item paired to target path {primary_target_path} from working_memory.target_paths"
                 )
+            cached_windows = []
+            for target_path in relevant_target_paths:
+                cached_window = cached_window_by_path.get(target_path)
+                if not cached_window:
+                    continue
+                cached_windows.append(
+                    {
+                        "path": target_path,
+                        "tool_call_id": cached_window.get("tool_call_id"),
+                        "line_start": cached_window.get("line_start"),
+                        "line_end": cached_window.get("line_end"),
+                        "context_truncated": cached_window.get("context_truncated"),
+                    }
+                )
+            if cached_windows:
+                plan_item_observation["cached_windows"] = cached_windows
+            edit_ready = bool(relevant_target_paths) and len(cached_windows) == len(relevant_target_paths) and all(
+                not item.get("context_truncated") for item in cached_windows
+            )
+            plan_item_observation["edit_ready"] = edit_ready
+            if edit_ready:
+                plan_item_observation["reason"] = (
+                    "first remaining plan item is paired to fully cached target paths and is ready for one edit batch"
+                )
         plan_item_observations.append(plan_item_observation)
+    if plan_item_observations and plan_item_observations[0].get("edit_ready"):
+        edit_ready_paths = {
+            str(item.get("path") or "")
+            for item in (plan_item_observations[0].get("cached_windows") or [])
+            if str(item.get("path") or "").strip()
+        }
+        kept_adjacent_read_observations = []
+        for observation in adjacent_read_observations:
+            observation_path = str(observation.get("path") or "")
+            if any(observation_path.endswith(path) for path in edit_ready_paths):
+                demoted = dict(observation)
+                demoted["reason"] = (
+                    f"{observation.get('reason')} edit_ready is true for this paired target path, so the reread signal is demoted behind the pending edit batch"
+                )
+                demoted_adjacent_read_observations.append(demoted)
+                continue
+            kept_adjacent_read_observations.append(observation)
+        adjacent_read_observations = kept_adjacent_read_observations
     repair_anchor_observations = build_repair_anchor_observations(
         session,
         calls,
@@ -4446,7 +4489,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
-        "adjacent_read_observations": build_adjacent_read_observations(calls, limit=3),
+        "adjacent_read_observations": adjacent_read_observations,
+        "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
         "target_path_cached_window_observations": target_path_cached_window_observations,
         "plan_item_observations": plan_item_observations,
         "repair_anchor_observations": repair_anchor_observations,

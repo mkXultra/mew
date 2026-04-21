@@ -1120,6 +1120,23 @@ Missing proof:
   multi-file normal-case autonomy still shows adjacent same-file reread creep
   before first edit under medium/high context pressure, even when the correct
   paired surfaces are chosen from the start.
+- M6.6 task #359 / session #347 then targeted that narrower first-edit
+  efficiency gap directly: make the first `plan_item_observations` entry carry
+  multi-path `cached_windows`, emit `edit_ready` only when every paired target
+  path is cached and untruncated, and demote same-path adjacent reread signals
+  once the batch is edit-ready. The native loop recovered the correct
+  source/test repair anchors after one old-text mismatch, but it exhausted the
+  remaining step budget on `remember` before it reached a fresh dry-run edit
+  batch. The landed direct patch now makes
+  `build_work_session_resume()` attach `cached_windows` and `edit_ready` to
+  the first `plan_item_observations` entry, moves same-path
+  `adjacent_read_observations` into a demoted bucket when that batch is ready,
+  and teaches `build_work_think_prompt()` to prefer one paired dry-run edit
+  over another same-path reread when `edit_ready` is true. Focused targeted
+  pytest, module-level `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is product
+  progress aimed at the remaining first-edit-efficiency blocker, not fresh
+  no-rescue mew-side evidence.
 
 Done when:
 
@@ -1190,14 +1207,19 @@ Next action:
   `build_work_session_resume()`, wired the matching prompt rule in
   `build_work_think_prompt()`, passed `tests.test_work_session`, and closed the
   required same-surface audit with `rescue_edits=0`.
+- Carry the landed #359 `edit_ready` / multi-path cached-window patch as
+  product progress, but do not count it as no-rescue evidence: native mew
+  recovered the right repair anchors and left a correct reentry note, yet the
+  session exhausted its step budget before it reached the fresh paired dry-run
+  edit batch.
 - Keep M6.6 on the mew-side critical path. The next task should target the
-  remaining adjacent same-file reread / broad-read creep on broader
-  `work_session.py`-anchored slices while preserving the now-proven correct
-  paired surface selection from the start. Prefer a fresh native no-steer
-  slice whose premise is not already satisfied by the current worktree,
-  requires native verification and same-surface audit, and attacks first-edit
-  efficiency rather than adding another prompt-only reminder or comparator
-  work.
+  remaining proof gap after #359: native mew must use the new
+  `plan_item_observations[*].cached_windows` + `edit_ready` surface to reach a
+  paired dry-run edit without another same-path reread detour on a broader
+  `work_session.py`-anchored slice. Prefer a fresh native no-steer slice whose
+  premise is not already satisfied by the current worktree, requires native
+  verification and same-surface audit, and attacks first-edit efficiency
+  rather than adding another prompt-only reminder or comparator work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

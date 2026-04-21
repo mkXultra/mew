@@ -466,3 +466,19 @@ broader rediscovery while pruning completed `working_memory.plan_items`, and
 extends the paired resume/context assertions in `tests/test_work_session.py`.
 This is implementation evidence for the frozen M6.6 set, not an extra
 comparator slot.
+
+Task #359 / session #347 then targeted the remaining first-edit-efficiency gap:
+carry multi-path cached windows into the first `plan_item_observations` entry,
+emit `edit_ready` only when every paired target path is cached and
+untruncated, and structurally demote same-path adjacent reread signals once
+that paired edit batch is ready. Native mew recovered the correct source/test
+repair anchors after one old-text mismatch, but it used the final step-budget
+turn on `remember` instead of reaching the fresh paired dry-run edit batch. The
+feature then landed directly as product progress: `build_work_session_resume()`
+now emits `cached_windows` and `edit_ready` for the first remaining plan item,
+`adjacent_read_observations` are demoted behind that batch when it is ready,
+and `build_work_think_prompt()` explicitly prefers one paired dry-run edit over
+another same-path reread on those cached paths. Focused pytest, module-level
+`uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`, and
+`git diff --check` passed. This is blocker reduction for the frozen M6.6 set,
+not an extra comparator slot.
