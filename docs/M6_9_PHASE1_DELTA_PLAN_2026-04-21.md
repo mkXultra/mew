@@ -506,6 +506,59 @@ Explicit non-goals for D7 first slice:
 If D7 needs any of those to land, stop and split the slice again instead of
 pulling later observability work into the first read-only surface.
 
+## D6 First Implementation Slice
+
+D6 is third, after D1 and D7. The first D6 slice should only let a reviewer
+disable one bad durable entry and observe that it no longer participates in
+read-only surfaces.
+
+Target files only:
+
+- `src/mew/typed_memory.py`
+- `src/mew/commands.py`
+- `src/mew/cli.py`
+- focused tests in `tests/test_memory.py`
+
+First-slice rule:
+
+- single-entry veto only
+- no edge propagation
+- no ranking or decay interaction
+- no work-session/work-loop integration yet
+- no hidden deletion; keep the original entry on disk
+
+Exact intended shape:
+
+1. Add a reviewer-owned command surface:
+   - `mew memory --veto <id> --reason <text>`
+2. Persist vetoes separately from typed-memory entries:
+   - append-only log file under the future durable layout
+   - first slice may use a minimal standalone JSONL veto log without requiring
+     the rest of `.mew/durable/` to exist yet
+3. Treat veto as logical suppression, not physical deletion:
+   - `mew memory --show <id>` reports veto status
+   - `mew memory --list` hides vetoed entries by default
+   - optional future `--include-vetoed` stays deferred unless needed
+4. Keep the first veto decision reviewer-authored:
+   - no automatic veto from failed recall or stale symbol detection
+
+Proof target for this slice:
+
+- write one D1 entry, veto it, confirm default list output no longer shows it
+- `mew memory --show <id>` explains that the entry is vetoed and includes the
+  veto reason
+- the original typed-memory file remains unchanged on disk
+
+Explicit non-goals for D6 first slice:
+
+- no transitive invalidation
+- no supersedes/refined_by graph walk
+- no recall-time veto metrics
+- no bulk veto or query-language selection
+
+If D6 needs any of those to land, stop and split the slice again instead of
+pulling Phase 2 invalidation behavior into the Phase 1 veto stub.
+
 ## Stop Rules
 
 Do not start M6.9 code if any of these is still true:
