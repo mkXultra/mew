@@ -17,6 +17,8 @@ from .work_session import (
     format_work_continuity_inline,
     format_work_continuity_recommendation,
     format_work_effort_brief,
+    work_session_has_running_activity,
+    work_session_latest_activity_at,
 )
 
 
@@ -120,40 +122,20 @@ def stale_for_seconds(item: dict[str, Any], current_time: str | None, *keys: str
     return None
 
 
-def latest_work_session_activity_at(session: dict[str, Any]) -> str:
-    latest_raw = ""
-    latest_ts = None
-    for collection in ("tool_calls", "model_turns"):
-        for item in session.get(collection) or []:
-            if not isinstance(item, dict):
-                continue
-            for key in ("finished_at", "updated_at", "started_at", "created_at"):
-                raw = item.get(key)
-                ts = parse_time(raw)
-                if not ts:
-                    continue
-                if latest_ts is None or ts > latest_ts:
-                    latest_ts = ts
-                    latest_raw = raw
-    if latest_raw:
-        return latest_raw
-    for key in ("updated_at", "created_at"):
-        raw = session.get(key)
-        if parse_time(raw):
-            return raw
-    return ""
-
-
 def work_session_stale_for_seconds(session: dict[str, Any], current_time: str | None) -> int | None:
-    activity_at = latest_work_session_activity_at(session)
+    activity_at = work_session_latest_activity_at(session)
     if activity_at:
         return stale_for_seconds({"activity_at": activity_at}, current_time, "activity_at")
     return stale_for_seconds(session, current_time, "updated_at", "created_at")
 
 
 def work_session_activity_sort_value(session: dict[str, Any]) -> float:
-    timestamp = parse_time(latest_work_session_activity_at(session))
+    timestamp = parse_time(work_session_latest_activity_at(session))
     return timestamp.timestamp() if timestamp else float("-inf")
+
+
+def work_session_is_paused(session: dict[str, Any]) -> bool:
+    return bool(session.get("stop_requested_at")) and not work_session_has_running_activity(session)
 
 
 def attach_action_metadata(action: dict[str, Any], reason: str, stale_seconds: int | None) -> dict[str, Any]:
@@ -350,7 +332,7 @@ def work_session_detail_item(session: dict[str, Any], state: dict[str, Any] | No
         "kind": "work_session",
         "label": f"Work session #{session_id}" if session_id is not None else "Work session",
         "summary": compact_detail_summary(session.get("goal"), session.get("title")) or "active work",
-        "status": normalize_text(session.get("status")) or "active",
+        "status": "paused" if work_session_is_paused(session) else (normalize_text(session.get("status")) or "active"),
         "effort": effort,
     }
     if effort_summary:
@@ -415,14 +397,15 @@ def question_action_item(question: dict[str, Any], current_time: str | None = No
 def work_session_action_item(session: dict[str, Any], current_time: str | None = None) -> dict[str, Any]:
     task_id = session.get("task_id")
     session_id = session.get("id")
+    paused = work_session_is_paused(session)
     action = {
-        "kind": "resume_work",
-        "label": "Resume active work",
+        "kind": "paused_work" if paused else "resume_work",
+        "label": "Paused active work" if paused else "Resume active work",
         "command": mew_command("work", "--session", "--resume", "--allow-read", "."),
     }
     if task_id is not None:
         action["task_id"] = task_id
-        action["label"] = f"Resume task #{task_id}"
+        action["label"] = f"{'Paused' if paused else 'Resume'} task #{task_id}"
         action["command"] = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
     if session_id is not None:
         action["id"] = session_id
@@ -433,7 +416,7 @@ def work_session_action_item(session: dict[str, Any], current_time: str | None =
         action["effort_summary"] = effort_summary
     return attach_action_metadata(
         action,
-        "active work session can be resumed",
+        "active work session is intentionally paused" if paused else "active work session can be resumed",
         work_session_stale_for_seconds(session, current_time),
     )
 
@@ -603,6 +586,8 @@ def focus_summary(
         sessions = active_work_sessions_for_desk(state)
     if sessions:
         goal = normalize_text(sessions[-1].get("goal") or sessions[-1].get("title")) or "active work"
+        if work_session_is_paused(sessions[-1]):
+            return f"Paused: {goal}"
         return f"Working on: {goal}"
     if tasks is None:
         tasks = open_tasks_for_desk(state)

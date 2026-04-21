@@ -584,6 +584,30 @@ class BriefTests(unittest.TestCase):
             brief,
         )
 
+    def test_brief_leaves_paused_active_work_session_paused(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Paused debug target", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Paused debug target",
+                "goal": "Leave this paused until a real invalidation appears.",
+                "created_at": "then",
+                "updated_at": "now",
+                "stop_requested_at": "2026-04-21T15:00:00Z",
+                "stop_reason": "paused debug target",
+                "default_options": {"allow_read": ["."]},
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        brief = build_brief(state, kind="coding")
+
+        self.assertIn("Next useful move: leave paused work session #3 task #7 paused", brief)
+
     def test_brief_hides_plan_needed_for_task_with_active_work_session(self):
         state = default_state()
         add_task(state, task_id=7, title="Do not duplicate active task", kind="coding")
@@ -1167,6 +1191,39 @@ class BriefTests(unittest.TestCase):
             "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 write_ready_fast_path=True",
             focus,
         )
+
+    def test_focus_surfaces_stop_request_for_paused_active_work_session(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Paused debug target", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Paused debug target",
+                "created_at": "then",
+                "updated_at": "2026-04-21T15:25:14Z",
+                "stop_requested_at": "2026-04-21T15:00:00Z",
+                "stop_reason": "paused debug target",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "finished_at": "2026-04-21T13:25:16Z",
+                    }
+                ],
+                "model_turns": [],
+            }
+        )
+
+        with patch("mew.brief.now_iso", return_value="2026-04-21T15:25:29Z"):
+            data = build_focus_data(state, limit=3, kind="coding")
+            focus = format_focus(data)
+
+        self.assertIn("stop_request: paused debug target", focus)
+        self.assertIn("Next: leave paused work session #3 task #7 paused", focus)
+        self.assertIn("last_active: 2026-04-21T13:25:16Z (2.0h ago)", focus)
 
     def test_focus_surfaces_active_work_session_age(self):
         state = default_state()

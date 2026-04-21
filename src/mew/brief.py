@@ -15,6 +15,7 @@ from .work_session import (
     format_work_continuity_recommendation,
     format_work_failure_risk,
     latest_unresolved_failure,
+    work_session_latest_activity_at,
     work_session_task,
 )
 
@@ -871,7 +872,12 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
         resume_command = _work_session_resume_command(session, task_parts)
         continue_command = _work_session_reentry_command(session, task_parts, max_steps=1)
         follow_command = _work_session_reentry_command(session, task_parts, max_steps=10, follow=True)
-        updated_at = session.get("updated_at") or session.get("created_at") or ""
+        updated_at = (
+            work_session_latest_activity_at(session)
+            or session.get("updated_at")
+            or session.get("created_at")
+            or ""
+        )
         inactive_hours = elapsed_hours(updated_at, current_time)
         risk = format_work_failure_risk(
             resume.get("unresolved_failure") or latest_unresolved_failure(resume.get("failures") or [])
@@ -894,6 +900,7 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "pending_steer": resume.get("pending_steer") or {},
                 "queued_followups": resume.get("queued_followups") or [],
                 "queued_followups_total": resume.get("queued_followups_total") or 0,
+                "stop_request": resume.get("stop_request") or {},
                 "resume_command": resume_command,
                 "continue_command": continue_command,
                 "follow_command": follow_command,
@@ -1158,6 +1165,9 @@ def format_focus(data):
                     metrics.append("write_ready_fast_path=True")
                 if metrics:
                     lines.append(f"  latest_model_failure_metrics: {' '.join(metrics)}")
+            stop_request = session.get("stop_request") or {}
+            if stop_request:
+                lines.append(f"  stop_request: {stop_request.get('reason') or 'stop requested'}")
             if session.get("updated_at"):
                 inactive = session.get("inactive_for")
                 if inactive:
@@ -1309,6 +1319,13 @@ def next_move(state, kind=None):
         return f"inspect verification run #{recent_verifications[0].get('id')} with `{mew_command('verification')}`"
     if active_work:
         session = active_work[0]
+        stop_request = session.get("stop_request") or {}
+        if stop_request:
+            command = session.get("resume_command") or session.get("continue_command")
+            return (
+                f"leave paused work session #{session.get('id')} task #{session.get('task_id')} paused "
+                f"and resume only when needed with `{command}`"
+            )
         continuity_summary = continuity_repair_summary(session.get("continuity") or {})
         if continuity_summary:
             command = session.get("continue_command") or session.get("resume_command")

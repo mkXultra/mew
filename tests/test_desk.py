@@ -330,6 +330,35 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["actions"][0]["label"], "Resume task #4")
         self.assertEqual(view["actions"][1]["label"], "Resume task #3")
 
+    def test_build_desk_view_model_surfaces_paused_active_work_session(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {"id": 3, "title": "Paused debug target", "status": "ready", "kind": "coding"},
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Paused debug target",
+                        "stop_requested_at": "2026-04-17T00:55:00Z",
+                        "stop_reason": "paused debug target",
+                        "updated_at": "2026-04-17T00:59:00Z",
+                    }
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
+            kind="coding",
+        )
+
+        self.assertEqual(view["focus"], "Paused: Paused debug target")
+        self.assertEqual(view["primary_action"]["kind"], "paused_work")
+        self.assertEqual(view["primary_action"]["label"], "Paused task #3")
+        self.assertEqual(view["primary_action"]["reason"], "active work session is intentionally paused")
+        self.assertEqual(view["details"]["active_work_sessions"][0]["status"], "paused")
+
     def test_build_desk_view_model_skips_active_work_for_blocked_task(self):
         view = build_desk_view_model(
             {

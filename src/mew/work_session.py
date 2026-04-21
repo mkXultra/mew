@@ -3796,6 +3796,30 @@ def work_session_has_running_activity(session):
     )
 
 
+def work_session_latest_activity_at(session):
+    latest_raw = ""
+    latest_ts = None
+    for collection in ("tool_calls", "model_turns"):
+        for item in session.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("finished_at", "updated_at", "started_at", "created_at"):
+                raw = item.get(key)
+                ts = parse_time(raw)
+                if not ts:
+                    continue
+                if latest_ts is None or ts > latest_ts:
+                    latest_ts = ts
+                    latest_raw = raw
+    if latest_raw:
+        return latest_raw
+    for key in ("updated_at", "created_at"):
+        raw = session.get(key)
+        if parse_time(raw):
+            return raw
+    return ""
+
+
 def work_interrupted_dry_run_write_retryable(call, *, effect_classification=None):
     if (call or {}).get("tool") not in WRITE_WORK_TOOLS:
         return False
