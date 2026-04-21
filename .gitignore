@@ -1,5 +1,7 @@
 .mew/
 auth.json
+auth.plus.json
+auth.pro.json
 .venv/
 __pycache__/
 .testmondata
