@@ -1832,6 +1832,7 @@ def build_parser():
         type=float,
         help="seconds to wait when starting review runs",
     )
+    agent_sweep_parser.add_argument("--json", action="store_true", help="print structured JSON")
     agent_sweep_parser.set_defaults(func=cmd_agent_sweep)
 
     return parser

@@ -1609,16 +1609,54 @@ Evidence:
   `py_compile`, and `git diff --check` all passed. Treat this as blocker
   reduction plus product progress; the next honest step is a fresh proof rerun,
   not another direct candidate patch.
+- Task `#385` / session `#374` then reopened Candidate N-F after the
+  compact-live substrate fix. mew surfaced the intended `src/mew/sweep.py` +
+  `tests/test_sweep.py` JSON-report patch, but the broader verifier
+  `uv run python -m unittest tests.test_commands` exposed a real product
+  blocker: `cmd_agent_sweep()` used `args.json` while the `agent sweep` CLI
+  parser did not define `--json`. The live rerun stayed bounded and re-anchored
+  the exact `src/mew/cli.py`, `src/mew/commands.py`, and
+  `tests/test_commands.py` windows, but still stopped before a new
+  reviewer-visible dry-run diff surfaced. The direct supervisor blocker fix
+  then landed: `src/mew/cli.py` now defines `agent sweep --json`,
+  `src/mew/commands.py` uses `getattr(args, "json", False)` defensively, and
+  `tests/test_commands.py` covers the JSON path while preserving timeout
+  passthrough. Focused
+  `uv run pytest -q tests/test_sweep.py tests/test_commands.py -k 'agent_sweep or sweep_report_json' --no-testmon`,
+  broader `uv run python -m unittest tests.test_sweep tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. Treat this as
+  blocker reduction plus product progress, not M6.7 supervised-proof credit.
+- Task `#386` / session `#375` then converted Candidate N-G into real
+  supervised-proof evidence. mew stayed within
+  `src/mew/commands.py` + `tests/test_journal.py`, surfaced reviewer-visible
+  dry-run diffs, applied the approved changes, repaired two stale exact test
+  expectations through same-surface repair turns without supervisor code
+  edits, reran the targeted journal pytest, passed broader
+  `uv run python -m unittest tests.test_journal`, then selected and passed the
+  paired commands verifier `uv run python -m unittest tests.test_commands`
+  before closing with same-surface audit reasoning. Focused
+  `uv run pytest -q tests/test_journal.py -k 'journal_command or json' --no-testmon`,
+  broader journal/commands unittests, `ruff`, and `py_compile` all passed.
+  Count this as M6.7 supervised-proof credit.
+- Task `#387` / session `#376` then converted Candidate N-I into additional
+  supervised-proof evidence. mew stayed within
+  `src/mew/signals.py` + `tests/test_signals.py`, surfaced reviewer-visible
+  dry-run diffs, applied the approved source/test edits, passed focused
+  `uv run pytest -q tests/test_signals.py -k 'cli or journal or reason_for_use' --no-testmon`,
+  passed broader `uv run python -m unittest tests.test_signals`, and closed
+  with same-surface audit reasoning that only `format_signal_journal()` text
+  output changed while JSON behavior remained unchanged. `ruff`,
+  `py_compile`, and `git diff --check` all passed. Count this as M6.7
+  supervised-proof credit.
 
 Missing proof:
 
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
-- Repeated soft-stops before a reviewable paired dry-run diff now count as
-  substrate evidence, not as proof-candidate exhaustion. When that happens,
-  M6.7 must switch back to fixing the exposed native-loop blocker before
-  consuming more bounded proof items.
+- If any supervised 8-hour proof item fails or soft-stops, M6.7 must classify
+  it as proof-or-revert failure, product-only progress, or substrate evidence,
+  then fix the exposed blocker before consuming more bounded proof items.
 
 Done when:
 
@@ -1634,15 +1672,17 @@ Done when:
 Next action:
 
 - Stop treating direct supervisor fixes as progress toward the 8-hour proof
-  when the same paired-dry-run blocker is still open. After a soft-stop of
-  that form, return to the exposed native-loop blocker and land the substrate
-  fix first.
+  when the same unresolved blocker is still open. If one proof item fails or
+  soft-stops, return to the exposed blocker, land the substrate fix, verify
+  it, and only then go back to the supervised proof queue.
 - Once the blocker fix is verified, rerun a fresh bounded proof item from the
   remaining live queue (`N-F`, `N-G`, `N-I`, then `N-D`) instead of consuming
   more candidates under the same unresolved blocker.
-- Start with `N-F` (`mew agent sweep --json` structured output) as the first
-  fresh rerun after the compact-live prompt-context fix, and only move deeper
-  into the queue if the paired dry-run surface now appears clean.
+- Start with a fresh rerun of `N-F` (`mew agent sweep --json` structured
+  output) only if the queue still needs another bounded item after `N-G` and
+  `N-I`; the next decision is whether the current supervised-proof evidence is
+  sufficient to close M6.7 honestly or whether one more bounded proof item is
+  still required.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.

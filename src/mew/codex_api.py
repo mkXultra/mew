@@ -1,6 +1,8 @@
 import json
 import os
 from pathlib import Path
+import socket
+import time
 import urllib.error
 import urllib.request
 
@@ -129,6 +131,68 @@ def sse_text_delta(data):
     return ""
 
 
+def _request_deadline(timeout):
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        return None
+    if timeout_value <= 0:
+        return None
+    return time.monotonic() + timeout_value
+
+
+def _raise_if_request_timed_out(deadline):
+    if deadline is not None and time.monotonic() >= deadline:
+        raise CodexApiError("request timed out")
+
+
+def _socket_read_timeout(timeout):
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        return 5.0
+    if timeout_value <= 0:
+        return 5.0
+    return max(0.01, min(timeout_value, 5.0))
+
+
+def _read_stream_body(response, deadline, on_text_delta=None):
+    chunks = []
+    while True:
+        _raise_if_request_timed_out(deadline)
+        try:
+            raw_line = response.readline()
+        except socket.timeout:
+            _raise_if_request_timed_out(deadline)
+            continue
+        except TimeoutError:
+            _raise_if_request_timed_out(deadline)
+            continue
+        if not raw_line:
+            break
+        _raise_if_request_timed_out(deadline)
+        line = raw_line.decode("utf-8", errors="replace")
+        chunks.append(line)
+        if on_text_delta:
+            delta = sse_text_delta(decode_sse_data_line(line))
+            if delta:
+                on_text_delta(delta)
+    return "".join(chunks)
+
+
+def _set_response_read_timeout(response, timeout):
+    stream = getattr(response, "fp", None)
+    visited = set()
+    while stream is not None and id(stream) not in visited:
+        visited.add(id(stream))
+        sock = getattr(stream, "_sock", None) or getattr(stream, "sock", None)
+        if sock is not None and hasattr(sock, "settimeout"):
+            sock.settimeout(timeout)
+            return True
+        stream = getattr(stream, "raw", None) or getattr(stream, "fp", None)
+    return False
+
+
 def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=None):
     url = base_url.rstrip("/") + "/responses"
     reasoning_effort = os.environ.get("MEW_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT).strip()
@@ -161,21 +225,17 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         headers=codex_headers(auth),
         method="POST",
     )
+    deadline = _request_deadline(timeout)
+    socket_timeout = _socket_read_timeout(timeout)
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
             if on_text_delta or "text/event-stream" in content_type:
-                chunks = []
-                for raw_line in response:
-                    line = raw_line.decode("utf-8", errors="replace")
-                    chunks.append(line)
-                    if on_text_delta:
-                        delta = sse_text_delta(decode_sse_data_line(line))
-                        if delta:
-                            on_text_delta(delta)
-                raw = "".join(chunks)
+                _set_response_read_timeout(response, socket_timeout)
+                raw = _read_stream_body(response, deadline, on_text_delta=on_text_delta)
             else:
+                _raise_if_request_timed_out(deadline)
                 raw = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
@@ -183,7 +243,7 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         raise CodexApiError(f"HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise CodexApiError(str(exc.reason)) from exc
-    except TimeoutError as exc:
+    except (socket.timeout, TimeoutError) as exc:
         raise CodexApiError("request timed out") from exc
 
     if "text/event-stream" in content_type or raw.lstrip().startswith(("event:", "data:")):

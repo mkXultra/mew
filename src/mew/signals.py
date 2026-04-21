@@ -294,8 +294,15 @@ def format_signal_journal(items):
     lines = ["Signal journal:"]
     for item in items:
         event_text = f" event=#{item.get('event_id')}" if item.get("event_id") else ""
+        reason_text = (
+            f" reason_for_use={item.get('reason_for_use')}"
+            if item.get("reason_for_use")
+            else ""
+        )
+        recorded_at = item.get("created_at") or item.get("recorded_at") or ""
+        recorded_text = f" recorded_at={recorded_at}" if recorded_at else ""
         lines.append(
             f"- #{item.get('id')} {item.get('source')}:{item.get('kind')}"
-            f"{event_text} {item.get('summary', '')}"
+            f"{event_text} {item.get('summary', '')}{reason_text}{recorded_text}"
         )
     return "\n".join(lines)

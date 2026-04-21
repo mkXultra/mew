@@ -388,9 +388,11 @@ def call_model_json_with_retries(
     timeout,
     log_prefix=None,
     on_text_delta=None,
+    retry_delays=None,
 ):
     last_error = None
-    for attempt, delay in enumerate((0.0, *MODEL_RETRY_DELAYS), start=1):
+    delays = MODEL_RETRY_DELAYS if retry_delays is None else tuple(retry_delays)
+    for attempt, delay in enumerate((0.0, *delays), start=1):
         if delay:
             time.sleep(delay)
         try:
@@ -407,7 +409,7 @@ def call_model_json_with_retries(
             return call_model_json(model_backend, model_auth, prompt, model, base_url, timeout)
         except ModelBackendError as exc:
             last_error = exc
-            if attempt > len(MODEL_RETRY_DELAYS) or not transient_model_error(exc):
+            if attempt > len(delays) or not transient_model_error(exc):
                 raise
             if log_prefix:
                 append_log(f"- {log_prefix} retry={attempt} error={exc}")

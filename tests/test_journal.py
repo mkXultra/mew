@@ -45,9 +45,13 @@ class JournalTests(unittest.TestCase):
         self.assertIn("#2 Done work [done]: shipped the first report", view["completed"])
         self.assertIn("#1 Open work [ready/coding]", view["active"])
         self.assertIn("Question #2: What next?", view["questions"])
+        self.assertEqual(len(view["sessions"]), 1)
+        self.assertIn("Work session #5 task #1: Open work is idle: Continue work", view["sessions"][0])
+        self.assertIn("continuity: 7/9 usable", view["sessions"][0])
+        self.assertIn("repair:", view["sessions"][0])
         self.assertIn(
-            "Work session #5 task #1: Open work is idle: Continue work; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: continue the work session with /continue in chat or ./mew work 1 --live --max-steps 1",
-            view["sessions"],
+            "next: continue the work session with /continue in chat or ./mew work 1 --live --max-steps 1",
+            view["sessions"][0],
         )
         self.assertIn("effect #6 [applied/passive_tick] actions=ask_user: Asked one question", view["runtime_effects"])
         self.assertIn("# Mew Journal 2026-04-17", text)
@@ -101,6 +105,19 @@ class JournalTests(unittest.TestCase):
                     state = load_state()
                     state["tasks"].append({"id": 1, "title": "Open work", "status": "ready"})
                     add_question(state, "Need input?")
+                    state["work_sessions"] = [
+                        {"id": 2, "task_id": 1, "status": "active", "goal": "Continue work", "phase": "idle"}
+                    ]
+                    state["runtime_effects"] = [
+                        {
+                            "id": 3,
+                            "reason": "passive_tick",
+                            "status": "applied",
+                            "action_types": ["ask_user"],
+                            "summary": "Asked one question",
+                            "finished_at": "2026-04-17T00:00:00Z",
+                        }
+                    ]
                     save_state(state)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -108,6 +125,37 @@ class JournalTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["date"], "2026-04-17")
                 self.assertEqual(data["counts"]["questions"], 1)
+                self.assertEqual(data["counts"]["active"], 1)
+                self.assertEqual(data["counts"]["sessions"], 1)
+                self.assertEqual(data["counts"]["runtime_effects"], 1)
+                self.assertEqual(data["counts"]["tomorrow_hints"], 3)
+                self.assertEqual(data["completed"], [])
+                self.assertEqual(data["active"], ["#1 Open work [ready]"])
+                self.assertEqual(data["questions"], ["Question #1: Need input?"])
+                self.assertEqual(len(data["sessions"]), 1)
+                self.assertIn("Work session #2 task #1: Open work is idle: Continue work", data["sessions"][0])
+                self.assertEqual(
+                    data["runtime_effects"],
+                    ["effect #3 [applied/passive_tick] actions=ask_user: Asked one question"],
+                )
+                self.assertEqual(len(data["tomorrow_hints"]), 3)
+                self.assertEqual(
+                    data["tomorrow_hints"][0],
+                    "Answer or close: Question #1: Need input?",
+                )
+                resume_hint = data["tomorrow_hints"][1]
+                self.assertTrue(
+                    resume_hint.startswith(
+                        "Resume: Work session #2 task #1: Open work is idle: Continue work"
+                    )
+                )
+                self.assertIn("continuity:", resume_hint)
+                self.assertIn("repair:", resume_hint)
+                self.assertIn("next:", resume_hint)
+                self.assertEqual(
+                    data["tomorrow_hints"][2],
+                    "Move forward: #1 Open work [ready]",
+                )
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["journal", "--date", "2026-04-17", "--write", "--json"]), 0)

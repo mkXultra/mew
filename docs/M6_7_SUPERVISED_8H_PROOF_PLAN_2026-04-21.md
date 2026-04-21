@@ -22,10 +22,11 @@ M6.7 is not done until a supervised 8-hour run completes with:
 - no chained autonomous task selection inside a single iteration
 - no auto-merge
 - roadmap/milestone status changes remain reviewer-owned
-- if a proof item soft-stops because the native loop cannot surface a
-  reviewable paired dry-run diff after repeated clean attempts, stop consuming
-  new proof items, switch to the exposed M6.7 substrate blocker, land that
-  blocker fix, and only then reopen the 8-hour proof on fresh bounded items
+- if any 8-hour proof item fails or soft-stops, record whether it was
+  proof-or-revert, product-only progress, or native-loop substrate evidence;
+  do not keep consuming new proof items under the same unresolved blocker.
+  Switch to the exposed M6.7 blocker, land that fix, verify it, and only then
+  return to the 8-hour proof on a fresh bounded item
 
 ## Item Selection Rules
 
@@ -95,25 +96,64 @@ converge:
   and `git diff --check` all passed. This is product progress, not
   supervised-proof credit, because task `#384` / session `#373` stalled in
   edit planning before a reviewable paired dry-run diff surfaced.
+- Candidate N-F: task `#385` / session `#374` surfaced the intended
+  `src/mew/sweep.py` + `tests/test_sweep.py` JSON-report patch and then hit a
+  real broader-verifier blocker: `cmd_agent_sweep()` assumed `args.json` while
+  the `agent sweep` CLI parser did not define `--json`. After repeated guided
+  live steps anchored the exact `src/mew/cli.py`, `src/mew/commands.py`, and
+  `tests/test_commands.py` windows, the direct supervisor blocker fix landed:
+  `agent sweep` now defines `--json`, `cmd_agent_sweep()` uses
+  `getattr(args, "json", False)` defensively, and `tests/test_commands.py`
+  covers the JSON path while preserving timeout passthrough. Focused
+  `uv run pytest -q tests/test_sweep.py tests/test_commands.py -k 'agent_sweep or sweep_report_json' --no-testmon`,
+  broader `uv run python -m unittest tests.test_sweep tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. Treat this as
+  product progress plus blocker reduction, not supervised-proof credit; rerun
+  N-F fresh if the queue still needs it.
+- Candidate N-G: task `#386` / session `#375` completed as real supervised
+  proof evidence. mew stayed inside `src/mew/commands.py` +
+  `tests/test_journal.py`, surfaced reviewer-visible dry-run diffs, handled
+  two same-surface repair turns after broader verifier failures exposed stale
+  exact test expectations, then reapplied the final source patch without
+  supervisor code edits. Focused
+  `uv run pytest -q tests/test_journal.py -k 'journal_command or json' --no-testmon`,
+  broader `uv run python -m unittest tests.test_journal`, paired verifier
+  `uv run python -m unittest tests.test_commands`, `ruff`, and `py_compile`
+  all passed. Count this as M6.7 supervised-proof credit.
+- Candidate N-I: task `#387` / session `#376` also completed as real
+  supervised proof evidence. mew stayed inside `src/mew/signals.py` +
+  `tests/test_signals.py`, surfaced a reviewer-visible dry-run diff, applied
+  the approved source/test edits, passed focused
+  `uv run pytest -q tests/test_signals.py -k 'cli or journal or reason_for_use' --no-testmon`,
+  passed broader `uv run python -m unittest tests.test_signals`, and finished
+  with same-surface audit reasoning that the change was text-only in
+  `format_signal_journal()` while JSON output remained unchanged. `ruff`,
+  `py_compile`, and `git diff --check` also passed. Count this as M6.7
+  supervised-proof credit.
 - Candidate N-D: still untried, but do not run it as a solo next proof item.
   After N-A/N-B soft-stop, N-C no-change, and N-E product-only progress, the
   queue needed to be replenished back to at least three untried bounded items
   before reopening the supervised 8-hour proof.
 
-## Soft-Stop Recovery Rule
+## Proof Failure Recovery Rule
 
-When a bounded proof item fails because the native loop cannot reach a
-reviewable paired dry-run diff, treat that as M6.7 substrate evidence first,
-not as a reason to keep burning through the queue.
+When a bounded 8-hour proof item fails or soft-stops, do not drift to other
+proof items. First classify the outcome, then repair the exposed blocker, and
+only then return to the supervised proof queue.
 
 Required response:
 
-1. record the proof item as soft-stop or product-only progress
-2. identify the exposed native-loop blocker
+1. record the proof item outcome as one of:
+   - proof-or-revert failure
+   - product-only progress
+   - native-loop substrate evidence
+2. identify the blocker that must be removed before another proof item is
+   meaningful
 3. fix that blocker directly in M6.7 substrate code
-4. rerun a fresh bounded proof item only after the blocker fix is verified
+4. verify the blocker fix
+5. rerun a fresh bounded proof item from the live queue
 
-Do not keep consuming proof candidates while the same paired-dry-run blocker is
+Do not keep consuming proof candidates while the same unresolved blocker is
 still open.
 
 ### Candidate N-A: proof-summary supervised-iteration validator

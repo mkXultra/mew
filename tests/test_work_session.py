@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -6174,6 +6175,100 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("created_at=", text)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_loop_model_calls_disable_transient_retries(self):
+        from mew.work_loop import call_model_json_with_retries
+
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=False):
+            with patch(
+                "mew.work_loop._agent_call_model_json_with_retries",
+                return_value={"summary": "ok", "action": {"type": "finish"}},
+            ) as call_model:
+                result = call_model_json_with_retries(
+                    "codex",
+                    {"path": "auth.json"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    45,
+                    log_prefix="work_think codex session=1",
+                )
+
+        self.assertEqual(result["summary"], "ok")
+        self.assertEqual(call_model.call_count, 1)
+        self.assertEqual(call_model.call_args.kwargs["retry_delays"], ())
+
+    def test_work_loop_model_calls_enforce_hard_timeout_without_retries(self):
+        if not hasattr(os, "fork"):
+            self.skipTest("requires fork context")
+
+        from mew.errors import ModelBackendError
+        from mew.work_loop import call_model_json_with_retries
+
+        def slow_model(*args, **kwargs):
+            time.sleep(0.2)
+            return {"summary": "late", "action": {"type": "finish"}}
+
+        started = time.monotonic()
+        with patch("mew.work_loop._agent_call_model_json_with_retries", side_effect=slow_model):
+            with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                call_model_json_with_retries(
+                    "codex",
+                    {"path": "auth.json"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    0.05,
+                    log_prefix="work_think codex session=1",
+                )
+
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_compact_model_turns_for_prompt_collapses_redundant_planning_churn(self):
+        from mew.work_session import compact_model_turns_for_prompt
+
+        turns = [
+            {"id": 1, "status": "completed", "action": {"type": "read_file"}},
+            {
+                "id": 2,
+                "status": "failed",
+                "action": {"type": "wait"},
+                "summary": "model turn failed: request timed out",
+                "error": "request timed out",
+            },
+            {
+                "id": 3,
+                "status": "interrupted",
+                "action": {"type": "planning"},
+                "summary": "planning work step",
+                "error": "Interrupted before the work model turn completed.",
+            },
+            {
+                "id": 4,
+                "status": "failed",
+                "action": {"type": "wait"},
+                "summary": "model turn failed: request timed out",
+                "error": "request timed out",
+            },
+            {"id": 5, "status": "completed", "action": {"type": "run_tests"}},
+            {
+                "id": 6,
+                "status": "failed",
+                "action": {"type": "wait"},
+                "summary": "model turn failed: request timed out",
+                "error": "request timed out",
+            },
+            {
+                "id": 7,
+                "status": "interrupted",
+                "action": {"type": "planning"},
+                "summary": "planning work step",
+                "error": "Interrupted before the work model turn completed.",
+            },
+        ]
+
+        compacted = compact_model_turns_for_prompt(turns)
+        self.assertEqual([turn["id"] for turn in compacted], [1, 4, 5, 7])
 
     def test_active_memory_terms_filter_self_improve_boilerplate(self):
         terms = active_memory_terms(
@@ -13971,6 +14066,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("paired-write constraint applies to code write batches", prompt)
         self.assertIn("Use at most one write/edit per file path in the batch", prompt)
         self.assertIn("prefer one edit_file_hunks action for that path", prompt)
+        self.assertIn("do not return wait just because of the one-write-per-path rule", prompt)
+        self.assertIn("continue toward the reviewer-visible dry-run batch", prompt)
         self.assertIn("If the full required write set would exceed five tools", prompt)
         self.assertIn("do not propose a partial batch that drops sibling edits", prompt)
         self.assertIn("Docs-only single edit_file/write_file actions", prompt)
@@ -20263,6 +20360,49 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("recovery_path: tests/test_work_session.py", text)
                 self.assertIn("recovery_line_start: 30", text)
                 self.assertIn("recovery_line_count: 6", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_marks_planning_producer_overdue_after_model_timeout(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "latest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "live",
+                            "task_id": 7,
+                            "heartbeat_at": "2026-04-21T00:00:00Z",
+                            "producer": {"pid": 999999},
+                            "model_timeout_seconds": 30,
+                            "resume": {"phase": "planning"},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with patch("mew.commands.now_iso", return_value="2026-04-21T00:01:00Z"):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(main(["work", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "overdue")
+                self.assertEqual(data["producer_health"]["state"], "overdue")
+                self.assertTrue(data["producer_health"]["stale"])
+                self.assertEqual(data["model_timeout_seconds"], 30.0)
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with patch("mew.commands.now_iso", return_value="2026-04-21T00:01:00Z"):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(main(["work", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("model_timeout_seconds: 30.0", text)
+                self.assertIn("producer_health: overdue", text)
             finally:
                 os.chdir(old_cwd)
 

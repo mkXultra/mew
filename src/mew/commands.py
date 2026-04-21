@@ -176,7 +176,7 @@ from .state import (
     state_lock,
 )
 from .snapshot import load_snapshot, save_snapshot, snapshot_path, take_snapshot
-from .sweep import format_sweep_report, sweep_agent_runs
+from .sweep import format_sweep_report, sweep_agent_runs, sweep_report_json
 from .step_loop import format_step_loop_report, run_step_loop
 from .read_tools import (
     glob_paths,
@@ -2258,6 +2258,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "task_id": task_id,
         "title": (session or {}).get("title") or (task or {}).get("title") or "",
         "mode": mode or ("follow" if getattr(args, "follow", False) else "live"),
+        "model_timeout_seconds": getattr(args, "model_timeout", None),
         "stop_reason": (report or {}).get("stop_reason"),
         "max_steps": (report or {}).get("max_steps"),
         "step_count": len((report or {}).get("steps") or []),
@@ -6291,6 +6292,7 @@ def work_follow_producer_health(status, heartbeat_at=None, age=None, producer_pi
         "absent": "no follow snapshot exists at the selected path",
         "fresh": "snapshot heartbeat is recent",
         "working": "producer process is still alive",
+        "overdue": "producer is still alive but the planning heartbeat exceeded the model timeout budget",
         "completed": "producer exited after writing a stopped snapshot",
         "dead": "producer disappeared without a stop reason",
         "stale": "snapshot heartbeat is old and no active producer is known",
@@ -6301,7 +6303,7 @@ def work_follow_producer_health(status, heartbeat_at=None, age=None, producer_pi
         "heartbeat_age_seconds": age,
         "producer_pid": producer_pid,
         "producer_alive": bool(producer_alive),
-        "stale": status in ("absent", "dead", "stale"),
+        "stale": status in ("absent", "dead", "stale", "overdue"),
         "terminal": status == "completed",
         "reason": reasons.get(status, ""),
     }
@@ -6361,7 +6363,7 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
             "command": _work_follow_status_refresh_command(task_id, session=session),
             "reason": "write a fresh observer snapshot before replying",
         }
-    if status in ("dead", "stale"):
+    if status in ("dead", "stale", "overdue"):
         selected_anchor = next(
             (
                 anchor
@@ -6401,6 +6403,7 @@ def _work_follow_status_session_state_newer(snapshot_updated_at, session_updated
 
 
 def _work_follow_status_from_snapshot(path, task_id=None, session=None):
+    overdue_grace_seconds = 10.0
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
     current_git = current_git_reentry_state()
     if not path.exists():
@@ -6428,8 +6431,26 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     producer_pid = ((data.get("producer") or {}).get("pid")) or None
     has_producer = producer_pid not in (None, "")
     producer_alive = pid_alive(producer_pid) if has_producer else False
+    resume = data.get("resume") or {}
+    phase = resume.get("phase") or data.get("phase") or ""
+    try:
+        model_timeout_seconds = float(
+            data.get("model_timeout_seconds")
+            or (((session or {}).get("default_options") or {}).get("model_timeout") or 0)
+        )
+    except (TypeError, ValueError):
+        model_timeout_seconds = 0.0
+    is_overdue = bool(
+        producer_alive
+        and phase == "planning"
+        and age is not None
+        and model_timeout_seconds > 0
+        and age > (model_timeout_seconds + overdue_grace_seconds)
+    )
     if age is not None and age <= 10:
         status = "fresh"
+    elif is_overdue:
+        status = "overdue"
     elif producer_alive:
         status = "working"
     elif has_producer and not producer_alive and data.get("stop_reason"):
@@ -6438,7 +6459,6 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         status = "dead"
     else:
         status = "stale"
-    resume = data.get("resume") or {}
     working_memory = resume.get("working_memory") or {}
     working_memory_stale = bool(
         working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
@@ -6478,6 +6498,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "producer_alive": producer_alive,
         "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
         "phase": resume.get("phase") or data.get("phase") or "",
+        "model_timeout_seconds": model_timeout_seconds or None,
         "next_action": resume.get("next_action") or "",
         "working_memory_stale": working_memory_stale,
         "latest_context_checkpoint": checkpoint,
@@ -6532,6 +6553,7 @@ def format_work_follow_status(data):
             f"session: {data.get('session_id') or '-'} task: {data.get('task_id') or '-'}",
             f"heartbeat: {data.get('heartbeat_at') or '-'} age={age_text}",
             f"producer: pid={data.get('producer_pid') or '-'} alive={bool(data.get('producer_alive'))}",
+            f"model_timeout_seconds: {data.get('model_timeout_seconds') if data.get('model_timeout_seconds') is not None else '-'}",
             f"pending_approvals: {data.get('pending_approval_count', 0)}",
             f"phase: {data.get('phase') or '-'}",
             f"steps: {data.get('step_count') if data.get('step_count') is not None else '-'}",
@@ -9617,7 +9639,14 @@ def cmd_journal(args):
                 "questions": len(view_model["questions"]),
                 "sessions": len(view_model["sessions"]),
                 "runtime_effects": len(view_model["runtime_effects"]),
+                "tomorrow_hints": len(view_model["tomorrow_hints"]),
             },
+            "completed": view_model["completed"],
+            "active": view_model["active"],
+            "questions": view_model["questions"],
+            "sessions": view_model["sessions"],
+            "runtime_effects": view_model["runtime_effects"],
+            "tomorrow_hints": view_model["tomorrow_hints"],
             "mew_note": view_model["mew_note"],
         }
         if written:
@@ -11951,7 +11980,10 @@ def cmd_agent_sweep(args):
         )
         if not args.dry_run:
             save_state(state)
-    print(format_sweep_report(report))
+    if getattr(args, "json", False):
+        print(json.dumps(sweep_report_json(report), indent=2))
+    else:
+        print(format_sweep_report(report))
     return 1 if report.get("errors") else 0
 
 def runtime_is_active():

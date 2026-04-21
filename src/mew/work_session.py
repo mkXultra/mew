@@ -3682,8 +3682,43 @@ def format_work_continuity_recommendation(continuity):
     return f"continuity_next: {summary}" if summary else ""
 
 
+def model_turn_is_redundant_planning_churn(turn):
+    turn = turn if isinstance(turn, dict) else {}
+    if turn.get("tool_call_id"):
+        return False
+    action = turn.get("action") or {}
+    action_type = action.get("type") or action.get("tool") or ""
+    if action_type and action_type not in ("wait", "planning"):
+        return False
+    status = str(turn.get("status") or "")
+    if status not in ("failed", "interrupted"):
+        return False
+    summary = str(turn.get("summary") or "").casefold()
+    error = str(turn.get("error") or "").casefold()
+    return (
+        summary == "planning work step"
+        or "request timed out" in error
+        or "interrupted before the work model turn completed" in error
+    )
+
+
+def compact_model_turns_for_prompt(turns, *, max_consecutive_redundant=1):
+    compacted = []
+    redundant_seen = 0
+    for turn in reversed(list(turns or [])):
+        if model_turn_is_redundant_planning_churn(turn):
+            if redundant_seen >= max(0, int(max_consecutive_redundant or 0)):
+                continue
+            redundant_seen += 1
+        else:
+            redundant_seen = 0
+        compacted.append(turn)
+    compacted.reverse()
+    return compacted
+
+
 def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
-    turns = list(turns or [])
+    turns = compact_model_turns_for_prompt(turns)
     recent_count = max(0, int(recent_limit or 0))
     older_turns = turns[:-recent_count] if recent_count else turns
     if not older_turns:
@@ -4347,8 +4382,9 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     suggested_verify_command = suggested_verify_command_for_calls(calls)
     verification_coverage_warning = verification_coverage_warning_for_calls(calls, task=task)
 
+    turns_for_prompt = compact_model_turns_for_prompt(turns)
     recent_decisions = []
-    for turn in turns[-limit:]:
+    for turn in turns_for_prompt[-limit:]:
         action = turn.get("action") or {}
         plan = turn.get("decision_plan") or {}
         memory = plan.get("working_memory") if isinstance(plan, dict) else {}
@@ -4367,7 +4403,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 "last_verified_state": clip_inline_text(str(memory.get("last_verified_state") or ""), 240),
             }
         )
-    compressed_prior_think = build_compressed_prior_think(turns, recent_limit=limit, limit=4)
+    compressed_prior_think = build_compressed_prior_think(turns_for_prompt, recent_limit=limit, limit=4)
 
     phase = work_session_phase(session, calls, turns, pending_approvals)
     latest_call = calls[-1] if calls else None

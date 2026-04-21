@@ -4652,6 +4652,39 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(kwargs["result_timeout"], 4.0)
         self.assertEqual(kwargs["start_timeout"], 6.0)
 
+    def test_agent_sweep_json_outputs_ok_and_keeps_timeout_flags(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch(
+                    "mew.commands.sweep_agent_runs",
+                    return_value={"review_needed": ["run #1 task=1"], "errors": []},
+                ) as sweep:
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(
+                            [
+                                "agent",
+                                "sweep",
+                                "--json",
+                                "--agent-result-timeout",
+                                "4",
+                                "--agent-start-timeout",
+                                "6",
+                            ]
+                        )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["review_needed"], ["run #1 task=1"])
+        self.assertEqual(payload["errors"], [])
+        _, kwargs = sweep.call_args
+        self.assertEqual(kwargs["result_timeout"], 4.0)
+        self.assertEqual(kwargs["start_timeout"], 6.0)
+
     def test_event_command_queues_external_event(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

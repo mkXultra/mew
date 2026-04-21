@@ -1,10 +1,12 @@
 import json
+import multiprocessing
 import os
 import shlex
 import time
 
-from .agent import call_model_json_with_retries
+from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
+from .errors import MewError, ModelBackendError
 from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
 from .tasks import clip_output
 from .timeutil import now_iso
@@ -15,6 +17,7 @@ from .work_session import (
     WRITE_WORK_TOOLS,
     attach_work_resume_world_state,
     build_work_session_resume,
+    compact_model_turns_for_prompt,
     work_turn_guidance_snapshot,
 )
 from .work_world import DEFAULT_WORLD_STATE_FILE_LIMIT, build_work_world_state
@@ -50,6 +53,92 @@ WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
+WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
+
+
+def _work_model_timeout_guard_available():
+    if not hasattr(multiprocessing, "get_context"):
+        return False
+    try:
+        multiprocessing.get_context("fork")
+    except ValueError:
+        return False
+    return True
+
+
+def _terminate_work_model_process(process):
+    if not process.is_alive():
+        process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
+        return
+    process.terminate()
+    process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
+
+
+def _work_model_call_child(send_conn, args, kwargs):
+    try:
+        result = _agent_call_model_json_with_retries(*args, **kwargs)
+        send_conn.send({"status": "ok", "result": result})
+    except BaseException as exc:
+        send_conn.send(
+            {
+                "status": "error",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            }
+        )
+    finally:
+        send_conn.close()
+
+
+def call_model_json_with_retries(*args, **kwargs):
+    kwargs.setdefault("retry_delays", ())
+    on_text_delta = kwargs.get("on_text_delta")
+    timeout = kwargs.get("timeout")
+    if timeout is None and len(args) > 5:
+        timeout = args[5]
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        timeout_value = None
+    if (
+        on_text_delta
+        or timeout_value is None
+        or timeout_value <= 0
+        or not _work_model_timeout_guard_available()
+    ):
+        return _agent_call_model_json_with_retries(*args, **kwargs)
+
+    context = multiprocessing.get_context("fork")
+    recv_conn, send_conn = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_work_model_call_child,
+        args=(send_conn, args, kwargs),
+        daemon=True,
+    )
+    process.start()
+    send_conn.close()
+    payload = None
+    try:
+        if recv_conn.poll(timeout_value):
+            payload = recv_conn.recv()
+        else:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out")
+    finally:
+        recv_conn.close()
+    process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
+    if payload is None:
+        raise ModelBackendError("request timed out")
+    if payload.get("status") == "ok":
+        return payload.get("result")
+    error_message = str(payload.get("message") or "work model call failed")
+    error_type = str(payload.get("error_type") or "")
+    if error_type == "MewError":
+        raise MewError(error_message)
+    raise ModelBackendError(error_message)
 
 
 def clip_work_task_notes(notes, limit=WORK_RESULT_TEXT_LIMIT, max_lines=WORK_TASK_NOTES_CONTEXT_LINES):
@@ -675,6 +764,7 @@ def build_work_session_context(
     prompt_context_mode="full",
 ):
     prompt_compacted = prompt_context_mode != "full"
+    prompt_model_turns = compact_model_turns_for_prompt(model_turns)
     goal = session.get("goal")
     if prompt_compacted:
         goal = clip_output(goal or "", WORK_COMPACT_TASK_TEXT_LIMIT)
@@ -694,7 +784,7 @@ def build_work_session_context(
         ],
         "model_turns": [
             work_model_turn_for_model(turn, prompt_context_mode=prompt_context_mode)
-            for turn in model_turns[-recent_turn_count:]
+            for turn in prompt_model_turns[-recent_turn_count:]
         ],
     }
     work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
@@ -713,7 +803,7 @@ def build_work_session_context(
             "recent_tool_calls": recent_tool_count,
             "recent_model_turns": recent_turn_count,
             "total_tool_calls": len(tool_calls),
-            "total_model_turns": len(model_turns),
+            "total_model_turns": len(prompt_model_turns),
             "note": note,
         }
     return work_context
@@ -928,7 +1018,7 @@ def build_work_think_prompt(context):
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "

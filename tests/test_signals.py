@@ -130,6 +130,14 @@ class SignalTests(unittest.TestCase):
                 self.assertEqual(journal["journal"][0]["source"], "hn")
                 self.assertEqual(journal["journal"][0]["kind"], "rss_item")
 
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["signals", "journal"]), 0)
+                journal_text = stdout.getvalue()
+                self.assertIn("#1 hn:rss_item", journal_text)
+                self.assertIn("Interesting daemon article", journal_text)
+                self.assertIn("reason_for_use=M7 signal dogfood", journal_text)
+                self.assertIn("recorded_at=", journal_text)
+
                 with redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["signals", "disable", "hn"]), 0)
                     self.assertEqual(

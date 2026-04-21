@@ -8,7 +8,7 @@ from mew.programmer import (
     create_task_plan,
 )
 from mew.state import default_state
-from mew.sweep import format_sweep_report, sweep_agent_runs
+from mew.sweep import format_sweep_report, sweep_agent_runs, sweep_report_json
 from mew.timeutil import now_iso
 
 
@@ -101,6 +101,20 @@ class SweepTests(unittest.TestCase):
 
         self.assertIn("run #1", report["stale"][0])
         self.assertEqual(state["attention"]["items"][0]["kind"], "agent_run_stale")
+
+    def test_sweep_report_json_sets_ok_true_with_empty_errors(self):
+        report = sweep_report_json({"review_needed": ["run #1 task=1"]})
+
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["review_needed"], ["run #1 task=1"])
+        self.assertEqual(report["errors"], [])
+
+    def test_sweep_report_json_sets_ok_false_when_errors_present(self):
+        report = sweep_report_json({"errors": ["run #1: boom"]})
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["errors"], ["run #1: boom"])
+        self.assertEqual(report["collected"], [])
 
 
 if __name__ == "__main__":

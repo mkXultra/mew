@@ -164,6 +164,20 @@ def sweep_agent_runs(
     return report
 
 
+def sweep_report_json(report):
+    return {
+        "ok": not bool(report.get("errors")),
+        "collected": list(report.get("collected") or []),
+        "stale": list(report.get("stale") or []),
+        "review_needed": list(report.get("review_needed") or []),
+        "review_started": list(report.get("review_started") or []),
+        "followup_needed": list(report.get("followup_needed") or []),
+        "followup_created": list(report.get("followup_created") or []),
+        "no_followup": list(report.get("no_followup") or []),
+        "errors": list(report.get("errors") or []),
+    }
+
+
 def format_sweep_report(report):
     lines = []
     for key, title in (

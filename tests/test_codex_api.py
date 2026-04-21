@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import unittest
 from unittest.mock import patch
 
@@ -9,12 +10,17 @@ from mew.codex_api import (
     extract_sse_text,
     sse_text_delta,
 )
+from mew.errors import CodexApiError
 
 
 class FakeUrlopenResponse:
-    def __init__(self, lines, headers=None):
-        self._lines = lines
+    def __init__(self, lines, headers=None, readline_side_effects=None):
+        self._lines = list(lines)
         self.headers = headers or {}
+        self._readline_index = 0
+        self._readline_side_effects = list(readline_side_effects or [])
+        self.socket_timeouts = []
+        self.fp = _FakeResponseStream(self.socket_timeouts)
 
     def __enter__(self):
         return self
@@ -23,14 +29,52 @@ class FakeUrlopenResponse:
         return False
 
     def __iter__(self):
-        return iter(self._lines)
+        while True:
+            line = self.readline()
+            if not line:
+                break
+            yield line
+
+    def readline(self):
+        if self._readline_side_effects:
+            effect = self._readline_side_effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+        if self._readline_index >= len(self._lines):
+            return b""
+        line = self._lines[self._readline_index]
+        self._readline_index += 1
+        return line
 
     def read(self):
-        return b"".join(self._lines)
+        if self._readline_index >= len(self._lines):
+            return b""
+        remaining = self._lines[self._readline_index :]
+        self._readline_index = len(self._lines)
+        return b"".join(remaining)
 
 
 def sse_line(data):
     return f"data: {json.dumps(data)}\n".encode("utf-8")
+
+
+class _FakeSocket:
+    def __init__(self, recorded):
+        self._recorded = recorded
+
+    def settimeout(self, value):
+        self._recorded.append(value)
+
+
+class _FakeResponseRaw:
+    def __init__(self, recorded):
+        self._sock = _FakeSocket(recorded)
+
+
+class _FakeResponseStream:
+    def __init__(self, recorded):
+        self.raw = _FakeResponseRaw(recorded)
 
 
 class CodexApiTests(unittest.TestCase):
@@ -97,3 +141,102 @@ class CodexApiTests(unittest.TestCase):
 
         self.assertEqual(text, "ok")
         self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
+        self.assertTrue(captured["body"]["stream"])
+
+    def test_call_codex_web_api_enforces_total_timeout_while_streaming(self):
+        lines = [
+            sse_line({"type": "response.output_text.delta", "delta": "hel"}),
+            sse_line({"type": "response.output_text.delta", "delta": "lo"}),
+            b"data: [DONE]\n",
+        ]
+        deltas = []
+
+        with patch(
+            "mew.codex_api.urllib.request.urlopen",
+            return_value=FakeUrlopenResponse(lines, headers={"content-type": "text/event-stream"}),
+        ):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 0.0, 1.1, 1.1]):
+                with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                    call_codex_web_api(
+                        {"access_token": "token"},
+                        "prompt",
+                        "model",
+                        "https://example.invalid",
+                        1,
+                        on_text_delta=deltas.append,
+                    )
+
+        self.assertLessEqual(len(deltas), 1)
+
+    def test_call_codex_web_api_enforces_timeout_before_first_stream_chunk(self):
+        deltas = []
+        response = FakeUrlopenResponse(
+            [],
+            headers={"content-type": "text/event-stream"},
+            readline_side_effects=[socket.timeout("idle"), socket.timeout("idle")],
+        )
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 1.1, 1.1]):
+                with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                    call_codex_web_api(
+                        {"access_token": "token"},
+                        "prompt",
+                        "model",
+                        "https://example.invalid",
+                        1,
+                        on_text_delta=deltas.append,
+                    )
+
+        self.assertEqual(deltas, [])
+
+    def test_call_codex_web_api_enforces_timeout_when_keepalives_arrive_without_deltas(self):
+        deltas = []
+        response = FakeUrlopenResponse(
+            [b": keepalive\n"],
+            headers={"content-type": "text/event-stream"},
+        )
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 1.1]):
+                with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                    call_codex_web_api(
+                        {"access_token": "token"},
+                        "prompt",
+                        "model",
+                        "https://example.invalid",
+                        1,
+                        on_text_delta=deltas.append,
+                    )
+
+        self.assertEqual(deltas, [])
+
+    def test_call_codex_web_api_uses_full_request_timeout_but_shorter_stream_read_timeout(self):
+        deltas = []
+        response = FakeUrlopenResponse(
+            [sse_line({"type": "response.output_text.delta", "delta": "ok"}), b"data: [DONE]\n"],
+            headers={"content-type": "text/event-stream"},
+            readline_side_effects=[socket.timeout("idle")],
+        )
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["timeout"] = timeout
+            return response
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            with patch(
+                "mew.codex_api.time.monotonic",
+                side_effect=[0.0, 0.0, 1.0, 1.0, 1.5, 1.5, 2.0, 2.0, 2.0],
+            ):
+                text = call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    45,
+                    on_text_delta=deltas.append,
+                )
+
+        self.assertEqual(text, "ok")
+        self.assertEqual(deltas, ["ok"])
+        self.assertEqual(captured["timeout"], 45)
+        self.assertEqual(response.socket_timeouts, [5.0])
