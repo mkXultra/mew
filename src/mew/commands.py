@@ -11406,6 +11406,14 @@ def _format_memory_entry_show(item):
         lines.append(f"how_to_apply: {item.get('how_to_apply')}")
     if item.get("rationale"):
         lines.append(f"rationale: {item.get('rationale')}")
+    if item.get("symptom"):
+        lines.append(f"symptom: {item.get('symptom')}")
+    if item.get("root_cause"):
+        lines.append(f"root_cause: {item.get('root_cause')}")
+    if item.get("fix"):
+        lines.append(f"fix: {item.get('fix')}")
+    if item.get("stop_rule"):
+        lines.append(f"stop_rule: {item.get('stop_rule')}")
     if item.get("vetoed"):
         lines.append("vetoed: yes")
         lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
@@ -11516,6 +11524,10 @@ def cmd_memory(args):
                     why=args.why or "",
                     how_to_apply=args.how_to_apply or "",
                     rationale=args.rationale or "",
+                    symptom=args.symptom or "",
+                    root_cause=args.root_cause or "",
+                    fix=args.fix or "",
+                    stop_rule=args.stop_rule or "",
                 )
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)

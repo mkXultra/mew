@@ -190,6 +190,34 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(template.memory_kind, "task-template")
             self.assertEqual(template.rationale, "keeps reviewer-gated iterations small and repeatable")
 
+            shield = backend.write(
+                "Avoid repeating the stale veto pattern.",
+                scope="private",
+                memory_type="project",
+                memory_kind="failure-shield",
+                name="Failure shield note",
+                approved=True,
+                symptom="veto pattern repeated",
+                root_cause="durable stale note reused without reviewer context",
+                fix="record reviewer veto before reusing the note",
+                stop_rule="stop if reviewer context is missing",
+            )
+            self.assertEqual(shield.memory_kind, "failure-shield")
+            self.assertEqual(shield.root_cause, "durable stale note reused without reviewer context")
+
+            with self.assertRaisesRegex(ValueError, "--root-cause"):
+                backend.write(
+                    "Broken failure shield",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="failure-shield",
+                    name="Broken shield",
+                    approved=True,
+                    symptom="stale note reused",
+                    fix="record reviewer veto",
+                    stop_rule="stop if reviewer context is missing",
+                )
+
     def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
         state = default_state()
         state["memory"]["deep"]["project"].append("Legacy project fact about runtime traces.")
@@ -508,6 +536,15 @@ class MemoryTests(unittest.TestCase):
                                 "private",
                                 "--name",
                                 "Bad durable note",
+                                "--approved",
+                                "--symptom",
+                                "stale bad note was reused",
+                                "--root-cause",
+                                "reviewer veto was not remembered",
+                                "--fix",
+                                "persist the veto before reuse",
+                                "--stop-rule",
+                                "stop if reviewer context is missing",
                             ]
                         ),
                         0,
@@ -584,6 +621,39 @@ class MemoryTests(unittest.TestCase):
                         1,
                     )
                 self.assertIn("schema-only until Phase 2", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_rejects_incomplete_failure_shield(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Missing failure shield root cause",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "failure-shield",
+                                "--name",
+                                "Broken shield",
+                                "--approved",
+                                "--symptom",
+                                "stale note reused",
+                                "--fix",
+                                "persist a blocker",
+                                "--stop-rule",
+                                "stop if reviewer context is missing",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--root-cause", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

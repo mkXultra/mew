@@ -38,6 +38,10 @@ class MemoryEntry:
     why: str = ""
     how_to_apply: str = ""
     rationale: str = ""
+    symptom: str = ""
+    root_cause: str = ""
+    fix: str = ""
+    stop_rule: str = ""
     path: Path | None = None
 
 
@@ -60,6 +64,10 @@ class FileMemoryBackend:
         why: str = "",
         how_to_apply: str = "",
         rationale: str = "",
+        symptom: str = "",
+        root_cause: str = "",
+        fix: str = "",
+        stop_rule: str = "",
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
@@ -67,13 +75,17 @@ class FileMemoryBackend:
         body = str(body or "").strip()
         if not body:
             raise ValueError("memory body must not be empty")
-        approved, why, how_to_apply, rationale = validate_write_gate(
+        approved, why, how_to_apply, rationale, symptom, root_cause, fix, stop_rule = validate_write_gate(
             memory_type=memory_type,
             memory_kind=memory_kind,
             approved=approved,
             why=why,
             how_to_apply=how_to_apply,
             rationale=rationale,
+            symptom=symptom,
+            root_cause=root_cause,
+            fix=fix,
+            stop_rule=stop_rule,
         )
         created_at = created_at or now_iso()
         name = normalize_text(name) or first_line(body) or "Untitled memory"
@@ -95,6 +107,10 @@ class FileMemoryBackend:
             why=why,
             how_to_apply=how_to_apply,
             rationale=rationale,
+            symptom=symptom,
+            root_cause=root_cause,
+            fix=fix,
+            stop_rule=stop_rule,
             path=path,
         )
         path.write_text(render_memory_entry(entry), encoding="utf-8")
@@ -286,12 +302,29 @@ def validate_write_gate(
     why: str = "",
     how_to_apply: str = "",
     rationale: str = "",
-) -> tuple[bool, str, str, str]:
+    symptom: str = "",
+    root_cause: str = "",
+    fix: str = "",
+    stop_rule: str = "",
+) -> tuple[bool, str, str, str, str, str, str, str]:
     normalized_why = normalize_text(why)
     normalized_how = normalize_text(how_to_apply)
     normalized_rationale = normalize_text(rationale)
+    normalized_symptom = normalize_text(symptom)
+    normalized_root_cause = normalize_text(root_cause)
+    normalized_fix = normalize_text(fix)
+    normalized_stop_rule = normalize_text(stop_rule)
     if memory_type != "project" or not memory_kind:
-        return bool(approved), normalized_why, normalized_how, normalized_rationale
+        return (
+            bool(approved),
+            normalized_why,
+            normalized_how,
+            normalized_rationale,
+            normalized_symptom,
+            normalized_root_cause,
+            normalized_fix,
+            normalized_stop_rule,
+        )
     if memory_kind == "reviewer-steering":
         if not approved:
             raise ValueError("reviewer-steering writes require --approved")
@@ -299,12 +332,32 @@ def validate_write_gate(
             raise ValueError("reviewer-steering writes require --why")
         if not normalized_how:
             raise ValueError("reviewer-steering writes require --how-to-apply")
+    if memory_kind == "failure-shield":
+        if not approved:
+            raise ValueError("failure-shield writes require --approved")
+        if not normalized_symptom:
+            raise ValueError("failure-shield writes require --symptom")
+        if not normalized_root_cause:
+            raise ValueError("failure-shield writes require --root-cause")
+        if not normalized_fix:
+            raise ValueError("failure-shield writes require --fix")
+        if not normalized_stop_rule:
+            raise ValueError("failure-shield writes require --stop-rule")
     if memory_kind == "task-template":
         if not approved:
             raise ValueError("task-template writes require --approved")
         if not normalized_rationale:
             raise ValueError("task-template writes require --rationale")
-    return bool(approved), normalized_why, normalized_how, normalized_rationale
+    return (
+        bool(approved),
+        normalized_why,
+        normalized_how,
+        normalized_rationale,
+        normalized_symptom,
+        normalized_root_cause,
+        normalized_fix,
+        normalized_stop_rule,
+    )
 
 
 def first_line(value: str) -> str:
@@ -376,6 +429,14 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         fields["how_to_apply"] = entry.how_to_apply
     if entry.rationale:
         fields["rationale"] = entry.rationale
+    if entry.symptom:
+        fields["symptom"] = entry.symptom
+    if entry.root_cause:
+        fields["root_cause"] = entry.root_cause
+    if entry.fix:
+        fields["fix"] = entry.fix
+    if entry.stop_rule:
+        fields["stop_rule"] = entry.stop_rule
     lines = [FRONTMATTER_DELIMITER]
     for key, value in fields.items():
         lines.append(f"{key} = {quote_frontmatter(value)}")
@@ -429,6 +490,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
     why = normalize_text(metadata.get("why"))
     how_to_apply = normalize_text(metadata.get("how_to_apply"))
     rationale = normalize_text(metadata.get("rationale"))
+    symptom = normalize_text(metadata.get("symptom"))
+    root_cause = normalize_text(metadata.get("root_cause"))
+    fix = normalize_text(metadata.get("fix"))
+    stop_rule = normalize_text(metadata.get("stop_rule"))
     if root:
         memory_id = normalize_text(metadata.get("id")) or path.relative_to(root).with_suffix("").as_posix()
     else:
@@ -446,6 +511,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         why=why,
         how_to_apply=how_to_apply,
         rationale=rationale,
+        symptom=symptom,
+        root_cause=root_cause,
+        fix=fix,
+        stop_rule=stop_rule,
         path=path,
     )
 
@@ -465,6 +534,10 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.why,
             entry.how_to_apply,
             entry.rationale,
+            entry.symptom,
+            entry.root_cause,
+            entry.fix,
+            entry.stop_rule,
         ]
     ).casefold()
     if needle in haystack:
@@ -492,6 +565,10 @@ def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> 
         "why": entry.why,
         "how_to_apply": entry.how_to_apply,
         "rationale": entry.rationale,
+        "symptom": entry.symptom,
+        "root_cause": entry.root_cause,
+        "fix": entry.fix,
+        "stop_rule": entry.stop_rule,
     }
     if entry.path:
         data["path"] = str(entry.path)

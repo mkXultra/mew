@@ -1488,6 +1488,10 @@ def build_parser():
     memory_parser.add_argument("--why", help="why this reviewer-steering memory should persist")
     memory_parser.add_argument("--how-to-apply", dest="how_to_apply", help="how to apply a reviewer-steering rule later")
     memory_parser.add_argument("--rationale", help="rationale for a task-template durable write")
+    memory_parser.add_argument("--symptom", help="symptom required for a failure-shield durable write")
+    memory_parser.add_argument("--root-cause", dest="root_cause", help="root cause required for a failure-shield durable write")
+    memory_parser.add_argument("--fix", help="fix required for a failure-shield durable write")
+    memory_parser.add_argument("--stop-rule", dest="stop_rule", help="stop rule required for a failure-shield durable write")
     memory_parser.add_argument(
         "--kind",
         dest="memory_kind",
