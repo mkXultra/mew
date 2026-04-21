@@ -42,6 +42,9 @@ Do not let a checkpoint "hold", "wait", or "do not spend a proof item" note
 become the new task selector. Treat it as a local constraint only.
 Do not treat a checkpoint, a commit boundary, or a clean worktree as a reason
 to return control to the user during a long session.
+Do not emit user-visible commentary/status updates during a long session unless
+the saved output gate explicitly allows reporting. Commentary counts as
+returning control.
 
 ## Reentry Checklist
 
@@ -139,6 +142,9 @@ Checkpoint rule:
 - A checkpoint is an internal continuity artifact, not a user-visible boundary.
 - After saving a checkpoint, continue working unless the saved output gate says
   reporting is allowed.
+- User-visible assistant messages are reports. This includes commentary,
+  progress updates, checkpoint summaries, and "quick status" replies that were
+  not explicitly requested by a new user interrupt.
 - During a user-granted long session, return control only when one of these is
   true:
   - the explicit time/report boundary was reached

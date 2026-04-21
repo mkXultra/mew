@@ -91,6 +91,14 @@ Always save the output gate explicitly:
 - `report_only_if={time_boundary, blocker, approval_needed, explicit_user_interrupt}`
 - `remaining_budget=<best current estimate>`
 
+Treat any user-visible assistant message as a report.
+
+- `commentary` progress updates count as returning control.
+- status blurts, checkpoint summaries, and "quick updates" also count as
+  returning control.
+- during a long session, silence is the default unless the saved
+  `report_only_if` condition fired.
+
 Do not treat `commit done`, `clean worktree`, `next action clear`, or
 `checkpoint saved` as report triggers.
 
