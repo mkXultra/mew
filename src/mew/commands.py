@@ -2146,7 +2146,47 @@ def _work_task_command(task_id, *parts):
     return mew_command(*args)
 
 
-def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
+def _work_session_continue_command(task_id, session=None, max_steps=1, follow=False):
+    parts = [mew_executable(), "work"]
+    if task_id is not None:
+        parts.append(str(task_id))
+    parts.append("--follow" if follow else "--live")
+    options = (session or {}).get("default_options") or {}
+    if options.get("auth"):
+        parts.extend(["--auth", options["auth"]])
+    if options.get("model_backend"):
+        parts.extend(["--model-backend", options["model_backend"]])
+    if options.get("model"):
+        parts.extend(["--model", options["model"]])
+    if options.get("base_url"):
+        parts.extend(["--base-url", options["base_url"]])
+    for root in options.get("allow_read") or ["."]:
+        parts.extend(["--allow-read", root])
+    for root in options.get("allow_write") or []:
+        parts.extend(["--allow-write", root])
+    if options.get("allow_shell"):
+        parts.append("--allow-shell")
+    if options.get("allow_verify"):
+        parts.append("--allow-verify")
+    if options.get("verify_command"):
+        parts.extend(["--verify-command", options["verify_command"]])
+    if options.get("approval_mode"):
+        parts.extend(["--approval-mode", options["approval_mode"]])
+    if options.get("act_mode"):
+        parts.extend(["--act-mode", options["act_mode"]])
+    if options.get("compact_live"):
+        parts.append("--compact-live")
+    if options.get("quiet"):
+        parts.append("--quiet")
+    if options.get("no_prompt_approval"):
+        parts.append("--no-prompt-approval")
+    elif options.get("prompt_approval"):
+        parts.append("--prompt-approval")
+    parts.extend(["--max-steps", str(max_steps)])
+    return shlex.join(parts)
+
+
+def work_recovery_suggestion_from_plan(recovery_plan, task_id=None, session=None):
     items = (recovery_plan or {}).get("items") or []
     if not items:
         return {}
@@ -2203,7 +2243,11 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None):
         )
     elif action == "replan":
         kind = "replannable"
-        command = item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", ".")
+        command = (
+            _work_session_continue_command(task_id, session=session, max_steps=1)
+            if session
+            else (item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", "."))
+        )
     else:
         kind = action
         command = item.get("hint") or item.get("review_hint") or _work_task_command(task_id, "--session", "--resume")
@@ -2271,6 +2315,7 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
         "suggested_recovery": work_recovery_suggestion_from_plan(
             (resume or {}).get("recovery_plan") or {},
             task_id=task_id,
+            session=session,
         ),
         "cells": build_work_session_cells(session, limit=30) if session else [],
         "controls": work_cli_control_items(session, args, task=task) if session else [],
@@ -6348,6 +6393,7 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
     planned = work_recovery_suggestion_from_plan(
         (resume.get("recovery_plan") or {}),
         task_id=task_id,
+        session=session,
     )
     if planned:
         return planned

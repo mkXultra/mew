@@ -844,6 +844,44 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(suggestion["source_index"], 0)
         self.assertEqual(suggestion["command"], "mew work 1 --session --resume --allow-read .")
 
+    def test_work_recovery_suggestion_uses_session_defaults_for_replan(self):
+        plan = {
+            "items": [
+                {
+                    "action": "replan",
+                    "reason": "verify world state and replan the interrupted model step",
+                }
+            ]
+        }
+        session = {
+            "default_options": {
+                "auth": "auth.json",
+                "model_backend": "codex",
+                "allow_read": ["."],
+                "allow_write": ["."],
+                "allow_verify": True,
+                "verify_command": "uv run python -m unittest tests.test_work_session tests.test_commands",
+                "act_mode": "deterministic",
+                "compact_live": True,
+                "no_prompt_approval": True,
+            }
+        }
+
+        suggestion = work_recovery_suggestion_from_plan(plan, task_id=388, session=session)
+
+        self.assertEqual(suggestion["kind"], "replannable")
+        self.assertIn("mew work 388 --live", suggestion["command"])
+        self.assertIn("--auth auth.json", suggestion["command"])
+        self.assertIn("--model-backend codex", suggestion["command"])
+        self.assertIn("--allow-read .", suggestion["command"])
+        self.assertIn("--allow-write .", suggestion["command"])
+        self.assertIn("--allow-verify", suggestion["command"])
+        self.assertIn("--verify-command", suggestion["command"])
+        self.assertIn("--act-mode deterministic", suggestion["command"])
+        self.assertIn("--compact-live", suggestion["command"])
+        self.assertIn("--no-prompt-approval", suggestion["command"])
+        self.assertIn("--max-steps 1", suggestion["command"])
+
     def test_work_cockpit_recovery_command_uses_selected_retry_tool_chat_hint(self):
         plan = {
             "items": [
