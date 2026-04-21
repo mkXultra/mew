@@ -3,6 +3,7 @@ import argparse
 import os
 
 from .dogfood import DOGFOOD_SCENARIOS, M2_COMPARATIVE_TASK_SHAPES
+from .typed_memory import CODING_MEMORY_KINDS
 from .commands import (
     APPROVAL_MODES,
     CHAT_HELP,
@@ -1479,6 +1480,12 @@ def build_parser():
     )
     memory_parser.add_argument("--name", help="typed memory name for --add --type")
     memory_parser.add_argument("--description", help="typed memory description for --add --type")
+    memory_parser.add_argument(
+        "--kind",
+        dest="memory_kind",
+        choices=CODING_MEMORY_KINDS,
+        help="coding memory kind for --add or --search; valid only with --type project",
+    )
     memory_parser.add_argument(
         "--category",
         choices=("preferences", "project", "decisions"),

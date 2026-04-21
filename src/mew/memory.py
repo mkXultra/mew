@@ -1,5 +1,11 @@
 from .timeutil import now_iso
-from .typed_memory import FileMemoryBackend, entry_to_dict, normalize_memory_type, normalize_scope
+from .typed_memory import (
+    FileMemoryBackend,
+    entry_to_dict,
+    normalize_memory_kind,
+    normalize_memory_type,
+    normalize_scope,
+)
 
 
 def add_deep_memory(state, category, text, current_time=None, limit=100):
@@ -98,6 +104,7 @@ def recall_memory(
     limit=20,
     scope=None,
     memory_type=None,
+    memory_kind=None,
     base_dir=".",
 ):
     limit = max(0, int(limit or 0))
@@ -105,8 +112,9 @@ def recall_memory(
         return []
     scope = normalize_scope(scope) if scope else None
     memory_type = normalize_memory_type(memory_type) if memory_type else None
+    memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type) if memory_kind else None
     results = []
-    if (scope in (None, "private")) and (memory_type in (None, "unknown")):
+    if (scope in (None, "private")) and (memory_type in (None, "unknown")) and not memory_kind:
         for item in search_memory(state, query, limit=limit):
             legacy = dict(item)
             legacy.setdefault("storage", "state")
@@ -117,7 +125,13 @@ def recall_memory(
     remaining = max(0, limit - len(results))
     if remaining:
         backend = FileMemoryBackend(base_dir)
-        for entry in backend.recall(query, scope=scope, memory_type=memory_type, limit=remaining):
+        for entry in backend.recall(
+            query,
+            scope=scope,
+            memory_type=memory_type,
+            memory_kind=memory_kind,
+            limit=remaining,
+        ):
             results.append(entry_to_dict(entry))
     return results[:limit]
 

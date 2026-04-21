@@ -115,12 +115,38 @@ class MemoryTests(unittest.TestCase):
 
             self.assertEqual(entry.scope, "private")
             self.assertEqual(entry.memory_type, "user")
+            self.assertEqual(entry.memory_kind, "")
             self.assertTrue(entry.path.exists())
             text = entry.path.read_text(encoding="utf-8")
             self.assertIn('type = "user"', text)
             self.assertIn("Prefer compact diffs", text)
             recalled = backend.recall("compact diffs", scope="private", memory_type="user")
             self.assertEqual(recalled[0].name, "Review preference")
+
+    def test_file_memory_backend_supports_project_memory_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = FileMemoryBackend(tmp)
+
+            entry = backend.write(
+                "Reviewer approved keeping scope fences explicit.",
+                scope="private",
+                memory_type="project",
+                memory_kind="reviewer-steering",
+                name="Scope fence rule",
+                description="Keep scope fences explicit.",
+                created_at="2026-04-19T00:00:00Z",
+            )
+
+            self.assertEqual(entry.memory_kind, "reviewer-steering")
+            text = entry.path.read_text(encoding="utf-8")
+            self.assertIn('kind = "reviewer-steering"', text)
+            recalled = backend.recall(
+                "scope fences",
+                scope="private",
+                memory_type="project",
+                memory_kind="reviewer-steering",
+            )
+            self.assertEqual(recalled[0].memory_kind, "reviewer-steering")
 
     def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
         state = default_state()
@@ -230,6 +256,8 @@ class MemoryTests(unittest.TestCase):
                                 "The mew project should prioritize typed memory.",
                                 "--type",
                                 "project",
+                                "--kind",
+                                "reviewer-steering",
                                 "--scope",
                                 "private",
                                 "--name",
@@ -243,21 +271,58 @@ class MemoryTests(unittest.TestCase):
                     )
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["entry"]["memory_type"], "project")
+                self.assertEqual(data["entry"]["memory_kind"], "reviewer-steering")
                 self.assertTrue((Path(data["entry"]["path"])).exists())
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
-                        main(["memory", "--search", "inhabitation slice", "--type", "project", "--json"]),
+                        main(
+                            [
+                                "memory",
+                                "--search",
+                                "inhabitation slice",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reviewer-steering",
+                                "--json",
+                            ]
+                        ),
                         0,
                     )
                 search_data = json.loads(stdout.getvalue())
                 self.assertEqual(search_data["matches"][0]["name"], "Typed memory priority")
                 self.assertEqual(search_data["matches"][0]["memory_scope"], "private")
+                self.assertEqual(search_data["matches"][0]["memory_kind"], "reviewer-steering")
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--deep"]), 0)
                 self.assertIn("typed_memory:", stdout.getvalue())
-                self.assertIn("private.project Typed memory priority", stdout.getvalue())
+                self.assertIn("private.project.reviewer-steering Typed memory priority", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_rejects_reasoning_trace_direct_write(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Store abstract reasoning trace.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reasoning-trace",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("schema-only until Phase 2", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

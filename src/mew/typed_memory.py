@@ -12,6 +12,13 @@ from .timeutil import now_iso
 
 MEMORY_SCOPES = ("private", "team")
 MEMORY_TYPES = ("user", "feedback", "project", "reference", "unknown")
+CODING_MEMORY_KINDS = (
+    "reviewer-steering",
+    "failure-shield",
+    "file-pair",
+    "task-template",
+    "reasoning-trace",
+)
 FRONTMATTER_DELIMITER = "+++"
 MAX_DESCRIPTION_CHARS = 240
 
@@ -21,6 +28,7 @@ class MemoryEntry:
     id: str
     scope: str
     memory_type: str
+    memory_kind: str
     name: str
     description: str
     body: str
@@ -39,12 +47,14 @@ class FileMemoryBackend:
         *,
         scope: str = "private",
         memory_type: str = "project",
+        memory_kind: str = "",
         name: str = "",
         description: str = "",
         created_at: str | None = None,
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
+        memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type)
         body = str(body or "").strip()
         if not body:
             raise ValueError("memory body must not be empty")
@@ -59,6 +69,7 @@ class FileMemoryBackend:
             id=memory_id,
             scope=scope,
             memory_type=memory_type,
+            memory_kind=memory_kind,
             name=name,
             description=description,
             body=body,
@@ -86,6 +97,7 @@ class FileMemoryBackend:
         *,
         scope: str | None = None,
         memory_type: str | None = None,
+        memory_kind: str | None = None,
         limit: int = 5,
     ) -> list[MemoryEntry]:
         limit = max(0, int(limit or 0))
@@ -93,11 +105,14 @@ class FileMemoryBackend:
             return []
         scope = normalize_scope(scope) if scope else None
         memory_type = normalize_memory_type(memory_type) if memory_type else None
+        memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type) if memory_kind else None
         matches = []
         for entry in self.entries():
             if scope and entry.scope != scope:
                 continue
             if memory_type and entry.memory_type != memory_type:
+                continue
+            if memory_kind and entry.memory_kind != memory_kind:
                 continue
             if memory_entry_matches(entry, query):
                 matches.append(entry)
@@ -121,6 +136,20 @@ def normalize_memory_type(value: str | None) -> str:
     normalized = normalize_text(value).casefold()
     if normalized not in MEMORY_TYPES:
         raise ValueError(f"memory type must be one of: {', '.join(MEMORY_TYPES)}")
+    return normalized
+
+
+def normalize_memory_kind(value: str | None, *, memory_type: str | None = None) -> str:
+    normalized = normalize_text(value).casefold()
+    if not normalized:
+        return ""
+    normalized_type = normalize_memory_type(memory_type) if memory_type else None
+    if normalized_type and normalized_type != "project":
+        raise ValueError("coding memory kinds require --type project")
+    if normalized not in CODING_MEMORY_KINDS:
+        raise ValueError(f"memory kind must be one of: {', '.join(CODING_MEMORY_KINDS)}")
+    if normalized == "reasoning-trace":
+        raise ValueError("reasoning-trace is schema-only until Phase 2")
     return normalized
 
 
@@ -180,6 +209,7 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         "id": entry.id,
         "scope": entry.scope,
         "type": entry.memory_type,
+        "kind": entry.memory_kind,
         "name": entry.name,
         "description": entry.description,
         "created_at": entry.created_at,
@@ -226,6 +256,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         memory_type = normalize_memory_type(metadata.get("type") or path.parent.name)
     except ValueError:
         memory_type = "unknown"
+    try:
+        memory_kind = normalize_memory_kind(metadata.get("kind"), memory_type=memory_type)
+    except ValueError:
+        memory_kind = ""
     name = normalize_text(metadata.get("name")) or path.stem
     description = clip_description(metadata.get("description") or first_line(body))
     created_at = normalize_text(metadata.get("created_at"))
@@ -237,6 +271,7 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         id=memory_id,
         scope=scope,
         memory_type=memory_type,
+        memory_kind=memory_kind,
         name=name,
         description=description,
         body=body,
@@ -256,6 +291,7 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.body,
             entry.scope,
             entry.memory_type,
+            entry.memory_kind,
         ]
     ).casefold()
     if needle in haystack:
@@ -271,6 +307,7 @@ def entry_to_dict(entry: MemoryEntry) -> dict[str, Any]:
         "memory_scope": entry.scope,
         "type": entry.memory_type,
         "memory_type": entry.memory_type,
+        "memory_kind": entry.memory_kind,
         "key": entry.name,
         "name": entry.name,
         "description": entry.description,

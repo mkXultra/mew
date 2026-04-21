@@ -11356,6 +11356,8 @@ def format_active_memory(active_memory, task=None, session=None):
         return "\n".join(lines)
     for item in items:
         label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
+        if item.get("memory_kind"):
+            label += f".{item.get('memory_kind')}"
         name = item.get("name") or item.get("key") or "memory"
         details = active_memory_item_detail_parts(item, include_score=True, include_matches=True)
         lines.append(f"- [{label}] {name}: {item.get('description') or item.get('text') or ''} ({'; '.join(details)})")
@@ -11393,7 +11395,7 @@ def cmd_memory(args):
         return 0
 
     if args.add:
-        if not args.memory_type and (args.scope or args.name or args.description):
+        if not args.memory_type and (args.scope or args.name or args.description or args.memory_kind):
             print("mew: typed memory metadata requires --type when adding memory", file=sys.stderr)
             return 1
         if args.memory_type:
@@ -11402,6 +11404,7 @@ def cmd_memory(args):
                     args.add,
                     scope=args.scope or "private",
                     memory_type=args.memory_type,
+                    memory_kind=args.memory_kind or "",
                     name=args.name or "",
                     description=args.description or "",
                 )
@@ -11444,6 +11447,7 @@ def cmd_memory(args):
                 limit=args.limit,
                 scope=args.scope,
                 memory_type=args.memory_type,
+                memory_kind=args.memory_kind,
             )
         except ValueError as exc:
             print(f"mew: {exc}", file=sys.stderr)
@@ -11465,6 +11469,8 @@ def cmd_memory(args):
                 details.append(str(result.get("at")))
             if result.get("memory_type"):
                 details.append(f"type={result.get('memory_type')}")
+            if result.get("memory_kind"):
+                details.append(f"kind={result.get('memory_kind')}")
             if result.get("path"):
                 details.append(str(result.get("path")))
             suffix = f" ({', '.join(details)})" if details else ""
@@ -11495,7 +11501,10 @@ def cmd_memory(args):
         print("typed_memory:")
         if typed_entries:
             for entry in typed_entries:
-                print(f"- {entry.scope}.{entry.memory_type} {entry.name}: {entry.description}")
+                label = f"{entry.scope}.{entry.memory_type}"
+                if entry.memory_kind:
+                    label += f".{entry.memory_kind}"
+                print(f"- {label} {entry.name}: {entry.description}")
         else:
             print("- none")
     return 0
