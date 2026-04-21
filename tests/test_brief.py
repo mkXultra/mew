@@ -538,6 +538,75 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("native_work_skip:", brief)
         self.assertIn("Next useful move: enter coding cockpit for active work session #3 task #7", brief)
 
+    def test_brief_prefers_continue_command_for_interrupted_active_work_session(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Resume interrupted coding task", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Resume interrupted coding task",
+                "goal": "Keep brief aligned with the actual interrupted work session.",
+                "created_at": "then",
+                "updated_at": "now",
+                "default_options": {
+                    "auth": "auth.json",
+                    "model_backend": "codex",
+                    "allow_read": ["."],
+                    "allow_write": ["."],
+                    "allow_verify": True,
+                    "verify_command": "uv run python -m unittest tests.test_brief",
+                    "compact_live": True,
+                    "no_prompt_approval": True,
+                },
+                "tool_calls": [],
+                "model_turns": [
+                    {
+                        "id": 12,
+                        "status": "failed",
+                        "error": "request timed out",
+                        "model_metrics": {
+                            "think": {"prompt_chars": 63842, "timeout_seconds": 45.0},
+                        },
+                    }
+                ],
+            }
+        )
+
+        brief = build_brief(state, kind="coding")
+
+        self.assertIn(
+            "Next useful move: resume interrupted active work session #3 task #7 with "
+            "`./mew work 7 --live --auth auth.json --model-backend codex --allow-read . "
+            "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "
+            "tests.test_brief' --compact-live --no-prompt-approval --max-steps 1`.",
+            brief,
+        )
+
+    def test_brief_hides_plan_needed_for_task_with_active_work_session(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Do not duplicate active task", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Do not duplicate active task",
+                "goal": "Avoid queue duplication.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        brief = build_brief(state, kind="coding")
+        data = build_brief_data(state, kind="coding")
+
+        self.assertNotIn("- plan needed: task #7", brief)
+        self.assertEqual(data["programmer_queue"]["plan_needed"], [])
+
     def test_brief_marks_rolled_back_recent_writes(self):
         state = default_state()
         state["write_runs"].append(

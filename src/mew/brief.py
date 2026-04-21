@@ -646,7 +646,20 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
     followup_waiting = review_runs_needing_followup(state)
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
-    plan_needed = tasks_needing_plan(tasks)
+    active_work_sessions = active_work_session_items(
+        state,
+        limit=limit,
+        kind=kind,
+        current_time=generated_at,
+    )
+    active_work_task_ids = {
+        str(session.get("task_id"))
+        for session in active_work_sessions
+        if session.get("task_id") is not None
+    }
+    plan_needed = [
+        task for task in tasks_needing_plan(tasks) if str(task.get("id")) not in active_work_task_ids
+    ]
     activity = [] if kind else recent_activity(state, limit=limit)
     thoughts = [] if kind else recent_thoughts_for_context(state, limit=limit)
     steps = [] if kind else recent_step_runs(state, limit=limit)
@@ -699,6 +712,7 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
             ],
             "plan_needed": [_task_item(task) for task in plan_needed[:limit]],
         },
+        "active_work_sessions": active_work_sessions,
         "next_move": next_move(state, kind=kind),
     }
 
@@ -1302,6 +1316,12 @@ def next_move(state, kind=None):
                 f"repair continuity for active work session #{session.get('id')}: "
                 f"{continuity_summary} via `{command}`"
             )
+        latest_model_failure = session.get("latest_model_failure") or {}
+        if latest_model_failure and session.get("continue_command"):
+            return (
+                f"resume interrupted active work session #{session.get('id')} "
+                f"task #{session.get('task_id')} with `{session.get('continue_command')}`"
+            )
         task = next((task for task in action_tasks if str(task.get("id")) == str(session.get("task_id"))), {})
         if task_kind(task) == "coding" and session.get("task_id") is not None:
             return (
@@ -1376,13 +1396,20 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     followup_waiting = review_runs_needing_followup(state)
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
-    plan_needed = tasks_needing_plan(tasks)
     active_work_sessions = active_work_session_items(
         state,
         limit=limit,
         kind=kind,
         current_time=generated_at,
     )
+    active_work_task_ids = {
+        str(session.get("task_id"))
+        for session in active_work_sessions
+        if session.get("task_id") is not None
+    }
+    plan_needed = [
+        task for task in tasks_needing_plan(tasks) if str(task.get("id")) not in active_work_task_ids
+    ]
     verifications = recent_records(
         filter_records_for_tasks(state.get("verification_runs", []), tasks, kind=kind),
         limit=limit,
