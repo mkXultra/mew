@@ -527,3 +527,17 @@ excerpt is already present in prompt context. Focused prompt tests,
 module-level `tests.test_work_session`, `ruff`, `py_compile`, and
 `git diff --check` passed. This is blocker reduction for the frozen M6.6 set,
 not an extra comparator slot.
+
+Task #363 / session #351 then provided the fresh mew-side proof that the
+first-edit-efficiency blocker is closed. Native mew did one initial source/test
+anchor search, one redundant source search that was then converted into the
+suggested narrow `read_file`, and after `edit_ready=true` it went straight to a
+paired dry-run src/test edit without another same-path reread before the edit
+batch. It applied the paired source/test change, passed
+`uv run python -m unittest tests.test_work_session`, performed the required
+same-surface audit on the adjacent `edit_ready` / cached-window /
+adjacent-read-demotion branch, and finished cleanly with a proof summary. The
+specific wording-only src/test diff from that run was not kept because it
+merely restated the proof condition in user-visible text; the run itself is the
+evidence. This is fresh mew-side implementation evidence for the frozen M6.6
+set, not an extra comparator slot.

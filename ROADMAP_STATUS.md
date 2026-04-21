@@ -1180,6 +1180,19 @@ Missing proof:
   module-level `uv run python -m unittest tests.test_work_session`, `ruff`,
   `py_compile`, and `git diff --check` passed. This is prompt hygiene for the
   same M6.6 first-edit proof path, not fresh no-rescue evidence.
+- M6.6 task #363 / session #351 then provided the fresh no-rescue proof that
+  the first-edit-efficiency blocker is closed. Native mew did one initial
+  source/test anchor search, one redundant source search that was then
+  converted into the suggested narrow `read_file`, and after `edit_ready=true`
+  it went straight to a paired dry-run src/test edit without another same-path
+  reread before the edit batch. It applied the paired source/test change,
+  passed `uv run python -m unittest tests.test_work_session`, performed the
+  required same-surface audit on the adjacent `edit_ready` / cached-window /
+  adjacent-read-demotion branch, and finished with the proof summary recorded
+  in task #363. The concrete wording-only src/test diff from that run was not
+  kept, because it merely restated the proof condition in user-visible text;
+  the run itself is the evidence. This is fresh mew-side implementation
+  evidence for the frozen M6.6 set.
 
 Done when:
 
@@ -1269,15 +1282,16 @@ Next action:
   but do not count it as no-rescue evidence: the fresh proof task failed
   before touching src/test because it tried to inspect a sensitive
   `.mew/memory/private` path already represented in active memory.
-- Keep M6.6 on the mew-side critical path. The next task should target the
-  remaining proof gap after #362: native mew must use the merged
-  `cached_window_by_path` recall together with `edit_ready`, the rendered
-  resume-text audit, and the new active-memory guard to reach a paired dry-run
-  edit without another same-path reread detour on a broader
-  `work_session.py`-anchored slice. Prefer a fresh native no-steer slice whose
-  premise is not already satisfied by the current worktree, requires native
-  verification and same-surface audit, and attacks first-edit efficiency
-  rather than adding another prompt-only reminder or comparator work.
+- Record task #363 / session #351 as fresh mew-side first-edit-efficiency
+  proof for the frozen M6.6 set: after the recent blocker-reduction patches,
+  native mew reached a paired dry-run src/test edit once `edit_ready=true`,
+  passed the configured unittest verifier, and closed same-surface audit
+  without rescue edits.
+- Keep M6.6 on the mew-side critical path. The next task should move from
+  blocker reduction to milestone closure work: freeze the current M6.6
+  implementation set and run the deferred Codex CLI comparator batch in
+  parallel detached worktrees, or surface any remaining honest gap that still
+  prevents that freeze.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
