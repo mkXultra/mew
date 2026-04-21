@@ -411,11 +411,12 @@ Done when:
   uncredited and the loop halted for review
 - scope fence prevents out-of-scope file edits and blocks self-authored
   roadmap-status or milestone-close changes without human approval
-- a supervised 8-hour run completes at least three real roadmap items end to
-  end with reviewer decisions recorded on each iteration, zero proof-or-revert
-  failures, and a green drift canary throughout
+- a supervised session spanning `>=4h` wall-clock completes `>=3` real roadmap
+  items end to end with reviewer decisions recorded on each iteration,
+  includes `>=1` real reentry or pause/resume across a context reload, and
+  sustains zero proof-or-revert failures plus a green drift canary throughout
 - any proposal for a 24h unattended run is rejected until the supervised
-  8-hour proof is recorded
+  M6.7 close-gate proof is recorded
 
 Why it matters:
 

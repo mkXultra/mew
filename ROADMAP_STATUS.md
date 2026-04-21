@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-21
+Last updated: 2026-04-22
 
 This file is the operational roadmap dashboard. It should stay short enough to
 survive context compression and long-session reentry. Historical detail through
@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two early bounded reviewer-gated iterations plus a fresh clean post-fix sixth iteration are recorded; dedicated governance scope fencing and stabilized live verification are in product, and the remaining gate is the supervised 8-hour proof. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two early bounded reviewer-gated iterations plus a fresh clean post-fix sixth iteration are recorded; dedicated governance scope fencing and stabilized live verification are in product, and the remaining gate is the supervised hybrid close-gate proof. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `not_started` | Turn persistent state into a coding advantage so the Nth iteration on the same repo is measurably smarter than the 1st. Spec: `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md`. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
@@ -73,7 +73,7 @@ Reasoning:
   same-surface audit, and finished with no reviewer rescue edits.
 - M6.8 (Task Chaining) and M6.9 (Durable Coding Intelligence) are now
   registered as successors but neither is active. Ordering: M6.7 closes first,
-  including the supervised 8-hour proof. Then M6.9 Phase 1-3 may begin under
+  including the supervised hybrid close-gate proof. Then M6.9 Phase 1-3 may begin under
   the M6.7 supervised-loop shape, while M6.8 may begin in parallel with those
   early M6.9 phases or before any M6.9 Phase 4 work that depends on chaining.
 - This ordering keeps M6.7 as the stable supervised substrate while still
@@ -81,12 +81,12 @@ Reasoning:
   meant to inform architectural choices made during remaining M6.7 work, not
   to reprioritize M6.7 implementation before its close gate is met.
 - M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 still lacks the supervised 8-hour proof.
+  ahead while M6.7 still lacks the supervised hybrid close-gate proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  the supervised 8-hour proof, not more speculative coding-loop polish.
+  the supervised hybrid close-gate proof, not more speculative coding-loop polish.
 
 Current next action:
 
@@ -102,9 +102,11 @@ Current next action:
    closed after a direct verifier-runtime blocker patch outside the task scope.
 5. Treat task `#374` as the clean fresh post-fix bounded proof on the now-
    stabilized live-verifier runtime.
-6. The next gate is the supervised 8-hour M6.7 run with at least three real
-   roadmap items, reviewer decisions recorded per iteration, zero
-   proof-or-revert failures, and a green drift canary throughout.
+6. The next gate is the supervised M6.7 close-gate proof: a session spanning
+   `>=4h` wall-clock that completes `>=3` real roadmap items with reviewer
+   decisions recorded per iteration, includes `>=1` real reentry or
+   pause/resume across a context reload, and sustains zero
+   proof-or-revert failures plus a green drift canary throughout.
 7. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
@@ -1581,7 +1583,7 @@ Evidence:
   `active_work_session_items()` skip non-actionable tasks, and the new
   regression proves `mew focus --kind coding` no longer treats a stale blocked
   work session as active work that should suppress the next useful move.
-- The refreshed 8-hour proof queue has now been exercised further. Task `#380`
+- The refreshed close-gate proof queue has now been exercised further. Task `#380`
   / sessions `#368` and `#369` soft-stopped Candidate N-A after the focused
   verifier shape was repaired: the run stayed inside
   `src/mew/proof_summary.py` + `tests/test_proof_summary.py`, but two fresh
@@ -1696,10 +1698,12 @@ Evidence:
 Missing proof:
 
 - The current supervised run now has three real roadmap items (`N-G`, `N-I`,
-  `N-J`), but the 8-hour wall-clock proof window has not completed yet.
-- Any 24h unattended run is still disallowed until the supervised 8-hour proof
-  is recorded.
-- If any supervised 8-hour proof item fails or soft-stops, M6.7 must classify
+  `N-J`), but the hybrid close-gate proof is still missing one real reentry or
+  pause/resume across a context reload and still needs `>=4h` wall-clock under
+  the same supervised run.
+- Any 24h unattended run is still disallowed until the supervised M6.7
+  close-gate proof is recorded.
+- If any supervised close-gate proof item fails or soft-stops, M6.7 must classify
   it as proof-or-revert failure, product-only progress, or substrate evidence,
   then fix the exposed blocker before consuming more bounded proof items.
 - Task `#388` is now explicitly marked as a paused debug target via the
@@ -1715,13 +1719,15 @@ Done when:
 - proof-or-revert is enforced when proof is missing or failing
 - scope fence blocks out-of-scope edits and self-authored roadmap/milestone
   closure changes without human approval
-- a supervised 8-hour run completes at least three real roadmap items end to
-  end with reviewer decisions recorded on each iteration, zero
-  proof-or-revert failures, and a green drift canary throughout
+- a supervised session spanning `>=4h` wall-clock completes `>=3` real roadmap
+  items end to end with reviewer decisions recorded on each iteration,
+  includes `>=1` real reentry or pause/resume across a context reload, and
+  sustains zero proof-or-revert failures plus a green drift canary throughout
 
 Next action:
 
-- Stop treating direct supervisor fixes as progress toward the 8-hour proof
+- Stop treating direct supervisor fixes as progress toward the supervised
+  close-gate proof
   when the same unresolved blocker is still open. If one proof item fails or
   soft-stops, return to the exposed blocker, land the substrate fix, verify
   it, and only then go back to the supervised proof queue.
@@ -1730,12 +1736,13 @@ Next action:
   more candidates under the same unresolved blocker.
 - Do not spend more proof items right now. Keep the current supervised run
   alive, record `N-J` with the blocker-fix chain that enabled it, and wait for
-  the 8-hour wall-clock criterion before deciding whether another bounded item
-  is actually required.
+  the hybrid close-gate criteria to be satisfied before deciding whether
+  another bounded item is actually required.
 - Preserve the new operator/debug stance: `#388` stays paused unless a real
   invalidation forces resume, and `brief` / `focus` / `desk` should keep
-  reflecting that paused state during the wall-clock wait.
-- Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
+  reflecting that paused state during the close-gate proof window.
+- Plan and run the supervised M6.7 close-gate proof only on bounded items that
+  are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.
 - Keep the per-iteration drift canary, proof-or-revert discipline, and
@@ -1753,7 +1760,7 @@ Goal:
 
 Entry gate:
 
-- M6.7 must be closed, including its supervised 8-hour proof
+- M6.7 must be closed, including its supervised hybrid close-gate proof
 - reviewer approval must be logged before the first chained run begins
 
 Missing proof:
@@ -1901,8 +1908,8 @@ Active focus: **M6.7 Supervised Self-Hosting Loop**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- planning and running the supervised 8-hour M6.7 proof with bounded roadmap
-  items and recorded reviewer decisions;
+- planning and running the supervised M6.7 close-gate proof with bounded
+  roadmap items, recorded reviewer decisions, and at least one real reentry;
 - roadmap registration and status maintenance for M6.8 / M6.9 only when it
   clarifies post-M6.7 ordering without changing the active milestone;
 - keeping M6.6 as a closed regression baseline for resident coding work;

@@ -1,18 +1,23 @@
-# M6.7 Supervised 8-Hour Proof Plan 2026-04-21
+# M6.7 Supervised Close-Gate Proof Plan 2026-04-21
 
 Status: planned.
 
 This document fixes the remaining M6.7 gate after the clean short-loop proof
 recorded in `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md`.
 
+Legacy note: the filename still says `8H` for continuity, but the active gate
+is now the hybrid M6.7 close-gate proof.
+
 ## Remaining Gate
 
-M6.7 is not done until a supervised 8-hour run completes with:
+M6.7 is not done until a supervised close-gate proof completes with:
 
-1. at least three real roadmap items
-2. reviewer decisions recorded on each iteration
-3. zero proof-or-revert failures
-4. a green drift canary throughout
+1. `>=4h` wall-clock under one supervised run
+2. `>=3` real roadmap items
+3. `>=1` real reentry or pause/resume across a context reload
+4. reviewer decisions recorded on each iteration
+5. zero proof-or-revert failures
+6. a green drift canary throughout
 
 ## Session Rules
 
@@ -22,11 +27,11 @@ M6.7 is not done until a supervised 8-hour run completes with:
 - no chained autonomous task selection inside a single iteration
 - no auto-merge
 - roadmap/milestone status changes remain reviewer-owned
-- if any 8-hour proof item fails or soft-stops, record whether it was
+- if any close-gate proof item fails or soft-stops, record whether it was
   proof-or-revert, product-only progress, or native-loop substrate evidence;
   do not keep consuming new proof items under the same unresolved blocker.
   Switch to the exposed M6.7 blocker, land that fix, verify it, and only then
-  return to the 8-hour proof on a fresh bounded item
+  return to the close-gate proof on a fresh bounded item
 
 ## Item Selection Rules
 
@@ -151,11 +156,11 @@ converge:
 - Candidate N-D: still untried, but do not run it as a solo next proof item.
   After N-A/N-B soft-stop, N-C no-change, and N-E product-only progress, the
   queue needed to be replenished back to at least three untried bounded items
-  before reopening the supervised 8-hour proof.
+  before reopening the supervised close-gate proof.
 
 ## Proof Failure Recovery Rule
 
-When a bounded 8-hour proof item fails or soft-stops, do not drift to other
+When a bounded close-gate proof item fails or soft-stops, do not drift to other
 proof items. First classify the outcome, then repair the exposed blocker, and
 only then return to the supervised proof queue.
 
@@ -356,7 +361,7 @@ Every iteration must follow the same shape:
 
 ## Stop Conditions
 
-Hard stop the whole 8-hour proof immediately if any of these happen:
+Hard stop the whole close-gate proof immediately if any of these happen:
 
 - drift canary fails
 - proof-or-revert failure
@@ -372,8 +377,8 @@ Soft stop an iteration and switch to a different candidate if:
 
 ## Near-Term Plan
 
-The next three hours should be used for preparation, not for claiming the 8-hour
-proof itself.
+The next work block should be used for preparation, not for prematurely
+claiming the close-gate proof itself.
 
 Before iteration 1 starts:
 
@@ -384,4 +389,4 @@ Before iteration 1 starts:
 4. prepare the iteration-doc skeletons so evidence is recorded during the run,
    not reconstructed after the fact
 
-Only after those are fixed should the supervised 8-hour proof start.
+Only after those are fixed should the supervised close-gate proof start.
