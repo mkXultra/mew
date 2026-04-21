@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `in_progress` | The first bounded reviewer-gated iteration passed end to end with a dry-run approval surface, focused and broader verification, and no reviewer rescue edits; proof-or-revert and scope-fence hardening remain. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end: the first proved the visible scope fence, and the second landed proof-or-revert finish blocking; dedicated scope-fence enforcement and the supervised 8-hour proof still remain. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -29,7 +29,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-21 13:14 JST.
+Last assessed: 2026-04-21 13:48 JST.
 
 Active work: **M6.7 Supervised Self-Hosting Loop** while M5.1, M6, and M6.6
 remain closed baselines and M7 stays deferred.
@@ -57,15 +57,21 @@ Reasoning:
   session `#352` stayed within the declared `src/mew/work_session.py` +
   `tests/test_work_session.py` scope, stopped for dry-run review, passed both
   focused and broader verification, and closed without reviewer rescue edits.
+- The second supervised iteration is now also recorded in
+  `docs/M6_7_SECOND_SUPERVISED_ITERATION_2026-04-21.md`: task `#365` /
+  session `#353` landed a bounded `src/mew/commands.py` finish guard that
+  keeps the session open while approvals, broader verification, or
+  same-surface audit are incomplete, and it closed only after focused plus
+  paired-source verification and a narrow commands.py same-surface audit.
 - M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 still lacks proof-or-revert hardening, scope-fence
-  hardening, and the supervised 8-hour proof.
+  ahead while M6.7 still lacks dedicated scope-fence hardening and the
+  supervised 8-hour proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  the second supervised self-hosting proof plus one direct M6.7 hardening
-  slice, not more speculative coding-loop polish.
+  the third supervised self-hosting proof aimed at scope-fence hardening, not
+  more speculative coding-loop polish.
 
 Current next action:
 
@@ -73,15 +79,17 @@ Current next action:
 2. Treat M6.6 as a closed baseline. Reopen only if a future native coding loop
    regresses on rescue-edits, verifier choice, approval surfaces, or
    path-recall/anti-churn behavior.
-3. Run the second M6.7 bounded roadmap task and keep the iteration shape the
-   same: drift canary first, dry-run reviewable diff, reviewer decision, then
-   focused plus broader verification before finish.
-4. Harden one remaining partial M6.7 criterion directly: proof-or-revert
-   enforcement or scope-fence enforcement beyond the current visible fence.
-5. Do not let mew self-author roadmap-status or milestone-close edits during
+3. Treat the first two bounded M6.7 iterations as the current supervised
+   baseline: visible scope fence plus proof-or-revert finish blocking.
+4. Run the third M6.7 bounded roadmap task under the same shape: drift canary
+   first, dry-run reviewable diff, reviewer decision, then focused plus
+   broader verification before finish.
+5. Use that third task to harden dedicated scope-fence enforcement beyond the
+   current visible fence.
+6. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
-6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+7. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -1348,11 +1356,21 @@ Evidence:
   then passed the broader verifier
   `uv run python -m unittest tests.test_work_session`, completed same-surface
   audit, and finished with no reviewer rescue edits.
+- `docs/M6_7_SECOND_SUPERVISED_ITERATION_2026-04-21.md` records the second
+  bounded supervised iteration. Task `#365` / session `#353` stayed inside the
+  declared `src/mew/commands.py` + `src/mew/work_session.py` +
+  `tests/test_work_session.py` scope, stopped on paired dry-run diffs, then
+  required both the focused verifier
+  `uv run pytest -q tests/test_work_session.py -k 'finish_block' --no-testmon`
+  and the paired-source verifier
+  `uv run python -m unittest tests.test_commands` before finish. The landed
+  `src/mew/commands.py` guard keeps the session open while pending approvals,
+  non-finish-ready verification, or same-surface audit still block proof, and
+  the iteration closed after a narrow same-surface commands.py audit with no
+  reviewer rescue edits.
 
 Missing proof:
 
-- Proof-or-revert is demonstrated by process in the first run, but it is not
-  yet a dedicated enforced artifact/credit gate.
 - Scope fence is now visible and reviewer-bounded for the first run, but the
   current product proof still relies on declared write roots plus existing
   governance review hooks rather than a dedicated M6.7 scope-fence mechanism.
@@ -1373,9 +1391,9 @@ Done when:
 
 Next action:
 
-- Run a second 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to harden either proof-or-revert enforcement or scope-fence
-  enforcement, not later-milestone feature work.
+- Run a third 30-60 minute reviewer-gated roadmap task under the same shape.
+- Use it to harden dedicated scope-fence enforcement, not later-milestone
+  feature work.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals
@@ -1485,7 +1503,8 @@ Active focus: **M6.7 Supervised Self-Hosting Loop**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- one bounded reviewer-gated M6.7 roadmap iteration with proof-or-revert;
+- one bounded reviewer-gated M6.7 roadmap iteration aimed at dedicated
+  scope-fence hardening;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 milestone close and proof harness fixes as closed baseline work;
 - reviewer-owned roadmap/status updates and checkpointing around M6.7 runs;

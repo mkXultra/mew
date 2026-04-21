@@ -15508,6 +15508,42 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_finish_block_keeps_session_open_for_proof_or_revert_gates(self):
+        from mew.commands import apply_work_control_action
+
+        blocker_cases = [
+            ("pending approval", {"pending_approvals": [{"id": 1, "tool": "edit_file"}]}),
+            (
+                "unverified source-edit verification",
+                {"verification_confidence": {"status": "narrow", "finish_ready": False}},
+            ),
+            ("required same-surface audit", {"same_surface_audit": {"status": "needed"}}),
+        ]
+
+        for blocker, resume in blocker_cases:
+            with self.subTest(blocker=blocker):
+                state = {}
+                session = {"id": 9, "status": "active"}
+                task = {"id": 15, "status": "ready", "notes": ""}
+                with patch("mew.commands.build_work_session_resume", return_value=resume), patch(
+                    "mew.commands.close_work_session"
+                ) as close_session:
+                    result = apply_work_control_action(
+                        state,
+                        session,
+                        task,
+                        {"type": "finish", "reason": "implemented and verified", "task_done": True},
+                    )
+
+                close_session.assert_not_called()
+                self.assertEqual(session["status"], "active")
+                self.assertEqual(task["status"], "ready")
+                self.assertFalse(result["task_done"])
+                self.assertIn("finish blocked", result["finished_note"])
+                self.assertIn(blocker, result["finished_note"])
+                self.assertIn("Work session finish blocked", task["notes"])
+                self.assertNotIn("Work session finished:", task["notes"])
+
     def test_work_finish_note_prefers_summary_over_reason(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

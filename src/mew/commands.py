@@ -2422,6 +2422,21 @@ def apply_work_control_action(state, session, task, action):
         note = _work_finish_text(action, "Work session finished.")
         current_time = now_iso()
         if session:
+            resume = build_work_session_resume(session)
+            verification_confidence = resume.get("verification_confidence") or {}
+            finish_blockers = []
+            if resume.get("pending_approvals"):
+                finish_blockers.append("pending approval")
+            if verification_confidence and not verification_confidence.get("finish_ready"):
+                finish_blockers.append("unverified source-edit verification")
+            if resume.get("same_surface_audit"):
+                finish_blockers.append("required same-surface audit")
+            if finish_blockers:
+                blocked_note = f"finish blocked: {', '.join(finish_blockers)}"
+                if task is not None:
+                    append_task_note(task, f"Work session finish blocked: {blocked_note}")
+                    task["updated_at"] = current_time
+                return {"finished_note": blocked_note, "task_done": False}
             close_work_session(session)
         if task is not None:
             append_task_note(task, f"Work session finished: {note}")
