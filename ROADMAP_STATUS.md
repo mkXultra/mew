@@ -22,8 +22,9 @@ M5 was archived losslessly in
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Mainline has landed bounded D1, D7, D6, D2, D3, D4, and D5 slices plus the first post-Phase-1 reverse-query surfaces: `mew memory --resolve-source-path` and `mew memory --resolve-test-path` now resolve durable file-pair paths in both directions with paired memory ids. |
+| 6.9. Durable Coding Intelligence | `frozen` | Phase 1 substrate exists, but active implementation is intentionally paused while M6.11 stabilizes the drafting loop that durable-memory work depends on. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
+| 6.11. Loop Stabilization | `in_progress` | The active milestone is now loop stabilization: land `WorkTodo`, `PatchDraftCompiler`, replay bundles, refusal separation, and draft-specific recovery so `#399` and `#401` become structurally reproducible and fixable. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -32,11 +33,11 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-22 05:29 JST.
+Last assessed: 2026-04-22 08:19 JST.
 
-Active work: **M6.9 Durable Coding Intelligence** while M5.1, M6, M6.6, and
-M6.7 remain closed baselines, M6.10 stays registered but inactive, and M7
-remains deferred.
+Active work: **M6.11 Loop Stabilization** while M5.1, M6, M6.6, and M6.7
+remain closed baselines, M6.9 is frozen in place as dependent substrate work,
+M6.10 stays registered but inactive, and M7 remains deferred.
 
 Reasoning:
 
@@ -95,12 +96,24 @@ Reasoning:
   plus broader retrieval changes remain deferred.
 - M7 signal registry foundation exists, but deeper signal work should remain
   deferred while M6.9 and M6.10 still dominate execution throughput.
+- `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` is now the canonical loop
+  rewrite plan, and `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md`
+  says the design is implementation-ready after the replay-bundle ordering,
+  state-model ownership, and deferred memory-provider issues were fixed.
+- The active milestone therefore moves from M6.9 surface expansion to
+  **M6.11 Loop Stabilization**. This is an explicit freeze, not a rollback:
+  M6.9 keeps its landed Phase 1 substrate but pauses further surface work until
+  the drafting loop is stable enough that new memory work does not hide loop
+  failures.
+- The first pull-forward item from the M6.11 review is refusal separation in
+  `src/mew/codex_api.py`, because without it the
+  `model_returned_refusal` blocker code is unreachable.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  bounded M6.9 progress, not speculative cockpit polish or premature M6.10
-  implementation.
+  bounded M6.11 progress, not speculative cockpit polish, renewed M6.9 surface
+  expansion, or premature M6.10 implementation.
 
 Current next action:
 
@@ -127,16 +140,15 @@ Current next action:
    window reached `2026-04-22 05:29 JST`.
 8. `docs/M6_7_CLOSE_GATE_2026-04-22.md` now records that reviewer-owned close
    decision. The frozen close-watch copy remains historical evidence only.
-9. Mainline implementation may continue through bounded **M6.9 Phase 1**
-   slices because M6.7 is now closed and M6.9 is the active milestone.
-10. Treat the current M6.9 implementation target as bounded **Phase 1**
-   substrate plus narrow post-Phase-1 observability/query slices: D1, D7, D6,
-   D2, D3, D4, and D5 are landed, `reasoning-trace` stays schema-only until
-   Phase 2, and the next separate slices should stay read-only or narrowly
-   reviewer-gated rather than broad recall-time rewrites.
-11. Do not let mew self-author roadmap-status or milestone-close edits during
-   M6.7; those remain reviewer-controlled until the supervised gate itself is
-   proven.
+9. Treat M6.9 as frozen at its current Phase 1 substrate boundary while M6.11
+   is active. Do not expand durable-memory surfaces until the drafting loop is
+   replayable and structurally stable.
+10. Start M6.11 Phase 0 first: land refusal separation, freeze blocker and
+    recovery enums, and add the draft metrics/placeholders that the design
+    depends on.
+11. Do not let mew self-author roadmap-status or milestone-close edits; those
+    remain reviewer-controlled until a later milestone explicitly moves that
+    boundary.
 12. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 13. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
@@ -160,6 +172,11 @@ Human-role transition rule:
 - From M6.7 onward, the default implementation mode is **mew first** for
   bounded roadmap/coding work: mew is the implementer, Codex plays the
   human-style reviewer/approver, and the loop stays reviewer-gated.
+- **Exception:** M6.11 Loop Stabilization is reviewer-implemented, not
+  mew-first. It rewrites the agent-loop substrate that the mew-first path
+  depends on, so Codex owns implementation until M6.11 closes. mew may still
+  be used as an evidence source or regression target, but not as the primary
+  implementer for this milestone.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
 - Low- and medium-risk implementation can now use mew as primary implementer
@@ -1775,7 +1792,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `in_progress`.
+Status: `frozen`.
 
 Goal:
 
@@ -1869,11 +1886,8 @@ Missing proof:
 
 Next action:
 
-- land the symmetric D7 read-only veto-log surface next:
-  `mew memory --veto-log` should dump `.mew/durable/veto_log.jsonl` in human
-  and JSON output without changing veto writes, retention, or recall behavior
-- keep later observability and broader recall-time rewrites split out until
-  the next bounded Phase 2 target is chosen explicitly
+- do not expand M6.9 surfaces while M6.11 is active; resume here only after
+  the drafting loop is replayable and structurally stable
 
 ### M6.10: Execution Accelerators
 
@@ -1909,6 +1923,54 @@ Next action:
   boundary is reaffirmed
 - when M6.10 opens, take Todo D1 first and keep Explorer deferred until Todo
   state is stable and reviewer-visible
+
+### M6.11: Loop Stabilization
+
+Status: `in_progress`.
+
+Goal:
+
+- make the drafting path between `edit_ready` and reviewer-visible dry-run
+  preview contract-driven, replayable, and recoverable
+
+Entry gate:
+
+- M6.7 must be closed
+- `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` must exist
+- `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md` must call the
+  design implementation-ready
+- active M6.9 surface expansion must be frozen
+
+Evidence:
+
+- four analysis/review docs now converge on the same diagnosis:
+  mew is strong through exact cached windows but weak at the drafting layer
+  between `edit_ready` and dry-run patch generation
+- the canonical design now fixes the previously blocking review issues:
+  replay bundles moved into Phase 2, `WorkTodo.status` is the canonical source
+  of truth with session phase derived from it, and `MemoryExploreProvider`
+  remains deferred protocol work that does not gate later phases
+- the final `claude-ultra` review explicitly says the design is
+  implementation-ready and that only refusal separation is worth pulling
+  forward before implementation
+- open loop failure buckets remain concrete and named:
+  `#399` exact cached windows but no safe dry-run patch,
+  `#401` exact cached windows reached but timeout before drafting
+
+Missing proof:
+
+- refusal separation is not yet landed in `src/mew/codex_api.py`
+- `WorkTodo` does not yet exist in session state
+- `PatchDraftCompiler` does not yet exist
+- live draft failures do not yet emit the replay bundles the design expects
+- draft-time recovery still collapses to generic `replan`
+- no bounded implementation slice has yet passed through the new drafting path
+
+Next action:
+
+- start Phase 0 now:
+  land refusal separation and the first draft-state metrics/placeholders from
+  the design, then move to `WorkTodo` and `PatchDraftCompiler`
 
 ### M7: Senses - Inbound Signals
 
@@ -2012,27 +2074,28 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.9 Durable Coding Intelligence**.
+Active focus: **M6.11 Loop Stabilization**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- bounded M6.9 Phase 1 and early post-Phase-1 work that preserves the current
-  reviewer-owned governance boundary;
-- agent-loop debug or substrate fixes only when they directly unblock mew-first
-  M6.9 iterations;
-- roadmap registration and status maintenance for M6.10 or later milestones
-  only when it clarifies post-M6.9 ordering without changing the active
-  milestone;
+- bounded M6.11 Phase 0-4 work from
+  `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md`;
+- refusal separation, `WorkTodo`, `PatchDraftCompiler`, replay-bundle capture,
+  tiny drafting contract, and drafting-specific recovery;
+- roadmap registration and status maintenance for later milestones only when it
+  clarifies post-M6.11 ordering without changing the active milestone;
+- keeping M6.9 frozen and available as dependent substrate work, not as the
+  current implementation target;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 and M6.7 close artifacts as closed baseline evidence;
-- reviewer-owned roadmap/status updates and checkpointing around M6.9 runs;
+- reviewer-owned roadmap/status updates and checkpointing around M6.11 runs;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1, M6, M6.6, and M6.7 as closed baselines while M6.9 turns durable
-state into coding advantage before deeper M7 signal work or any unattended
-self-hosting.
+Keep M5.1, M6, M6.6, and M6.7 as closed baselines while M6.11 stabilizes the
+drafting nerve path, M6.9 stays frozen as dependent substrate work, and deeper
+M7 signal work plus unattended self-hosting remain deferred.
 
 ## Maintenance Rule
 
