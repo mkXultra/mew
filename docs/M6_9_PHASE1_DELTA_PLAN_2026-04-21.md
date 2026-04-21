@@ -385,6 +385,72 @@ closes; they do not authorize implementation yet.
 The first post-M6.7 implementation pass should confirm or reject this map
 before touching any durable schema.
 
+## D1 First Implementation Slice
+
+This is the intended first code slice after M6.7 closes. It exists to keep D1
+bounded and to prevent D1 from absorbing D2/D3 behavior.
+
+Target files only:
+
+- `src/mew/typed_memory.py`
+- `src/mew/memory.py`
+- `src/mew/commands.py`
+- `src/mew/cli.py`
+- focused tests in `tests/test_memory.py` and `tests/test_work_session.py` only
+
+First-slice rule:
+
+- extend the existing typed-memory infrastructure in place
+- do not touch work-loop recall or prompt injection yet
+- do not add `.mew/durable/` files yet
+- do not add write gates yet
+- do not add symbol-index or revise logic yet
+
+Exact intended shape:
+
+1. Keep the current storage layout:
+   - `.mew/memory/<scope>/<type>/*.md`
+   - no migration rewrite
+   - legacy entries without coding metadata continue to load
+2. Add an optional `memory_kind` discriminator to typed-memory frontmatter and
+   `entry_to_dict()` output.
+3. Restrict Phase 1 coding kinds to `--type project` entries only.
+4. Accept these populated kinds in the first slice:
+   - `reviewer-steering`
+   - `failure-shield`
+   - `file-pair`
+   - `task-template`
+5. Reserve `reasoning-trace` in schema, but reject direct writes with an
+   explicit `schema-only until Phase 2` error.
+6. Add CLI filtering/output only:
+   - `mew memory --add ... --type project --kind <memory_kind>`
+   - `mew memory --search ... --kind <memory_kind>`
+   - JSON and human output show `memory_kind` when present
+7. Leave active-memory recall semantics unchanged in D1:
+   - same matching
+   - same injection order
+   - no new recall ranking
+   - no automatic promotion from session logs
+
+Proof target for this slice:
+
+- one manual typed-memory round trip for each populated kind
+- `reasoning-trace` rejects cleanly as schema-only
+- legacy typed-memory reads/searches still pass without `memory_kind`
+- active-memory tests stay green without any prompt-shape change
+
+Explicit non-goals for D1 first slice:
+
+- no `mew memory list/show/trace` expansion beyond exposing `memory_kind`
+- no write-gate enforcement
+- no reviewer-diff capture
+- no veto command
+- no deterministic `revise()`
+- no symbol-index persistence
+
+If D1 needs any of those to land, stop and split the slice again instead of
+bundling later Phase 1 deliverables into taxonomy scaffolding.
+
 ## Stop Rules
 
 Do not start M6.9 code if any of these is still true:
