@@ -240,6 +240,8 @@ Minimum Phase 1 surfaces:
 - `mew memory list/show/trace`
 - `mew index query <module> <symbol>`
 - session trace fields for recall/write events
+- explicit growth budgets and Phase 1 oldest-entry eviction
+- separate `veto_log.jsonl` and `eviction_log.jsonl`
 
 Proof:
 
@@ -254,12 +256,19 @@ Non-goals:
 Implement as separate M6.7-shaped iterations after M6.7 closes:
 
 1. D1 taxonomy scaffolding
-2. D2 write-gate matrix
-3. D3 deterministic `revise()`
-4. D4 minimum symbol index
-5. D5 reviewer-diff capture
-6. D6 veto stub
-7. D7 observability surfaces
+2. D6 reviewer veto stub
+3. D7 observability surfaces
+4. D2 write-gate matrix
+5. D3 deterministic `revise()`
+6. D4 minimum symbol index
+7. D5 reviewer-diff capture
+
+Rationale:
+
+- D6 must exist early so bad durable entries can be cleaned up before they
+  accumulate.
+- D7 must exist early because later deliverables rely on trace/dump surfaces
+  for proof.
 
 Keep them separate. Do not bundle D1-D7 in one pass.
 
@@ -276,11 +285,24 @@ Before Phase 1 code starts, define and keep stable:
   - `m6_9-observability-rebuild`
   - `m6_9-phase1-regression`
 - comparator baseline source for the 3 M6.6 task shapes
+- baseline metrics pinned from 3 consecutive M6.7 iterations:
+  - `B0.iter_wall`
+  - `B0.first_think`
+  - `B0.comparator`
 - session trace additions needed for:
   - returned/dropped/injected entry ids
   - memory_kind
   - write_gate_result
   - index hit/miss
+- write-path audit fields:
+  - `written_by`
+  - `approved_by`
+  - `approved_at`
+  - source iteration id
+- Phase 1 NFR ceilings recorded before code lands:
+  - iteration wall time `<= B0.iter_wall x 1.15`
+  - first-think latency `<= B0.first_think x 1.10`
+  - comparator regression bounded by the pinned `B0.comparator`
 
 ## Open Questions To Resolve Before Code
 
@@ -292,6 +314,8 @@ Before Phase 1 code starts, define and keep stable:
 4. Which current approval/apply hook is the correct source of truth for
    `reviewer_diffs.jsonl` finalization?
 5. Which existing CLI family should own `mew index query` and veto operations?
+6. What per-type growth budgets and Phase 1 oldest-entry eviction rule should
+   be pinned before `.mew/durable/` starts filling?
 
 ## Stop Rules
 
