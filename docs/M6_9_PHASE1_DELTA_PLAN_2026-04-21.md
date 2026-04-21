@@ -256,8 +256,8 @@ Non-goals:
 Implement as separate M6.7-shaped iterations after M6.7 closes:
 
 1. D1 taxonomy scaffolding
-2. D6 reviewer veto stub
-3. D7 observability surfaces
+2. D7 observability surfaces
+3. D6 reviewer veto stub
 4. D2 write-gate matrix
 5. D3 deterministic `revise()`
 6. D4 minimum symbol index
@@ -265,12 +265,19 @@ Implement as separate M6.7-shaped iterations after M6.7 closes:
 
 Rationale:
 
+- D1 must land first because every later slice needs stable typed objects and
+  a durable `memory_kind` vocabulary.
 - D6 must exist early so bad durable entries can be cleaned up before they
   accumulate.
 - D7 must exist early because later deliverables rely on trace/dump surfaces
   for proof.
 
 Keep them separate. Do not bundle D1-D7 in one pass.
+
+Concrete start rule:
+
+- do not begin D2 until D1, D7, and D6 each have their own bounded proof
+  artifact and reviewer sign-off
 
 ## Required Proof Artifacts
 
@@ -297,6 +304,8 @@ Before Phase 1 code starts, define and keep stable:
     recommendation
   - current pinned implementation baseline:
     - `a719b5d` surfaces `latest_model_failure` diagnostics in `focus`
+    - `234d844` extends `work --follow-status` failure metrics with explicit
+      `write_ready_fast_path_reason` output
     - `3360b7c` makes `brief` prefer interrupted-session recovery over
       self-improve/default coding entrypoints
     - `33e7ab0` separates `untracked_only` checkpoint git state from true
@@ -307,6 +316,10 @@ Before Phase 1 code starts, define and keep stable:
     - `a8a86d7` aligns `build_work_session_resume()` with paused idle
       stop-request semantics so the resume surface no longer claims an already
       idle paused session will stop "at the next boundary"
+    - `7f5a8b8` keeps paused work status consistent across `brief` / `focus`
+      task lists instead of mixing a paused session with a `ready` task badge
+    - `adb0555` suppresses stale `pending_steer` while a work session is
+      explicitly paused, so parked blockers stay quiet until reactivated
   - remaining operator baseline work before M6.9 code starts:
     - keep `#388` paused unless a real invalidation forces resume
     - preserve these paused/interrupted semantics through the rest of M6.7 so
