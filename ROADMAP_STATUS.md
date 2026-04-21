@@ -102,12 +102,15 @@ Current next action:
    closed after a direct verifier-runtime blocker patch outside the task scope.
 5. Treat task `#374` as the clean fresh post-fix bounded proof on the now-
    stabilized live-verifier runtime.
-6. The next gate is the supervised M6.7 close-gate proof: a session spanning
-   `>=4h` wall-clock that completes `>=3` real roadmap items with reviewer
-   decisions recorded per iteration, includes `>=1` real reentry or
-   pause/resume across a context reload, and sustains zero
-   proof-or-revert failures plus a green drift canary throughout.
-7. Do not let mew self-author roadmap-status or milestone-close edits during
+6. Treat the resumed `#388` / session `#378` interrupt-submit run as the real
+   context-reload reentry for the M6.7 hybrid gate. The run stayed in-scope,
+   preserved the same supervised session, and returned exact blocker outcomes
+   without proof-or-revert failure.
+7. The remaining gate is now the same supervised run reaching `>=4h`
+   wall-clock while preserving the already-met `>=3` real roadmap items,
+   reviewer decisions, real reentry, zero proof-or-revert failures, and green
+   drift canary conditions.
+8. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
 8. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
@@ -1698,19 +1701,19 @@ Evidence:
 Missing proof:
 
 - The current supervised run now has three real roadmap items (`N-G`, `N-I`,
-  `N-J`), but the hybrid close-gate proof is still missing one real reentry or
-  pause/resume across a context reload and still needs `>=4h` wall-clock under
-  the same supervised run.
+  `N-J`) and one real reentry/pause-resume across a context reload (`#388` /
+  session `#378`), but the hybrid close-gate proof still needs `>=4h`
+  wall-clock under that same supervised run.
 - Any 24h unattended run is still disallowed until the supervised M6.7
   close-gate proof is recorded.
-- If any supervised close-gate proof item fails or soft-stops, M6.7 must classify
-  it as proof-or-revert failure, product-only progress, or substrate evidence,
-  then fix the exposed blocker before consuming more bounded proof items.
-- Task `#388` is now explicitly marked as a paused debug target via the
-  existing work-session stop request, with `brief`, `focus`, and `desk`
-  updated to surface that paused state honestly instead of recommending it as
-  the default next move. Treat it as a stored fallback/debug target, not as
-  the next proof item to grind.
+- If any future supervised close-gate proof item fails or soft-stops, M6.7
+  must classify it as proof-or-revert failure, product-only progress, or
+  substrate evidence, then fix the exposed blocker before consuming more
+  bounded proof items.
+- Task `#388` is now stored blocker/product work, not the next proof item to
+  grind. Its recent reruns exposed exact-window insufficiency and then
+  prompt/runtime failures after exact-window priming; those findings do not
+  invalidate the already-satisfied reentry criterion.
 
 Done when:
 
@@ -1726,27 +1729,17 @@ Done when:
 
 Next action:
 
-- Stop treating direct supervisor fixes as progress toward the supervised
-  close-gate proof
-  when the same unresolved blocker is still open. If one proof item fails or
-  soft-stops, return to the exposed blocker, land the substrate fix, verify
-  it, and only then go back to the supervised proof queue.
-- Once the blocker fix is verified, rerun a fresh bounded proof item from the
-  remaining live queue (`N-F`, `N-G`, `N-I`, then `N-D`) instead of consuming
-  more candidates under the same unresolved blocker.
-- Do not spend more proof items right now. Keep the current supervised run
-  alive, record `N-J` with the blocker-fix chain that enabled it, and wait for
-  the hybrid close-gate criteria to be satisfied before deciding whether
-  another bounded item is actually required.
-- Preserve the new operator/debug stance: `#388` stays paused unless a real
-  invalidation forces resume, and `brief` / `focus` / `desk` should keep
-  reflecting that paused state during the close-gate proof window.
-- Plan and run the supervised M6.7 close-gate proof only on bounded items that
-  are
-  still live product gaps and can plausibly produce reviewer-gated dry-run
-  diffs.
+- Do not spend more proof items right now. The `>=3` item count and real
+  reentry condition are already met inside the active supervised run.
+- Keep the current supervised run alive until the `>=4h` wall-clock condition
+  is satisfied, and avoid fake waiting: use the remaining time on bounded
+  blocker/product work or pre-approved successor prep that does not claim new
+  M6.7 proof credit.
+- Preserve the new operator/debug stance: `#388` stays parked as stored
+  blocker/product work unless a real invalidation justifies another rerun, and
+  `brief` / `focus` / `desk` should keep reflecting that state honestly.
 - Keep the per-iteration drift canary, proof-or-revert discipline, and
-  reviewer-gated dry-run approvals intact throughout the run.
+  reviewer-gated approvals intact throughout the run.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M6.8: Task Chaining - Supervised Self-Selection
@@ -1908,8 +1901,11 @@ Active focus: **M6.7 Supervised Self-Hosting Loop**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- planning and running the supervised M6.7 close-gate proof with bounded
-  roadmap items, recorded reviewer decisions, and at least one real reentry;
+- keeping the active supervised M6.7 run alive until the `>=4h` wall-clock
+  close condition is satisfied, without burning more proof items now that the
+  `>=3` item count and real reentry condition are already met;
+- bounded blocker/product work that does not claim fresh M6.7 proof credit,
+  especially agent-loop debug or substrate fixes exposed by `#388`;
 - roadmap registration and status maintenance for M6.8 / M6.9 only when it
   clarifies post-M6.7 ordering without changing the active milestone;
 - keeping M6.6 as a closed regression baseline for resident coding work;
