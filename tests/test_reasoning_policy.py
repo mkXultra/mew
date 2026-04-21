@@ -96,6 +96,41 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["effort"], "medium")
         self.assertEqual(policy["work_type"], "small_implementation")
 
+    def test_scope_fence_negated_governance_stays_medium(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Reverse symbol-index query",
+                "kind": "coding",
+                "notes": (
+                    "Scope fence: src/mew/cli.py, src/mew/commands.py only. "
+                    "Reviewer-owned governance files out of scope."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "medium")
+        self.assertEqual(policy["work_type"], "small_implementation")
+
+    def test_non_negated_governance_line_still_stays_high(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Reverse symbol-index query",
+                "kind": "coding",
+                "notes": (
+                    "Scope fence: docs are out of scope.\n"
+                    "Update governance approval flow before resuming the task."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "high_risk")
+        self.assertIn("governance", policy["matched_terms"])
+
     def test_env_override_wins(self):
         policy = select_work_reasoning_policy(
             {"title": "Inspect project shape", "kind": "coding"},

@@ -28,6 +28,13 @@ NOTE_HISTORY_MARKERS = (
     "Long session checkpoint:",
     "Context save ",
 )
+HIGH_RISK_NEGATION_MARKERS = (
+    "out of scope",
+    "out-of-scope",
+    "outside scope",
+    "not in scope",
+    "reviewer-owned",
+)
 
 
 def normalize_reasoning_effort(value):
@@ -39,9 +46,23 @@ def _joined_text(*values):
     return " ".join(str(value or "") for value in values if value)
 
 
+def _line_suppresses_high_risk(line):
+    lowered = str(line or "").casefold()
+    if not lowered:
+        return False
+    return any(marker in lowered for marker in HIGH_RISK_NEGATION_MARKERS)
+
+
 def _matching_high_risk_terms(text):
-    lowered = str(text or "").casefold()
-    return [term for term in HIGH_RISK_TERMS if term in lowered]
+    matches = []
+    for line in str(text or "").splitlines() or [str(text or "")]:
+        lowered = str(line or "").casefold()
+        if _line_suppresses_high_risk(lowered):
+            continue
+        for term in HIGH_RISK_TERMS:
+            if term in lowered and term not in matches:
+                matches.append(term)
+    return matches
 
 
 def task_policy_description(task):
