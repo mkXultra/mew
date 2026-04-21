@@ -1576,6 +1576,10 @@ Done when:
 
 Next action:
 
+- Refresh `docs/M6_7_SUPERVISED_8H_PROOF_PLAN_2026-04-21.md` around the new
+  N-A..N-E candidate queue and use that queue for the supervised 8-hour run;
+  the first frozen queue is exhausted as honest no-change evidence and should
+  not be reused as closure proof.
 - Plan and run the supervised 8-hour M6.7 proof with at least three bounded
   real roadmap items and recorded reviewer decisions.
 - Keep the per-iteration drift canary, proof-or-revert discipline, and

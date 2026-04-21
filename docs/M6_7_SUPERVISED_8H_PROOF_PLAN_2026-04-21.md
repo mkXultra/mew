@@ -44,30 +44,55 @@ Reject items with any of these traits:
 
 ## Candidate Queue
 
-Freeze five or six candidates so one failed item does not force mid-proof
-replanning. The first three completed items can close the gate if every
-iteration stays green.
+The original A/B/C/D/E queue was exercised and exhausted mostly as honest
+no-change outcomes on already-green surfaces. This refreshed queue replaces it
+with open product gaps drawn from the current M6.7 evidence trail.
 
-Primary order for the first supervised run:
+Freeze five candidates so one failed item does not force mid-proof replanning.
+The first three completed items can close the gate if every iteration stays
+green.
 
-1. Candidate A
-2. Candidate B
-3. Candidate D
+Primary order for the next supervised run:
+
+1. Candidate N-A
+2. Candidate N-B
+3. Candidate N-C
 
 Fallbacks if one primary candidate is rejected by the canary or does not
 converge:
 
-4. Candidate C
-5. Candidate E
+4. Candidate N-D
+5. Candidate N-E
 
-### Candidate A: brief active-work and next-move coherence
+### Candidate N-A: proof-summary supervised-iteration validator
 
-- scope fence: `src/mew/brief.py`, `tests/test_brief.py`
-- target shape: visible focus/brief behavior only
+- scope fence: `src/mew/proof_summary.py`, `tests/test_proof_summary.py`
+- target shape: `mew proof-summary --supervised-iteration <doc>` validates
+  that an M6.7 iteration doc includes drift canary, focused verifier, broader
+  verifier, scope fence, reviewer decision, same-surface audit, and
+  no-rescue-edit evidence; `--strict` fails on any missing section
 - drift canary / focused verifier:
 
 ```bash
-uv run pytest -q tests/test_brief.py -k "focus or brief or active_work_session" --no-testmon
+uv run pytest -q tests/test_proof_summary.py -k "supervised or strict" --no-testmon
+```
+
+- broader verifier:
+
+```bash
+uv run python -m unittest tests.test_proof_summary
+```
+
+### Candidate N-B: brief/next governance-blocked approval context
+
+- scope fence: `src/mew/brief.py`, `tests/test_brief.py`
+- target shape: when the active work session carries
+  `approve_all_blocked_reason`, `mew brief` and `mew next` surface the blocked
+  reason plus `blocked_approve_all_hint`; JSON output exposes the same fields
+- drift canary / focused verifier:
+
+```bash
+uv run pytest -q tests/test_brief.py -k "blocked_approve_all or governance_blocked or next_move_blocked" --no-testmon
 ```
 
 - broader verifier:
@@ -76,30 +101,36 @@ uv run pytest -q tests/test_brief.py -k "focus or brief or active_work_session" 
 uv run python -m unittest tests.test_brief
 ```
 
-### Candidate B: work-session resume or repair anchor clarity
+### Candidate N-C: active-work non-actionable state parity
 
-- scope fence: `src/mew/work_session.py`, `tests/test_work_session.py`
-- target shape: reviewer surface, resume, repair anchor, or same-surface audit
+- scope fence: `src/mew/brief.py`, `tests/test_brief.py`
+- target shape: `active_work_session_items()` excludes all non-actionable
+  session states, not only stale blocked ones, so `mew focus --kind coding`
+  does not suppress the next useful move for aborted, rejected, or stale
+  finished-without-proof work
 - drift canary / focused verifier:
 
 ```bash
-uv run pytest -q tests/test_work_session.py -k "resume or same_surface or repair_anchor" --no-testmon
+uv run pytest -q tests/test_brief.py -k "active_work_session or focus_kind_coding" --no-testmon
 ```
 
 - broader verifier:
 
 ```bash
-uv run python -m unittest tests.test_work_session
+uv run python -m unittest tests.test_brief
 ```
 
-### Candidate C: commands reply or approval surface clarity
+### Candidate N-D: reply-file per-tool governance approval audit trail
 
 - scope fence: `src/mew/commands.py`, `tests/test_work_session.py`
-- target shape: visible `mew work` control or reply behavior
+- target shape: governance/policy dry-run edits approved via
+  `mew work --reply-file` per-tool approvals record reviewer id, reason, and
+  governance target in the effect journal and surface in audit output; missing
+  reviewer identity is rejected before execution
 - drift canary / focused verifier:
 
 ```bash
-uv run pytest -q tests/test_work_session.py -k "approve_all or governance or reply_file" --no-testmon
+uv run pytest -q tests/test_work_session.py -k "reply_file and (governance or per_tool_approve)" --no-testmon
 ```
 
 - broader verifier:
@@ -108,38 +139,22 @@ uv run pytest -q tests/test_work_session.py -k "approve_all or governance or rep
 uv run python -m unittest tests.test_work_session tests.test_commands
 ```
 
-### Candidate D: commands top-level legibility surface
+### Candidate N-E: live verifier timeout diagnostic surface
 
-- scope fence: `src/mew/commands.py`, `tests/test_commands.py`
-- target shape: visible top-level `status` / `brief` / `focus` / `next`
-  behavior, especially JSON, quiet, or kind-filtered output
+- scope fence: `src/mew/toolbox.py`, `tests/test_toolbox.py`
+- target shape: on verifier timeout, the streaming helper records structured
+  timeout diagnostics (`timed_out`, kill status, stdout/stderr tail) so the
+  work session surfaces an actionable diagnostic instead of an opaque timeout
 - drift canary / focused verifier:
 
 ```bash
-uv run pytest -q tests/test_commands.py -k "status_brief_and_next or focus_and_daily or next_and_focus" --no-testmon
+uv run pytest -q tests/test_toolbox.py -k "timeout or streaming_kill" --no-testmon
 ```
 
 - broader verifier:
 
 ```bash
-uv run python -m unittest tests.test_commands
-```
-
-### Candidate E: read-only signal provenance or journal surface
-
-- scope fence: `src/mew/signals.py`, `tests/test_signals.py`
-- target shape: read-only signal provenance, journaling, or CLI rendering only;
-  no collectors, daemon schedule, or wake-up behavior
-- drift canary / focused verifier:
-
-```bash
-uv run pytest -q tests/test_signals.py --no-testmon
-```
-
-- broader verifier:
-
-```bash
-uv run python -m unittest tests.test_signals
+uv run python -m unittest tests.test_toolbox
 ```
 
 ## Per-Iteration Runbook
@@ -179,7 +194,7 @@ proof itself.
 
 Before iteration 1 starts:
 
-1. freeze the candidate list
+1. freeze the refreshed candidate list
 2. pre-write scope fence, drift canary, focused verifier, and broader verifier
    for each candidate
 3. confirm a continuous reviewer window exists for the full proof
