@@ -5164,6 +5164,44 @@ def _append_reviewer_diff_record(payload, *, base_dir="."):
     return path
 
 
+def _load_reviewer_diff_records(base_dir="."):
+    path = _reviewer_diffs_log_path(base_dir)
+    if not path.exists():
+        return []
+    records = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _format_reviewer_diff_records(records):
+    lines = []
+    for record in records:
+        task_id = record.get("task_id")
+        session_id = record.get("session_id")
+        recorded_at = record.get("recorded_at") or ""
+        path = record.get("path") or ""
+        draft = record.get("ai_draft") or {}
+        tool = draft.get("tool") or ""
+        bits = []
+        if task_id is not None:
+            bits.append(f"task=#{task_id}")
+        if session_id is not None:
+            bits.append(f"session=#{session_id}")
+        if tool:
+            bits.append(f"tool={tool}")
+        if recorded_at:
+            bits.append(f"recorded_at={recorded_at}")
+        if path:
+            bits.append(f"path={path}")
+        lines.append("- " + " ".join(bits))
+    return "\n".join(lines)
+
+
 def _mark_work_recovery_chain(session, source_call, status, recovered_by_tool_call_id, recovered_at):
     seen = set()
     current = source_call
@@ -11506,10 +11544,11 @@ def cmd_memory(args):
             or args.show
             or args.resolve_source_path
             or args.resolve_test_path
+            or args.reviewer_diffs
             or args.veto
         ):
             print(
-                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, --resolve-source-path, --resolve-test-path, or --veto",
+                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, or --veto",
                 file=sys.stderr,
             )
             return 1
@@ -11536,10 +11575,10 @@ def cmd_memory(args):
         print(format_active_memory(active_memory, task=task, session=session))
         return 0
 
-    if args.list or args.show or args.resolve_source_path or args.resolve_test_path or args.veto:
+    if args.list or args.show or args.resolve_source_path or args.resolve_test_path or args.reviewer_diffs or args.veto:
         if args.add or args.search or args.compact:
             print(
-                "mew: --list/--show/--resolve-source-path/--resolve-test-path/--veto cannot be combined with --add, --search, or --compact",
+                "mew: --list/--show/--resolve-source-path/--resolve-test-path/--reviewer-diffs/--veto cannot be combined with --add, --search, or --compact",
                 file=sys.stderr,
             )
             return 1
@@ -11550,19 +11589,27 @@ def cmd_memory(args):
                 bool(args.show),
                 bool(args.resolve_source_path),
                 bool(args.resolve_test_path),
+                bool(args.reviewer_diffs),
                 bool(args.veto),
             )
             if flag
         ]
         if len(chosen) > 1:
             print(
-                "mew: choose only one of --list, --show, --resolve-source-path, --resolve-test-path, or --veto",
+                "mew: choose only one of --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, or --veto",
                 file=sys.stderr,
             )
             return 1
         try:
             backend = FileMemoryBackend(".")
             vetoes = backend.latest_vetoes()
+            if args.reviewer_diffs:
+                records = _load_reviewer_diff_records(".")
+                if args.json:
+                    print(json.dumps({"records": records}, ensure_ascii=False, indent=2))
+                elif records:
+                    print(_format_reviewer_diff_records(records))
+                return 0
             if args.resolve_source_path:
                 from .symbol_index import resolve_source_path, resolve_test_path
 

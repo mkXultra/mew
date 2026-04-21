@@ -1856,14 +1856,22 @@ Missing proof:
   Task `#398` stalled twice in mew session `#390` despite exact cached windows,
   so `claude-ultra` chose a direct patch as product progress rather than
   autonomy credit
+- D7 read-only reviewer-diff observability is landed as product progress:
+  `mew memory --reviewer-diffs` now dumps `.mew/durable/reviewer_diffs.jsonl`
+  in both human and JSON form, with empty-log no-op behavior and collision
+  checks that match the existing memory read-surface matrix. `tests/test_memory.py`
+  now covers empty output, one-record output, JSON shape, and flag-collision
+  rejection. Task `#400` timed out in mew session `#391` after exact cached
+  windows but before drafting the paired edit, so the landed patch is product
+  progress and the failure was preserved separately as blocker task `#401`
 - no comparator rerun exists yet for the post-split M6.9 slices
 - later observability and broader retrieval changes remain unstarted
 
 Next action:
 
-- land the smallest D7 read-only observability slice next:
-  `mew memory --reviewer-diffs` should expose `.mew/durable/reviewer_diffs.jsonl`
-  in human and JSON output without changing the write path or adding filters
+- land the symmetric D7 read-only veto-log surface next:
+  `mew memory --veto-log` should dump `.mew/durable/veto_log.jsonl` in human
+  and JSON output without changing veto writes, retention, or recall behavior
 - keep later observability and broader recall-time rewrites split out until
   the next bounded Phase 2 target is chosen explicitly
 

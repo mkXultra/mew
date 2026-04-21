@@ -1474,6 +1474,12 @@ def build_parser():
         dest="resolve_test_path",
         help="resolve one test path through the durable symbol/file-pair index",
     )
+    memory_parser.add_argument(
+        "--reviewer-diffs",
+        dest="reviewer_diffs",
+        action="store_true",
+        help="dump durable reviewer diff records",
+    )
     memory_parser.add_argument("--veto", help="logically suppress one typed memory entry by id")
     memory_parser.add_argument("--reason", help="required veto reason for --veto")
     memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")

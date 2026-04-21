@@ -762,6 +762,56 @@ class MemoryTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_memory_reviewer_diffs_surfaces_json_and_human_output(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--reviewer-diffs", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue()), {"records": []})
+
+                durable = Path(".mew") / "durable"
+                durable.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "task_id": 12,
+                    "session_id": 34,
+                    "path": "src/mew/commands.py",
+                    "recorded_at": "2026-04-22T00:00:00Z",
+                    "ai_draft": {"tool": "write_file", "diff": "draft"},
+                    "reviewer_approved": {"status": "applied"},
+                    "ai_final": {"diff": "final"},
+                }
+                (durable / "reviewer_diffs.jsonl").write_text(
+                    json.dumps(payload, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--reviewer-diffs", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["records"], [payload])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--reviewer-diffs"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("task=#12", text)
+                self.assertIn("session=#34", text)
+                self.assertIn("tool=write_file", text)
+                self.assertIn("recorded_at=2026-04-22T00:00:00Z", text)
+                self.assertIn("path=src/mew/commands.py", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_reviewer_diffs_collides_with_other_read_only_flags(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["memory", "--reviewer-diffs", "--list"]), 1)
+        self.assertIn("choose only one", stderr.getvalue())
+
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["memory", "--reviewer-diffs", "--search", "trace"]), 1)
+        self.assertIn("cannot be combined", stderr.getvalue())
+
     def test_cli_memory_veto_hides_entry_from_list_and_surfaces_reason_in_show(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
