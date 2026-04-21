@@ -10111,6 +10111,80 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_approve_all_blocks_governance_edit(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old readme\n", encoding="utf-8")
+                Path("ROADMAP_STATUS.md").write_text("old status\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "README.md",
+                                "--old",
+                                "old readme",
+                                "--new",
+                                "new readme",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "ROADMAP_STATUS.md",
+                                "--old",
+                                "old status",
+                                "--new",
+                                "new status",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume"]), 0)
+                output = stdout.getvalue()
+                self.assertIn(
+                    "approve all blocked: approve-all is blocked for pending governance/policy dry-run edits",
+                    output,
+                )
+                self.assertIn("approve each tool explicitly instead", output)
+                self.assertNotIn("approve all pending writes", output)
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--approve-all", "--allow-write", "."]), 1)
+
+                self.assertIn(
+                    "approve-all is blocked for pending governance/policy dry-run edits",
+                    stderr.getvalue(),
+                )
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old readme\n")
+                self.assertEqual(Path("ROADMAP_STATUS.md").read_text(encoding="utf-8"), "old status\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_approval_can_override_unpaired_source_edit(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end: the first proved the visible scope fence, and the second landed proof-or-revert finish blocking; dedicated scope-fence enforcement and the supervised 8-hour proof still remain. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end, and dedicated governance approve-all scope fencing is now in product; the remaining gap is a fresh no-rescue iteration that proves the fence plus the supervised 8-hour proof. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -1368,12 +1368,28 @@ Evidence:
   non-finish-ready verification, or same-surface audit still block proof, and
   the iteration closed after a narrow same-surface commands.py audit with no
   reviewer rescue edits.
+- Task `#366` / session `#354` targeted the remaining dedicated scope-fence
+  gap: block `approve-all` when the pending dry-run batch contains a
+  governance/policy edit such as `ROADMAP_STATUS.md`. The native run reached a
+  correct bounded 3-file dry-run batch, but after the bad first regression
+  shape was repaired it closed itself under high pressure instead of preserving
+  a reviewable approval surface. The product patch then landed directly in
+  `src/mew/work_session.py`, `src/mew/commands.py`, and
+  `tests/test_work_session.py`: resume now prints
+  `approve all blocked: approve-all is blocked for pending governance/policy dry-run edits ...`,
+  `work --approve-all` returns an error for pending governance/policy dry-run
+  edits, and the new regression proves both behaviors. Focused
+  `uv run pytest -q tests/test_work_session.py -k 'approve_all or governance_edit' --no-testmon`,
+  broader `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
 
 Missing proof:
 
-- Scope fence is now visible and reviewer-bounded for the first run, but the
-  current product proof still relies on declared write roots plus existing
-  governance review hooks rather than a dedicated M6.7 scope-fence mechanism.
+- Dedicated scope-fence enforcement now exists in product behavior, but there
+  is still no fresh bounded no-rescue supervised iteration that lands and
+  verifies the scope-fence slice end to end without supervisor rescue.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1392,8 +1408,8 @@ Done when:
 Next action:
 
 - Run a third 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to harden dedicated scope-fence enforcement, not later-milestone
-  feature work.
+- Use it to prove the landed dedicated scope-fence mechanism in a fresh
+  no-rescue bounded iteration, not later-milestone feature work.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals

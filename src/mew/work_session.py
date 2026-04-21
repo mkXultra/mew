@@ -4260,7 +4260,26 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             cli_approve_all_parts.extend(["--allow-write", write_path])
         cli_approve_all_parts.extend(["--allow-verify", "--verify-command", verify_command or "<command>"])
         cli_approve_all_hint = work_task_command(*cli_approve_all_parts)
-        if any((approval.get("pairing_status") or {}).get("status") == "missing_test_edit" for approval in pending_approvals):
+        governance_approval = None
+        from .self_improve_audit import _m5_governance_path_category
+
+        for approval in pending_approvals:
+            approval_path = approval.get("path") or "."
+            category = _m5_governance_path_category(approval_path)
+            if category:
+                governance_approval = (category, approval_path)
+                break
+        if governance_approval:
+            category, approval_path = governance_approval
+            approve_all_blocked_reason = (
+                "approve-all is blocked for pending governance/policy dry-run edits; "
+                f"approve each tool explicitly instead ({category} {approval_path})"
+            )
+            blocked_approve_all_hint = approve_all_hint
+            cli_blocked_approve_all_hint = cli_approve_all_hint
+            approve_all_hint = ""
+            cli_approve_all_hint = ""
+        elif any((approval.get("pairing_status") or {}).get("status") == "missing_test_edit" for approval in pending_approvals):
             approve_all_blocked_reason = (
                 "one or more src/mew source edits need paired tests/** write/edit before approve-all"
             )

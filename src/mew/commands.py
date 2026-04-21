@@ -5440,6 +5440,30 @@ def cmd_work_approve_all(args):
             task=task,
             promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
         )
+        blocked_reason = ""
+        from .self_improve_audit import _m5_governance_path_category
+
+        for approve_id in approve_ids:
+            source_call = find_work_tool_call(session, approve_id)
+            if not source_call:
+                continue
+            result = source_call.get("result") or {}
+            if not result.get("dry_run") or not result.get("changed"):
+                continue
+            path = source_call.get("path") or (source_call.get("parameters") or {}).get("path") or ""
+            category = _m5_governance_path_category(path)
+            if category:
+                blocked_reason = (
+                    "approve-all is blocked for pending governance/policy dry-run edits; "
+                    f"approve each tool explicitly instead ({category} {path})"
+                )
+                break
+        if blocked_reason:
+            if args.json:
+                print(json.dumps({"approved": [], "count": 0, "error": blocked_reason}, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: {blocked_reason}", file=sys.stderr)
+            return 1
     if not approve_ids:
         if args.json:
             print(json.dumps({"approved": [], "count": 0}, ensure_ascii=False, indent=2))
