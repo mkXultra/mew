@@ -21,6 +21,8 @@ M5 was archived losslessly in
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `in_progress` | Two early bounded reviewer-gated iterations plus a fresh clean post-fix sixth iteration are recorded; dedicated governance scope fencing and stabilized live verification are in product, and the remaining gate is the supervised 8-hour proof. |
+| 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
+| 6.9. Durable Coding Intelligence | `not_started` | Turn persistent state into a coding advantage so the Nth iteration on the same repo is measurably smarter than the 1st. Spec: `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md`. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -69,6 +71,15 @@ Reasoning:
   canary first, produced a reviewer-visible dry-run diff, passed the focused
   verifier plus `uv run python -m unittest tests.test_brief`, completed a
   same-surface audit, and finished with no reviewer rescue edits.
+- M6.8 (Task Chaining) and M6.9 (Durable Coding Intelligence) are now
+  registered as successors but neither is active. Ordering: M6.7 closes first,
+  including the supervised 8-hour proof. Then M6.9 Phase 1-3 may begin under
+  the M6.7 supervised-loop shape, while M6.8 may begin in parallel with those
+  early M6.9 phases or before any M6.9 Phase 4 work that depends on chaining.
+- This ordering keeps M6.7 as the stable supervised substrate while still
+  registering the longer-horizon coding advantage. The M6.9 registration is
+  meant to inform architectural choices made during remaining M6.7 work, not
+  to reprioritize M6.7 implementation before its close gate is met.
 - M7 signal registry foundation exists, but deeper signal work should not move
   ahead while M6.7 still lacks the supervised 8-hour proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
@@ -1571,6 +1582,58 @@ Next action:
   reviewer-gated dry-run approvals intact throughout the run.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
+### M6.8: Task Chaining - Supervised Self-Selection
+
+Status: `not_started`.
+
+Goal:
+
+- remove the per-iteration human-dispatch latency from the M6.7 loop while
+  preserving reviewer gating and the scope fence
+
+Entry gate:
+
+- M6.7 must be closed, including its supervised 8-hour proof
+- reviewer approval must be logged before the first chained run begins
+
+Missing proof:
+
+- no chained supervised run exists yet
+- selector governance, rejection recovery, and chained drift-canary behavior
+  have not been exercised
+
+Next action:
+
+- finish M6.7 first; do not start M6.8 implementation while the M6.7 close
+  gate is still open
+
+### M6.9: Durable Coding Intelligence
+
+Status: `not_started`.
+
+Goal:
+
+- turn persistent state into a coding advantage so repeated work in the same
+  repository becomes measurably smarter over time
+
+Entry gate:
+
+- M6.7 must be closed
+- the delta/spec work derived from
+  `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md` must be approved
+  before any `src/mew` implementation lands
+- M6.9 Phase 4 stays gated on M6.8
+
+Missing proof:
+
+- no M6.9 implementation or comparator rerun exists yet
+- no durable-coding-memory types are registered in product behavior yet
+
+Next action:
+
+- keep this as the next coding-track dream-goal, but defer all implementation
+  until M6.7 closes and the Phase 1-3 delta plan is reviewer-approved
+
 ### M7: Senses - Inbound Signals
 
 Status: `foundation`.
@@ -1680,6 +1743,8 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - planning and running the supervised 8-hour M6.7 proof with bounded roadmap
   items and recorded reviewer decisions;
+- roadmap registration and status maintenance for M6.8 / M6.9 only when it
+  clarifies post-M6.7 ordering without changing the active milestone;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 milestone close and proof harness fixes as closed baseline work;
 - reviewer-owned roadmap/status updates and checkpointing around M6.7 runs;
