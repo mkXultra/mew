@@ -1042,6 +1042,8 @@ def _work_write_ready_fast_path_state(context):
     if not (has_tests and has_source):
         return {}
     steer_text = str(((resume.get("pending_steer") or {}).get("text")) or "")
+    if not steer_text:
+        steer_text = str((context or {}).get("guidance") or "")
     if steer_text:
         steer_lower = steer_text.lower()
         steer_requests_write = any(
@@ -1055,6 +1057,42 @@ def _work_write_ready_fast_path_state(context):
         "cached_windows": cached_windows,
         "steer_text": steer_text,
     }
+
+
+def _write_ready_recent_windows_from_target_paths(work_session, resume):
+    recent_windows = list((work_session or {}).get("recent_read_file_windows") or [])
+    if not recent_windows:
+        return []
+    target_paths = []
+    working_memory = (resume or {}).get("working_memory") or {}
+    for path in working_memory.get("target_paths") or []:
+        if isinstance(path, str) and path:
+            target_paths.append(path)
+    for item in (resume or {}).get("target_path_cached_window_observations") or []:
+        path = (item or {}).get("path")
+        if isinstance(path, str) and path:
+            target_paths.append(path)
+    ordered_paths = []
+    for path in target_paths:
+        if any(_work_paths_match(path, existing) for existing in ordered_paths):
+            continue
+        ordered_paths.append(path)
+    matched = []
+    for path in ordered_paths:
+        for item in recent_windows:
+            if not _work_paths_match(item.get("path"), path):
+                continue
+            if not item.get("text") or item.get("context_truncated"):
+                break
+            matched.append(item)
+            break
+    if len(matched) < 2:
+        return []
+    has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in matched)
+    has_source = any(_work_batch_path_is_mew_source(item.get("path")) for item in matched)
+    if not (has_tests and has_source):
+        return []
+    return matched
 
 
 def build_write_ready_work_model_context(context):
@@ -1076,6 +1114,11 @@ def build_write_ready_work_model_context(context):
             recent_windows.append(item)
             break
         else:
+            recent_windows = []
+            break
+    if not recent_windows:
+        recent_windows = _write_ready_recent_windows_from_target_paths(work_session, resume)
+        if not recent_windows:
             return {}
     resume_context = {
         "working_memory": resume.get("working_memory") or {},

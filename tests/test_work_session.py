@@ -6160,6 +6160,83 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
         self.assertLess(len(fast_prompt), len(prompt))
 
+    def test_write_ready_fast_path_falls_back_to_recent_target_path_windows(self):
+        from mew.work_loop import build_write_ready_work_model_context
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Draft a paired dry-run edit from recent target-path windows.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "working_memory": {
+                        "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 6960,
+                                    "line_end": 7010,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 19405,
+                                    "line_end": 19497,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        fast_context = build_write_ready_work_model_context(context)
+
+        self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(
+            [item["tool_call_id"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [11, 12],
+        )
+        self.assertEqual(
+            [item["line_start"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [6890, 19433],
+        )
+
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
