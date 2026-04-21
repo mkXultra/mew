@@ -49,6 +49,7 @@ WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
+WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -698,22 +699,127 @@ def compact_active_memory_for_prompt(
     }
 
 
+def compact_resume_notes_for_prompt(notes, *, item_limit=3, text_limit=240):
+    notes = notes if isinstance(notes, list) else []
+    compacted = []
+    for note in notes[-item_limit:]:
+        if isinstance(note, dict):
+            compact = {}
+            if note.get("created_at"):
+                compact["created_at"] = note.get("created_at")
+            if note.get("source"):
+                compact["source"] = note.get("source")
+            compact["text"] = clip_output(str(note.get("text") or ""), text_limit)
+        else:
+            compact = {"text": clip_output(str(note or ""), text_limit)}
+        compacted.append(compact)
+    return compacted
+
+
+def _decision_has_structural_context(decision):
+    if not isinstance(decision, dict):
+        return False
+    return bool(
+        decision.get("plan_items")
+        or decision.get("target_paths")
+        or decision.get("open_questions")
+        or decision.get("last_verified_state")
+    )
+
+
+def compact_recent_decisions_for_prompt(decisions, *, item_limit=4, text_limit=240, guidance_limit=160):
+    decisions = decisions if isinstance(decisions, list) else []
+    compacted = []
+    for decision in decisions[-item_limit:]:
+        if not isinstance(decision, dict):
+            compacted.append({"summary": clip_output(str(decision or ""), text_limit)})
+            continue
+        compact = {
+            "model_turn_id": decision.get("model_turn_id"),
+            "status": decision.get("status"),
+            "action": decision.get("action"),
+            "summary": clip_output(str(decision.get("summary") or ""), text_limit),
+            "tool_call_id": decision.get("tool_call_id"),
+        }
+        if decision.get("plan_items"):
+            compact["plan_items"] = _compact_context_value(
+                decision.get("plan_items"),
+                text_limit=guidance_limit,
+                item_limit=3,
+            )
+        if decision.get("target_paths"):
+            compact["target_paths"] = _compact_context_value(
+                decision.get("target_paths"),
+                text_limit=guidance_limit,
+                item_limit=3,
+            )
+        if decision.get("open_questions"):
+            compact["open_questions"] = _compact_context_value(
+                decision.get("open_questions"),
+                text_limit=guidance_limit,
+                item_limit=3,
+            )
+        if decision.get("last_verified_state"):
+            compact["last_verified_state"] = clip_output(
+                str(decision.get("last_verified_state") or ""),
+                guidance_limit,
+            )
+        guidance = str(decision.get("guidance_snapshot") or decision.get("guidance") or "").strip()
+        if guidance:
+            if _decision_has_structural_context(decision) or decision.get("status") == "completed":
+                compact["guidance_snapshot"] = clip_output(guidance, guidance_limit)
+            else:
+                compact["guidance_omitted"] = True
+        compacted.append(compact)
+    return compacted
+
+
+def compact_recovery_plan_for_prompt(recovery_plan, *, item_limit=3, text_limit=200):
+    recovery_plan = recovery_plan if isinstance(recovery_plan, dict) else {}
+    compact_items = []
+    for item in (recovery_plan.get("items") or [])[:item_limit]:
+        if not isinstance(item, dict):
+            compact_items.append({"summary": clip_output(str(item or ""), text_limit)})
+            continue
+        compact = {
+            "kind": item.get("kind"),
+            "action": item.get("action"),
+            "effect_classification": item.get("effect_classification"),
+            "reason": clip_output(str(item.get("reason") or ""), text_limit),
+            "safety": item.get("safety"),
+            "source_summary": clip_output(str(item.get("source_summary") or ""), text_limit),
+        }
+        if compact_items and compact == {
+            key: compact_items[-1].get(key)
+            for key in ("kind", "action", "effect_classification", "reason", "safety", "source_summary")
+        }:
+            compact_items[-1]["repeat_count"] = compact_items[-1].get("repeat_count", 1) + 1
+            continue
+        compact_items.append(compact)
+    compact = {}
+    if recovery_plan.get("next_action"):
+        compact["next_action"] = clip_output(str(recovery_plan.get("next_action") or ""), text_limit)
+    if compact_items:
+        compact["items"] = compact_items
+    return compact
+
+
 def compact_resume_for_prompt(resume, *, mode="compact_memory"):
     compacted = dict(resume or {})
     compacted["active_memory"] = compact_active_memory_for_prompt(
         compacted.get("active_memory"),
         mode=mode,
     )
+    compacted["notes"] = compact_resume_notes_for_prompt(compacted.get("notes"))
+    compacted["recent_decisions"] = compact_recent_decisions_for_prompt(compacted.get("recent_decisions"))
+    compacted["recovery_plan"] = compact_recovery_plan_for_prompt(compacted.get("recovery_plan"))
     for key in (
         "goal",
         "working_memory",
-        "recovery_plan",
-        "recent_decisions",
         "compressed_prior_think",
         "same_surface_audit",
         "continuity",
         "effort",
-        "notes",
         "low_yield_observations",
         "failures",
         "unresolved_failure",
@@ -915,6 +1021,107 @@ def build_work_model_context(
     }
 
 
+def _work_write_ready_fast_path_state(context):
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
+    observations = resume.get("plan_item_observations") or []
+    if not observations:
+        return {}
+    first = observations[0] or {}
+    if not first.get("edit_ready"):
+        return {}
+    cached_windows = [
+        item
+        for item in (first.get("cached_windows") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    if len(cached_windows) < 2:
+        return {}
+    has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in cached_windows)
+    has_source = any(_work_batch_path_is_mew_source(item.get("path")) for item in cached_windows)
+    if not (has_tests and has_source):
+        return {}
+    steer_text = str(((resume.get("pending_steer") or {}).get("text")) or "")
+    if steer_text:
+        steer_lower = steer_text.lower()
+        steer_requests_write = any(
+            needle in steer_lower
+            for needle in ("dry-run", "dry run", "paired dry-run", "paired dry run", "draft")
+        )
+        if not steer_requests_write:
+            return {}
+    return {
+        "plan_item": first,
+        "cached_windows": cached_windows,
+        "steer_text": steer_text,
+    }
+
+
+def build_write_ready_work_model_context(context):
+    fast_path = _work_write_ready_fast_path_state(context)
+    if not fast_path:
+        return {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
+    cached_paths = [item.get("path") for item in fast_path.get("cached_windows") or []]
+    recent_windows = []
+    for cached in fast_path.get("cached_windows") or []:
+        for item in (work_session.get("recent_read_file_windows") or []):
+            if not _work_paths_match(item.get("path"), cached.get("path")):
+                continue
+            if item.get("line_start") != cached.get("line_start") or item.get("line_end") != cached.get("line_end"):
+                continue
+            if not item.get("text") or item.get("context_truncated"):
+                return {}
+            recent_windows.append(item)
+            break
+        else:
+            return {}
+    resume_context = {
+        "working_memory": resume.get("working_memory") or {},
+        "plan_item_observations": [fast_path.get("plan_item")],
+        "target_path_cached_window_observations": [
+            item
+            for item in (resume.get("target_path_cached_window_observations") or [])
+            if any(_work_paths_match(item.get("path"), path) for path in cached_paths)
+        ],
+        "pending_steer": resume.get("pending_steer") or {},
+        "next_action": resume.get("next_action") or "",
+        "suggested_verify_command": resume.get("suggested_verify_command") or {},
+        "verification_confidence": resume.get("verification_confidence") or {},
+        "recent_decisions": compact_recent_decisions_for_prompt(
+            (resume.get("recent_decisions") or [])[-1:],
+            item_limit=1,
+            text_limit=160,
+            guidance_limit=120,
+        ),
+        "notes": compact_resume_notes_for_prompt((resume.get("notes") or [])[-2:]),
+    }
+    return {
+        "date": (context or {}).get("date") or {},
+        "task": {
+            "id": ((context or {}).get("task") or {}).get("id"),
+            "title": ((context or {}).get("task") or {}).get("title"),
+            "description": clip_output((((context or {}).get("task") or {}).get("description") or ""), 240),
+            "status": ((context or {}).get("task") or {}).get("status"),
+            "kind": ((context or {}).get("task") or {}).get("kind"),
+        },
+        "work_session": {
+            "id": work_session.get("id"),
+            "status": work_session.get("status"),
+            "resume": resume_context,
+            "recent_read_file_windows": recent_windows,
+        },
+        "capabilities": (context or {}).get("capabilities") or {},
+        "guidance": clip_output((context or {}).get("guidance") or "", 500),
+        "write_ready_fast_path": {
+            "active": True,
+            "reason": "paired cached windows are edit-ready; draft one dry-run batch or report one exact blocker",
+            "cached_window_texts": recent_windows,
+        },
+    }
+
+
 def _work_action_schema_text():
     return (
         "{\n"
@@ -1042,6 +1249,23 @@ def build_work_think_prompt(context):
         "For finish, set task_done=true only when the task itself should be marked done.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+    )
+
+
+def build_work_write_ready_think_prompt(context):
+    return (
+        "You are the THINK phase for mew work mode.\n"
+        "Return only JSON. Do not use markdown.\n"
+        "Write-ready fast path is active.\n"
+        "The paired src/test windows are already cached and edit-ready.\n"
+        "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
+        "Do not add read or search actions unless those cached texts are insufficient for exact old/new text.\n"
+        "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
+        "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
+        "If you still cannot draft the dry-run batch, return wait with one exact blocker tied to the cached windows.\n"
+        "Do not broaden scope, roots, or verification.\n"
+        f"Schema:\n{_work_action_schema_text()}\n\n"
+        f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
 
 
@@ -1309,6 +1533,18 @@ def _normalized_work_path(path):
     return str(path or "").replace("\\", "/").lstrip("./")
 
 
+def _work_paths_match(left, right):
+    normalized_left = _normalized_work_path(left)
+    normalized_right = _normalized_work_path(right)
+    if not normalized_left or not normalized_right:
+        return False
+    return (
+        normalized_left == normalized_right
+        or normalized_left.endswith(f"/{normalized_right}")
+        or normalized_right.endswith(f"/{normalized_left}")
+    )
+
+
 def _work_batch_path_is_tests(path):
     normalized = _normalized_work_path(path)
     return normalized == "tests" or normalized.startswith("tests/")
@@ -1537,6 +1773,7 @@ def plan_work_model_turn(
         guidance=guidance,
         prompt_context_mode=prompt_context_mode,
     )
+    write_ready_context = build_write_ready_work_model_context(context)
     stream_deltas = []
 
     def capture_delta(phase, text):
@@ -1549,7 +1786,16 @@ def plan_work_model_turn(
     delta_progress = progress if progress_model_deltas else None
     think_delta = model_delta_progress(delta_progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
-    think_prompt = build_work_think_prompt(context)
+    think_prompt = (
+        build_work_write_ready_think_prompt(write_ready_context)
+        if write_ready_context
+        else build_work_think_prompt(context)
+    )
+    think_timeout = (
+        max(float(timeout), WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
+        if write_ready_context
+        else float(timeout)
+    )
     work_session_context = (context or {}).get("work_session") or {}
     resume_context = work_session_context.get("resume") or {}
     suggested_verify_command = ""
@@ -1567,10 +1813,12 @@ def plan_work_model_turn(
         **_recent_read_window_metrics(context),
         "think": {
             "prompt_chars": len(think_prompt),
+            "timeout_seconds": think_timeout,
         },
         "reasoning_policy": reasoning_policy,
         "reasoning_effort": reasoning_policy.get("effort") or "",
         "prompt_context_mode": prompt_context_mode,
+        "write_ready_fast_path": bool(write_ready_context),
     }
     if pre_model_metrics_sink:
         pre_model_metrics_sink(dict(model_metrics))
@@ -1582,7 +1830,7 @@ def plan_work_model_turn(
             think_prompt,
             model,
             base_url,
-            timeout,
+            think_timeout,
             log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
             **think_kwargs,
         )

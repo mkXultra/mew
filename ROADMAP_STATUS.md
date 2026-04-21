@@ -110,6 +110,18 @@ Current next action:
    proven.
 8. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
+9. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
+   written. The reconsideration trigger fired on fresh bounded item `#389`,
+   but the exposed blocker was narrower than Explorer/Todo: write-ready diff
+   generation. `work_loop.py` now carries the blocker-specific fix set
+   instead: compact resume trimming, write-ready fast-path prompting with exact
+   cached text, path normalization for cached windows, same-file-hunk guidance,
+   and a write-ready timeout uplift. Those changes turned `#389` from repeated
+   timeout stalls into a reviewer-visible paired dry-run/apply/verify/finish
+   flow with no supervisor code rescue on the task itself. Keep Todo deferred
+   as M6.8/M6.9 input and Explorer deferred post-M6.7; reconsider the broader
+   proposal only if a new fresh bounded M6.7 item still stalls after these
+   write-ready fast-path fixes.
 
 Human-role transition rule:
 
@@ -1648,10 +1660,30 @@ Evidence:
   output changed while JSON behavior remained unchanged. `ruff`,
   `py_compile`, and `git diff --check` all passed. Count this as M6.7
   supervised-proof credit.
+- Task `#389` / session `#380` then converted Candidate N-J into additional
+  supervised-proof evidence after the narrow write-ready blocker fix set
+  landed in `src/mew/work_loop.py` and `tests/test_work_session.py`. mew first
+  exposed exact blockers instead of timing out: cached src tail missing,
+  missing model-turn schema, then same-file-hunk batch shaping. After the
+  write-ready fast-path prompt, exact cached text injection, path
+  normalization, same-file-hunk guidance, and write-ready timeout uplift
+  landed, mew stayed within `src/mew/commands.py` +
+  `tests/test_work_session.py`, surfaced reviewer-visible paired dry-run
+  diffs with `edit_file_hunks`, applied the approved source/test edits with no
+  supervisor code rescue on the task itself, passed `uv run python -m unittest
+  tests.test_commands` on apply, passed focused `uv run python -m unittest
+  tests.test_work_session.WorkSessionTests.test_work_follow_status_marks_planning_producer_overdue_after_model_timeout`,
+  completed a same-surface audit on `src/mew/commands.py`, and finished with a
+  summary tied to the new `latest_model_failure` JSON field. Focused pytest
+  for the touched substrate tests, broader `unittest` on
+  `tests.test_commands` plus the edited follow-status case, `ruff`,
+  `py_compile`, and `git diff --check` all passed. Count this as M6.7
+  supervised-proof credit.
 
 Missing proof:
 
-- No supervised 8-hour proof with three real roadmap items exists yet.
+- The current supervised run now has three real roadmap items (`N-G`, `N-I`,
+  `N-J`), but the 8-hour wall-clock proof window has not completed yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
 - If any supervised 8-hour proof item fails or soft-stops, M6.7 must classify
@@ -1678,11 +1710,10 @@ Next action:
 - Once the blocker fix is verified, rerun a fresh bounded proof item from the
   remaining live queue (`N-F`, `N-G`, `N-I`, then `N-D`) instead of consuming
   more candidates under the same unresolved blocker.
-- Start with a fresh rerun of `N-F` (`mew agent sweep --json` structured
-  output) only if the queue still needs another bounded item after `N-G` and
-  `N-I`; the next decision is whether the current supervised-proof evidence is
-  sufficient to close M6.7 honestly or whether one more bounded proof item is
-  still required.
+- Do not spend more proof items right now. Keep the current supervised run
+  alive, record `N-J` with the blocker-fix chain that enabled it, and wait for
+  the 8-hour wall-clock criterion before deciding whether another bounded item
+  is actually required.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.

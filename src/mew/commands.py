@@ -6463,6 +6463,27 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     working_memory_stale = bool(
         working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
     )
+    latest_model_failure = None
+    model_turns = ((data.get("session") or {}).get("model_turns") or [])
+    for turn in reversed(model_turns):
+        turn_status = turn.get("status")
+        if turn_status not in ("failed", "interrupted"):
+            continue
+        summary = turn.get("summary")
+        if not summary:
+            error = turn.get("error")
+            if isinstance(error, str):
+                summary = error
+            elif error is not None:
+                summary = json.dumps(error, sort_keys=True)
+            else:
+                summary = ""
+        latest_model_failure = {
+            "model_turn_id": turn.get("model_turn_id"),
+            "status": turn_status,
+            "summary": summary,
+        }
+        break
     checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
     current_git = data.get("current_git") or current_git
     snapshot_session_updated_at = data.get("session_updated_at")
@@ -6501,6 +6522,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "model_timeout_seconds": model_timeout_seconds or None,
         "next_action": resume.get("next_action") or "",
         "working_memory_stale": working_memory_stale,
+        "latest_model_failure": latest_model_failure,
         "latest_context_checkpoint": checkpoint,
         "current_git": current_git,
         "suggested_recovery": suggested_recovery,

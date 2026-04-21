@@ -5741,8 +5741,77 @@ class WorkSessionTests(unittest.TestCase):
         model_guidance = context["work_session"]["model_turns"][0]["guidance_snapshot"]
         self.assertNotIn("\n... output truncated ...", model_guidance)
 
+    def test_compact_resume_for_prompt_trims_notes_and_redundant_planning_churn(self):
+        from mew.work_loop import compact_resume_for_prompt
+
+        resume = {
+            "notes": [
+                {"created_at": f"2026-04-21T12:0{index}:00Z", "source": "user", "text": f"note {index} " + ("x" * 240)}
+                for index in range(5)
+            ],
+            "recent_decisions": [
+                {
+                    "model_turn_id": 10,
+                    "status": "completed",
+                    "action": "batch",
+                    "summary": "read exact windows",
+                    "guidance_snapshot": "keep exact windows",
+                    "plan_items": ["read source", "draft paired edit"],
+                    "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                },
+                {
+                    "model_turn_id": 11,
+                    "status": "failed",
+                    "action": "wait",
+                    "summary": "model turn failed: request timed out",
+                    "guidance_snapshot": "retry from the same exact windows only",
+                },
+            ],
+            "recovery_plan": {
+                "next_action": "verify world state and replan the interrupted model step",
+                "items": [
+                    {
+                        "kind": "model_turn",
+                        "action": "replan",
+                        "effect_classification": "no_action",
+                        "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
+                        "safety": "no_tool_started",
+                        "source_summary": "planning work step",
+                    },
+                    {
+                        "kind": "model_turn",
+                        "action": "replan",
+                        "effect_classification": "no_action",
+                        "reason": "interrupted model planning has no committed tool result; verify world state and run a new work step",
+                        "safety": "no_tool_started",
+                        "source_summary": "planning work step",
+                    },
+                ],
+            },
+        }
+
+        compact = compact_resume_for_prompt(resume, mode="compact_memory")
+
+        self.assertEqual(len(compact["notes"]), 3)
+        self.assertEqual(compact["notes"][0]["created_at"], "2026-04-21T12:02:00Z")
+        self.assertLessEqual(len(compact["notes"][-1]["text"]), 240 + len(" ... output truncated ..."))
+
+        self.assertEqual(len(compact["recent_decisions"]), 2)
+        self.assertIn("guidance_snapshot", compact["recent_decisions"][0])
+        self.assertNotIn("guidance_snapshot", compact["recent_decisions"][1])
+        self.assertTrue(compact["recent_decisions"][1]["guidance_omitted"])
+
+        self.assertEqual(compact["recovery_plan"]["next_action"], resume["recovery_plan"]["next_action"])
+        self.assertEqual(len(compact["recovery_plan"]["items"]), 1)
+        self.assertEqual(compact["recovery_plan"]["items"][0]["repeat_count"], 2)
+
     def test_work_session_resume_surfaces_working_memory(self):
-        from mew.work_loop import build_work_model_context, build_work_think_prompt
+        from mew.work_loop import (
+            build_work_model_context,
+            build_work_think_prompt,
+            build_work_write_ready_think_prompt,
+            build_write_ready_work_model_context,
+        )
         from mew.work_session import (
             build_work_session_resume,
             finish_work_model_turn,
@@ -5773,6 +5842,7 @@ class WorkSessionTests(unittest.TestCase):
                     "path": "src/mew/workbench.py",
                     "line_start": 120,
                     "line_end": 143,
+                    "text": "".join(f"source_before_{index}\n" for index in range(24)),
                     "next_line": 144,
                     "context_truncated": False,
                     "source_truncated": False,
@@ -5790,6 +5860,7 @@ class WorkSessionTests(unittest.TestCase):
                     "path": "src/mew/workbench.py",
                     "line_start": 144,
                     "line_end": 160,
+                    "text": "".join(f"source_after_{index}\n" for index in range(17)),
                     "next_line": 161,
                     "context_truncated": False,
                     "source_truncated": False,
@@ -5807,6 +5878,7 @@ class WorkSessionTests(unittest.TestCase):
                     "path": "tests/test_workbench.py",
                     "line_start": 32,
                     "line_end": 43,
+                    "text": "".join(f"test_line_{index}\n" for index in range(12)),
                     "next_line": 44,
                     "context_truncated": False,
                     "source_truncated": False,
@@ -6033,6 +6105,22 @@ class WorkSessionTests(unittest.TestCase):
         prompt = build_work_think_prompt(context)
         self.assertIn("plan_item_observations[0].edit_ready is true", prompt)
         self.assertIn("prefer one paired dry-run edit over another same-path reread", prompt)
+        fast_context = build_write_ready_work_model_context(context)
+        self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(
+            [item["path"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/workbench.py", "tests/test_workbench.py"],
+        )
+        self.assertEqual(
+            fast_context["work_session"]["resume"]["plan_item_observations"],
+            [resume["plan_item_observations"][0]],
+        )
+        fast_prompt = build_work_write_ready_think_prompt(fast_context)
+        self.assertIn("Write-ready fast path is active.", fast_prompt)
+        self.assertIn("Use write_ready_fast_path.cached_window_texts as the exact old text source", fast_prompt)
+        self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
+        self.assertIn("Prefer one paired dry-run batch", fast_prompt)
+        self.assertLess(len(fast_prompt), len(prompt))
 
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
@@ -6074,6 +6162,117 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn(preference, text)
             finally:
                 os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_extends_timeout_for_write_ready_fast_path(self):
+        from mew.work_loop import (
+            WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
+            plan_work_model_turn,
+        )
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Fast path timeout",
+            "goal": "Draft a paired dry-run edit.",
+            "created_at": "then",
+            "updated_at": "then",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/workbench.py", "line_start": 120, "line_count": 41},
+                    "result": {
+                        "path": "src/mew/workbench.py",
+                        "line_start": 120,
+                        "line_end": 160,
+                        "text": "".join(f"source_line_{index}\n" for index in range(41)),
+                        "next_line": 161,
+                        "context_truncated": False,
+                        "source_truncated": False,
+                        "truncated": False,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_workbench.py", "line_start": 32, "line_count": 12},
+                    "result": {
+                        "path": "tests/test_workbench.py",
+                        "line_start": 32,
+                        "line_end": 43,
+                        "text": "".join(f"test_line_{index}\n" for index in range(12)),
+                        "next_line": 44,
+                        "context_truncated": False,
+                        "source_truncated": False,
+                        "truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+        task = {
+            "id": 1,
+            "title": "Fast path timeout",
+            "description": "Draft a paired dry-run edit.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        decision_plan = {
+            "summary": "prepare paired dry-run edit",
+            "working_memory": {
+                "hypothesis": "The paired source/test windows are enough for a dry-run edit.",
+                "next_step": "Draft one paired dry-run edit batch.",
+                "plan_items": [
+                    "Draft one paired dry-run edit batch.",
+                    "Run focused verifier after approval.",
+                ],
+                "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                "last_verified_state": "Exact paired windows are cached and complete.",
+            },
+        }
+        turn = start_work_model_turn(
+            state,
+            session,
+            decision_plan,
+            {"summary": "prepare paired dry-run edit"},
+            {"type": "wait", "reason": "next slice is clear"},
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        observed = []
+
+        def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+            observed.append({"prompt": prompt, "timeout": timeout})
+            return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
+
+        with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                timeout=60,
+                allowed_read_roots=["."],
+                allowed_write_roots=["."],
+                allow_verify=True,
+                verify_command="uv run python -m unittest tests.test_workbench",
+                act_mode="deterministic",
+            )
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["timeout"], WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
+        self.assertIn("Write-ready fast path is active.", observed[0]["prompt"])
+        self.assertTrue(planned["model_metrics"]["write_ready_fast_path"])
+        self.assertEqual(
+            planned["model_metrics"]["think"]["timeout_seconds"],
+            WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
+        )
 
     def test_work_session_context_and_resume_surface_active_typed_memory(self):
         old_cwd = os.getcwd()
@@ -20380,6 +20579,25 @@ class WorkSessionTests(unittest.TestCase):
                             "producer": {"pid": 999999},
                             "model_timeout_seconds": 30,
                             "resume": {"phase": "planning"},
+                            "session": {
+                                "model_turns": [
+                                    {
+                                        "model_turn_id": 10,
+                                        "status": "failed",
+                                        "summary": "older failure",
+                                    },
+                                    {
+                                        "model_turn_id": 11,
+                                        "status": "completed",
+                                        "summary": "ok",
+                                    },
+                                    {
+                                        "model_turn_id": 12,
+                                        "status": "interrupted",
+                                        "error": "request timed out",
+                                    },
+                                ]
+                            },
                         }
                     ),
                     encoding="utf-8",
@@ -20394,6 +20612,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["producer_health"]["state"], "overdue")
                 self.assertTrue(data["producer_health"]["stale"])
                 self.assertEqual(data["model_timeout_seconds"], 30.0)
+                self.assertEqual(data["latest_model_failure"]["model_turn_id"], 12)
+                self.assertEqual(data["latest_model_failure"]["status"], "interrupted")
+                self.assertEqual(data["latest_model_failure"]["summary"], "request timed out")
                 self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
 
                 with patch("mew.commands.pid_alive", return_value=True):

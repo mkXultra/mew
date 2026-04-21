@@ -130,6 +130,24 @@ converge:
   `format_signal_journal()` while JSON output remained unchanged. `ruff`,
   `py_compile`, and `git diff --check` also passed. Count this as M6.7
   supervised-proof credit.
+- Candidate N-J: task `#389` / session `#380` completed as additional real
+  supervised proof evidence after the narrow write-ready blocker fix chain
+  landed in `src/mew/work_loop.py` + `tests/test_work_session.py`. mew first
+  turned the old timeout stall into exact blockers: cached src tail missing,
+  missing model-turn schema, then same-file-hunk batch shaping. After the
+  write-ready fast-path prompt, exact cached text injection, path
+  normalization, same-file-hunk guidance, and write-ready timeout uplift
+  landed, mew stayed inside `src/mew/commands.py` +
+  `tests/test_work_session.py`, surfaced reviewer-visible paired dry-run diffs
+  using `edit_file_hunks`, applied the approved source/test edits without
+  supervisor code rescue on the task itself, passed `uv run python -m unittest
+  tests.test_commands` on apply, passed focused `uv run python -m unittest
+  tests.test_work_session.WorkSessionTests.test_work_follow_status_marks_planning_producer_overdue_after_model_timeout`,
+  completed a same-surface audit on `src/mew/commands.py`, and finished with a
+  summary tied to the new `latest_model_failure` JSON field. Focused substrate
+  pytest, broader `unittest` on `tests.test_commands` plus the edited
+  follow-status case, `ruff`, `py_compile`, and `git diff --check` all
+  passed. Count this as M6.7 supervised-proof credit.
 - Candidate N-D: still untried, but do not run it as a solo next proof item.
   After N-A/N-B soft-stop, N-C no-change, and N-E product-only progress, the
   queue needed to be replenished back to at least three untried bounded items
