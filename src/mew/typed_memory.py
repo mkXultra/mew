@@ -91,6 +91,44 @@ class FileMemoryBackend:
                 entries.append(entry)
         return entries
 
+    def filtered_entries(
+        self,
+        *,
+        scope: str | None = None,
+        memory_type: str | None = None,
+        memory_kind: str | None = None,
+    ) -> list[MemoryEntry]:
+        scope = normalize_scope(scope) if scope else None
+        memory_type = normalize_memory_type(memory_type) if memory_type else None
+        memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type) if memory_kind else None
+        entries = []
+        for entry in self.entries():
+            if scope and entry.scope != scope:
+                continue
+            if memory_type and entry.memory_type != memory_type:
+                continue
+            if memory_kind and entry.memory_kind != memory_kind:
+                continue
+            entries.append(entry)
+        entries.sort(key=lambda item: ((item.created_at or ""), item.id), reverse=True)
+        return entries
+
+    def get(
+        self,
+        entry_id: str,
+        *,
+        scope: str | None = None,
+        memory_type: str | None = None,
+        memory_kind: str | None = None,
+    ) -> MemoryEntry | None:
+        wanted = normalize_text(entry_id)
+        if not wanted:
+            return None
+        for entry in self.filtered_entries(scope=scope, memory_type=memory_type, memory_kind=memory_kind):
+            if entry.id == wanted:
+                return entry
+        return None
+
     def recall(
         self,
         query: str,
@@ -103,17 +141,8 @@ class FileMemoryBackend:
         limit = max(0, int(limit or 0))
         if limit <= 0:
             return []
-        scope = normalize_scope(scope) if scope else None
-        memory_type = normalize_memory_type(memory_type) if memory_type else None
-        memory_kind = normalize_memory_kind(memory_kind, memory_type=memory_type) if memory_kind else None
         matches = []
-        for entry in self.entries():
-            if scope and entry.scope != scope:
-                continue
-            if memory_type and entry.memory_type != memory_type:
-                continue
-            if memory_kind and entry.memory_kind != memory_kind:
-                continue
+        for entry in self.filtered_entries(scope=scope, memory_type=memory_type, memory_kind=memory_kind):
             if memory_entry_matches(entry, query):
                 matches.append(entry)
         return matches[:limit]

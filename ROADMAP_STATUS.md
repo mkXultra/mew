@@ -1792,7 +1792,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `not_started`.
+Status: `in_progress`.
 
 Goal:
 
@@ -1809,13 +1809,20 @@ Entry gate:
 
 Missing proof:
 
-- no M6.9 implementation or comparator rerun exists yet
-- no durable-coding-memory types are registered in product behavior yet
+- D1 first slice is landed: typed project memory now supports optional
+  `memory_kind` for `mew memory --add/--search`, with guarded direct writes and
+  focused tests
+- D7 first slice is landed: `mew memory --list` and `mew memory --show <id>`
+  now expose typed-memory inventory/read-only detail with stable JSON and human
+  output
+- no D6 reviewer-veto surface exists yet
+- no comparator rerun exists yet for the post-split M6.9 slices
 
 Next action:
 
-- keep this as the next coding-track dream-goal, but defer all implementation
-  until M6.7 closes and the Phase 1-3 delta plan is reviewer-approved
+- continue with the next bounded Phase 1 slice only after reaffirming the
+  current D1/D7 landings and keeping later D2/D3/D6 work split into separate
+  proofable increments
 
 ### M7: Senses - Inbound Signals
 

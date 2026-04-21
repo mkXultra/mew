@@ -1462,6 +1462,8 @@ def build_parser():
     memory_parser.add_argument("--recent", type=int, default=5, help="number of recent shallow memory events")
     memory_parser.add_argument("--deep", action="store_true", help="include deep memory sections")
     memory_parser.add_argument("--search", help="search shallow and deep memory text")
+    memory_parser.add_argument("--list", action="store_true", help="list typed memory entries")
+    memory_parser.add_argument("--show", help="show one typed memory entry by id")
     memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")
     memory_parser.add_argument("--task-id", help="task id used to select active typed memory")
     memory_parser.add_argument("--limit", type=int, default=20, help="maximum search matches")
@@ -1470,13 +1472,13 @@ def build_parser():
     memory_parser.add_argument(
         "--scope",
         choices=("private", "team"),
-        help="typed memory scope for --add or --search",
+        help="typed memory scope for --add, --search, --list, or --show",
     )
     memory_parser.add_argument(
         "--type",
         dest="memory_type",
         choices=("user", "feedback", "project", "reference", "unknown"),
-        help="typed memory type for --add or --search; enables file-backed typed memory for --add",
+        help="typed memory type for --add, --search, --list, or --show; enables file-backed typed memory for --add",
     )
     memory_parser.add_argument("--name", help="typed memory name for --add --type")
     memory_parser.add_argument("--description", help="typed memory description for --add --type")
@@ -1484,7 +1486,7 @@ def build_parser():
         "--kind",
         dest="memory_kind",
         choices=CODING_MEMORY_KINDS,
-        help="coding memory kind for --add or --search; valid only with --type project",
+        help="coding memory kind for --add, --search, --list, or --show; valid only with --type project",
     )
     memory_parser.add_argument(
         "--category",

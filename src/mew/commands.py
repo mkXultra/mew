@@ -11366,10 +11366,51 @@ def format_active_memory(active_memory, task=None, session=None):
     return "\n".join(lines)
 
 
+def _memory_entry_label(item):
+    label = f"{item.get('memory_scope') or item.get('scope')}.{item.get('memory_type') or item.get('type')}"
+    if item.get("memory_kind"):
+        label += f".{item.get('memory_kind')}"
+    return label
+
+
+def _format_memory_entry_list(entries):
+    if not entries:
+        return "No typed memory entries."
+    lines = []
+    for item in entries:
+        details = [f"id={item.get('id')}"]
+        if item.get("created_at"):
+            details.append(f"created_at={item.get('created_at')}")
+        if item.get("path"):
+            details.append(str(item.get("path")))
+        lines.append(
+            f"- [{_memory_entry_label(item)}] {item.get('name') or item.get('key')}: "
+            f"{item.get('description') or item.get('text') or ''} ({'; '.join(details)})"
+        )
+    return "\n".join(lines)
+
+
+def _format_memory_entry_show(item):
+    lines = [
+        f"id: {item.get('id')}",
+        f"label: {_memory_entry_label(item)}",
+        f"name: {item.get('name') or item.get('key') or ''}",
+        f"description: {item.get('description') or ''}",
+        f"created_at: {item.get('created_at') or ''}",
+    ]
+    if item.get("path"):
+        lines.append(f"path: {item.get('path')}")
+    lines.extend(["", item.get("text") or ""])
+    return "\n".join(lines)
+
+
 def cmd_memory(args):
     if args.active:
-        if args.add or args.search or args.compact:
-            print("mew: --active cannot be combined with --add, --search, or --compact", file=sys.stderr)
+        if args.add or args.search or args.compact or args.list or args.show:
+            print(
+                "mew: --active cannot be combined with --add, --search, --compact, --list, or --show",
+                file=sys.stderr,
+            )
             return 1
         state = load_state()
         try:
@@ -11392,6 +11433,48 @@ def cmd_memory(args):
             )
             return 0
         print(format_active_memory(active_memory, task=task, session=session))
+        return 0
+
+    if args.list or args.show:
+        if args.add or args.search or args.compact:
+            print("mew: --list/--show cannot be combined with --add, --search, or --compact", file=sys.stderr)
+            return 1
+        if args.list and args.show:
+            print("mew: choose only one of --list or --show", file=sys.stderr)
+            return 1
+        try:
+            backend = FileMemoryBackend(".")
+            if args.show:
+                entry = backend.get(
+                    args.show,
+                    scope=args.scope,
+                    memory_type=args.memory_type,
+                    memory_kind=args.memory_kind,
+                )
+                if not entry:
+                    print(f"mew: typed memory not found: {args.show}", file=sys.stderr)
+                    return 1
+                data = entry_to_dict(entry)
+                if args.json:
+                    print(json.dumps({"entry": data}, ensure_ascii=False, indent=2))
+                else:
+                    print(_format_memory_entry_show(data))
+                return 0
+            entries = [
+                entry_to_dict(entry)
+                for entry in backend.filtered_entries(
+                    scope=args.scope,
+                    memory_type=args.memory_type,
+                    memory_kind=args.memory_kind,
+                )[: max(0, int(args.limit or 0))]
+            ]
+        except ValueError as exc:
+            print(f"mew: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps({"entries": entries}, ensure_ascii=False, indent=2))
+        else:
+            print(_format_memory_entry_list(entries))
         return 0
 
     if args.add:

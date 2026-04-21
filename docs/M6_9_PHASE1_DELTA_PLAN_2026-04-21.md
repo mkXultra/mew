@@ -1,8 +1,8 @@
 # M6.9 Phase 1 Delta Plan
 
 Date: 2026-04-21  
-Status: prep only. No M6.9 implementation starts until M6.7 closes and this
-delta plan is reviewer-approved.
+Status: active under split execution. M6.7 remains gate-pending in a frozen
+close-watch copy while mainline may land bounded D1/D7 slices from this plan.
 
 ## Purpose
 
@@ -11,9 +11,9 @@ implementation-ready Phase 1 slice list without changing the active milestone.
 
 Current ordering stays:
 
-1. Finish M6.7 supervised 8-hour proof
-2. Approve this delta plan
-3. Land M6.9 Phase 1 as bounded M6.7-shaped iterations
+1. Keep M6.7 gate-pending proof isolated in the frozen close-watch copy
+2. Land bounded M6.9 Phase 1 slices on mainline, one slice at a time
+3. Preserve the D2/D3/D6 split; do not bundle later Phase 1 work into D1/D7
 
 This document is deliberately narrower than the design review. It answers:
 

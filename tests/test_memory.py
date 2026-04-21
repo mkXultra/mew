@@ -302,6 +302,90 @@ class MemoryTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_memory_list_and_show_typed_memory_by_id(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Keep reviewer steering memories concise.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reviewer-steering",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Reviewer steering note",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Remember the matching test path for work_session changes.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "file-pair",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Paired test note",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--list",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reviewer-steering",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                list_data = json.loads(stdout.getvalue())
+                self.assertEqual(len(list_data["entries"]), 1)
+                entry = list_data["entries"][0]
+                self.assertEqual(entry["memory_kind"], "reviewer-steering")
+                self.assertEqual(entry["name"], "Reviewer steering note")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--show", entry["id"], "--json"]), 0)
+                show_data = json.loads(stdout.getvalue())
+                self.assertEqual(show_data["entry"]["id"], entry["id"])
+                self.assertEqual(show_data["entry"]["name"], "Reviewer steering note")
+                self.assertIn("Keep reviewer steering memories concise.", show_data["entry"]["text"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--show", entry["id"]]), 0)
+                text = stdout.getvalue()
+                self.assertIn(f"id: {entry['id']}", text)
+                self.assertIn("label: private.project.reviewer-steering", text)
+                self.assertIn("Reviewer steering note", text)
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["memory", "--list", "--show", entry["id"]]), 1)
+                self.assertIn("choose only one", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_cli_memory_add_rejects_reasoning_trace_direct_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
