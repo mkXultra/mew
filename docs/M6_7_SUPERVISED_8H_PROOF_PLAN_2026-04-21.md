@@ -22,6 +22,10 @@ M6.7 is not done until a supervised 8-hour run completes with:
 - no chained autonomous task selection inside a single iteration
 - no auto-merge
 - roadmap/milestone status changes remain reviewer-owned
+- if a proof item soft-stops because the native loop cannot surface a
+  reviewable paired dry-run diff after repeated clean attempts, stop consuming
+  new proof items, switch to the exposed M6.7 substrate blocker, land that
+  blocker fix, and only then reopen the 8-hour proof on fresh bounded items
 
 ## Item Selection Rules
 
@@ -95,6 +99,22 @@ converge:
   After N-A/N-B soft-stop, N-C no-change, and N-E product-only progress, the
   queue needed to be replenished back to at least three untried bounded items
   before reopening the supervised 8-hour proof.
+
+## Soft-Stop Recovery Rule
+
+When a bounded proof item fails because the native loop cannot reach a
+reviewable paired dry-run diff, treat that as M6.7 substrate evidence first,
+not as a reason to keep burning through the queue.
+
+Required response:
+
+1. record the proof item as soft-stop or product-only progress
+2. identify the exposed native-loop blocker
+3. fix that blocker directly in M6.7 substrate code
+4. rerun a fresh bounded proof item only after the blocker fix is verified
+
+Do not keep consuming proof candidates while the same paired-dry-run blocker is
+still open.
 
 ### Candidate N-A: proof-summary supervised-iteration validator
 

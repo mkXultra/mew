@@ -1602,6 +1602,10 @@ Missing proof:
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
+- Repeated soft-stops before a reviewable paired dry-run diff now count as
+  substrate evidence, not as proof-candidate exhaustion. When that happens,
+  M6.7 must switch back to fixing the exposed native-loop blocker before
+  consuming more bounded proof items.
 
 Done when:
 
@@ -1616,14 +1620,13 @@ Done when:
 
 Next action:
 
-- Refresh `docs/M6_7_SUPERVISED_8H_PROOF_PLAN_2026-04-21.md` around the new
-  N-F/N-G/N-I primary queue with N-D fallback and use that refreshed queue for
-  the supervised 8-hour run; the earlier frozen queue is exhausted as
-  soft-stop/no-change/product-only evidence and should not be reused as closure
-  proof.
-- Start the refreshed queue with the smallest honest remaining bounded item
-  first (`mew agent sweep --json` structured output), then take the next JSON
-  candidates (`journal`, `signals journal`) if the canaries stay green.
+- Stop treating direct supervisor fixes as progress toward the 8-hour proof
+  when the same paired-dry-run blocker is still open. After a soft-stop of
+  that form, return to the exposed native-loop blocker and land the substrate
+  fix first.
+- Once the blocker fix is verified, rerun a fresh bounded proof item from the
+  remaining live queue (`N-F`, `N-G`, `N-I`, then `N-D`) instead of consuming
+  more candidates under the same unresolved blocker.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.
