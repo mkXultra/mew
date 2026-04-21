@@ -283,13 +283,23 @@ memory.
 - Grounded in: AutoCodeRover AST-level search; CodePlan dependency
   graph; claude-code `symbolContext.ts` as seed regex.
 
-### P4. Memory as a mutable graph
-New memories can **rewrite** old ones. Writing a reviewer-steering rule
-checks for conflicts with existing rules and either refines, supersedes,
-or links them. Memory is not append-only.
+### P4. Memory as a mutable graph (logical) on an append-only store (physical)
+The **logical model** is a mutable graph: new memories can refine,
+supersede, or link old ones; recall sees the current graph, not stacked
+duplicates. The **physical model** is append-only JSONL: writes append
+a new entry that carries `supersedes` / `refined_by` / `related`
+edges; old entries remain on disk for diffability (P8). Consolidation
+passes (Phase 2+) append new versions and update indexing, but do not
+rewrite or delete existing lines.
 - Grounded in: A-MEM link evolution; Generative Agents reflection tree.
-- Implementation: each memory entry has `supersedes`, `refined_by`,
-  `related` edges; consolidation pass walks and rewrites.
+- Implementation: each memory entry has `entry_id`, `supersedes`,
+  `refined_by`, `related` edges, and a version number. A recall-time
+  projection walks the graph and presents the latest-effective entry
+  per logical identity, not every physical record.
+- Observability (P8 + §12.5): external tools reconstruct the logical
+  graph by replaying the JSONL with `supersedes` chains. `mew memory
+  show <entry_id>` returns the latest-effective form by default and
+  `--history` shows the full chain.
 
 ### P5. Recall scored by recency × importance × relevance
 Pure embedding similarity is a weak baseline for code. Retrieval also
@@ -317,6 +327,30 @@ counter-measures:
   shortcuts should fail. Measures real coverage.
 - Grounded in: Self-Synthesized Rehearsal; Spurious Forgetting.
 
+### P8. External observability preserved
+mew today exposes enough internal state (iteration docs, commands.py,
+journaled effects, work-session traces) that external implementation
+agents can diagnose and fix issues from the outside. M6.9 adds durable
+artifacts that could become opaque if not explicitly surfaced. The
+principle: **every durable artifact M6.9 introduces must be
+inspectable, explainable, and diffable from outside mew without reading
+source code**.
+- *Inspectable*: each memory type has a CLI dump and a stable on-disk
+  layout under `.mew/durable/`. External agents can `cat`, `jq`, or
+  diff these without importing mew modules.
+- *Explainable*: for every recall that influences a work-session
+  prompt, the session trace records which entries were returned, which
+  were dropped by `revise()` and why, and (Phase 2+) the ranking
+  score. A reviewer can reconstruct recall decisions from trace alone.
+- *Diffable*: durable state between two session boundaries is
+  machine-comparable (JSONL append-only or atomic JSON rewrite), so a
+  reviewer or external agent can answer "what changed in memory this
+  iteration?" with a filesystem diff.
+- Grounded in: mew's existing journaled-effect discipline; M9
+  Legibility's future human-readable focus. M6.9 observability is the
+  minimum machine-readable layer; M9 adds the human narrative layer on
+  top later.
+
 ## 7. Phases
 
 Four phases, ordered by value × implementation cost. Each phase lands in
@@ -329,7 +363,8 @@ call; the design below does not depend on it.
 
 Principles applied: P1 (5 types; reasoning-trace is schema-only in
 Phase 1, populated in Phase 2), P2 (write+reuse gates), P3 (minimum
-symbol index, canonical schema above).
+symbol index, canonical schema above), P8 (external observability of
+all durable artifacts introduced in Phase 1).
 
 Deliverables:
 
@@ -440,6 +475,45 @@ Deliverables:
    invalidation surface). This stub exists in Phase 1 so that early
    bad writes can be cleaned up before they accumulate.
 
+7. **Observability surfaces** (P8). External agents must be able to
+   inspect and diff M6.9 durable state without reading mew source.
+   Deliverable scope in Phase 1:
+   - **Stable on-disk layout** under `.mew/durable/`:
+     ```
+     .mew/durable/
+       memory/
+         reviewer_steering.jsonl    # append-only, one entry per line
+         failure_shield.jsonl
+         file_pair.jsonl
+         task_template.jsonl
+         reasoning_trace.jsonl      # schema only in Phase 1; empty file
+       symbol_index.json            # atomic rewrite (see §6 P3)
+       reviewer_diffs.jsonl         # §7.1 D5
+       veto_log.jsonl               # reviewer-actioned vetoes only
+       eviction_log.jsonl           # automatic storage-cap evictions
+                                    # (see §12.4); distinct schema from
+                                    # veto_log
+     ```
+     Schema for each `*.jsonl` entry is documented in the delta doc
+     (§10) and versioned via a `schema_version` field.
+   - **CLI dump commands** (minimum set):
+     - `mew memory list --kind <type>` — list entries of a type with
+       id, summary, fire_count, last_seen.
+     - `mew memory show <entry_id>` — full JSON of a single entry.
+     - `mew memory trace <entry_id>` — iterations that read or wrote
+       this entry, from session traces.
+     - `mew index query <module> <symbol>` — index lookup output,
+       same shape as the internal recall uses.
+     Commands read from disk only; no in-memory state required.
+   - **Session-trace fields** added (see §12.3 for full list): every
+     recall logs `returned_entry_ids`, `dropped_entry_ids` with
+     reasons, and `injected_entry_ids`. Every durable write logs
+     `memory_kind`, `entry_id`, `write_gate_result`.
+   - **Diffability guarantee**: durable files either JSONL append-only
+     or atomic JSON rewrite, so `diff` between two session boundaries
+     always works. No binary formats, no compressed archives, no
+     database files in Phase 1.
+
 Proof:
 - 3 supervised M6.7 iterations after Phase 1 lands. Each iteration
   must exercise at least one Phase 1 deliverable as follows:
@@ -455,6 +529,68 @@ Proof:
   prose recall.
 - At least 1 test of the reviewer veto stub (D6): write a bad entry,
   veto it, confirm it no longer fires in a subsequent recall.
+- At least 1 external observability check (D7): a non-mew process
+  (shell script or external agent) reconstructs which memory entries
+  fired in a specific iteration using only `.mew/durable/` and the
+  session trace — without importing mew code. Recorded as a proof
+  artifact.
+
+Dogfood registration (Phase 1):
+Every M6.9 proof above must be reproducible as a deterministic
+`mew dogfood --scenario <name>` invocation. Register the following
+scenarios in the dogfood scenario enum as part of Phase 1:
+
+- `m6_9-memory-taxonomy` — writes one entry of each populated type
+  (steering, shield, pair, template) under Phase 1 write gates;
+  verifies disk layout and read-back via the CLI surfaces from D7.
+  Exercises the **full write-gate matrix** from D2:
+  - *Happy path*: each type writes successfully with all required
+    fields.
+  - *Missing-field rejection*: steering without `why`, shield without
+    root-cause, template without rationale, each rejected at the gate
+    with a logged reason, no disk write.
+  - *Drift-canary failure rejection*: a write attempted when the
+    universal P2 gate (drift canary green at iteration close) is red
+    must be rejected regardless of per-type fields; tested with a
+    forced-red canary fixture.
+  - *File-pair evidence rejection (two distinct fixtures)*:
+    - fixture `a` — focused-test-green is present but structural
+      co-edit/read evidence is missing; the write must be rejected
+      with reason `missing_structural_evidence`.
+    - fixture `b` — structural evidence is present but focused-test
+      is red; the write must be rejected with reason `test_not_green`.
+    Both branches of the file-pair write gate must be exercised
+    separately; a single "lacks both" fixture is insufficient.
+- `m6_9-revise-drop` — sets up a durable entry whose referenced
+  symbol no longer exists; recall must drop with reason
+  `symbol_not_found`; dropped event logged.
+- `m6_9-symbol-index-hit` — scripted work session where the first
+  `read` for a known symbol resolves via the index; `index_hit=true`
+  asserted in the session trace.
+- `m6_9-reviewer-diff` — scripted approve + land cycle; verifies the
+  triple is written to `.mew/durable/reviewer_diffs.jsonl` only at
+  `ai_final` time and matches the schema.
+- `m6_9-veto-stub` — writes a bad entry, vetoes it, confirms it does
+  not fire in a following recall attempt; `veto_log.jsonl` updated.
+- `m6_9-observability-rebuild` — runs a short iteration, then spawns
+  a non-mew subprocess that reconstructs the recall story from
+  `.mew/durable/` + session trace using only `jq` and shell; assertion
+  compares reconstructed entry set to the trace-internal set.
+- `m6_9-phase1-regression` — wraps the three M6.6 comparator task
+  shapes with memory active, measures median wall time against a
+  stored `B0.comparator` snapshot, and fails if the ceiling in §12.2
+  Phase 1 (×1.15) is exceeded. Fixture source: the three comparator
+  task shapes must be pinned as stable fixtures in the delta doc
+  (§10) before Phase 1 code lands. Pinning can use either (a) a
+  retroactive `m6_6-comparator` dogfood registration that the M6.6
+  evidence block references, or (b) a dedicated fixture file under
+  `tests/fixtures/m6_9/comparator/*` that captures the three task
+  shapes by hand. Either source is acceptable; the choice must be
+  recorded in the delta doc.
+
+All scenarios must run in under 5 minutes each on the existing
+dogfood harness and emit a JSON report consumable by
+`./mew proof-summary ... --strict`.
 
 ### Phase 2 (Tier S/A) — graph rewrite and hindsight
 
@@ -464,9 +600,10 @@ harvest).
 Deliverables:
 
 1. **Link-evolving consolidation**: a consolidation pass that, on write,
-   walks related entries and rewrites `supersedes` / `refined_by` /
-   `related` edges. Runs at iteration boundary plus on explicit
-   `/consolidate`.
+   walks related entries and **appends new versions** carrying
+   `supersedes` / `refined_by` / `related` edges. Never rewrites or
+   deletes existing JSONL lines (see §6 P4 physical model). Runs at
+   iteration boundary plus on explicit `/consolidate`.
 2. **Ranked recall**: recall scorer combining recency, importance
    (firing count, rescue-prevention count), and relevance (symbol
    overlap, task-shape similarity). Replaces the current raw-relevance
@@ -504,6 +641,25 @@ Proof:
 - Ranked recall surfaces at least 1 non-obvious memory (not the
   top-cosine hit) that a reviewer confirms was the right one.
 
+Dogfood registration (Phase 2):
+- `m6_9-consolidation-rewrite` — write a new entry that supersedes an
+  existing one; verifies `supersedes` edge is added, old entry stays
+  in JSONL (append-only), ranked recall returns the new entry.
+- `m6_9-ranked-recall` — seeds 10 entries with known recency /
+  importance / relevance; asserts ranker output matches expected
+  ordering.
+- `m6_9-hindsight-queue` — scripted blocked-finish iteration;
+  verifies a candidate case enters `hindsight_queue.jsonl` with a
+  `target_type` proposal; reviewer decision is logged inline.
+- `m6_9-reasoning-trace-distill` — scripted iteration close;
+  verifies shallow + deep entries are produced with the `shallow_of`
+  back-edge; reviewer approval path emits persisted entry.
+- `m6_9-invalidation-propagation` — veto an entry with `related`
+  edges; verifies propagation to linked entries; veto log records
+  the affected set.
+- `m6_9-phase2-regression` — M6.6 comparator rerun, median ≤
+  `B0.comparator` (neutral bar per §12.2 Phase 2).
+
 ### Phase 3 (Tier A) — rehearsal and novelty
 
 Principles applied: P7 (rehearsal + novel-task injection).
@@ -529,6 +685,19 @@ Proof:
   is not falsely invoked.
 - 1 entry is decayed-then-re-verified across an iteration boundary.
 
+Dogfood registration (Phase 3):
+- `m6_9-rehearsal-replay` — uses `--time-dilation` to simulate a 48h
+  gap, runs a rehearsal pass, verifies canonical-convention entries
+  are re-acked.
+- `m6_9-novel-task-injection` — injects a task flagged as
+  shortcut-impossible; asserts `memory_shortcut_attempted=true` and
+  `shortcut_succeeded=false`; exploration path recorded.
+- `m6_9-confidence-decay` — seeds an entry with known decay factor;
+  advances virtual time; recall priority drops and re-verification
+  triggers at use.
+- `m6_9-phase3-regression` — M6.6 comparator rerun, median ≤
+  `B0.comparator` × 0.90 (≥10% gain per §12.2 Phase 3).
+
 ### Phase 4 (Tier B) — curriculum and habit compilation
 
 Principles applied: extension of P7 + P1 task-template.
@@ -550,6 +719,19 @@ Deliverables:
 Proof and positioning: Phase 4 is only meaningful after M6.8 task
 chaining. Registering here for completeness; actual work lands after
 M6.8 closes.
+
+Dogfood registration (Phase 4):
+- `m6_9-curriculum-failure-seed` — seeds a failure cluster; asserts
+  chooser weights next-task selection toward that cluster.
+- `m6_9-habit-compile` — promotes a task-template with sufficient
+  score; verifies deterministic script is produced, compiled path
+  runs without model inference, and fallback engages on structural
+  mismatch.
+- `m6_9-preference-inject` — asserts `(dispreferred, preferred)`
+  pairs are injected per turn with token cost ≤ 500 (§12.2 Phase 4).
+- `m6_9-phase4-regression` — M6.6 comparator rerun, median ≤
+  `B0.iter_wall` × 0.70; compiled-eligible tasks ≤ `B0.iter_wall` ×
+  0.30 per §12.2 Phase 4.
 
 ## 8. Drift and evolutionary-pressure controls
 
@@ -573,11 +755,17 @@ are part of the milestone, not optional extras.
    `approved_by`, `approved_at`, source iteration id. No anonymous
    writes.
 6. **Growth budget**: each memory type has a soft cap. Exceeding the
-   cap forces a consolidation pass rather than accepting more entries.
+   cap triggers overflow handling:
+   - Phase 2+: consolidation pass is forced rather than accepting more
+     entries. Canonical path.
+   - Phase 1 (no consolidation): oldest-entry eviction within the
+     breached type, preserving entries that fired in the last 3
+     iterations. See §12.4 for the detailed path.
+
    reasoning-trace has the tightest cap of the 5 types: traces are the
    easiest to over-generate and the hardest to sanity-check later, so
-   the cap forces consolidation into deep-form abstractions before
-   shallow-form volume explodes.
+   the cap forces consolidation (Phase 2+) or eviction (Phase 1) into
+   deep-form abstractions before shallow-form volume explodes.
 7. **Comparative baseline retained**: M6.6 comparator tasks should be
    rerun after each Phase with and without durable recall. Gains
    attributable to durable memory must be measurable at that comparator
@@ -622,7 +810,7 @@ For the implementation agent:
      typed memory, §5.14 active recall, §5.11 snapshot, and M3 context
      checkpoint — module paths, public APIs, schema files. Flag any
      divergence from §4.0 assumptions.
-   - **Per-deliverable mapping for Phase 1 D1-D6**: which new files or
+   - **Per-deliverable mapping for Phase 1 D1-D7**: which new files or
      existing files each deliverable touches; the public API surface
      each introduces.
    - **Schema decisions**: the `memory_kind` discriminator values, the
@@ -632,14 +820,37 @@ For the implementation agent:
    - **Telemetry plan**: which fields in the session trace are added
      to measure the §2 success criteria, in particular criterion #4
      (`index_hit` logging) and criterion #7 (reasoning-trace recall
-     attribution).
+     attribution). All §12.3 fields, including observability fields
+     required by P8, must be enumerated with type and source.
+   - **Observability contract**: on-disk layout of `.mew/durable/`,
+     `schema_version` of each entry type, and the CLI command surface
+     from §7.1 D7. Must confirm that no binary/DB formats are
+     introduced.
+   - **Dogfood integration plan**: full list of new `m6_9-*` scenario
+     names to register in the dogfood scenario enum per phase, the
+     fixture setup each needs, and the `proof-summary` assertion
+     shape (`--strict`-compatible JSON report fields). Must confirm
+     that new scenarios follow the existing dogfood conventions
+     (deterministic, under 5 min wall time, JSON-reportable).
    - **Adopt/reject list**: from §4 engineering precedents and §5
      research grounding, name each pattern and state adopted / adapted
      / rejected, with reason.
    - **Open questions touched**: which §11 open questions Phase 1
      answers (if any) and which remain deferred.
 2. **Land Phase 1 as one bounded M6.7 iteration per deliverable.**
-   Six iterations (D1 through D6), each reviewer-gated. Do not bundle.
+   Seven iterations (D1 through D7), each reviewer-gated. Do not
+   bundle. D7 (observability) may be landed earlier than its sequence
+   position if it accelerates review of earlier deliverables.
+   Each deliverable is accompanied by its corresponding `m6_9-*`
+   dogfood scenario registered in the same iteration. Exception:
+   **regression scenarios** (`m6_9-phaseN-regression`) are tied to
+   the phase NFR block (§12.2), not to a specific deliverable, and
+   land as part of the phase close gate. Every non-regression
+   scenario must match a deliverable, and every deliverable must
+   have at least one non-regression scenario; violations fail the
+   iteration close gate. The regression scenario runs once per
+   phase, after all deliverables land, and is reviewer-gated like
+   any other iteration.
 3. **Do not replace existing typed-memory scaffolding.** §5.12 and §5.14
    stay. Add the coding-domain taxonomy as a `memory_kind` layer on
    top.
@@ -693,7 +904,246 @@ agent should flag if it has a preference, not silently decide:
    of task is this at all") recalled for unfamiliar task types? No
    clear literature answer; adding later is cheaper than removing.
 
-## 12. Expected impact
+## 12. Non-functional requirements (per phase)
+
+Durable memory has a known failure mode: the feature that should make
+mew faster instead slows it down because recall, revise, and
+consolidation add overhead before accumulated memory can pay it back.
+This section specifies per-phase budgets so that regression is caught
+at the proof gate, not after proof.
+
+### 12.1 Baselines (B0)
+
+Captured immediately before Phase 1 code lands, during the delta-doc
+step (§10). All three baselines are measured over 3 consecutive M6.7
+supervised iterations.
+
+| Baseline | What it is | How to measure |
+| --- | --- | --- |
+| `B0.iter_wall` | Median iteration wall time | From drift canary start to iteration close |
+| `B0.first_think` | Median first-THINK latency | First model turn latency after work-session start (M6.5 shape) |
+| `B0.comparator` | Median wall time on 3 M6.6 comparator tasks | M6.6 proof methodology, with memory disabled |
+
+B0 values are frozen at delta-doc time and used as the reference for
+all later phases. They are not re-measured per phase (re-measurement
+would mask regression against cumulative drift in the baseline
+infrastructure itself).
+
+### 12.2 Per-phase budgets
+
+Budgets are expressed as ceilings. Iterations may be faster. Iterations
+slower than the ceiling trigger the breach policy (§12.4).
+
+**Phase 1 (baseline that stops the bleeding)**
+
+| NFR | Budget | Rationale |
+| --- | --- | --- |
+| Iteration wall time | ≤ `B0.iter_wall` × 1.15 | New pipeline steps (revise, index query, write gates) cost time; memory volume is still low so benefit is thin. +15% is a conservative ceiling to catch runaway regressions without blocking Phase 1. |
+| First-THINK latency | ≤ `B0.first_think` × 1.10 | Memory injection lives in the first-turn prompt assembly. +10% keeps M6.5 speed promise mostly intact. |
+| Memory injection per turn | ≤ 14 entries total: 5 steering, 3 shields, 5 pairs, 1 template, 0 reasoning-trace. ≤ 2000 tokens | Hard cap, reviewer veto if breached. |
+| Recall latency (per call) | ≤ 100ms | Active recall (§5.14) + type filter only in Phase 1. |
+| Index query latency | ≤ 50ms; timeout falls back to search tool | Success metric #4 in §2 assumes index is cheaper than search. |
+| Write-gate latency | ≤ 200ms per write | Per-type validation is structural; no model calls. |
+| Consolidation | N/A | Link-evolving consolidation is Phase 2. |
+| Storage (`.mew/durable/`) | ≤ 10MB at Phase 1 close | |
+| Regression proof | 3 M6.6 comparator tasks rerun with memory active. Median wall time ≤ `B0.comparator` × 1.15 | Same ceiling as iteration wall time. |
+
+**Phase 2 (graph rewrite and hindsight)**
+
+| NFR | Budget | Rationale |
+| --- | --- | --- |
+| Iteration wall time | ≤ `B0.iter_wall` × 1.05 | Memory starts paying off; ceiling tightens. |
+| Ranked recall latency | ≤ 200ms | Scorer + graph walk allowed extra cost vs Phase 1 recall. |
+| Consolidation pass | **Async only**. Must not block iteration close by more than 500ms (barrier wait). Drift canary reads the latest consolidated snapshot available, may lag one iteration. | Synchronous consolidation kills iteration throughput. Explicit async choice here. |
+| Hindsight harvester | ≤ 2 min wall time per blocked-finish or revert iteration | Runs only on failure, not every iteration. |
+| Reasoning-trace distillation | ≤ 1 min wall time per iteration close | Uses a bounded model call; must be time-boxed. |
+| Memory injection per turn | Same caps as Phase 1 | No bloat. |
+| Storage | ≤ 50MB | |
+| Regression proof | Same 3 M6.6 tasks. Median wall time ≤ `B0.comparator` (neutral) | Neutral is the minimum bar at Phase 2; positive gain expected but not required to close Phase 2. |
+
+**Phase 3 (rehearsal and novelty)**
+
+| NFR | Budget | Rationale |
+| --- | --- | --- |
+| Iteration wall time | ≤ `B0.iter_wall` × 0.90 | Phase 3 must show measurable speedup. |
+| Rehearsal pass | ≤ 5 min wall time per scheduled pass, cadence at Phase 3 implementer's choice but documented | Rehearsal is a positive-pressure signal, not a latency sink. |
+| Novel-task injection | At least 1 per 10 supervised iterations. Memory-shortcut success rate on injected tasks ≤ 20% | If memory shortcuts succeed on > 20% of injected tasks, the tasks were not truly novel; injection spec must be tightened. |
+| Confidence decay evaluation | ≤ 20ms added to recall per decayed entry | |
+| Memory injection per turn | Caps may relax to 18 entries / 2500 tokens if recall quality measurements justify it | Explicit ratchet, not automatic. |
+| Storage | ≤ 100MB | |
+| Regression proof | Same 3 M6.6 tasks. Median wall time ≤ `B0.comparator` × 0.90 | Must show ≥10% gain. |
+
+**Phase 4 (curriculum and habit compilation)**
+
+| NFR | Budget | Rationale |
+| --- | --- | --- |
+| Iteration wall time | ≤ `B0.iter_wall` × 0.70 | Compilation + curriculum should show substantial gain. |
+| Compiled-path tasks | Wall time ≤ `B0.iter_wall` × 0.30 on compiled-eligible tasks | Compiled path skips model inference for a subsequence; 3x speedup is the explicit target. |
+| Preference injection | ≤ 500 additional tokens per turn | Pair injection must not bloat context. |
+| Storage | ≤ 200MB | |
+| Regression proof | Compiled-eligible tasks show ≥ 3× speedup vs pre-compilation baseline | |
+
+### 12.3 Telemetry fields
+
+The delta doc must extend the session trace with the following fields
+before Phase 1 code lands. Per-iteration fields:
+
+```
+# Latency / cost
+wall_time_ms                       // total iteration wall time
+first_think_ms                     // first model turn latency
+memory_recall_ms                   // sum over all recall calls
+revise_ms                          // sum over all revise() calls
+index_query_ms                     // sum over all index queries
+write_gate_ms                      // sum over all durable writes
+consolidation_blocking_ms          // only Phase 2+, barrier wait time
+hindsight_run_ms                   // only Phase 2+, per blocked-finish
+reasoning_distill_ms               // only Phase 2+, per iteration close
+
+# Volume
+index_hit_count                    // criterion #4 in §2
+index_miss_count                   // complement of above
+injected_token_count               // tokens added by memory injection
+injected_entry_count_by_type       // map: memory_kind → count
+
+# Observability (P8; required for external reconstruction)
+returned_entry_ids                 // list[entry_id] per recall call
+dropped_entry_ids_with_reason      // list[(entry_id, drop_reason)] per recall
+injected_entry_ids                 // list[entry_id] actually placed in prompt
+write_events                       // list[(memory_kind, entry_id,
+                                   //        write_gate_result, timestamp)]
+ranking_scores                     // Phase 2+: list[(entry_id, recency,
+                                   //        importance, relevance, final)]
+veto_events                        // list[(entry_id, reviewer_id, reason)]
+eviction_events                    // list[(entry_id, memory_kind, reason,
+                                   //        triggered_by)]; auto only, no reviewer_id
+
+# Phase 3+ (rehearsal and novelty)
+injection_id                       // novel-task injection identifier
+memory_shortcut_attempted          // bool
+shortcut_succeeded                 // bool; must be false on true novelty
+exploration_path_summary           // string; how mew completed the task
+rehearsal_outcome                  // string: {reacked, drift_detected}
+rehearsal_reanchored_entries       // list[entry_id]
+decay_factor_per_recall            // map: entry_id → current decay factor
+
+# Phase 4+ (curriculum and habit compilation)
+preference_pairs_injected          // list[(context_id, dispreferred_id,
+                                   //        preferred_id)] per turn
+compiled_path_hits                 // count of model-free executions
+compiled_path_fallbacks            // count of fallbacks to model-backed path
+```
+
+Fields are added in the phase that introduces the corresponding
+behavior. Earlier phases may leave phase-N+ fields absent; consumers
+must tolerate missing fields, never invent them.
+
+### 12.4 Breach policy
+
+NFR breach is measured per-phase, not per-iteration.
+
+- **Single iteration breach**: logged, not acted on.
+- **Two consecutive measured iterations breach the same NFR**: Phase N
+  work pauses. Reviewer decides one of:
+  - **Roll back** the most recent deliverable.
+  - **Revise the budget** with written justification (not a loophole;
+    budget changes are recorded in this doc with a dated amendment).
+  - **Accept as proof-blocker**: Phase N proof gate does not close.
+- **NFR breach during a proof iteration**: a proof iteration that
+  reports an NFR breach does **not** count toward the phase proof,
+  even if its functional deliverable criteria are green. The phase
+  requires the full set of proof iterations (3 for Phase 1) to be
+  both functionally green **and** NFR-green. A breached proof
+  iteration must be rerun after the underlying cause is addressed.
+  "2/3 green" is not sufficient.
+- **Phase N+1 cannot begin** until Phase N's NFR proof is recorded.
+- **Storage cap breach**:
+  - Phase 2+ (consolidation exists): consolidation normally runs
+    **async** (§12.2 Phase 2), but a storage-cap breach escalates the
+    **next** consolidation run to synchronous-at-iteration-close,
+    bounded by the same 500ms barrier wait. If the 500ms barrier is
+    exceeded, the iteration closes anyway and the escalation carries
+    forward; it does not loop. Normal async cadence resumes once the
+    cap clears. This is the only sanctioned sync path; regular
+    consolidation stays async.
+  - Phase 1 (no consolidation pass yet): oldest-entry eviction within
+    the breached memory type is performed, preserving entries that
+    have fired in the last 3 iterations. Evictions are logged to a
+    dedicated sidecar `.mew/durable/eviction_log.jsonl` (distinct from
+    `veto_log.jsonl`, which stays reserved for reviewer-actioned
+    vetoes) so the trail is observable (P8). Eviction entries carry
+    `{entry_id, memory_kind, evicted_at, reason: "storage_cap_eviction",
+    triggered_by: "automatic"}` — no `reviewer_id` is required, which
+    is why they cannot share the veto schema. Eviction is preferred
+    over blocking writes so the loop does not stall.
+  - If still over cap after the above, growth budget per type (§8 #6)
+    is tightened by 20%. Re-eviction uses the same Phase 1 rule
+    (oldest by `last_seen`, tiebreak by lowest `fire_count`, entries
+    that fired in the last 3 iterations protected). Phase 2+ uses the
+    ranked-recall scorer (§6 P5) for re-selection once available.
+- **Index query latency breach (per-query)**: the slow query is
+  logged and the recall falls back to search. Not a phase-level
+  breach unless the median across an iteration exceeds the budget.
+
+### 12.5 Observability guarantees (tied to P8 and §7.1 D7)
+
+These are NFRs because they protect the external inspectability that
+currently makes mew diagnosable. Breach of any guarantee below is a
+phase-close blocker even if functional behavior is correct.
+
+**Phase 1**
+- Durable files under `.mew/durable/` are plain text (JSONL or JSON).
+  No binary, no compression, no database files.
+- Every durable write flushes to disk before the iteration close
+  handshake completes. No deferred writes across iteration boundaries.
+- CLI commands in §7.1 D7 run against a stopped or running mew; no
+  process lock required. Read-only.
+- Session trace includes `returned_entry_ids`, `dropped_entry_ids`
+  with reasons, `injected_entry_ids`, `write_gate_result` per durable
+  operation. Missing field = breach.
+- Schema `schema_version` present on every durable entry. Breaking
+  schema change requires a migration artifact, never a silent rewrite.
+
+**Phase 2**
+- Link-evolving consolidation logs each rewrite as a diff entry, not
+  in-place rewrite without trace. `.mew/durable/memory/*.jsonl`
+  remains append-only; supersession recorded via `supersedes` field on
+  the new entry, not deletion of the old.
+- Ranked recall logs the full score breakdown per entry
+  (recency/importance/relevance components) in the session trace.
+  External reconstruction of ranking from trace alone must be
+  possible.
+- Hindsight harvester queue exposed as `.mew/durable/hindsight_queue.jsonl`
+  with reviewer decisions logged inline.
+
+**Phase 3**
+- Rehearsal pass records are appended to `.mew/durable/rehearsal_log.jsonl`
+  with pass outcome and any re-anchored entries.
+- Novel-task injection records include `injection_id`, `memory_shortcut_attempted`,
+  `shortcut_succeeded`, `exploration_path_summary`.
+- Confidence decay is observable: each entry's current decay factor
+  is part of the recall log, not an internal-only number.
+
+**Phase 4**
+- Compiled habit entries are stored as plain-text scripts or
+  deterministic JSON, never as opaque blobs. The compiled entry must
+  cite the source task-template and the verification that gated
+  compilation.
+- Preference-store retrieval logs per-turn preference pairs injected,
+  so reviewer can audit preference influence on output.
+
+### 12.6 What this section does not cover
+
+- Concurrency NFRs (multi-resident scenarios) — out of scope until
+  M10 Multi-Agent Residence.
+- Memory correctness NFRs (drift, staleness) — covered in §8.
+- Cross-project scaling — out of scope until M8 Identity.
+- Model cost budgets — separate from latency budgets; not specified
+  here. If a phase reduces latency by adding more model calls, it is
+  within NFR, but cost impact should be flagged in the Phase proof
+  artifact.
+
+## 13. Expected impact
 
 If M6.9 lands fully:
 
