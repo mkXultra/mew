@@ -13421,6 +13421,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
+        self.assertIn("work_session.resume.target_path_cached_window_observations", prompt)
+        self.assertIn("prefer refreshing that direct cached window before repeating same-surface search_text", prompt)
         self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
         self.assertIn("do not rerun that same search_text", prompt)
         self.assertIn("switch to a narrow read_file on the anchored window instead", prompt)

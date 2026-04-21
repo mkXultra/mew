@@ -1042,10 +1042,21 @@ Missing proof:
   `working_memory.target_paths` with matching completed `read_file` windows, the
   paired tests prove that cached window survives through resume/context, and
   the native run closed with `uv run python -m unittest tests.test_work_session`
-  plus a same-surface audit on `format_work_session_resume()`. The remaining
-  M6.6 missing proof is no longer whether durable target paths can point at a
-  cached exact window; it is broader multi-file normal-case autonomy and
-  durable plan/path recall with less targeted search churn.
+  plus a same-surface audit on `format_work_session_resume()`. Task #355 /
+  session #343 then consumed that carried-forward signal in the next multi-file
+  slice: `build_work_think_prompt()` now tells THINK to refresh a cached target
+  path window from `target_path_cached_window_observations` before repeating
+  same-surface `search_text` rediscovery, and the paired prompt-guidance test
+  coverage now lives on the correct surface in `tests/test_work_session.py`.
+  The native run passed `uv run python -m unittest tests.test_work_session
+  tests.test_step_loop` and closed same-surface audit on
+  `src/mew/work_loop.py`, but it needed one narrow steer to stop wasting time
+  on the wrong test file (`tests/test_step_loop.py`) and switch to the real
+  prompt-guidance surface. Count #355 as fresh multi-file implementation
+  evidence for the frozen M6.6 set, but not as a clean no-steer proof. The
+  remaining M6.6 missing proof is now narrower: broader multi-file normal-case
+  autonomy and durable plan/path recall without supervisor steer, especially on
+  slices that need correct paired source/test surfacing from the start.
 
 Done when:
 
@@ -1094,15 +1105,22 @@ Next action:
   evidence for the frozen M6.6 implementation set: cached exact `read_file`
   windows can now be paired back to `working_memory.target_paths` without
   supervisor hints, native verification passed, and same-surface audit closed.
+- Record task #355 / session #343 as fresh multi-file implementation evidence
+  for the frozen M6.6 set: mew carried `target_path_cached_window_observations`
+  from resume into `build_work_think_prompt()` and landed the paired
+  `src/mew/work_loop.py` + `tests/test_work_session.py` change with native
+  verification and same-surface audit, but the run still needed one narrow
+  steer to abandon the wrong test surface before the edit.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native no-steer proof task on a broader multi-file coding slice, ideally one
   that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a
   broader resume/recovery peer in addition to `tests/test_work_session.py`.
-  Prefer a task that forces mew to reuse the landed durable plan/path signals
-  instead of rediscovering files from scratch, but avoid turning back into
-  prompt-only guidance or comparator work. Choose a fresh task whose premise is
-  not already satisfied by the current worktree, require native verification
-  and same-surface audit, and keep comparator work deferred until the mew-side
+  Prefer a task that forces mew to pick the correct paired source/test surfaces
+  from the start and reuse the landed durable plan/path signals instead of
+  rediscovering files from scratch, but avoid turning back into prompt-only
+  guidance or comparator work. Choose a fresh task whose premise is not
+  already satisfied by the current worktree, require native verification and
+  same-surface audit, and keep comparator work deferred until the mew-side
   implementation set is frozen.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
