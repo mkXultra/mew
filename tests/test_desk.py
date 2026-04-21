@@ -245,6 +245,46 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(by_label["Review attention #2"]["stale_for_seconds"], 2400)
         self.assertEqual(by_label["Open task #4"]["stale_for_seconds"], 2700)
 
+    def test_build_desk_view_model_skips_active_work_for_blocked_task(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {
+                        "id": 3,
+                        "title": "Blocked task",
+                        "status": "blocked",
+                        "kind": "coding",
+                        "updated_at": "2026-04-17T00:30:00Z",
+                    },
+                    {
+                        "id": 4,
+                        "title": "Ready task",
+                        "status": "ready",
+                        "kind": "coding",
+                        "updated_at": "2026-04-17T00:15:00Z",
+                    },
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Blocked task",
+                        "updated_at": "2026-04-17T00:45:00Z",
+                    }
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
+            kind="coding",
+        )
+
+        labels = [action["label"] for action in view["actions"]]
+
+        self.assertNotIn("Resume task #3", labels)
+        self.assertEqual(view["primary_action"]["label"], "Open task #4")
+        self.assertEqual(view["counts"]["active_work_sessions"], 0)
+
     def test_build_desk_view_model_kind_filter_scopes_related_backlog(self):
         view = build_desk_view_model(
             {

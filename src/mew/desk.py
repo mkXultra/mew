@@ -208,6 +208,8 @@ def active_work_sessions_for_desk(state: dict[str, Any], kind: str | None = None
         task = tasks_by_id.get(str(task_id)) if task_id is not None else None
         if task and task.get("status") == "done":
             continue
+        if task and not task_is_actionable_for_desk(task):
+            continue
         if kind_filter and not task_matches_kind(task, kind_filter):
             continue
         active.append(session)
