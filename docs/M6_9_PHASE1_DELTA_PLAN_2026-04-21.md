@@ -339,6 +339,39 @@ Before Phase 1 code starts, define and keep stable:
 6. What per-type growth budgets and Phase 1 oldest-entry eviction rule should
    be pinned before `.mew/durable/` starts filling?
 
+## Current Repo-Local Candidate Surfaces
+
+These are prep notes only. They narrow the first code-reading pass after M6.7
+closes; they do not authorize implementation yet.
+
+- D1 taxonomy / typed-memory extension:
+  - `src/mew/typed_memory.py`
+  - `src/mew/memory.py`
+  - `src/mew/commands.py` (`mew memory --add/--search/--active`)
+- D2 write-gate matrix and rejection surfaces:
+  - `src/mew/work_session.py` (resume/audit surfaces and durable work context)
+  - `src/mew/commands.py` (CLI-facing rejection and audit output)
+- D3 deterministic `revise()` on reuse:
+  - `src/mew/work_session.py` (`build_work_active_memory`, active recall match/injection)
+  - `src/mew/work_loop.py` (prompt compaction/injection path)
+- D4 minimum symbol/pair index:
+  - likely new durable file under `.mew/durable/`
+  - nearest current durable-file precedents:
+    - `src/mew/context_checkpoint.py`
+    - `src/mew/snapshot.py`
+- D5 reviewer-diff capture:
+  - `src/mew/commands.py` approval/apply path
+  - `src/mew/work_session.py` session-side approval and audit surfaces
+- D6 reviewer veto stub:
+  - `src/mew/commands.py` is the most likely CLI owner
+  - storage shape should follow the existing file-backed typed-memory pattern
+- D7 observability surfaces:
+  - `src/mew/commands.py` (`memory list/show/active`, future `index query`)
+  - `src/mew/work_session.py` and `src/mew/work_loop.py` for session trace fields
+
+The first post-M6.7 implementation pass should confirm or reject this map
+before touching any durable schema.
+
 ## Stop Rules
 
 Do not start M6.9 code if any of these is still true:
