@@ -128,11 +128,24 @@ Human-role transition rule:
 - M5.1 dogfooded the first small slice with **mew as implementer** and Codex
   acting as the human reviewer/approver. The rescue was recorded honestly, so
   it did not count as autonomy credit.
+- From M6.7 onward, the default implementation mode is **mew first** for
+  bounded roadmap/coding work: mew is the implementer, Codex plays the
+  human-style reviewer/approver, and the loop stays reviewer-gated.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
 - Low- and medium-risk implementation can now use mew as primary implementer
   with Codex acting as human reviewer/approver. Rescue edits by Codex still
   disqualify the loop from autonomy credit and should be recorded as blockers.
+- Until M6.8 closes, keep **task selection** reviewer-owned even when mew is
+  the implementer. Do not let mew choose its own next roadmap task as part of
+  the M6.7 loop.
+- Keep roadmap-status edits, milestone-close decisions, and governance changes
+  reviewer-owned until the relevant milestone explicitly moves that boundary.
+- Direct Codex implementation during M6.7+ is reserved for:
+  - substrate blockers in the native loop
+  - safety / governance fixes
+  - urgent proof-preserving fixes when a mew-run cannot continue honestly
+  Count those as product progress, not supervised-loop autonomy credit.
 
 ## Milestone Evidence
 
