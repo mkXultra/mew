@@ -28,6 +28,17 @@ Treat reference docs and model opinions as input evidence, not authority. The
 active roadmap milestone is the authority unless the user's newest instruction
 explicitly changes direction.
 
+## North Star And Gate
+
+Always keep both of these in view at the same time:
+
+- **North star**: would I want to be inside mew?
+- **Execution gate**: what is the single highest-value task that closes the
+  active milestone honestly?
+
+The north star is not a task selector by itself. It exists to interpret the
+active milestone, not to bypass it.
+
 ## Milestone Gate
 
 Select exactly one active milestone:
@@ -55,6 +66,36 @@ of continuing to polish.
 When all active-milestone criteria are met, recommend closing that milestone in
 `ROADMAP_STATUS.md` and moving to the next milestone. This is the convergence
 rule.
+
+Before returning a next task, force this check:
+
+1. name exactly one `partial` or `unmet` active-milestone criterion
+2. state whether the next task will:
+   - close it
+   - reduce its measured blocker
+   - collect the exact proof needed for it
+3. if you cannot do one of those three honestly, do **not** choose polish or
+   prep work; instead recommend:
+   - running the required proof, or
+   - rewriting the criterion/measurement in `ROADMAP_STATUS.md`
+
+Checkpoint notes, `mew focus`, `mew brief`, live friction, and external model
+comments are evidence only. They must never become the task selector unless you
+explicitly map them back to one active-milestone criterion.
+
+If a checkpoint says "hold", "wait", "do not spend a proof item", or similar,
+interpret that as a **local constraint**, not as the new roadmap authority.
+Still ask: which active-milestone criterion is blocked, and what is the next
+highest-value action for that criterion under this constraint?
+
+If the same criterion has absorbed three cycles of "blocker reduction",
+"operator hardening", "prep-only docs", or similar without clearer evidence or
+measurable progress, stop calling that convergence. Escalate by recommending:
+
+- run the proof now, or
+- rewrite the criterion / measurement now
+
+Do not allow a fourth cycle of nearby work under the same unresolved gate.
 
 ## Product Bar
 
@@ -93,6 +134,7 @@ Return a short evaluation with:
 - verdict: `yes`, `not yet`, or `no`
 - active_milestone
 - Done-when checklist with `met` / `partial` / `unmet`
+- criterion_target: the single active-milestone criterion the next task is for
 - blocking_gap
 - next_task, explicitly mapped to one Done-when criterion
 - evidence used

@@ -14,6 +14,14 @@ mew is good enough, route task selection through `mew-product-evaluator`.
 The evaluator's active milestone and Done-when checklist are the value
 function; do not keep selecting polish after context compression.
 
+When reentry reaches task selection, require an explicit chain:
+
+`active milestone -> single unmet/partial criterion -> next task`
+
+If you cannot write that chain in one line, you are not ready to choose a task.
+Run `mew-product-evaluator` again or rewrite the criterion/measurement instead
+of drifting into nearby work.
+
 ## Decision Precedence
 
 When deciding what to do next, apply this order:
@@ -30,6 +38,8 @@ When deciding what to do next, apply this order:
 Do not let a fresh active task, latest checkpoint, or external model comment override the session charter unless the user explicitly changed direction.
 Do not let `mew focus` or an attractive recent suggestion override the active
 milestone gate unless it closes that milestone's Done-when criteria.
+Do not let a checkpoint "hold", "wait", or "do not spend a proof item" note
+become the new task selector. Treat it as a local constraint only.
 
 ## Reentry Checklist
 
@@ -88,6 +98,7 @@ Summarize only:
 - active roadmap milestone, unmet Done-when criteria, and which one the next
   task closes
 - next safest action
+- the one-line chain `milestone -> criterion -> task`
 
 ## Drift Check
 
@@ -100,6 +111,12 @@ Before starting or continuing a self-improve task, compare it against the sessio
 - If the next step is chosen from `mew focus`, explain why it is compatible with the charter instead of treating focus as authoritative.
 - If the next step does not map to the active milestone's Done-when checklist,
   do not implement it during a free-form long session; record it as deferred.
+- If a checkpoint or external model opinion conflicts with the active milestone
+  next action in `ROADMAP_STATUS.md`, prefer `ROADMAP_STATUS.md` unless the
+  user explicitly changed direction.
+- If you have already spent three cycles on blocker reduction or nearby polish
+  for the same active criterion, do not start a fourth. Recommend running the
+  gate proof or rewriting the criterion/measurement.
 
 Validation rule: report validation visible in `brief`, task notes, or work-session resume as "last observed". Do not rerun full validation unless the user asked for validation or you changed files in this turn.
 

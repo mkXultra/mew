@@ -77,6 +77,17 @@ the unmet Done-when criterion being attacked, and the rule for rejecting polish.
 Use `mew-product-evaluator` and `ROADMAP_STATUS.md` as the source of that
 decision instead of copying only the latest chat preference.
 
+Always save the governing chain explicitly:
+
+- active milestone
+- single target criterion
+- next task mapped to that criterion
+
+If the checkpoint says "hold", "wait", or "do not spend a proof item", also
+save **why** that constraint exists and what event would re-open task
+selection. Do not save the hold note by itself as if it were the governing
+goal.
+
 If the current context diagnostics themselves are useful, prefer the native checkpoint command:
 
 ```bash
@@ -103,3 +114,4 @@ After saving, a future agent should be able to use `mew-planning-reentry` and re
 - deferred work and reasons
 - latest validation
 - next safest action
+- milestone -> criterion -> task mapping
