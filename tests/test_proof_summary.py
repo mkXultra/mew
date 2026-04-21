@@ -174,6 +174,110 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(summary["checks"]["failed"], ["resident_loop_processes_multiple_events"])
         self.assertIn("failed_checks: resident_loop_processes_multiple_events", format_proof_summary(summary))
 
+    def test_summarize_uses_inspect_when_summary_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            (artifact_dir / "inspect.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "Name": "/mew-proof-sample",
+                            "Config": {"Image": "mew-proof:latest"},
+                            "State": {
+                                "Status": "exited",
+                                "ExitCode": 0,
+                                "StartedAt": "2026-04-20T10:10:06Z",
+                                "FinishedAt": "2026-04-20T14:10:10Z",
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (artifact_dir / "report.json").write_text(
+                json.dumps(
+                    {
+                        "scenario": "m6-daemon-loop",
+                        "status": "pass",
+                        "scenarios": [
+                            {
+                                "name": "m6-daemon-loop",
+                                "status": "pass",
+                                "artifacts": {
+                                    "requested_duration_seconds": 14400.0,
+                                    "requested_interval_seconds": 60.0,
+                                    "processed_events": 241,
+                                    "passive_events": 239,
+                                    "passive_gaps_seconds": [60.0, 60.0, 61.0],
+                                },
+                                "checks": [
+                                    {"name": "m6_daemon_loop_starts_reports_and_stops", "passed": True},
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = summarize_proof_artifacts(artifact_dir)
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["container"]["name"], "mew-proof-sample")
+        self.assertEqual(summary["container"]["exit_code"], "0")
+
+    def test_summarize_normalizes_long_daemon_watcher_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            (artifact_dir / "summary.txt").write_text("exit_code: 1\n", encoding="utf-8")
+            (artifact_dir / "report.json").write_text(
+                json.dumps(
+                    {
+                        "scenario": "m6-daemon-loop",
+                        "status": "fail",
+                        "scenarios": [
+                            {
+                                "name": "m6-daemon-loop",
+                                "status": "fail",
+                                "artifacts": {
+                                    "requested_duration_seconds": 14400.0,
+                                    "requested_interval_seconds": 60.0,
+                                    "processed_events": 241,
+                                    "passive_events": 239,
+                                    "passive_gaps_seconds": [60.0, 60.0, 61.0],
+                                },
+                                "checks": [
+                                    {
+                                        "name": "m6_daemon_loop_starts_reports_and_stops",
+                                        "passed": True,
+                                    },
+                                    {
+                                        "name": "m6_daemon_loop_watcher_processes_file_event",
+                                        "passed": False,
+                                        "observed": {
+                                            "processed_event": {
+                                                "id": 2,
+                                                "type": "file_change",
+                                                "source": "daemon_watch",
+                                                "processed_at": "2026-04-20T10:10:10Z",
+                                            },
+                                            "external_effect": None,
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = summarize_proof_artifacts(artifact_dir)
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["checks"]["failed"], [])
+        self.assertEqual(summary["checks"]["passed"], 2)
+
     def test_cli_proof_summary_parses(self):
         parser = build_parser()
 

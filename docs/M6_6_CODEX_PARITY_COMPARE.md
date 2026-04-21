@@ -11,14 +11,14 @@ M6.6 closes only after three predeclared representative coding tasks pass:
 | Task | Shape | Status | Mew run | Codex CLI comparator | Rescue edits |
 |---|---|---|---|---|---|
 | M6.6-A | Behavior-preserving refactor | `side_by_side_recorded` | #325 / session #311 | `/tmp/mew-m66a-codex-20260420-2316` | 0 |
-| M6.6-B | Bug fix with regression test | `side_by_side_recorded` | #324 / session #310 | `/tmp/mew-m66b-codex-20260420-2218` | 0 |
-| M6.6-C | Small feature with paired source/test changes | `mew_run_recorded_comparator_deferred` | #327 / session #314 | deferred until M6.6 freeze | 0 |
+| M6.6-B | Bug fix with regression test | `side_by_side_recorded` | #324 / session #310 | `/tmp/mew-m66b-codex-rerun-20260421-1223` | 0 |
+| M6.6-C | Small feature with paired source/test changes | `side_by_side_recorded` | #327 / session #314 | `/tmp/mew-m66c-codex-20260421-1223` | 0 |
 
 Comparator note:
 
 - Codex CLI comparator runs are gate evidence, not per-slice critical-path work.
-- Once the mew-side M6.6 implementation set is stable, run the remaining
-  comparator tasks from that frozen commit in parallel detached worktrees.
+- The deferred frozen-commit comparator batch completed on 2026-04-21, so all
+  three comparator slots now have checked-in mew/Codex side-by-side evidence.
 
 Required pass conditions for each task:
 
@@ -275,39 +275,38 @@ Task: same as M6.6-B mew run, executed in a detached worktree at commit
 
 Predeclared success criteria: same as mew run.
 
-Start time: 2026-04-20 22:17 JST
-End time: 2026-04-20 22:29 JST
+Start time: 2026-04-21 12:26 JST
+End time: completed before 2026-04-21 12:30 JST
 
 Metrics:
 
-- first_edit_latency_seconds: about 120
+- first_edit_latency_seconds: not recorded; one Codex CLI session
 - model_turns: one Codex CLI session
-- search_calls_before_first_edit: several broad shell searches plus large file
-  reads; exact count not captured
-- read_calls_before_first_edit: included a broad
-  `sed -n '1,260p' tests/test_work_session.py` and multiple targeted windows
+- search_calls_before_first_edit: not recorded precisely; one project search is
+  visible in the saved tool trace
+- read_calls_before_first_edit: not recorded precisely; one prompt-window read
+  and one focused test-window read are visible in the saved tool trace
 - changed_files: `src/mew/work_loop.py`,
   `tests/test_work_session.py`
 - verifier_commands:
-  `PYTHONPATH=src /Users/mk/dev/x-cli/.venv/bin/python -m pytest -q -o addopts= tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_allows_docs_only_single_writes_outside_code_batch_rule`
-- repair_cycles: 0 implementation repairs; multiple verification environment
-  retries
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_allows_docs_only_single_writes_outside_code_batch_rule --no-testmon`
+- repair_cycles: 0
 - prompt_context_chars: not recorded
 - rescue_edits: 0
 - adopted_reference_patterns: Codex patch/review loop, focused regression test
 
 Review:
 
-- correctness: focused regression passed with `1 passed in 0.67s`
+- correctness: focused regression passed with `1 passed in 0.52s`
 - minimality: one prompt sentence and one focused new regression test
-- reviewability: patch was readable, but the test was larger than the mew-side
-  assertion-only update
+- reviewability: patch was readable and stayed on the same two-file surface as
+  the mew run
 - resident_state_reuse: none; this was a fresh CLI worktree comparator
-- notes: normal `uv run pytest ...` could not complete in the Codex CLI
-  sandbox because uncached `coverage`/`hatchling` dependencies were unavailable;
-  Codex recovered by using an existing pytest environment with `PYTHONPATH=src`
+- notes: this rerun supersedes the earlier caveated B comparator. Normal
+  `uv run pytest ... --no-testmon` now succeeds in the detached worktree, so
+  the old environment caveat is removed from the gate evidence
 
-Verdict: Codex CLI comparator passed with environment caveat.
+Verdict: Codex CLI comparator passed with no environment caveat.
 
 ### M6.6-C mew run
 
@@ -359,8 +358,47 @@ Review:
   window read (#2269) and then a paired dry-run batch; this run counts as
   mew-side evidence with steering but no rescue edits
 
-Verdict: mew run passed. Matching Codex CLI comparator is deferred until the
-M6.6 implementation set is frozen.
+Verdict: mew run passed.
+
+### M6.6-C Codex CLI run
+
+Task: same as M6.6-C mew run, executed in a detached worktree at commit
+`48e97a4`.
+
+Predeclared success criteria: same as mew run.
+
+Start time: 2026-04-21 12:26 JST
+End time: completed before 2026-04-21 12:30 JST
+
+Metrics:
+
+- first_edit_latency_seconds: not recorded; one Codex CLI session
+- model_turns: one Codex CLI session
+- search_calls_before_first_edit: 2
+- read_calls_before_first_edit: 3
+- changed_files: `src/mew/work_loop.py`,
+  `tests/test_work_session.py`
+- verifier_commands:
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch --no-testmon`;
+  `uv run python -m unittest tests.test_work_session`
+- repair_cycles: 0
+- prompt_context_chars: not recorded
+- rescue_edits: 0
+- adopted_reference_patterns: Codex patch/review loop, focused regression
+  verifier, read-only exploration discipline
+
+Review:
+
+- correctness: focused verifier passed with `1 passed in 0.64s`; broader
+  verifier passed with `Ran 396 tests in 22.789s, OK`
+- minimality: one prompt sentence expanded and one focused assertion added
+- reviewability: Codex produced a readable two-file diff before verification
+- resident_state_reuse: none; this was a fresh detached worktree comparator
+- notes: the first `uv run` created a local `.venv` and built the local
+  package before running tests, but verification completed normally without a
+  fallback environment
+
+Verdict: Codex CLI comparator passed with no environment caveat.
 
 ## Historical M6.6-C Blocker Note
 
@@ -403,13 +441,11 @@ task #327 is the replacement mew-side run.
 
 ## Current Comparator State
 
-Bootstrap is complete. M6.6-A and M6.6-B have side-by-side mew/Codex CLI
-evidence. M6.6-B still carries an environment caveat from its comparator run.
-M6.6-C now has mew-side evidence from task #327 / session #314. By project
-decision on 2026-04-21, the remaining/final Codex CLI comparator runs are
-deferred until the M6.6 mew-side implementation set is frozen, then they should
-run in parallel detached worktrees as gate evidence rather than per-slice
-critical-path work.
+Bootstrap is complete. M6.6-A, M6.6-B, and M6.6-C all now have checked-in
+side-by-side mew/Codex CLI evidence with `rescue_edits=0`. The deferred frozen
+comparator batch completed on 2026-04-21, the M6.6-B rerun removed the old
+environment caveat, and the M6.6-C comparator passed both focused and broader
+verification in a detached worktree.
 
 After the direct `working_memory.target_paths` patch from task #331, task #332
 / session #319 added fresh mew-side implementation evidence for that path-

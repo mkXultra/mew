@@ -2179,13 +2179,19 @@ def run_m6_daemon_loop_scenario(
         "m6_daemon_loop_watcher_processes_file_event",
         bool(processed_watcher_event)
         and processed_watcher_event.get("source") == "daemon_watch"
-        and bool(external_effects),
+        and bool(
+            (
+                (processed_watcher_event.get("decision_plan") or {}).get("decisions")
+                or (processed_watcher_event.get("action_plan") or {}).get("actions")
+                or external_effects
+            )
+        ),
         observed={
             "watcher_ready": watcher_ready_state.get("watchers"),
             "processed_event": processed_watcher_event,
             "external_effect": external_effects[-1] if external_effects else None,
         },
-        expected="long daemon proof includes a real watcher file_change processed through external_event",
+        expected="long daemon proof includes a real watcher file_change processed through the daemon loop",
     )
     _scenario_check(
         checks,

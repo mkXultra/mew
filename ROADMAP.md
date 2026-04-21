@@ -383,6 +383,47 @@ Why it matters:
   autonomy will amplify implementation mistakes if the native coding loop
   remains naive.
 
+## Milestone 6.7: Supervised Self-Hosting Loop
+
+Let mew implement roadmap work in bounded reviewer-gated iterations before any
+attempt at unattended multi-hour autonomy.
+
+Target:
+
+- one roadmap task per iteration, capped to about 30-60 minutes of wall time
+- mew acts as implementer and must stop after producing a diff plus a proof
+  artifact
+- Codex acts as a human-style reviewer who can approve, request changes, or
+  reject, but does not silently rescue the implementation
+- proof-or-revert: no test, comparator result, or reproducible verification
+  command means the iteration does not count
+- scope fence: edits stay inside the declared task scope and tests; roadmap
+  status, milestone closure, and governance files require explicit human sign-off
+- drift canary before each iteration using a comparator or reduced regression
+  canary for the resident coding loop
+- no auto-merge and no chained autonomous task selection inside the same run
+
+Done when:
+
+- mew can run one bounded roadmap iteration end to end, stop for review, and
+  attach a usable proof artifact without hidden reviewer rescue edits
+- proof-or-revert is enforced: missing or failing proof leaves the task
+  uncredited and the loop halted for review
+- scope fence prevents out-of-scope file edits and blocks self-authored
+  roadmap-status or milestone-close changes without human approval
+- a supervised 8-hour run completes at least three real roadmap items end to
+  end with reviewer decisions recorded on each iteration, zero proof-or-revert
+  failures, and a green drift canary throughout
+- any proposal for a 24h unattended run is rejected until the supervised
+  8-hour proof is recorded
+
+Why it matters:
+
+- This is the bridge from \"mew can code inside mew\" to \"mew can keep
+  improving itself under supervision\". If it is not explicit, long sessions
+  will drift back toward polish or fake progress instead of reviewer-audited
+  autonomous implementation.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

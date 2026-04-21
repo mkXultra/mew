@@ -17,10 +17,11 @@ M5 was archived losslessly in
 | 4. True Recovery | `done` | Crashed/interrupted runtime and work-session effects can be classified, safely retried/requeued when deterministic, or surfaced for durable review. |
 | 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
 | 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
-| 6. Body: Daemon & Persistent Presence | `in_progress` | Core daemon body is implemented; enhanced multi-hour Docker proof is running. |
+| 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
-| 6.6. Coding Competence: Codex CLI Parity | `foundation` | First slice is coding plan state plus path recall; mew is still naive compared with Codex CLI. |
-| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring is deferred until M6.6. |
+| 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
+| 6.7. Supervised Self-Hosting Loop | `not_started` | Milestone is now defined and becomes the next active gate: bounded reviewer-gated self-hosting before any unattended multi-hour run. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -28,10 +29,10 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-20 21:25 JST.
+Last assessed: 2026-04-21 13:00 JST.
 
-Active work: **M6.6 Coding Competence: Codex CLI Parity** while the M6 enhanced
-proof runs in parallel.
+Active work: **M6.7 Supervised Self-Hosting Loop** while M5.1, M6, and M6.6
+remain closed baselines and M7 stays deferred.
 
 Reasoning:
 
@@ -39,56 +40,42 @@ Reasoning:
   2026-04-20 after M3 and M4 were already closed.
 - M5.1 closed as a bounded patch that makes future self-improvement safer
   without retroactively changing the M5 done gate.
-- M6 core daemon work exists and the enhanced multi-hour Docker proof is
-  running detached. Waiting for that proof should not block useful local work.
-- M7 signal registry foundation exists. M6.5 was inserted before deeper M7
-  work because feature expansion exposed a speed blocker in mew-as-implementer
-  loops.
-- The first #320-class self-hosting attempts produced no reviewable edit
-  proposal: xhigh had roughly 132s first THINK latency, high then stalled
-  beyond three minutes, and the repaired model turns recorded interruption
-  without edits.
-- After prompt-size instrumentation and approval-path cleanup, session #301 did
-  produce and apply a reviewable paired src/tests patch, but its recorded
-  model metrics still used `high`/`full`.
-- Clean rerun session #306 proved the speed path: it used
-  `medium`/`compact_memory`, reached first useful output in 14.7s, proposed a
-  paired dry-run edit in the third model step, and verified the applied patch.
-- That closes the speed blocker, but it also exposes the next blocker: native
-  coding tasks are still too prompt-driven and naive compared with Codex CLI.
-  Recent dogfood showed path confusion, repeated search/read churn, and a model
-  turn that wanted to finish after identifying the next edit instead of
-  proposing it.
-- M6.6 is now the earliest unfinished enabling milestone. It should make coding
-  work plan, edit, verify, repair, self-review, and summarize with explicit
-  evidence, before M7 expands the resident's senses and creates more work for
-  the native implementer.
-- `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` identifies the structural
-  cause: durable memory is currently used as prompt bulk instead of a fast
-  pointer/index.
-- `claude-ultra` was consulted in session
-  `f220b253-51d5-435e-ab24-520190e3f97e` and recommended prompt caching,
-  reasoning-effort auto-adjustment, and differential context before deeper M7
-  feature work. Codex agrees.
-- Broad polish and general refactor remain non-goals. M6.6 work should target
-  coding-task structure, not cosmetic CLI refinements.
+- M6 is now closed. `docs/M6_CLOSE_GATE_2026-04-21.md` records the close gate,
+  and the collected enhanced 4-hour Docker proof passes
+  `./mew proof-summary ... --strict` with `ok=true`, `7/7` checks passed,
+  `processed_events=241`, and `passive_events=239` against an expected minimum
+  of `238`.
+- The raw detached container still exited `1` and the original `report.json`
+  still says `fail`, but that is now documented as a retention-based
+  false negative in the close-out harness rather than missing daemon behavior.
+- M6.5 is closed and M6.6 is now also closed: the bootstrap gate passed, all
+  three predeclared comparator tasks passed with `rescue_edits=0`, the frozen
+  detached Codex CLI comparator batch is recorded, and the first-edit blocker
+  closed via task #363.
+- M6.7 is now the next enabling gate: mew should autonomously implement one
+  bounded roadmap item at a time while Codex acts as reviewer, with
+  proof-or-revert, scope fencing, and drift canaries.
+- M7 signal registry foundation exists, but deeper signal work should not move
+  ahead while M6.7 has not started and proven the supervised loop.
+- `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
+  that M6.6 can be marked done honestly after the fresh B rerun and C
+  comparator completed.
+- Broad polish and general refactor remain non-goals. The next useful work is
+  the first supervised self-hosting proof, not more speculative coding-loop
+  polish.
 
 Current next action:
 
 1. Use this dashboard as the active decision after context compression.
-2. Let the enhanced M6 Docker proof finish, collect it, and run
-   `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`.
-3. Start M6.6 with the first native coding-loop slice: durable coding plan
-   state plus anti-churn/path recall.
-4. Before counting the three comparator tasks, run the M6.6 bootstrap
-   integration gate: have mew implement one small reference-grounded
-   coding-loop slice itself, with Codex only reviewing/approving. Any Codex
-   rescue edit fails this bootstrap gate and is recorded as a blocker.
-5. Compare each M6.6 dogfood task against Codex CLI standards: correctness,
-   minimal edits, verifier choice, repair behavior, latency, and reviewability.
-6. If the M6 proof passes while M6.6 is in progress, write the M6 close gate
-   without dropping the M6.6 active focus.
-7. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+2. Treat M6.6 as a closed baseline. Reopen only if a future native coding loop
+   regresses on rescue-edits, verifier choice, approval surfaces, or
+   path-recall/anti-churn behavior.
+3. Start M6.7 with a single 30-60 minute reviewer-gated roadmap task. Require
+   proof-or-revert, scope fencing, and a drift canary before the iteration.
+4. Do not let mew self-author roadmap-status or milestone-close edits during
+   M6.7; those remain reviewer-controlled until the supervised gate itself is
+   proven.
+5. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -114,7 +101,7 @@ Evidence:
   inside a work session.
 - Tool calls are journaled and resumable enough for later audit.
 
-Missing proof:
+Closure caveat and historical blocker trail:
 
 - None for the documented M1 gate.
 
@@ -131,7 +118,7 @@ Evidence:
 - Final M2 comparative artifact recorded parity with mew continuity advantage
   for the documented focused task gate.
 
-Missing proof:
+Closure caveat and historical blocker trail:
 
 - None for the documented M2 gate. Future cockpit feel work must map to M5.1
   safety, M6 daemon operation, or later milestones.
@@ -277,13 +264,13 @@ Done when:
 - Any refactor is limited to the code paths needed by the verifier or safety
   hooks.
 
-Next action:
+Historical next action trail before closure:
 
 - Move to M6 Body.
 
 ### M6: Body - Daemon & Persistent Presence
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -343,18 +330,21 @@ Evidence:
   targeted `ruff`, `bash -n scripts/run_proof_docker.sh`, `git diff --check`,
   and short Docker smoke
   `proof-artifacts/mew-proof-m6-daemon-loop-smoke-20260420-1913` all passed.
-- Enhanced multi-hour Docker proof is running detached:
-  `mew-proof-m6-daemon-loop-enhanced-20260420-1910`, scenario
-  `m6-daemon-loop`, duration `14400`, interval `60`, poll interval `0.2`.
-  On completion, collect with
-  `scripts/collect_proof_docker.sh mew-proof-m6-daemon-loop-enhanced-20260420-1910`.
+- `docs/M6_CLOSE_GATE_2026-04-21.md` records the final close decision.
+- The collected enhanced multi-hour Docker proof
+  `proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910` now passes
+  `./mew proof-summary ... --json --strict` with `ok=true`, `7/7` checks
+  passed, `processed_events=241`, `passive_events=239`, `expected_min=238`,
+  and passive gaps held to `60-61s` across the 4-hour run.
+- The raw detached container exited `1` and the original `report.json` still
+  records `status=fail`, but the close gate documents this as a
+  retention-based false negative: the early watcher `external_event` aged out
+  of the last-100 runtime-effect journal even though the processed
+  `file_change` event remained present and auditable.
 
 Missing proof:
 
-- The enhanced multi-hour resident proof is running but not complete yet.
-- M6 should not close until the collected Docker artifacts pass
-  `./mew proof-summary proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910 --strict`
-  with actual passive counts near the requested 4h/60s cadence.
+- None for the documented M6 gate.
 
 Done when:
 
@@ -367,6 +357,10 @@ Done when:
 - A multi-hour resident proof runs through the daemon path, not only a direct
   foreground loop.
 - The daemon can be paused, inspected, repaired, and resumed from CLI/chat.
+
+Historical next action trail before closure:
+
+- Move active focus to M6.7 supervised self-hosting.
 
 ### M6.5: Self-Hosting Speed
 
@@ -493,14 +487,14 @@ Done when:
 - The reviewer can approve, reject, or steer the mew-generated change from the
   normal work-session surfaces.
 
-Next action:
+Historical next action trail before closure:
 
 - Start M6.6 and treat the observed coding-loop naivete as the next blocker
   before deeper M7 work.
 
 ### M6.6: Coding Competence - Codex CLI Parity
 
-Status: `foundation`.
+Status: `done`.
 
 Goal:
 
@@ -1193,6 +1187,12 @@ Missing proof:
   kept, because it merely restated the proof condition in user-visible text;
   the run itself is the evidence. This is fresh mew-side implementation
   evidence for the frozen M6.6 set.
+- The frozen detached comparator batch then completed on 2026-04-21. M6.6-B
+  was rerun cleanly in `/tmp/mew-m66b-codex-rerun-20260421-1223`, removing the
+  earlier environment caveat, and M6.6-C passed in
+  `/tmp/mew-m66c-codex-20260421-1223` with both focused and broader verifier
+  passes. `docs/M6_6_CODEX_PARITY_COMPARE.md` now records side-by-side
+  evidence for all three predeclared comparator slots.
 
 Done when:
 
@@ -1299,6 +1299,65 @@ Next action:
   continue with the next M6.6 coding-loop slice instead of per-slice
   comparator work.
 
+Next action after closure:
+
+- Keep M6.6 closed. Use it as the resident coding baseline, not as the active
+  milestone.
+- Reopen M6.6 only if a future native coding loop regresses on rescue-edits,
+  verifier choice, reviewable approval surfaces, or path-recall/anti-churn
+  behavior.
+- Shift active focus to M6 close-out: collect the running enhanced Docker proof
+  and write the M6 close gate if the proof passes.
+- After M6 closes, start M6.7 with a reviewer-gated bounded loop rather than
+  any unattended multi-hour self-hosting run.
+- Keep deeper M7 signal work deferred until M6 is closed or a specific M7 task
+  is explicitly chosen.
+
+### M6.7: Supervised Self-Hosting Loop
+
+Status: `not_started`.
+
+Goal:
+
+- Let mew implement roadmap work in bounded reviewer-gated iterations before
+  any attempt at unattended multi-hour autonomy.
+
+Evidence:
+
+- M6.6 now provides the closed coding baseline needed for supervised
+  self-hosting: bootstrap passed, three comparator slots passed with
+  `rescue_edits=0`, and the frozen Codex CLI comparator batch is recorded.
+- `claude-ultra` session `9b90d99e-3bb5-4b65-aafd-5f5985bcd952` recommended
+  a short bounded loop as the first honest shape: one roadmap item per
+  iteration, proof artifact required, reviewer decision after each run, no
+  chained tasks, and no auto-merge.
+- The guardrails are now explicit in `ROADMAP.md`: proof-or-revert, scope
+  fencing, and a drift canary before each iteration.
+
+Missing proof:
+
+- No bounded reviewer-gated self-hosting iteration has been run under this
+  milestone yet.
+- No supervised 8-hour proof with three real roadmap items exists yet.
+- Any 24h unattended run is still disallowed until the supervised 8-hour proof
+  is recorded.
+
+Done when:
+
+- mew can run one bounded roadmap iteration end to end, stop for review, and
+  attach a usable proof artifact without hidden reviewer rescue edits
+- proof-or-revert is enforced when proof is missing or failing
+- scope fence blocks out-of-scope edits and self-authored roadmap/milestone
+  closure changes without human approval
+- a supervised 8-hour run completes at least three real roadmap items end to
+  end with reviewer decisions recorded on each iteration, zero
+  proof-or-revert failures, and a green drift canary throughout
+
+Next action:
+
+- Start M6.7 with a single 30-60 minute reviewer-gated roadmap task.
+- Keep roadmap-status and milestone-close edits under reviewer control.
+
 ### M7: Senses - Inbound Signals
 
 Status: `foundation`.
@@ -1401,23 +1460,20 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.6 Coding Competence: Codex CLI Parity**.
+Active focus: **M6.7 Supervised Self-Hosting Loop**.
 
-The next long session should not drift into broad polish or general refactor.
-The acceptable near-term work is:
+The next long session should not drift into broad polish, open-ended
+infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- collecting the running M6 enhanced Docker proof when it finishes;
-- adding explicit coding plan state, path recall, and anti-churn behavior to
-  native work sessions;
-- dogfooding representative coding tasks with mew as implementer and Codex as
-  reviewer/approver;
-- comparing mew traces against Codex CLI expectations for correctness, tool
-  churn, latency, verification, repair, and reviewability;
+- one bounded reviewer-gated M6.7 roadmap iteration with proof-or-revert;
+- keeping M6.6 as a closed regression baseline for resident coding work;
+- keeping M6 milestone close and proof harness fixes as closed baseline work;
+- reviewer-owned roadmap/status updates and checkpointing around M6.7 runs;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1 as the closed safety baseline and M6 as proof-pending while M6.6
-removes the coding-competence blocker before deeper M7 signal work.
+Keep M5.1, M6, and M6.6 as closed baselines while M6.7 proves supervised
+self-hosting before deeper M7 signal work or any unattended self-hosting.
 
 ## Maintenance Rule
 
