@@ -1192,6 +1192,7 @@ class BriefTests(unittest.TestCase):
                                 "timeout_seconds": 45.0,
                             },
                             "write_ready_fast_path": True,
+                            "write_ready_fast_path_reason": "paired_cached_windows_edit_ready",
                         },
                     }
                 ],
@@ -1208,9 +1209,14 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(latest_failure["prompt_chars"], 63842)
         self.assertEqual(latest_failure["timeout_seconds"], 45.0)
         self.assertTrue(latest_failure["write_ready_fast_path"])
+        self.assertEqual(
+            latest_failure["write_ready_fast_path_reason"],
+            "paired_cached_windows_edit_ready",
+        )
         self.assertIn("latest_model_failure: turn=#12 status=failed request timed out", focus)
         self.assertIn(
-            "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 write_ready_fast_path=True",
+            "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 "
+            "write_ready_fast_path=True write_ready_fast_path_reason=paired_cached_windows_edit_ready",
             focus,
         )
 

@@ -266,6 +266,8 @@ def _latest_failed_model_turn_item(session):
             item["timeout_seconds"] = think.get("timeout_seconds")
         if model_metrics.get("write_ready_fast_path"):
             item["write_ready_fast_path"] = True
+        if model_metrics.get("write_ready_fast_path_reason"):
+            item["write_ready_fast_path_reason"] = model_metrics.get("write_ready_fast_path_reason")
         return item
     return {}
 
@@ -1163,6 +1165,10 @@ def format_focus(data):
                     metrics.append(f"timeout_seconds={latest_model_failure.get('timeout_seconds')}")
                 if latest_model_failure.get("write_ready_fast_path"):
                     metrics.append("write_ready_fast_path=True")
+                if latest_model_failure.get("write_ready_fast_path_reason"):
+                    metrics.append(
+                        f"write_ready_fast_path_reason={latest_model_failure.get('write_ready_fast_path_reason')}"
+                    )
                 if metrics:
                     lines.append(f"  latest_model_failure_metrics: {' '.join(metrics)}")
             stop_request = session.get("stop_request") or {}
