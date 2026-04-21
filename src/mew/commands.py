@@ -6244,6 +6244,7 @@ def build_work_reply_schema(session=None, resume=None):
     session_id = (session or {}).get("id")
     observed = (session or {}).get("updated_at")
     submit_ready = bool(session_id and observed)
+    resume = resume or {}
     reply_path = STATE_DIR / "follow" / "reply.json"
     docs_path = Path(__file__).resolve().parents[2] / "docs" / "FOLLOW_REPLY_SCHEMA.md"
     return {
@@ -6257,6 +6258,9 @@ def build_work_reply_schema(session=None, resume=None):
         "observed_session_updated_at": observed,
         "submit_ready": submit_ready,
         "schema_only": not submit_ready,
+        "approve_all_blocked_reason": resume.get("approve_all_blocked_reason") or "",
+        "blocked_approve_all_hint": resume.get("blocked_approve_all_hint") or "",
+        "override_approve_all_hint": resume.get("override_approve_all_hint") or "",
         "supported_actions": _work_reply_supported_actions(resume=resume),
         "reply_template": _work_reply_template(session, resume=resume),
     }

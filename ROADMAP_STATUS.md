@@ -1423,6 +1423,25 @@ Evidence:
   `ruff`, `py_compile`, and `git diff --check` all passed in the same update
   session. This is product progress, not a no-rescue supervised-iteration
   proof.
+- Task `#369` / session `#357` then targeted the next bounded proof slice on
+  the same surface: expose machine-readable blocked `approve_all` context from
+  the existing resume fields, so external reviewers do not have to infer the
+  blocked reason only from `reply_template` text or the omitted
+  `supported_actions` entry. The native run recovered from one transient Codex
+  transport failure, then stayed inside the declared `src/mew/commands.py` +
+  `tests/test_work_session.py` scope, searched exact anchors, read exact
+  source/test windows, and advanced to a bounded batch decision that would
+  reuse the existing blocked-context fields. The producer then died before the
+  dry-run diff surfaced, so the same minimal patch landed directly in
+  `src/mew/commands.py` and `tests/test_work_session.py` instead:
+  `build_work_reply_schema()` now returns `approve_all_blocked_reason`,
+  `blocked_approve_all_hint`, and `override_approve_all_hint`, and the hidden-
+  unpaired-source plus governance blocked tests assert those schema fields
+  directly against the resume state. Focused named pytest coverage, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
 
 Missing proof:
 
