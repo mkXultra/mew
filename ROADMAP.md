@@ -580,6 +580,61 @@ Why it matters:
   exploration additive, bounded, and read-only. Without that split, mew keeps
   spending turns on avoidable planning churn.
 
+## Milestone 6.11: Loop Stabilization
+
+Stabilize the agent loop structurally so mew can turn exact cached windows into
+reviewer-visible dry-run patches and recover from drafting failures without
+falling back into generic replanning.
+
+Target:
+
+- canonical `WorkTodo` drafting frontier persisted in session state, with
+  session phase derived from it rather than competing with it
+- deterministic `PatchDraftCompiler` that turns a tiny drafting proposal into
+  either a validated patch artifact or one exact blocker
+- replay bundles and offline fixtures for the known loop failure buckets,
+  especially `#399` and `#401`
+- a tiny drafting contract in write-ready mode that emits `patch_proposal` or
+  `patch_blocker`, instead of a generic next-action tool plan
+- drafting-specific recovery actions such as
+  `resume_draft_from_cached_windows`, `refresh_cached_window`, and
+  `revise_patch_from_review_findings`
+- refusal separation at the API boundary so `model_returned_refusal` is a
+  reachable blocker code rather than an opaque parse/backend failure
+- design spec: see `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` and
+  `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md`
+- phase split:
+  - active close-gate phases: 0-4
+  - deferred inside the same milestone: Phase 5 isolated review lane, Phase 6
+    executor lifecycle tightening, provisional `MemoryExploreProvider`
+    protocol work
+
+Done when:
+
+- Phase 0-4 of `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` are landed and
+  validated; deferred phases are explicitly non-blocking for milestone close
+- `#399` becomes replayable offline and resolves to either a validated
+  patch-draft path or one exact blocker without same-surface reread regression
+- `#401` becomes replayable offline and recovery preserves the same drafting
+  frontier via `resume_draft_from_cached_windows` instead of generic `replan`
+- live draft failures emit replay bundles early enough to reproduce the first
+  post-rewrite failures locally
+- `WorkTodo.status` is the canonical source of truth for drafting state, and
+  follow-status/resume expose the same blocker code and next recovery action
+- refusal-shaped model output is classified distinctly from generic parse or
+  transport failure at the work-loop boundary
+- at least one bounded mew-first implementation slice completes through the new
+  drafting path with reviewer-visible dry-run preview, approval/apply/verify,
+  and no rescue edits attributable to the old drafting failure buckets
+
+Why it matters:
+
+- M6.9 assumes mew can turn durable recall into action. Without a stable agent
+  loop, more memory only makes failures harder to debug. M6.11 hardens the
+  drafting nerve path first so later durable memory, accelerators, and
+  resident-operation work build on a replayable, contract-driven execution
+  core rather than prompt luck.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only
