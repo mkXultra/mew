@@ -1021,6 +1021,27 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("line_count=12", text)
         self.assertIn("max_chars=12000", text)
 
+    def test_work_action_batch_displays_dry_run_edit_preview(self):
+        text = format_work_action(
+            {
+                "type": "batch",
+                "tools": [
+                    {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "before\n",
+                        "new": "after\n",
+                        "apply": False,
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("- 1. edit_file path=README.md", text)
+        self.assertIn("Diff preview (+1 -1)", text)
+        self.assertIn("-before", text)
+        self.assertIn("+after", text)
+
     def test_work_session_cells_capture_model_command_diff_and_approval(self):
         session = {
             "id": 3,

@@ -1,3 +1,4 @@
+import difflib
 import json
 from pathlib import Path
 import re
@@ -278,6 +279,59 @@ def format_diff_preview(diff, max_chars=DEFAULT_DIFF_PREVIEW_MAX_CHARS, diff_sta
         f"Diff preview (+{counts['added']} -{counts['removed']})\n"
         f"{clip_output(diff, max_chars)}"
     )
+
+
+def _planned_write_preview_lines(text):
+    text = str(text or "")
+    if not text:
+        return []
+    return text.splitlines()
+
+
+def _planned_write_preview_diff(path, before_text, after_text):
+    before_lines = _planned_write_preview_lines(before_text)
+    after_lines = _planned_write_preview_lines(after_text)
+    if before_lines == after_lines:
+        return ""
+    return "\n".join(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile=path or "before",
+            tofile=path or "after",
+            lineterm="",
+        )
+    )
+
+
+def format_work_batch_write_preview(tool, max_chars=400):
+    tool = dict(tool or {})
+    tool_type = tool.get("type") or tool.get("tool") or ""
+    if tool_type not in WRITE_WORK_TOOLS:
+        return ""
+    if tool.get("apply"):
+        return ""
+    path = tool.get("path") or ""
+    diff = ""
+    if tool_type == "write_file":
+        diff = _planned_write_preview_diff(path, "", tool.get("content") or "")
+    elif tool_type == "edit_file":
+        diff = _planned_write_preview_diff(path, tool.get("old") or "", tool.get("new") or "")
+    elif tool_type == "edit_file_hunks":
+        parts = []
+        edits = tool.get("edits") or []
+        for index, edit in enumerate(edits, start=1):
+            item = edit if isinstance(edit, dict) else {}
+            hunk_diff = _planned_write_preview_diff(path, item.get("old") or "", item.get("new") or "")
+            if not hunk_diff:
+                continue
+            if len(edits) > 1:
+                parts.append(f"@@ planned hunk {index} @@")
+            parts.append(hunk_diff)
+        diff = "\n".join(parts)
+    if not diff:
+        return ""
+    return format_diff_preview(diff, max_chars=max_chars)
 
 
 def clipped_approval_diff(diff, max_chars=DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS):
@@ -5253,6 +5307,9 @@ def format_work_action(action, parameters=None, tool_call_id=None):
                     details.append(f"{key}={clip_output(str(value), 120)}")
             suffix = " " + " ".join(details) if details else ""
             lines.append(f"- {index}. {tool_type}{suffix}")
+            preview = format_work_batch_write_preview(tool)
+            if preview:
+                lines.extend(f"  {line}" for line in preview.splitlines())
         return "\n".join(lines)
     for key in WORK_ACTION_DISPLAY_FIELDS:
         value = _display_value(action, parameters, key)

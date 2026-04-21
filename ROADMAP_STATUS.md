@@ -1442,6 +1442,21 @@ Evidence:
   `ruff`, `py_compile`, and `git diff --check` all passed in the same update
   session. This is product progress, not a no-rescue supervised-iteration
   proof.
+- Task `#370` / session `#358` then shifted M6.7 from adjacent reply-surface
+  scope-fence hardening into blocker reduction. The native loop had already
+  searched exact anchors, read exact src/test windows, and reached a bounded
+  batch decision for `src/mew/work_session.py` +
+  `tests/test_work_session.py`, but the formatted resume still lost the
+  proposed write when the producer stopped before the dry-run tool call
+  finished. The minimal direct patch landed in those same two files instead:
+  `format_work_action(batch)` now appends an indented `Diff preview` block for
+  dry-run `write_file`, `edit_file`, and `edit_file_hunks` subtools using a
+  minimal planned unified diff built from tool parameters, and a new
+  batch-formatting regression proves the preview is visible before execution.
+  Focused pytest on batch formatting + diff preview, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. This is blocker
+  reduction plus product progress, not a no-rescue supervised-iteration proof.
 
 Missing proof:
 
@@ -1450,6 +1465,10 @@ Missing proof:
   `supported_actions`, but there is still no fresh bounded no-rescue
   supervised iteration that lands and verifies the fence slice end to end
   without supervisor rescue.
+- Batch-decision reviewability is now stronger, but there is still no fresh
+  bounded no-rescue supervised iteration proving that the native loop can
+  surface and complete a reviewer-visible paired dry-run diff end to end after
+  the blocker-reduction patches.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1467,9 +1486,9 @@ Done when:
 
 Next action:
 
-- Run a third 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to prove the landed dedicated scope-fence mechanism in a fresh
-  no-rescue bounded iteration, not later-milestone feature work.
+- Run a fresh 30-60 minute reviewer-gated roadmap task under the same shape.
+- Use it to prove a no-rescue bounded iteration on the now-hardened paired
+  src/test review surface, not another adjacent product patch.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals
