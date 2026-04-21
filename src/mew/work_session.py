@@ -5285,7 +5285,11 @@ def format_work_action(action, parameters=None, tool_call_id=None):
         lines.append(f"reason: {clip_output(str(reason), 500)}")
     if action_type == "batch":
         tools = action.get("tools") or []
-        lines.append(f"tools: {len(tools)}")
+        truncated_tools = action.get("truncated_tools")
+        tools_line = f"tools: {len(tools)}"
+        if isinstance(truncated_tools, int) and truncated_tools > 0:
+            tools_line += f" (+{truncated_tools} truncated)"
+        lines.append(tools_line)
         for index, tool in enumerate(tools[:5], start=1):
             tool_type = tool.get("type") or tool.get("tool") or "unknown"
             details = []

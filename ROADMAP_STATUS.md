@@ -1457,6 +1457,23 @@ Evidence:
   `uv run python -m unittest tests.test_work_session tests.test_commands`,
   `ruff`, `py_compile`, and `git diff --check` all passed. This is blocker
   reduction plus product progress, not a no-rescue supervised-iteration proof.
+- Task `#371` / session `#359` then used that hardened paired src/test review
+  surface for the next fresh bounded proof attempt in the same two files. The
+  native loop stayed inside scope without reviewer code rescue: it ran the
+  drift canary, searched exact anchors, read exact windows, proposed a paired
+  dry-run diff, and stopped on reviewer-visible approvals for
+  `src/mew/work_session.py` + `tests/test_work_session.py`. The landed change
+  adds truncated-batch visibility to `format_work_action(batch)`: when
+  `truncated_tools > 0`, the `tools:` line now renders `(+N truncated)`, and
+  the nearby batch-format regression asserts that output directly. Focused
+  batch-formatting pytest, `ruff`, `py_compile`, and `git diff --check`
+  passed. But the iteration still does not count as fresh no-rescue proof:
+  after approval the native loop chose the correct broader verifier target
+  (`uv run python -m unittest tests.test_work_session`), yet the live
+  `run_tests` path timed out twice under session capture even though the same
+  unittest module passed directly outside the live loop (`Ran 421 tests in
+  23.681s`). Carry #371 as blocker evidence plus product progress, not as
+  supervised-iteration credit.
 
 Missing proof:
 
@@ -1469,6 +1486,11 @@ Missing proof:
   bounded no-rescue supervised iteration proving that the native loop can
   surface and complete a reviewer-visible paired dry-run diff end to end after
   the blocker-reduction patches.
+- Native broader verification inside the live supervised loop is still not
+  reliable enough: `run_tests` timed out on `uv run python -m unittest
+  tests.test_work_session` even though the same module passes directly outside
+  the live loop, so the verifier path itself is now a blocker for honest M6.7
+  proof credit.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1487,8 +1509,9 @@ Done when:
 Next action:
 
 - Run a fresh 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to prove a no-rescue bounded iteration on the now-hardened paired
-  src/test review surface, not another adjacent product patch.
+- First reduce the native broader-verifier timeout/capture blocker exposed by
+  #371, then rerun a fresh no-rescue bounded iteration on the same paired
+  src/test review surface.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals

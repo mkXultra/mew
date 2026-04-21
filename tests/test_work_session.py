@@ -1013,9 +1013,11 @@ class WorkSessionTests(unittest.TestCase):
                         "max_chars": 12000,
                     }
                 ],
+                "truncated_tools": 2,
             }
         )
 
+        self.assertIn("tools: 1 (+2 truncated)", text)
         self.assertIn("read_file path=src/mew/work_session.py", text)
         self.assertIn("line_start=42", text)
         self.assertIn("line_count=12", text)
