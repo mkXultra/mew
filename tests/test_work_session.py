@@ -2150,12 +2150,12 @@ class WorkSessionTests(unittest.TestCase):
                     "id": index,
                     "tool": "edit_file",
                     "status": "completed",
-                    "parameters": {"path": f"docs/{index}.md"},
+                    "parameters": {"path": f"notes/{index}.md"},
                     "result": {
-                        "path": f"docs/{index}.md",
+                        "path": f"notes/{index}.md",
                         "dry_run": True,
                         "changed": True,
-                        "diff": f"--- a/docs/{index}.md\n+++ b/docs/{index}.md\n@@ -1 +1 @@\n-old\n+new\n",
+                        "diff": f"--- a/notes/{index}.md\n+++ b/notes/{index}.md\n@@ -1 +1 @@\n-old\n+new\n",
                     },
                 }
             )
@@ -2174,6 +2174,50 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], list(range(2, 10)))
         self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
         self.assertIn("hidden src/mew source edit", schema["reply_template"]["actions"][0]["text"])
+
+    def test_work_reply_template_steers_when_governance_blocks_approve_all(self):
+        tool_calls = [
+            {
+                "id": 1,
+                "tool": "edit_file",
+                "status": "completed",
+                "parameters": {"path": "README.md"},
+                "result": {
+                    "path": "README.md",
+                    "dry_run": True,
+                    "changed": True,
+                    "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+                },
+            },
+            {
+                "id": 2,
+                "tool": "edit_file",
+                "status": "completed",
+                "parameters": {"path": "ROADMAP_STATUS.md"},
+                "result": {
+                    "path": "ROADMAP_STATUS.md",
+                    "dry_run": True,
+                    "changed": True,
+                    "diff": "--- a/ROADMAP_STATUS.md\n+++ b/ROADMAP_STATUS.md\n@@ -1 +1 @@\n-old\n+new\n",
+                },
+            },
+        ]
+        session = {
+            "id": 4,
+            "task_id": 10,
+            "status": "active",
+            "updated_at": "2026-04-18T00:00:00Z",
+            "tool_calls": tool_calls,
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session, limit=8)
+        schema = build_work_reply_schema(session, resume=resume)
+
+        self.assertEqual(schema["reply_template"]["actions"][0]["type"], "steer")
+        self.assertIn("governance/policy", schema["reply_template"]["actions"][0]["text"])
+        self.assertIn("explicit per-tool approval", schema["reply_template"]["actions"][0]["text"])
+        self.assertNotIn("allow_unpaired_source_edit", schema["reply_template"]["actions"][0]["text"])
 
     def test_cockpit_controls_do_not_primary_approve_unpaired_source_edit(self):
         session = {
@@ -10171,6 +10215,9 @@ class WorkSessionTests(unittest.TestCase):
                     output,
                 )
                 self.assertIn("approve each tool explicitly instead", output)
+                self.assertIn("review blocked approve-all in resume", output)
+                self.assertNotIn("add paired tests before approve all", output)
+                self.assertNotIn("override unpaired approve all", output)
                 self.assertNotIn("approve all pending writes", output)
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
@@ -19243,6 +19290,98 @@ class WorkSessionTests(unittest.TestCase):
                 snapshot = json.loads(Path(".mew/follow/latest.json").read_text(encoding="utf-8"))
                 self.assertEqual(snapshot["last_step"]["applied"][0]["type"], "approve_all")
                 self.assertEqual(snapshot["last_step"]["applied"][0]["count"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_reply_file_approve_all_blocks_governance_edits(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old readme\n", encoding="utf-8")
+                Path("ROADMAP_STATUS.md").write_text("old status\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "README.md",
+                                "--old",
+                                "old readme",
+                                "--new",
+                                "new readme",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "ROADMAP_STATUS.md",
+                                "--old",
+                                "old status",
+                                "--new",
+                                "new status",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                observed_updated_at = load_state()["work_sessions"][0]["updated_at"]
+                Path("reply.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "session_id": 1,
+                            "task_id": 1,
+                            "observed_session_updated_at": observed_updated_at,
+                            "actions": [{"type": "approve_all", "allow_write": "."}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--reply-file", "reply.json"]), 1)
+
+                self.assertIn(
+                    "approve-all is blocked for pending governance/policy dry-run edits",
+                    stderr.getvalue(),
+                )
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old readme\n")
+                self.assertEqual(Path("ROADMAP_STATUS.md").read_text(encoding="utf-8"), "old status\n")
             finally:
                 os.chdir(old_cwd)
 

@@ -1384,6 +1384,25 @@ Evidence:
   `ruff`, `py_compile`, and `git diff --check` all passed in the same update
   session. This is product progress, not a no-rescue supervised-iteration
   proof.
+- Task `#367` / session `#355` then targeted the next secondary-surface gap:
+  reply-file / CLI approval surfaces still treated governance-blocked
+  `approve-all` like the older hidden-unpaired-source case, so they could emit
+  the wrong wording and the reply-file path could bypass the new governance
+  block entirely. The native run found the right bounded source/test surfaces
+  and refreshed the exact windows, but two codex model turns stalled in
+  planning before they surfaced a reviewable dry-run diff. The product patch
+  then landed directly in `src/mew/commands.py` and
+  `tests/test_work_session.py`: CLI approval controls now distinguish
+  hidden-unpaired-source blocks from governance blocks, reply-file guidance now
+  tells the reviewer to inspect resume and approve per-tool for
+  governance/policy edits, and `work --reply-file` now rejects `approve_all`
+  when the pending batch contains governance/policy dry-run edits instead of
+  bypassing the block. Focused
+  `uv run pytest -q tests/test_work_session.py -k 'reply_file and approve_all or governance_blocks_approve_all' --no-testmon`,
+  broader `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
 
 Missing proof:
 

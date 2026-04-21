@@ -1861,6 +1861,26 @@ def _work_cli_override_approve_all_command(session, approvals):
     return f"{_work_cli_approve_all_command(session, approvals)} --allow-unpaired-source-edit"
 
 
+def _work_governance_blocked_approve_all_reason(session, approve_ids):
+    from .self_improve_audit import _m5_governance_path_category
+
+    for approve_id in approve_ids or []:
+        source_call = find_work_tool_call(session, approve_id)
+        if not source_call:
+            continue
+        result = source_call.get("result") or {}
+        if not result.get("dry_run") or not result.get("changed"):
+            continue
+        path = source_call.get("path") or (source_call.get("parameters") or {}).get("path") or ""
+        category = _m5_governance_path_category(path)
+        if category:
+            return (
+                "approve-all is blocked for pending governance/policy dry-run edits; "
+                f"approve each tool explicitly instead ({category} {path})"
+            )
+    return ""
+
+
 def _work_cli_approval_items(session, resume):
     if not session or session.get("status") != "active":
         return []
@@ -1868,19 +1888,27 @@ def _work_cli_approval_items(session, resume):
     items = []
     if (resume or {}).get("approve_all_hint") or (resume or {}).get("approve_all_blocked_reason"):
         if (resume or {}).get("approve_all_blocked_reason"):
-            items.append(
-                {
-                    "label": "add paired tests before approve all",
-                    "command": _work_resume_command(args=None, task_id=session.get("task_id"), session=session),
-                }
-            )
-            items.append(
-                {
-                    "label": "override unpaired approve all",
-                    "command": (resume or {}).get("cli_override_approve_all_hint")
-                    or _work_cli_override_approve_all_command(session, approvals),
-                }
-            )
+            if (resume or {}).get("override_approve_all_hint"):
+                items.append(
+                    {
+                        "label": "add paired tests before approve all",
+                        "command": _work_resume_command(args=None, task_id=session.get("task_id"), session=session),
+                    }
+                )
+                items.append(
+                    {
+                        "label": "override unpaired approve all",
+                        "command": (resume or {}).get("cli_override_approve_all_hint")
+                        or _work_cli_override_approve_all_command(session, approvals),
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "label": "review blocked approve-all in resume",
+                        "command": _work_resume_command(args=None, task_id=session.get("task_id"), session=session),
+                    }
+                )
         else:
             items.append(
                 {
@@ -5440,24 +5468,7 @@ def cmd_work_approve_all(args):
             task=task,
             promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
         )
-        blocked_reason = ""
-        from .self_improve_audit import _m5_governance_path_category
-
-        for approve_id in approve_ids:
-            source_call = find_work_tool_call(session, approve_id)
-            if not source_call:
-                continue
-            result = source_call.get("result") or {}
-            if not result.get("dry_run") or not result.get("changed"):
-                continue
-            path = source_call.get("path") or (source_call.get("parameters") or {}).get("path") or ""
-            category = _m5_governance_path_category(path)
-            if category:
-                blocked_reason = (
-                    "approve-all is blocked for pending governance/policy dry-run edits; "
-                    f"approve each tool explicitly instead ({category} {path})"
-                )
-                break
+        blocked_reason = _work_governance_blocked_approve_all_reason(session, approve_ids)
         if blocked_reason:
             if args.json:
                 print(json.dumps({"approved": [], "count": 0, "error": blocked_reason}, ensure_ascii=False, indent=2))
@@ -6164,15 +6175,26 @@ def _work_reply_template(session=None, resume=None):
     first_approval = blocked_source_approval or ((pending_approvals[0] or {}) if pending_approvals else {})
     first_approval_id = first_approval.get("tool_call_id")
     if not blocked_source_approval and (resume or {}).get("approve_all_blocked_reason"):
-        actions = [
-            {
-                "type": "steer",
-                "text": (
-                    "Inspect the work-session resume before approving: at least one hidden src/mew source edit "
-                    "needs a paired tests/** write/edit or an explicit unpaired override."
-                ),
-            }
-        ]
+        if (resume or {}).get("override_approve_all_hint"):
+            actions = [
+                {
+                    "type": "steer",
+                    "text": (
+                        "Inspect the work-session resume before approving: at least one hidden src/mew source edit "
+                        "needs a paired tests/** write/edit or an explicit unpaired override."
+                    ),
+                }
+            ]
+        else:
+            actions = [
+                {
+                    "type": "steer",
+                    "text": (
+                        "Inspect the work-session resume before approving: at least one pending governance/policy "
+                        "dry-run edit requires explicit per-tool approval, so approve_all should stay blocked."
+                    ),
+                }
+            ]
     elif first_approval_id not in (None, ""):
         pairing = first_approval.get("pairing_status") or {}
         if pairing.get("status") == "missing_test_edit":
@@ -6664,6 +6686,10 @@ def _apply_work_reply_approval_action(args, session_id, action, expected_updated
                 task=task,
                 promote_paired_source_verifiers=not bool(getattr(args, "verify_command", None)),
             )
+            blocked_reason = _work_governance_blocked_approve_all_reason(session, approve_ids)
+            if blocked_reason:
+                print(f"mew: {blocked_reason}", file=sys.stderr)
+                return 1, approved
         else:
             approve_ids = [action["tool_call_id"]]
         deferred_verify_ids = (
