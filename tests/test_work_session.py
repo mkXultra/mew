@@ -7783,6 +7783,91 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_resume_includes_paired_test_repair_anchor_after_failed_mew_source_edit(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as project, tempfile.TemporaryDirectory() as other_cwd:
+            try:
+                project_path = Path(project)
+                (project_path / "src/mew").mkdir(parents=True)
+                (project_path / "tests").mkdir()
+                (project_path / "src/mew/work_session.py").write_text("VALUE = 1\n", encoding="utf-8")
+                (project_path / "tests/test_work_session.py").write_text(
+                    "def test_placeholder():\n    assert True\n",
+                    encoding="utf-8",
+                )
+                os.chdir(other_cwd)
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Recover paired edit",
+                    "goal": "Recover mew source edit failure.",
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 10,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/work_session.py", "line_start": 120, "line_count": 8},
+                            "result": {
+                                "path": str(project_path / "src/mew/work_session.py"),
+                                "line_start": 120,
+                                "line_count": 8,
+                                "text": "source window\n",
+                            },
+                        },
+                        {
+                            "id": 11,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {
+                                "path": "tests/test_work_session.py",
+                                "line_start": 30,
+                                "line_count": 6,
+                            },
+                            "result": {
+                                "path": str(project_path / "tests/test_work_session.py"),
+                                "line_start": 30,
+                                "line_count": 6,
+                                "text": "test window\n",
+                            },
+                        },
+                        {
+                            "id": 12,
+                            "tool": "edit_file",
+                            "status": "failed",
+                            "parameters": {
+                                "path": "src/mew/work_session.py",
+                                "old": "missing",
+                                "new": "replacement",
+                            },
+                            "error": "old text was not found",
+                            "summary": "edit failed",
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                anchors = resume["repair_anchor_observations"]
+                self.assertEqual(
+                    anchors[0]["parameters"],
+                    {"path": "src/mew/work_session.py", "line_start": 120, "line_count": 8},
+                )
+                self.assertEqual(
+                    anchors[1]["parameters"],
+                    {"path": "tests/test_work_session.py", "line_start": 30, "line_count": 6},
+                )
+                self.assertEqual(anchors[1]["source_tool_call_id"], 12)
+                text = format_work_session_resume(resume)
+                self.assertIn("Repair anchors", text)
+                self.assertIn("tests/test_work_session.py", text)
+                self.assertIn("paired tests surface", text)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_resume_drops_prior_read_window_after_intervening_write(self):
         from mew.work_session import build_work_session_resume
 
@@ -13490,6 +13575,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("use its suggested_next read_file replacement instead of rerunning search_text again", prompt)
         self.assertIn("work_session.resume.adjacent_read_observations", prompt)
         self.assertIn("use its suggested_next merged read instead of inching through more small reads", prompt)
+        self.assertIn("work_session.resume.repair_anchor_observations", prompt)
+        self.assertIn("failed batch or repair loop", prompt)
         self.assertIn("Use work_session.resume.continuity as the reentry contract", prompt)
         self.assertIn("treat continuity.recommendation as the first repair queue", prompt)
         self.assertIn("missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state", prompt)

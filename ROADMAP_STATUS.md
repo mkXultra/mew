@@ -1071,6 +1071,16 @@ Missing proof:
   resume test proves that stale src-path recall now keeps both the source and
   its paired test path. Count #356 as product progress plus a concrete blocker
   trace for repair-loop/test-anchor drift, not as no-rescue evidence.
+- A direct supervisor patch then turned that #356 blocker into an explicit
+  resume/prompt surface: `build_work_session_resume()` now emits
+  `repair_anchor_observations`, a deduplicated list of source/test `read_file`
+  anchors built from the latest failed write plus any still-relevant
+  `working_memory.target_paths`, and `build_work_think_prompt()` now tells
+  native mew to prefer those anchors before new same-surface `search_text` or
+  broader rereads. Focused regressions, broader `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #356 repair-loop/test-anchor
+  blocker, not yet fresh no-rescue evidence.
 
 Done when:
 
@@ -1130,6 +1140,10 @@ Next action:
   paired dry-run/apply attempt, but repeated test-anchor drift on
   `tests/test_work_session.py` forced supervisor takeover before the final
   passing patch was landed.
+- Carry the landed `repair_anchor_observations` resume/prompt patch as product
+  progress, but do not count it as no-rescue evidence until a fresh native M6.6
+  run proves that mew can reuse those repair anchors to return to the correct
+  paired source/test surfaces after a failed apply/verify turn.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native no-steer proof task on a broader multi-file coding slice, ideally one
   that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a

@@ -1851,6 +1851,128 @@ def suggested_safe_reobserve_for_call(call, calls=None):
     return {}
 
 
+def repair_anchor_observation_for_path(
+    path,
+    calls=None,
+    *,
+    before_id=None,
+    source_tool_call_id=None,
+    source_tool="",
+    reason="",
+):
+    normalized_path = _normalized_work_path_text(path)
+    if not normalized_path:
+        return {}
+    window = latest_prior_read_window_for_path(calls, normalized_path, before_id=before_id)
+    parameters = {"path": normalized_path}
+    if window:
+        parameters.update(window)
+    observation = {
+        "source_tool_call_id": source_tool_call_id,
+        "source_tool": source_tool,
+        "kind": "tool_observation",
+        "action": "read_file",
+        "parameters": parameters,
+        "reason": reason
+        or (
+            "repair/reentry still points at this target path; reuse the latest window before broader search"
+            if window
+            else "repair/reentry still points at this target path; re-read it before broader search"
+        ),
+    }
+    return {key: value for key, value in observation.items() if value not in (None, "", [])}
+
+
+def _repair_anchor_key(observation):
+    if not isinstance(observation, dict):
+        return ()
+    parameters = observation.get("parameters") or {}
+    return (
+        observation.get("action") or observation.get("kind") or "",
+        _normalized_work_path_text(parameters.get("path")),
+        parameters.get("line_start"),
+        parameters.get("line_count"),
+    )
+
+
+def _append_repair_anchor(observations, observation, *, limit=4):
+    if not observation:
+        return
+    key = _repair_anchor_key(observation)
+    if not key:
+        return
+    if any(_repair_anchor_key(existing) == key for existing in observations):
+        return
+    observations.append(observation)
+    del observations[limit:]
+
+
+def paired_repair_anchor_paths_for_call(session, call):
+    if not isinstance(call, dict):
+        return []
+    path = _normalized_work_path_text(work_call_path(call))
+    if not path:
+        return []
+    paths = [path]
+    parameters = call.get("parameters") or {}
+    if _is_mew_source_path(path):
+        discovered_tests = discovered_test_candidates_for_call(session, call, limit=1)
+        paired_test_path = (
+            discovered_tests[0]["path"] if discovered_tests else inferred_test_path_for_mew_source(path)
+        )
+        paired_test_path = _normalized_work_path_text(paired_test_path)
+        if paired_test_path and paired_test_path not in paths:
+            paths.append(paired_test_path)
+    elif _is_test_path(path):
+        paired_source_path = _normalized_work_path_text(parameters.get("paired_test_source_path"))
+        if paired_source_path and paired_source_path not in paths:
+            paths.append(paired_source_path)
+    return paths
+
+
+def build_repair_anchor_observations(session, calls, failures, working_memory=None, limit=4):
+    observations = []
+    call_by_id = {call.get("id"): call for call in calls or [] if call.get("id") is not None}
+    for failure in reversed(list(failures or [])):
+        safe_reobserve = failure.get("suggested_safe_reobserve") or {}
+        if safe_reobserve.get("action") == "read_file":
+            _append_repair_anchor(observations, safe_reobserve, limit=limit)
+        call = call_by_id.get(failure.get("tool_call_id"))
+        if not call or call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        paired_paths = paired_repair_anchor_paths_for_call(session, call)
+        for paired_path in paired_paths[1:]:
+            if _is_test_path(paired_path):
+                reason = (
+                    "failed mew source edit likely still needs its paired tests surface; "
+                    "reuse the latest paired test window before broader search"
+                )
+            else:
+                reason = (
+                    "failed paired test edit likely still needs its source surface; "
+                    "reuse the latest paired source window before broader search"
+                )
+            observation = repair_anchor_observation_for_path(
+                paired_path,
+                calls=calls,
+                before_id=call.get("id"),
+                source_tool_call_id=call.get("id"),
+                source_tool=call.get("tool") or "",
+                reason=reason,
+            )
+            _append_repair_anchor(observations, observation, limit=limit)
+    target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
+    for target_path in target_paths:
+        observation = repair_anchor_observation_for_path(
+            target_path,
+            calls=calls,
+            source_tool_call_id=None,
+            source_tool="working_memory",
+        )
+        _append_repair_anchor(observations, observation, limit=limit)
+    return observations[:limit]
+
+
 def _work_call_repeat_target(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
@@ -4264,6 +4386,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     }
                 )
                 break
+    repair_anchor_observations = build_repair_anchor_observations(
+        session,
+        calls,
+        failures,
+        working_memory=working_memory,
+        limit=4,
+    )
     user_preferences = build_work_user_preferences(state, limit=limit)
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
@@ -4290,6 +4419,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": build_adjacent_read_observations(calls, limit=3),
         "target_path_cached_window_observations": target_path_cached_window_observations,
+        "repair_anchor_observations": repair_anchor_observations,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -4604,6 +4734,18 @@ def format_work_session_resume(resume):
             )
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
+    repair_anchors = resume.get("repair_anchor_observations") or []
+    if repair_anchors:
+        lines.extend(["", "Repair anchors"])
+        for anchor in repair_anchors:
+            params = shlex.join(
+                f"{key}={value}" for key, value in (anchor.get("parameters") or {}).items()
+            )
+            suffix = f" {params}" if params else ""
+            lines.append(f"- {anchor.get('action') or anchor.get('kind') or 'observation'}{suffix}")
+            if anchor.get("reason"):
+                lines.append(f"  reason: {anchor.get('reason')}")
 
     lines.extend(["", "Work notes"])
     notes = resume.get("notes") or []
