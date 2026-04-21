@@ -289,6 +289,12 @@ Before Phase 1 code starts, define and keep stable:
   - `B0.iter_wall`
   - `B0.first_think`
   - `B0.comparator`
+- operator-surface baseline pinned from the late M6.7 wall-clock run:
+  - `mew follow-status` shows `latest_model_failure`, selected failure metrics,
+    and an exact recovery command
+  - `mew focus` / `mew brief` / `mew desk` distinguish interrupted-vs-paused
+    active work and do not treat a paused debug target as the default resume
+    recommendation
 - session trace additions needed for:
   - returned/dropped/injected entry ids
   - memory_kind
