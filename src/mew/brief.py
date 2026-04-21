@@ -246,6 +246,29 @@ def recent_records(records, limit=5):
     return list(reversed(list(records)[-limit:]))
 
 
+def _latest_failed_model_turn_item(session):
+    for turn in reversed((session or {}).get("model_turns") or []):
+        status = turn.get("status")
+        if status not in ("failed", "interrupted"):
+            continue
+        model_metrics = turn.get("model_metrics") or {}
+        think = model_metrics.get("think") or {}
+        summary = turn.get("summary") or turn.get("error") or ""
+        item = {
+            "model_turn_id": turn.get("id"),
+            "status": status,
+            "summary": _clip_focus_text(summary, 220),
+        }
+        if think.get("prompt_chars") is not None:
+            item["prompt_chars"] = think.get("prompt_chars")
+        if think.get("timeout_seconds") is not None:
+            item["timeout_seconds"] = think.get("timeout_seconds")
+        if model_metrics.get("write_ready_fast_path"):
+            item["write_ready_fast_path"] = True
+        return item
+    return {}
+
+
 def _message_item(message):
     return {
         "id": message.get("id"),
@@ -850,6 +873,7 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "inactive_for": format_waiting_hours(inactive_hours, minimum_hours=0.0),
                 "next_action": resume.get("next_action") or "",
                 "risk": risk,
+                "latest_model_failure": _latest_failed_model_turn_item(session),
                 "continuity": resume.get("continuity") or {},
                 "compressed_prior_think": resume.get("compressed_prior_think") or {},
                 "working_memory": resume.get("working_memory") or {},
@@ -1103,6 +1127,23 @@ def format_focus(data):
                 lines.append(f"  next: {session.get('next_action')}")
             if session.get("risk"):
                 lines.append(f"  risk: {session.get('risk')}")
+            latest_model_failure = session.get("latest_model_failure") or {}
+            if latest_model_failure:
+                lines.append(
+                    "  latest_model_failure: "
+                    f"turn=#{latest_model_failure.get('model_turn_id') or '-'} "
+                    f"status={latest_model_failure.get('status') or '-'} "
+                    f"{latest_model_failure.get('summary') or ''}".rstrip()
+                )
+                metrics = []
+                if latest_model_failure.get("prompt_chars") is not None:
+                    metrics.append(f"prompt_chars={latest_model_failure.get('prompt_chars')}")
+                if latest_model_failure.get("timeout_seconds") is not None:
+                    metrics.append(f"timeout_seconds={latest_model_failure.get('timeout_seconds')}")
+                if latest_model_failure.get("write_ready_fast_path"):
+                    metrics.append("write_ready_fast_path=True")
+                if metrics:
+                    lines.append(f"  latest_model_failure_metrics: {' '.join(metrics)}")
             if session.get("updated_at"):
                 inactive = session.get("inactive_for")
                 if inactive:

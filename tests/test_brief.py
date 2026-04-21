@@ -1054,6 +1054,51 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("old verifier was recovered", focus)
         self.assertNotIn("newer recovered failure", focus)
 
+    def test_focus_surfaces_latest_failed_model_turn_for_active_work_session(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Recover timed-out planner", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Recover timed-out planner",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [],
+                "model_turns": [
+                    {
+                        "id": 12,
+                        "status": "failed",
+                        "error": "request timed out",
+                        "model_metrics": {
+                            "think": {
+                                "prompt_chars": 63842,
+                                "timeout_seconds": 45.0,
+                            },
+                            "write_ready_fast_path": True,
+                        },
+                    }
+                ],
+            }
+        )
+
+        data = build_focus_data(state, limit=3, kind="coding")
+        focus = format_focus(data)
+
+        latest_failure = data["active_work_sessions"][0]["latest_model_failure"]
+        self.assertEqual(latest_failure["model_turn_id"], 12)
+        self.assertEqual(latest_failure["status"], "failed")
+        self.assertEqual(latest_failure["summary"], "request timed out")
+        self.assertEqual(latest_failure["prompt_chars"], 63842)
+        self.assertEqual(latest_failure["timeout_seconds"], 45.0)
+        self.assertTrue(latest_failure["write_ready_fast_path"])
+        self.assertIn("latest_model_failure: turn=#12 status=failed request timed out", focus)
+        self.assertIn(
+            "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 write_ready_fast_path=True",
+            focus,
+        )
+
     def test_focus_surfaces_active_work_session_age(self):
         state = default_state()
         add_task(state, task_id=7, title="Resume after a day", kind="coding")
