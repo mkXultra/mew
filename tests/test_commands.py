@@ -4375,7 +4375,7 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["brief", "--kind", "coding"]), 0)
                 brief = stdout.getvalue()
                 self.assertIn("context_checkpoint: Dogfood context save", brief)
-                self.assertIn("context_checkpoint_git: dirty", brief)
+                self.assertRegex(brief, r"context_checkpoint_git: (dirty|untracked_only)")
                 self.assertIn("context_checkpoint_note: Long session checkpoint", brief)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -4389,7 +4389,7 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(main(["focus", "--kind", "coding"]), 0)
                 focus = stdout.getvalue()
                 self.assertIn("Checkpoint: Dogfood context save", focus)
-                self.assertIn("Checkpoint git: dirty", focus)
+                self.assertRegex(focus, r"Checkpoint git: (dirty|untracked_only)")
                 self.assertIn("Checkpoint note: Long session checkpoint", focus)
 
                 with redirect_stdout(StringIO()) as stdout:

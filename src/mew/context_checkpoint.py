@@ -6,8 +6,44 @@ from .typed_memory import FileMemoryBackend, entry_to_dict, memory_entry_matches
 CONTEXT_CHECKPOINT_QUERY = "Context save next safe action context compression long session"
 
 
+def _parse_git_status_short(status_text):
+    status_text = (status_text or "").rstrip("\n")
+    tracked_dirty_paths = []
+    untracked_paths = []
+    dirty_paths = []
+    for line in status_text.splitlines():
+        if len(line) <= 2:
+            continue
+        path = line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+        dirty_paths.append(path)
+        if line.startswith("??"):
+            untracked_paths.append(path)
+        else:
+            tracked_dirty_paths.append(path)
+    if not dirty_paths:
+        status = "clean"
+    elif tracked_dirty_paths:
+        status = "dirty"
+    else:
+        status = "untracked_only"
+    return {
+        "status_short": status_text,
+        "status": status,
+        "dirty_paths": dirty_paths,
+        "tracked_dirty_paths": tracked_dirty_paths,
+        "untracked_paths": untracked_paths,
+    }
+
+
 def current_git_reentry_state():
-    data = {"head": "", "status": "unknown", "status_short": "", "dirty_paths": []}
+    data = {
+        "head": "",
+        "status": "unknown",
+        "status_short": "",
+        "dirty_paths": [],
+        "tracked_dirty_paths": [],
+        "untracked_paths": [],
+    }
     try:
         head = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -29,14 +65,7 @@ def current_git_reentry_state():
             timeout=2,
         )
         if status.returncode == 0:
-            status_text = (status.stdout or "").rstrip("\n")
-            data["status_short"] = status_text
-            data["status"] = "dirty" if status_text else "clean"
-            data["dirty_paths"] = [
-                line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
-                for line in status_text.splitlines()
-                if len(line) > 2
-            ]
+            data.update(_parse_git_status_short(status.stdout or ""))
     except (OSError, subprocess.TimeoutExpired):
         pass
     return data
@@ -49,6 +78,8 @@ def context_load_current_state():
         "git_status": git.get("status") or "unknown",
         "git_status_short": git.get("status_short") or "",
         "dirty_paths": git.get("dirty_paths") or [],
+        "tracked_dirty_paths": git.get("tracked_dirty_paths") or [],
+        "untracked_paths": git.get("untracked_paths") or [],
     }
 
 
