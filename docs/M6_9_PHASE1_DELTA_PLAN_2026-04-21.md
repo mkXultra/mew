@@ -1,0 +1,312 @@
+# M6.9 Phase 1 Delta Plan
+
+Date: 2026-04-21  
+Status: prep only. No M6.9 implementation starts until M6.7 closes and this
+delta plan is reviewer-approved.
+
+## Purpose
+
+Turn `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md` into an
+implementation-ready Phase 1 slice list without changing the active milestone.
+
+Current ordering stays:
+
+1. Finish M6.7 supervised 8-hour proof
+2. Approve this delta plan
+3. Land M6.9 Phase 1 as bounded M6.7-shaped iterations
+
+This document is deliberately narrower than the design review. It answers:
+
+- what Phase 1 deliverables exist
+- which product surfaces likely change first
+- what proof artifacts are required
+- what is explicitly deferred to later phases
+
+## Inputs
+
+- `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md`
+- `ROADMAP.md`
+- `ROADMAP_STATUS.md`
+- current M6.7 reviewer-gated iteration shape
+
+## Phase 1 Scope
+
+Phase 1 is the baseline that stops the bleeding. The target is not "smart
+memory" in the abstract. The target is durable coding memory that is:
+
+- typed
+- gated on outcome
+- inspectable from outside mew
+- cheap enough not to regress the coding loop badly
+
+Phase 1 includes only:
+
+1. coding memory taxonomy
+2. per-type write gates
+3. deterministic `revise()` on reuse
+4. minimum symbol/pair index
+5. reviewer-diff capture
+6. reviewer veto stub
+7. observability surfaces for all durable artifacts
+
+Deferred from Phase 1:
+
+- hindsight harvester
+- reasoning-trace population
+- ranked recall
+- graph rewrite / consolidation
+- rehearsal and novelty injection
+- preference store
+
+## Deliverable Map
+
+### D1. Coding Memory Taxonomy
+
+Goal:
+
+- add coding-domain `memory_kind` values on top of existing typed memory
+
+Phase 1 populated kinds:
+
+- `reviewer-steering`
+- `failure-shield`
+- `file-pair`
+- `task-template`
+
+Phase 1 schema-only kind:
+
+- `reasoning-trace`
+
+Likely surfaces:
+
+- typed memory schema / validators
+- memory write path
+- memory list/show/trace output
+
+Proof:
+
+- one iteration writes at least one populated entry of each Phase 1 kind
+- schema for `reasoning-trace` exists but stays empty
+
+Non-goals:
+
+- no model-generated reasoning-trace extraction yet
+
+### D2. Write-Gate Matrix
+
+Goal:
+
+- durable writes happen only when type-specific evidence is present
+
+Phase 1 minimum rules:
+
+- `reviewer-steering`: explicit reviewer approval + `why` + `how_to_apply`
+- `failure-shield`: explicit reviewer approval + symptom/root-cause/fix/stop-rule
+- `file-pair`: focused paired test green + structural evidence
+- `task-template`: explicit reviewer approval + rationale
+- `reasoning-trace`: schema only, no writes
+
+Likely surfaces:
+
+- write gate evaluator
+- durable write trace fields
+- rejection reason surfaces
+
+Proof:
+
+- happy-path writes succeed
+- missing-field writes reject with logged reason
+- drift-canary-red rejects any write
+- `file-pair` rejects separately on missing structural evidence and red tests
+
+Non-goals:
+
+- no hidden promotion from raw session logs
+
+### D3. Deterministic `revise()` Reuse Gate
+
+Goal:
+
+- recalled durable memory must be adapted or dropped before injection
+
+Phase 1 behavior:
+
+- no model call
+- rewrite symbol/file references from current index
+- drop on `symbol_not_found` or `precondition_miss`
+- log drop reasons
+
+Likely surfaces:
+
+- active recall path
+- reuse trace logging
+- session trace fields for dropped/injected entry ids
+
+Proof:
+
+- at least one real recall fires `revise()`
+- at least one entry drops with `symbol_not_found`
+
+Non-goals:
+
+- no learned or model-backed revise step yet
+
+### D4. Minimum Symbol/Pair Index
+
+Goal:
+
+- durable coding memory keys off `(module, symbol_kind, symbol_name)` with file
+  paths secondary
+
+Phase 1 shape:
+
+- incremental population only
+- no full-repo scan
+- atomic JSON rewrite at `.mew/durable/symbol_index.json`
+
+Likely surfaces:
+
+- symbol extraction helper
+- durable index read/write
+- recall lookup path
+
+Proof:
+
+- one known symbol resolves via index on first read
+- `index_hit=true` appears in trace
+
+Non-goals:
+
+- no graph scorer yet
+
+### D5. Reviewer-Diff Capture
+
+Goal:
+
+- persist `(ai_draft, reviewer_approved, ai_final)` triples for landed diffs
+
+Phase 1 rule:
+
+- write only when `ai_final` exists
+
+Likely surfaces:
+
+- approval/apply path
+- final landing hook
+- `.mew/durable/reviewer_diffs.jsonl`
+
+Proof:
+
+- one approve + land cycle writes a complete triple
+- approve-without-land does not write a triple
+
+Non-goals:
+
+- no preference retrieval yet
+
+### D6. Reviewer Veto Stub
+
+Goal:
+
+- reviewer can mark one durable entry stale/deleted
+
+Phase 1 rule:
+
+- single-entry only
+- no edge propagation
+
+Likely surfaces:
+
+- durable memory CLI
+- veto log
+
+Proof:
+
+- one bad entry is written, vetoed, and confirmed not to fire again
+
+Non-goals:
+
+- no graph invalidation yet
+
+### D7. Observability Surfaces
+
+Goal:
+
+- external agents can inspect durable coding state without importing mew code
+
+Minimum Phase 1 surfaces:
+
+- stable `.mew/durable/` layout
+- `mew memory list/show/trace`
+- `mew index query <module> <symbol>`
+- session trace fields for recall/write events
+
+Proof:
+
+- one external process reconstructs a recall story from disk + trace only
+
+Non-goals:
+
+- no database or binary storage
+
+## Proposed Bounded Iteration Split
+
+Implement as separate M6.7-shaped iterations after M6.7 closes:
+
+1. D1 taxonomy scaffolding
+2. D2 write-gate matrix
+3. D3 deterministic `revise()`
+4. D4 minimum symbol index
+5. D5 reviewer-diff capture
+6. D6 veto stub
+7. D7 observability surfaces
+
+Keep them separate. Do not bundle D1-D7 in one pass.
+
+## Required Proof Artifacts
+
+Before Phase 1 code starts, define and keep stable:
+
+- dogfood scenarios:
+  - `m6_9-memory-taxonomy`
+  - `m6_9-revise-drop`
+  - `m6_9-symbol-index-hit`
+  - `m6_9-reviewer-diff`
+  - `m6_9-veto-stub`
+  - `m6_9-observability-rebuild`
+  - `m6_9-phase1-regression`
+- comparator baseline source for the 3 M6.6 task shapes
+- session trace additions needed for:
+  - returned/dropped/injected entry ids
+  - memory_kind
+  - write_gate_result
+  - index hit/miss
+
+## Open Questions To Resolve Before Code
+
+1. Which existing typed-memory file/schema should host `memory_kind` without
+   forcing a migration rewrite?
+2. Which current recall surface should own deterministic `revise()` in Phase 1?
+3. What is the minimum symbol extractor that is good enough without a full-repo
+   scan?
+4. Which current approval/apply hook is the correct source of truth for
+   `reviewer_diffs.jsonl` finalization?
+5. Which existing CLI family should own `mew index query` and veto operations?
+
+## Stop Rules
+
+Do not start M6.9 code if any of these is still true:
+
+- M6.7 is not closed
+- this delta plan is not reviewer-approved
+- Phase 1 deliverables are being bundled
+- the comparator baseline for `m6_9-phase1-regression` is not pinned
+
+## First Action After Approval
+
+After M6.7 closes and this plan is approved:
+
+1. pin comparator baseline fixtures
+2. choose D1 only
+3. land D1 as one bounded supervised iteration
+4. record proof artifact before touching D2
