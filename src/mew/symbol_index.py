@@ -86,3 +86,20 @@ def resolve_source_path(source_path: str, base_dir: str | Path = ".") -> dict[st
         return None
     record = sources.get(str(source_path or "").strip())
     return record if isinstance(record, dict) else None
+
+
+def resolve_test_path(test_path: str, base_dir: str | Path = ".") -> dict[str, Any] | None:
+    index = load_symbol_index(base_dir)
+    sources = index.get("sources")
+    if not isinstance(sources, dict):
+        return None
+    wanted = str(test_path or "").strip()
+    for source_path, record in sources.items():
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("test_path") or "").strip() != wanted:
+            continue
+        payload = dict(record)
+        payload.setdefault("source_path", source_path)
+        return payload
+    return None

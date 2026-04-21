@@ -558,13 +558,38 @@ class MemoryTests(unittest.TestCase):
                 self.assertIn("test_path: tests/test_memory.py", text)
                 self.assertIn(f"memory_ids: {entry.id}", text)
 
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--resolve-test-path", "tests/test_memory.py", "--json"]), 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["resolved"]["source_path"], "src/mew/commands.py")
+                self.assertEqual(payload["resolved"]["test_path"], "tests/test_memory.py")
+                self.assertEqual(payload["resolved"]["memory_ids"], [entry.id])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--resolve-test-path", "tests/test_memory.py"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("source_path: src/mew/commands.py", text)
+                self.assertIn("test_path: tests/test_memory.py", text)
+                self.assertIn(f"memory_ids: {entry.id}", text)
+
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["memory", "--resolve-source-path", "src/mew/missing.py"]), 1)
                 self.assertIn("typed memory not found for source path", stderr.getvalue())
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["memory", "--resolve-test-path", "tests/missing_test.py"]), 1)
+                self.assertIn("typed memory not found for test path", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(
                         main(["memory", "--list", "--resolve-source-path", "src/mew/commands.py"]),
+                        1,
+                    )
+                self.assertIn("choose only one", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(["memory", "--list", "--resolve-test-path", "tests/test_memory.py"]),
                         1,
                     )
                 self.assertIn("choose only one", stderr.getvalue())

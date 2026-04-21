@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mew.symbol_index import rebuild_symbol_index, resolve_source_path
+from mew.symbol_index import rebuild_symbol_index, resolve_source_path, resolve_test_path
 from mew.typed_memory import FileMemoryBackend
 
 
@@ -46,3 +46,6 @@ class SymbolIndexTests(unittest.TestCase):
 
             resolved = resolve_source_path("src/mew/symbol_index.py", tmp)
             self.assertEqual(resolved, record)
+
+            reverse_resolved = resolve_test_path("tests/test_symbol_index.py", tmp)
+            self.assertEqual(reverse_resolved, record)
