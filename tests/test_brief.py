@@ -1234,6 +1234,7 @@ class BriefTests(unittest.TestCase):
                 "updated_at": "2026-04-21T15:25:14Z",
                 "stop_requested_at": "2026-04-21T15:00:00Z",
                 "stop_reason": "paused debug target",
+                "pending_steer": {"text": "old steer that should stay hidden", "source": "user"},
                 "tool_calls": [
                     {
                         "id": 1,
@@ -1255,6 +1256,7 @@ class BriefTests(unittest.TestCase):
         self.assertIn("last_active: 2026-04-21T13:25:16Z (2.0h ago)", focus)
         self.assertIn("- #7 [coding/paused/normal] Paused debug target", focus)
         self.assertIn("  next: leave paused work session for task #7 paused", focus)
+        self.assertNotIn("pending_steer: old steer that should stay hidden", focus)
 
     def test_focus_surfaces_active_work_session_age(self):
         state = default_state()

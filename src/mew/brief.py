@@ -1213,7 +1213,7 @@ def format_focus(data):
             elif memory.get("next_step"):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
             pending_steer = session.get("pending_steer") or {}
-            if pending_steer.get("text"):
+            if pending_steer.get("text") and not stop_request:
                 lines.append(f"  pending_steer: {pending_steer.get('text')}")
             queued_followups = session.get("queued_followups") or []
             if queued_followups:
