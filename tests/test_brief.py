@@ -607,6 +607,7 @@ class BriefTests(unittest.TestCase):
         brief = build_brief(state, kind="coding")
 
         self.assertIn("Next useful move: leave paused work session #3 task #7 paused", brief)
+        self.assertIn("- #7 [paused/normal/coding] Paused debug target", brief)
 
     def test_brief_uses_checkpoint_guided_last_request_for_same_day_coding_reentry(self):
         state = default_state()
@@ -1252,6 +1253,8 @@ class BriefTests(unittest.TestCase):
         self.assertIn("stop_request: paused debug target", focus)
         self.assertIn("Next: leave paused work session #3 task #7 paused", focus)
         self.assertIn("last_active: 2026-04-21T13:25:16Z (2.0h ago)", focus)
+        self.assertIn("- #7 [coding/paused/normal] Paused debug target", focus)
+        self.assertIn("  next: leave paused work session for task #7 paused", focus)
 
     def test_focus_surfaces_active_work_session_age(self):
         state = default_state()

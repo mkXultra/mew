@@ -331,6 +331,14 @@ def _task_item(task):
     }
 
 
+def _paused_active_work_task_ids(active_work_sessions):
+    return {
+        str(session.get("task_id"))
+        for session in active_work_sessions or []
+        if session.get("task_id") is not None and (session.get("stop_request") or {})
+    }
+
+
 def _agent_run_item(run):
     return {
         "id": run.get("id"),
@@ -660,6 +668,7 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
         for session in active_work_sessions
         if session.get("task_id") is not None
     }
+    paused_task_ids = _paused_active_work_task_ids(active_work_sessions)
     plan_needed = [
         task for task in tasks_needing_plan(tasks) if str(task.get("id")) not in active_work_task_ids
     ]
@@ -671,6 +680,7 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
         review_waiting = [run for run in review_waiting if str(run.get("task_id")) in task_ids]
         followup_waiting = [run for run in followup_waiting if str(run.get("task_id")) in task_ids]
 
+    paused_task_ids = _paused_active_work_task_ids(active_work_sessions)
     return {
         "generated_at": generated_at,
         "kind": kind or "",
@@ -694,7 +704,13 @@ def build_brief_data(state, limit=5, kind=None, include_context_checkpoint=False
         "thought_journal": [_thought_item(thought) for thought in thoughts],
         "attention": [_attention_item(item) for item in attention[:limit]],
         "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
-        "open_tasks": [_task_item(task) for task in tasks[:limit]],
+        "open_tasks": [
+            {
+                **_task_item(task),
+                "status": "paused" if str(task.get("id")) in paused_task_ids else task.get("status"),
+            }
+            for task in tasks[:limit]
+        ],
         "open_task_count": len(tasks),
         "running_agents": [_agent_run_item(run) for run in running_runs[:limit]],
         "recent_verification": [
@@ -773,6 +789,13 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
     attention = filter_attention_for_tasks(attention, tasks, kind=kind)
     unread = filter_messages_for_tasks(open_unread_messages(state), tasks, kind=kind)
     routine_unread = [message for message in unread if is_routine_outbox_message(state, message)]
+    active_work_sessions = active_work_session_items(
+        state,
+        limit=limit,
+        kind=kind,
+        current_time=generated_at,
+    )
+    paused_task_ids = _paused_active_work_task_ids(active_work_sessions)
     return {
         "generated_at": generated_at,
         "next_move": next_move(state, kind=kind),
@@ -786,17 +809,17 @@ def build_focus_data(state, limit=3, kind=None, include_context_checkpoint=False
         "current_git": current_git_reentry_state() if include_context_checkpoint else {},
         "open_questions": [_question_item(question, current_time=generated_at) for question in questions[:limit]],
         "attention": [_attention_item(item) for item in attention[:limit]],
-        "active_work_sessions": active_work_session_items(
-            state,
-            limit=limit,
-            kind=kind,
-            current_time=generated_at,
-        ),
+        "active_work_sessions": active_work_sessions,
         "recent_friction": recent_focus_friction(state, kind=kind, session_limit=20, sample_limit=3),
         "tasks": [
             {
                 **_task_item(task),
-                "next_step": task_reentry_next_step(task),
+                "status": "paused" if str(task.get("id")) in paused_task_ids else task.get("status"),
+                "next_step": (
+                    f"leave paused work session for task #{task.get('id')} paused"
+                    if str(task.get("id")) in paused_task_ids
+                    else task_reentry_next_step(task)
+                ),
             }
             for task in tasks[:limit]
         ],
@@ -1430,6 +1453,7 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
         for session in active_work_sessions
         if session.get("task_id") is not None
     }
+    paused_task_ids = _paused_active_work_task_ids(active_work_sessions)
     plan_needed = [
         task for task in tasks_needing_plan(tasks) if str(task.get("id")) not in active_work_task_ids
     ]
@@ -1574,8 +1598,9 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
         lines.append("Open tasks")
         for task in tasks[:limit]:
             run = f" agent_run=#{task.get('agent_run_id')}" if task.get("agent_run_id") else ""
+            status = "paused" if str(task.get("id")) in paused_task_ids else task.get("status")
             lines.append(
-                f"- #{task.get('id')} [{task.get('status')}/{task.get('priority')}/{task_kind(task)}] "
+                f"- #{task.get('id')} [{status}/{task.get('priority')}/{task_kind(task)}] "
                 f"{task.get('title')}{run}"
             )
         lines.append("")
