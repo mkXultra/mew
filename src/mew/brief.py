@@ -1336,6 +1336,12 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     dry_run_waiting = dry_run_implementation_runs(state, tasks)
     dispatchable = dispatchable_planned_tasks(tasks)
     plan_needed = tasks_needing_plan(tasks)
+    active_work_sessions = active_work_session_items(
+        state,
+        limit=limit,
+        kind=kind,
+        current_time=generated_at,
+    )
     verifications = recent_records(
         filter_records_for_tasks(state.get("verification_runs", []), tasks, kind=kind),
         limit=limit,
@@ -1395,7 +1401,7 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
         if note:
             lines.insert(-1, f"context_checkpoint_note: {note}")
     skip_recovery = runtime.get("last_native_work_skip_recovery") or {}
-    if runtime.get("last_native_work_step_skip"):
+    if runtime.get("last_native_work_step_skip") and not active_work_sessions:
         recovery = f" next={skip_recovery.get('command')}" if skip_recovery.get("command") else ""
         lines.insert(-1, f"native_work_skip: {runtime.get('last_native_work_step_skip')}{recovery}")
     native_recovery = runtime.get("last_native_work_recovery") or {}

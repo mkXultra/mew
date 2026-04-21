@@ -511,6 +511,33 @@ class BriefTests(unittest.TestCase):
             brief,
         )
 
+    def test_brief_hides_stale_native_work_skip_when_active_work_session_exists(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Resume active coding task", kind="coding")
+        state["runtime_status"]["last_native_work_step_skip"] = "no_active_work_session"
+        state["runtime_status"]["last_native_work_skip_recovery"] = {
+            "action": "focus_coding",
+            "command": "./mew focus --kind coding",
+        }
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Resume active coding task",
+                "goal": "Keep brief aligned with the actual active work session.",
+                "created_at": "then",
+                "updated_at": "now",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        brief = build_brief(state, kind="coding")
+
+        self.assertNotIn("native_work_skip:", brief)
+        self.assertIn("Next useful move: enter coding cockpit for active work session #3 task #7", brief)
+
     def test_brief_marks_rolled_back_recent_writes(self):
         state = default_state()
         state["write_runs"].append(
