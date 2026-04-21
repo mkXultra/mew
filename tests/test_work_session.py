@@ -20794,6 +20794,109 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_follow_status_uses_live_session_defaults_for_replan_recovery(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["status"] = "active"
+                    session["updated_at"] = "2026-04-21T13:25:16Z"
+                    session["default_options"] = {
+                        "auth": "auth.json",
+                        "model_backend": "codex",
+                        "allow_read": ["."],
+                        "allow_write": ["."],
+                        "allow_verify": True,
+                        "verify_command": "uv run python -m unittest tests.test_work_session tests.test_commands",
+                        "act_mode": "deterministic",
+                        "compact_live": True,
+                        "no_prompt_approval": True,
+                    }
+                    session["model_turns"] = [
+                        {
+                            "id": 12,
+                            "status": "failed",
+                            "error": "request timed out",
+                            "model_metrics": {
+                                "think": {
+                                    "prompt_chars": 63842,
+                                    "timeout_seconds": 45.0,
+                                }
+                            },
+                        }
+                    ]
+                    save_state(state)
+
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "live",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "heartbeat_at": "2026-04-21T13:23:52Z",
+                            "session_updated_at": "2026-04-21T13:23:51Z",
+                            "stop_reason": "model_error",
+                            "producer": {"pid": 999999},
+                            "resume": {
+                                "phase": "idle",
+                                "recovery_plan": {
+                                    "next_action": "verify world state and replan the interrupted model step",
+                                    "items": [
+                                        {
+                                            "action": "replan",
+                                            "kind": "model_turn",
+                                            "model_turn_id": 12,
+                                            "reason": "interrupted model planning has no committed tool result",
+                                            "hint": "./mew work 1 --live --allow-read <path>",
+                                        }
+                                    ],
+                                },
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["status"], "completed")
+                self.assertEqual(data["latest_model_failure"]["model_turn_id"], 12)
+                self.assertEqual(data["latest_model_failure"]["summary"], "request timed out")
+                self.assertEqual(data["latest_model_failure"]["prompt_chars"], 63842)
+                self.assertEqual(data["latest_model_failure"]["timeout_seconds"], 45.0)
+                self.assertEqual(data["suggested_recovery"]["kind"], "replannable")
+                self.assertEqual(
+                    data["suggested_recovery"]["command"],
+                    "mew work 1 --live --auth auth.json --model-backend codex --allow-read . --allow-write . "
+                    "--allow-verify --verify-command 'uv run python -m unittest tests.test_work_session tests.test_commands' "
+                    "--act-mode deterministic --compact-live --no-prompt-approval --max-steps 1",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("latest_model_failure: turn=12 status=failed source=session summary=request timed out", text)
+                self.assertIn("latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0", text)
+                self.assertIn(
+                    "recovery_command: mew work 1 --live --auth auth.json --model-backend codex --allow-read . "
+                    "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "
+                    "tests.test_work_session tests.test_commands' --act-mode deterministic --compact-live "
+                    "--no-prompt-approval --max-steps 1",
+                    text,
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_follow_status_keeps_fresh_status_when_zero_step_producer_exited(self):
         from mew.timeutil import now_iso
 
