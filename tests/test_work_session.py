@@ -5811,6 +5811,30 @@ class WorkSessionTests(unittest.TestCase):
         text = format_work_session_resume(resume)
         self.assertIn("Working memory", text)
         self.assertIn("Recent decisions", text)
+        self.assertIn("Plan item observations", text)
+        self.assertIn(
+            "- Capture the failing approval transcript. target_path=src/mew/workbench.py edit_ready=True",
+            text,
+        )
+        self.assertIn("  cached_windows:", text)
+        self.assertIn(
+            "  - src/mew/workbench.py lines=144-160 tool_call=#2 truncated=False",
+            text,
+        )
+        self.assertIn(
+            "  - tests/test_workbench.py lines=32-43 tool_call=#3 truncated=False",
+            text,
+        )
+        self.assertIn("Target path cached windows", text)
+        self.assertIn(
+            "- src/mew/workbench.py lines=144-160 tool_call=#2 truncated=False",
+            text,
+        )
+        self.assertIn("Demoted adjacent read observations", text)
+        self.assertIn(
+            "- read_file src/mew/workbench.py repeated with adjacent windows 2x; last_tool=#2 lines=120-160",
+            text,
+        )
         self.assertIn("hypothesis: Approval UX still needs command output visibility.", text)
         self.assertIn("next_step: Add a focused command-output pane.", text)
         self.assertIn("plan_items:", text)

@@ -482,3 +482,18 @@ another same-path reread on those cached paths. Focused pytest, module-level
 `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`, and
 `git diff --check` passed. This is blocker reduction for the frozen M6.6 set,
 not an extra comparator slot.
+
+Task #360 / session #348 then consumed that fresh `edit_ready` surface on a
+new resume-text audit slice. Native mew reached `edit_ready=true` with paired
+cached source/test windows, but it still spent more turns on source
+rediscovery and never produced the paired dry-run edit batch. Inspecting the
+rendered resume surface exposed the missing product link: the human-facing
+`format_work_session_resume()` output still did not print
+`plan_item_observations`, `target_path_cached_window_observations`, or
+`demoted_adjacent_read_observations`, so the edit-ready audit state was not
+visible in the text that downstream readers consume. The feature then landed as
+direct blocker reduction: `format_work_session_resume()` now renders those
+sections with exact cached-window lines, `edit_ready` state, and demoted reread
+hints, and focused formatter/prompt regression checks passed with
+`tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`. This
+is blocker reduction for the frozen M6.6 set, not an extra comparator slot.

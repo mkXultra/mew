@@ -4809,6 +4809,68 @@ def format_work_session_resume(resume):
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
 
+    plan_item_observations = resume.get("plan_item_observations") or []
+    if plan_item_observations:
+        lines.extend(["", "Plan item observations"])
+        for item in plan_item_observations:
+            target = f" target_path={item.get('target_path')}" if item.get("target_path") else ""
+            edit_ready = ""
+            if "edit_ready" in item:
+                edit_ready = f" edit_ready={item.get('edit_ready')}"
+            lines.append(f"- {item.get('plan_item') or '(unknown)'}{target}{edit_ready}")
+            if item.get("reason"):
+                lines.append(f"  reason: {item.get('reason')}")
+            cached_window = item.get("cached_window") or {}
+            if cached_window:
+                lines.append(
+                    "  cached_window: "
+                    f"tool_call=#{cached_window.get('tool_call_id')} "
+                    f"lines={cached_window.get('line_start')}-{cached_window.get('line_end')} "
+                    f"truncated={bool(cached_window.get('context_truncated'))}"
+                )
+            cached_windows = item.get("cached_windows") or []
+            if cached_windows:
+                lines.append("  cached_windows:")
+                for cached in cached_windows:
+                    lines.append(
+                        "  - "
+                        f"{cached.get('path')} "
+                        f"lines={cached.get('line_start')}-{cached.get('line_end')} "
+                        f"tool_call=#{cached.get('tool_call_id')} "
+                        f"truncated={bool(cached.get('context_truncated'))}"
+                    )
+
+    target_path_cached_windows = resume.get("target_path_cached_window_observations") or []
+    if target_path_cached_windows:
+        lines.extend(["", "Target path cached windows"])
+        for item in target_path_cached_windows:
+            lines.append(
+                "- "
+                f"{item.get('path')} lines={item.get('line_start')}-{item.get('line_end')} "
+                f"tool_call=#{item.get('tool_call_id')} "
+                f"truncated={bool(item.get('context_truncated'))}"
+            )
+            if item.get("reason"):
+                lines.append(f"  reason: {item.get('reason')}")
+
+    demoted_adjacent_reads = resume.get("demoted_adjacent_read_observations") or []
+    if demoted_adjacent_reads:
+        lines.extend(["", "Demoted adjacent read observations"])
+        for item in demoted_adjacent_reads:
+            line_range = (
+                f" lines={item.get('merged_line_start')}-{item.get('merged_line_end')}"
+                if item.get("merged_line_start") and item.get("merged_line_end")
+                else ""
+            )
+            lines.append(
+                f"- {item.get('tool')} {item.get('path')} repeated with adjacent windows "
+                f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}{line_range}"
+            )
+            if item.get("reason"):
+                lines.append(f"  reason: {item.get('reason')}")
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
     repair_anchors = resume.get("repair_anchor_observations") or []
     if repair_anchors:
         lines.extend(["", "Repair anchors"])
