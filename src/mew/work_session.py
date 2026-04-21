@@ -4080,6 +4080,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     else:
         verify_command = default_options.get("verify_command") or latest_work_verify_command(calls, task=task)
     verify_command_hint = shlex.quote(verify_command) if verify_command else '"<command>"'
+    declared_write_roots = list(default_options.get("allow_write") or [])
     paths = []
     commands = []
     failures = []
@@ -4504,6 +4505,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "phase": phase,
         "updated_at": session.get("updated_at"),
         "files_touched": paths[-limit:],
+        "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],
         "suggested_verify_command": suggested_verify_command,
         "verification_coverage_warning": verification_coverage_warning,
@@ -4622,6 +4624,13 @@ def format_work_session_resume(resume):
     files = resume.get("files_touched") or []
     if files:
         lines.extend(f"- {path}" for path in files)
+    else:
+        lines.append("(none)")
+
+    lines.extend(["", "Declared write roots"])
+    declared_write_roots = resume.get("declared_write_roots") or []
+    if declared_write_roots:
+        lines.extend(f"- {path}" for path in declared_write_roots)
     else:
         lines.append("(none)")
 

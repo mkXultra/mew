@@ -1276,6 +1276,25 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_format_work_session_resume_surfaces_declared_write_scope(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Visible scope fence",
+            "default_options": {"allow_write": ["src/mew", "tests"]},
+            "tool_calls": [],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(resume["declared_write_roots"], ["src/mew", "tests"])
+        self.assertIn("Declared write roots", text)
+        self.assertIn("- src/mew", text)
+        self.assertIn("- tests", text)
+
     def test_resume_does_not_suggest_verifier_for_read_or_dry_run_source(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

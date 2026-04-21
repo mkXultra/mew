@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `not_started` | Milestone is now defined and becomes the next active gate: bounded reviewer-gated self-hosting before any unattended multi-hour run. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | The first bounded reviewer-gated iteration passed end to end with a dry-run approval surface, focused and broader verification, and no reviewer rescue edits; proof-or-revert and scope-fence hardening remain. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -29,7 +29,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-21 13:00 JST.
+Last assessed: 2026-04-21 13:14 JST.
 
 Active work: **M6.7 Supervised Self-Hosting Loop** while M5.1, M6, and M6.6
 remain closed baselines and M7 stays deferred.
@@ -52,17 +52,20 @@ Reasoning:
   three predeclared comparator tasks passed with `rescue_edits=0`, the frozen
   detached Codex CLI comparator batch is recorded, and the first-edit blocker
   closed via task #363.
-- M6.7 is now the next enabling gate: mew should autonomously implement one
-  bounded roadmap item at a time while Codex acts as reviewer, with
-  proof-or-revert, scope fencing, and drift canaries.
+- M6.7 is now active. First supervised iteration proof is recorded in
+  `docs/M6_7_FIRST_SUPERVISED_ITERATION_2026-04-21.md`: task `#364` /
+  session `#352` stayed within the declared `src/mew/work_session.py` +
+  `tests/test_work_session.py` scope, stopped for dry-run review, passed both
+  focused and broader verification, and closed without reviewer rescue edits.
 - M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 has not started and proven the supervised loop.
+  ahead while M6.7 still lacks proof-or-revert hardening, scope-fence
+  hardening, and the supervised 8-hour proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  the first supervised self-hosting proof, not more speculative coding-loop
-  polish.
+  the second supervised self-hosting proof plus one direct M6.7 hardening
+  slice, not more speculative coding-loop polish.
 
 Current next action:
 
@@ -70,12 +73,15 @@ Current next action:
 2. Treat M6.6 as a closed baseline. Reopen only if a future native coding loop
    regresses on rescue-edits, verifier choice, approval surfaces, or
    path-recall/anti-churn behavior.
-3. Start M6.7 with a single 30-60 minute reviewer-gated roadmap task. Require
-   proof-or-revert, scope fencing, and a drift canary before the iteration.
-4. Do not let mew self-author roadmap-status or milestone-close edits during
+3. Run the second M6.7 bounded roadmap task and keep the iteration shape the
+   same: drift canary first, dry-run reviewable diff, reviewer decision, then
+   focused plus broader verification before finish.
+4. Harden one remaining partial M6.7 criterion directly: proof-or-revert
+   enforcement or scope-fence enforcement beyond the current visible fence.
+5. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
-5. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+6. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -1315,7 +1321,7 @@ Next action after closure:
 
 ### M6.7: Supervised Self-Hosting Loop
 
-Status: `not_started`.
+Status: `in_progress`.
 
 Goal:
 
@@ -1333,11 +1339,23 @@ Evidence:
   chained tasks, and no auto-merge.
 - The guardrails are now explicit in `ROADMAP.md`: proof-or-revert, scope
   fencing, and a drift canary before each iteration.
+- `docs/M6_7_FIRST_SUPERVISED_ITERATION_2026-04-21.md` records the first
+  bounded supervised iteration. Task `#364` / session `#352` used a reviewer
+  scope limited to `src/mew/work_session.py` and `tests/test_work_session.py`,
+  stopped on a paired dry-run diff, required explicit reviewer approval,
+  passed the focused verifier
+  `uv run pytest -q tests/test_work_session.py -k 'declared_write_scope' --no-testmon`,
+  then passed the broader verifier
+  `uv run python -m unittest tests.test_work_session`, completed same-surface
+  audit, and finished with no reviewer rescue edits.
 
 Missing proof:
 
-- No bounded reviewer-gated self-hosting iteration has been run under this
-  milestone yet.
+- Proof-or-revert is demonstrated by process in the first run, but it is not
+  yet a dedicated enforced artifact/credit gate.
+- Scope fence is now visible and reviewer-bounded for the first run, but the
+  current product proof still relies on declared write roots plus existing
+  governance review hooks rather than a dedicated M6.7 scope-fence mechanism.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1355,7 +1373,9 @@ Done when:
 
 Next action:
 
-- Start M6.7 with a single 30-60 minute reviewer-gated roadmap task.
+- Run a second 30-60 minute reviewer-gated roadmap task under the same shape.
+- Use it to harden either proof-or-revert enforcement or scope-fence
+  enforcement, not later-milestone feature work.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals
