@@ -6416,10 +6416,14 @@ def _latest_failed_model_turn(model_turns):
                 summary = json.dumps(error, sort_keys=True)
             else:
                 summary = ""
+        think_metrics = ((turn.get("model_metrics") or {}).get("think") or {})
         return {
             "model_turn_id": turn.get("model_turn_id") or turn.get("id"),
             "status": turn_status,
             "summary": summary,
+            "prompt_chars": think_metrics.get("prompt_chars"),
+            "timeout_seconds": think_metrics.get("timeout_seconds"),
+            "write_ready_fast_path": bool((turn.get("model_metrics") or {}).get("write_ready_fast_path")),
         }
     return None
 
@@ -6634,6 +6638,15 @@ def format_work_follow_status(data):
         if latest_model_failure.get("summary"):
             failure_line += f" summary={latest_model_failure.get('summary')}"
         lines.append(failure_line)
+        metrics_bits = []
+        if latest_model_failure.get("prompt_chars") is not None:
+            metrics_bits.append(f"prompt_chars={latest_model_failure.get('prompt_chars')}")
+        if latest_model_failure.get("timeout_seconds") is not None:
+            metrics_bits.append(f"timeout_seconds={latest_model_failure.get('timeout_seconds')}")
+        if latest_model_failure.get("write_ready_fast_path"):
+            metrics_bits.append("write_ready_fast_path=True")
+        if metrics_bits:
+            lines.append("latest_model_failure_metrics: " + " ".join(metrics_bits))
     if data.get("next_action"):
         lines.append(f"next_action: {data.get('next_action')}")
     _append_work_follow_status_checkpoint_lines(lines, data)

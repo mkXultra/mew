@@ -20675,6 +20675,13 @@ class WorkSessionTests(unittest.TestCase):
                             "id": 9,
                             "status": "failed",
                             "error": "live session timeout",
+                            "model_metrics": {
+                                "think": {
+                                    "prompt_chars": 34567,
+                                    "timeout_seconds": 90.0,
+                                },
+                                "write_ready_fast_path": True,
+                            },
                         }
                     ]
                     save_state(state)
@@ -20720,6 +20727,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["status"], "failed")
                 self.assertEqual(data["latest_model_failure"]["summary"], "live session timeout")
                 self.assertEqual(data["latest_model_failure"]["source"], "session")
+                self.assertEqual(data["latest_model_failure"]["prompt_chars"], 34567)
+                self.assertEqual(data["latest_model_failure"]["timeout_seconds"], 90.0)
+                self.assertTrue(data["latest_model_failure"]["write_ready_fast_path"])
                 self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
                 self.assertIn("current session state is newer", data["suggested_recovery"]["reason"])
                 self.assertIn("mew work 1 --session --resume", data["suggested_recovery"]["command"])
@@ -20735,6 +20745,10 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 self.assertIn(
                     "latest_model_failure: turn=9 status=failed source=session summary=live session timeout",
+                    text,
+                )
+                self.assertIn(
+                    "latest_model_failure_metrics: prompt_chars=34567 timeout_seconds=90.0 write_ready_fast_path=True",
                     text,
                 )
                 self.assertIn("recovery: inspect_resume", text)
