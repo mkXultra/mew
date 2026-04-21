@@ -295,6 +295,22 @@ Before Phase 1 code starts, define and keep stable:
   - `mew focus` / `mew brief` / `mew desk` distinguish interrupted-vs-paused
     active work and do not treat a paused debug target as the default resume
     recommendation
+  - current pinned implementation baseline:
+    - `a719b5d` surfaces `latest_model_failure` diagnostics in `focus`
+    - `3360b7c` makes `brief` prefer interrupted-session recovery over
+      self-improve/default coding entrypoints
+    - `33e7ab0` separates `untracked_only` checkpoint git state from true
+      tracked dirtiness
+    - `3361f15` prevents `desk` from foregrounding blocked active sessions
+    - `090673c` makes `brief` / `focus` / `desk` surface explicitly paused work
+      sessions honestly
+    - `a8a86d7` aligns `build_work_session_resume()` with paused idle
+      stop-request semantics so the resume surface no longer claims an already
+      idle paused session will stop "at the next boundary"
+  - remaining operator baseline work before M6.9 code starts:
+    - keep `#388` paused unless a real invalidation forces resume
+    - preserve these paused/interrupted semantics through the rest of M6.7 so
+      later M6.9 observability work measures against a stable operator surface
 - session trace additions needed for:
   - returned/dropped/injected entry ids
   - memory_kind
