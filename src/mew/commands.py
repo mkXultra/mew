@@ -4034,6 +4034,7 @@ def cmd_work_ai(args):
                 ),
                 progress_model_deltas=not bool(getattr(effective_args, "compact_live", False)),
                 pre_model_metrics_sink=record_pre_model_metrics,
+                compact_live=bool(getattr(effective_args, "compact_live", False)),
             )
             flush_live_model_delta()
         except KeyboardInterrupt:

@@ -652,7 +652,9 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
     return compacted
 
 
-def work_prompt_context_mode(reasoning_policy):
+def work_prompt_context_mode(reasoning_policy, *, compact_live=False):
+    if compact_live:
+        return "compact_memory"
     if (reasoning_policy or {}).get("effort") in {"high", "xhigh"}:
         return "full"
     if (reasoning_policy or {}).get("work_type") == "high_risk":
@@ -1411,6 +1413,7 @@ def plan_work_model_turn(
     model_delta_sink=None,
     progress_model_deltas=True,
     pre_model_metrics_sink=None,
+    compact_live=False,
 ):
     current_time = now_iso()
     capabilities = {
@@ -1427,7 +1430,10 @@ def plan_work_model_turn(
         guidance=guidance,
         capabilities=capabilities,
     )
-    prompt_context_mode = work_prompt_context_mode(reasoning_policy)
+    prompt_context_mode = work_prompt_context_mode(
+        reasoning_policy,
+        compact_live=compact_live,
+    )
     context = build_work_model_context(
         state,
         session,

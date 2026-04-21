@@ -6636,6 +6636,58 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_compact_live_forces_compact_prompt_context_on_high_risk_task(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("compact high risk\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    state["tasks"][0]["title"] = "Roadmap approval audit"
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                prompts = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    prompts.append(prompt)
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--compact-live",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertEqual(len(prompts), 1)
+                self.assertIn('"mode": "compact_memory"', prompts[0])
+                session = load_state()["work_sessions"][0]
+                metrics = session["model_turns"][0].get("model_metrics") or {}
+                self.assertEqual(metrics.get("reasoning_effort"), "high")
+                self.assertEqual(metrics.get("reasoning_policy", {}).get("work_type"), "high_risk")
+                self.assertEqual(metrics.get("prompt_context_mode"), "compact_memory")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_queue_followup_is_consumed_by_next_model_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -14621,6 +14673,10 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(work_prompt_context_mode({"effort": "high", "work_type": "explicit"}), "full")
         self.assertEqual(work_prompt_context_mode({"effort": "xhigh", "work_type": "explicit"}), "full")
+        self.assertEqual(
+            work_prompt_context_mode({"effort": "high", "work_type": "high_risk"}, compact_live=True),
+            "compact_memory",
+        )
 
     def test_work_model_context_under_budget_keeps_recent_window(self):
         from mew.work_loop import build_work_model_context

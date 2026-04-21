@@ -1596,6 +1596,19 @@ Evidence:
   broader `uv run python -m unittest tests.test_mood`, `ruff`, `py_compile`,
   and `git diff --check` all passed. This is product progress, not
   supervised-proof credit.
+- A direct M6.7 substrate patch then addressed the newly explicit soft-stop
+  blocker itself: `--compact-live` now forces the live THINK prompt to use
+  `compact_memory` context even for high-risk tasks, instead of only compacting
+  CLI rendering while the model still received a full prompt. The fix landed in
+  `src/mew/work_loop.py` and `src/mew/commands.py`, and
+  `tests/test_work_session.py` now proves both that
+  `work_prompt_context_mode(..., compact_live=True)` returns
+  `compact_memory` and that a high-risk `work --ai --compact-live` turn records
+  `prompt_context_mode=compact_memory` in model metrics. Focused named pytest,
+  broader `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` all passed. Treat this as blocker
+  reduction plus product progress; the next honest step is a fresh proof rerun,
+  not another direct candidate patch.
 
 Missing proof:
 
@@ -1627,6 +1640,9 @@ Next action:
 - Once the blocker fix is verified, rerun a fresh bounded proof item from the
   remaining live queue (`N-F`, `N-G`, `N-I`, then `N-D`) instead of consuming
   more candidates under the same unresolved blocker.
+- Start with `N-F` (`mew agent sweep --json` structured output) as the first
+  fresh rerun after the compact-live prompt-context fix, and only move deeper
+  into the queue if the paired dry-run surface now appears clean.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.
