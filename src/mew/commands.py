@@ -6402,6 +6402,48 @@ def _work_follow_status_session_state_newer(snapshot_updated_at, session_updated
     return False
 
 
+def _latest_failed_model_turn(model_turns):
+    for turn in reversed(model_turns or []):
+        turn_status = turn.get("status")
+        if turn_status not in ("failed", "interrupted"):
+            continue
+        summary = turn.get("summary")
+        if not summary:
+            error = turn.get("error")
+            if isinstance(error, str):
+                summary = error
+            elif error is not None:
+                summary = json.dumps(error, sort_keys=True)
+            else:
+                summary = ""
+        return {
+            "model_turn_id": turn.get("model_turn_id") or turn.get("id"),
+            "status": turn_status,
+            "summary": summary,
+        }
+    return None
+
+
+def _work_follow_status_latest_model_failure(snapshot_turns, session_turns):
+    snapshot_failure = _latest_failed_model_turn(snapshot_turns)
+    session_failure = _latest_failed_model_turn(session_turns)
+    if not snapshot_failure:
+        if session_failure:
+            session_failure["source"] = "session"
+        return session_failure
+    if not session_failure:
+        snapshot_failure["source"] = "snapshot"
+        return snapshot_failure
+    snapshot_id = snapshot_failure.get("model_turn_id")
+    session_id = session_failure.get("model_turn_id")
+    if isinstance(snapshot_id, int) and isinstance(session_id, int):
+        chosen = session_failure if session_id >= snapshot_id else snapshot_failure
+    else:
+        chosen = session_failure
+    chosen["source"] = "session" if chosen is session_failure else "snapshot"
+    return chosen
+
+
 def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     overdue_grace_seconds = 10.0
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
@@ -6463,27 +6505,10 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     working_memory_stale = bool(
         working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
     )
-    latest_model_failure = None
-    model_turns = ((data.get("session") or {}).get("model_turns") or [])
-    for turn in reversed(model_turns):
-        turn_status = turn.get("status")
-        if turn_status not in ("failed", "interrupted"):
-            continue
-        summary = turn.get("summary")
-        if not summary:
-            error = turn.get("error")
-            if isinstance(error, str):
-                summary = error
-            elif error is not None:
-                summary = json.dumps(error, sort_keys=True)
-            else:
-                summary = ""
-        latest_model_failure = {
-            "model_turn_id": turn.get("model_turn_id"),
-            "status": turn_status,
-            "summary": summary,
-        }
-        break
+    latest_model_failure = _work_follow_status_latest_model_failure(
+        ((data.get("session") or {}).get("model_turns") or []),
+        ((session or {}).get("model_turns") or []),
+    )
     checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
     current_git = data.get("current_git") or current_git
     snapshot_session_updated_at = data.get("session_updated_at")
@@ -6597,6 +6622,18 @@ def format_work_follow_status(data):
         lines.append(health_line)
     if data.get("working_memory_stale"):
         lines.append("working_memory: stale")
+    latest_model_failure = data.get("latest_model_failure") or {}
+    if latest_model_failure:
+        failure_line = (
+            "latest_model_failure: "
+            f"turn={latest_model_failure.get('model_turn_id') or '-'} "
+            f"status={latest_model_failure.get('status') or '-'}"
+        )
+        if latest_model_failure.get("source"):
+            failure_line += f" source={latest_model_failure.get('source')}"
+        if latest_model_failure.get("summary"):
+            failure_line += f" summary={latest_model_failure.get('summary')}"
+        lines.append(failure_line)
     if data.get("next_action"):
         lines.append(f"next_action: {data.get('next_action')}")
     _append_work_follow_status_checkpoint_lines(lines, data)

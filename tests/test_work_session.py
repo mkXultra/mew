@@ -20670,6 +20670,13 @@ class WorkSessionTests(unittest.TestCase):
                     session["status"] = "closed"
                     session["updated_at"] = "2026-04-18T00:10:00Z"
                     session["default_options"] = {"allow_read": ["."]}
+                    session["model_turns"] = [
+                        {
+                            "id": 9,
+                            "status": "failed",
+                            "error": "live session timeout",
+                        }
+                    ]
                     save_state(state)
 
                 follow_dir = Path(".mew/follow")
@@ -20687,6 +20694,15 @@ class WorkSessionTests(unittest.TestCase):
                             "producer": {"pid": 999999},
                             "resume": {"phase": "awaiting_approval"},
                             "pending_approvals": [{"tool_call_id": 7}],
+                            "session": {
+                                "model_turns": [
+                                    {
+                                        "model_turn_id": 8,
+                                        "status": "failed",
+                                        "error": "older snapshot failure",
+                                    }
+                                ]
+                            },
                         }
                     ),
                     encoding="utf-8",
@@ -20700,6 +20716,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["session_updated_at"], "2026-04-18T00:00:00Z")
                 self.assertEqual(data["current_session_updated_at"], "2026-04-18T00:10:00Z")
                 self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(data["latest_model_failure"]["model_turn_id"], 9)
+                self.assertEqual(data["latest_model_failure"]["status"], "failed")
+                self.assertEqual(data["latest_model_failure"]["summary"], "live session timeout")
+                self.assertEqual(data["latest_model_failure"]["source"], "session")
                 self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
                 self.assertIn("current session state is newer", data["suggested_recovery"]["reason"])
                 self.assertIn("mew work 1 --session --resume", data["suggested_recovery"]["command"])
@@ -20711,6 +20731,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn(
                     "session_state: newer_than_snapshot current=2026-04-18T00:10:00Z "
                     "snapshot=2026-04-18T00:00:00Z",
+                    text,
+                )
+                self.assertIn(
+                    "latest_model_failure: turn=9 status=failed source=session summary=live session timeout",
                     text,
                 )
                 self.assertIn("recovery: inspect_resume", text)
