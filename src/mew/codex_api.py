@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 from .config import DEFAULT_AUTH_PATHS, DEFAULT_CODEX_REASONING_EFFORT
-from .errors import CodexApiError, MewError
+from .errors import CodexApiError, CodexRefusalError, MewError
 
 
 def find_auth_path(auth_path=None):
@@ -83,8 +83,43 @@ def extract_response_text(data):
 
     return ""
 
-def extract_sse_text(raw_text):
-    chunks = []
+
+def extract_response_refusal(data):
+    if isinstance(data, dict):
+        refusal = data.get("refusal")
+        if isinstance(refusal, str) and refusal.strip():
+            return refusal.strip()
+
+        chunks = []
+        for item in data.get("output", []) or []:
+            if not isinstance(item, dict):
+                continue
+            item_refusal = item.get("refusal")
+            if isinstance(item_refusal, str) and item_refusal.strip():
+                chunks.append(item_refusal)
+            for content in item.get("content", []) or []:
+                if not isinstance(content, dict):
+                    continue
+                text = content.get("refusal")
+                if not isinstance(text, str):
+                    content_type = str(content.get("type") or "").strip().casefold()
+                    if content_type == "refusal":
+                        text = content.get("text") or content.get("output_text")
+                if isinstance(text, str):
+                    chunks.append(text)
+        if chunks:
+            return "".join(chunks).strip()
+
+        response = data.get("response")
+        if isinstance(response, dict):
+            return extract_response_refusal(response)
+
+    return ""
+
+
+def extract_sse_response_parts(raw_text):
+    text_chunks = []
+    refusal_chunks = []
     completed_response = None
 
     for line in raw_text.splitlines():
@@ -93,20 +128,36 @@ def extract_sse_text(raw_text):
             continue
 
         event_type = data.get("type")
-        if event_type in ("response.output_text.delta", "response.refusal.delta"):
+        if event_type == "response.output_text.delta":
             delta = data.get("delta")
             if isinstance(delta, str):
-                chunks.append(delta)
+                text_chunks.append(delta)
+        elif event_type == "response.refusal.delta":
+            delta = data.get("delta")
+            if isinstance(delta, str):
+                refusal_chunks.append(delta)
         elif event_type == "response.completed":
             completed_response = data.get("response")
         elif "response" in data and isinstance(data["response"], dict):
             completed_response = data["response"]
 
-    if chunks:
-        return "".join(chunks).strip()
     if completed_response:
-        return extract_response_text(completed_response)
-    return ""
+        if not text_chunks:
+            completed_text = extract_response_text(completed_response)
+            if completed_text:
+                text_chunks.append(completed_text)
+        if not refusal_chunks:
+            completed_refusal = extract_response_refusal(completed_response)
+            if completed_refusal:
+                refusal_chunks.append(completed_refusal)
+
+    return {
+        "text": "".join(text_chunks).strip(),
+        "refusal": "".join(refusal_chunks).strip(),
+    }
+
+def extract_sse_text(raw_text):
+    return extract_sse_response_parts(raw_text).get("text") or ""
 
 
 def decode_sse_data_line(line):
@@ -125,7 +176,7 @@ def decode_sse_data_line(line):
 def sse_text_delta(data):
     if not isinstance(data, dict):
         return ""
-    if data.get("type") in ("response.output_text.delta", "response.refusal.delta"):
+    if data.get("type") == "response.output_text.delta":
         delta = data.get("delta")
         return delta if isinstance(delta, str) else ""
     return ""
@@ -247,13 +298,19 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         raise CodexApiError("request timed out") from exc
 
     if "text/event-stream" in content_type or raw.lstrip().startswith(("event:", "data:")):
-        text = extract_sse_text(raw)
+        response_parts = extract_sse_response_parts(raw)
+        text = response_parts.get("text") or ""
+        refusal = response_parts.get("refusal") or ""
     else:
         try:
-            text = extract_response_text(json.loads(raw))
+            payload = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise CodexApiError(f"non-JSON response: {raw[:200]}") from exc
+        text = extract_response_text(payload)
+        refusal = extract_response_refusal(payload)
 
+    if refusal:
+        raise CodexRefusalError(f"model returned refusal: {refusal}")
     if not text:
         raise CodexApiError("response did not contain assistant text")
     return text

@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 from mew.agent import should_use_ai_for_event, think_phase
 from mew.cli import main
-from mew.errors import ModelBackendError
+from mew.errors import CodexRefusalError, ModelBackendError
 from mew.runtime import (
     apply_runtime_autonomy_controls,
     compact_agent_reflex_report,
@@ -2534,6 +2534,35 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(call_model.call_count, 2)
         sleep.assert_called_once_with(0.25)
         self.assertEqual(plan["summary"], "retried successfully")
+
+    def test_think_phase_does_not_retry_model_refusal(self):
+        state = default_state()
+        event = add_event(state, "github_webhook", "test", {"ref": "main"})
+
+        with patch(
+            "mew.agent.call_model_json",
+            side_effect=CodexRefusalError("model returned refusal: need approval"),
+        ) as call_model:
+            with patch("mew.agent.time.sleep") as sleep:
+                plan = think_phase(
+                    state,
+                    event,
+                    "now",
+                    model_auth={"path": "auth.json"},
+                    model="model",
+                    base_url="base",
+                    timeout=1,
+                    ai_ticks=False,
+                    allow_task_execution=False,
+                    guidance="",
+                    policy="",
+                    log_phases=False,
+                )
+
+        self.assertEqual(call_model.call_count, 1)
+        sleep.assert_not_called()
+        self.assertTrue(plan["model_error"])
+        self.assertIn("model returned refusal: need approval", plan["decisions"][-1]["text"])
 
 
 if __name__ == "__main__":

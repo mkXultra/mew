@@ -19,7 +19,7 @@ from .config import (
     DEFAULT_TASK_TIMEOUT_SECONDS,
     MAX_RECENT_EVENTS,
 )
-from .errors import ModelBackendError
+from .errors import ModelBackendError, ModelRefusalError
 from .agent_runs import find_agent_run, get_agent_run_result, start_agent_run
 from .model_backends import call_model_json, model_backend_label
 from .model_trace import append_model_trace
@@ -357,6 +357,8 @@ def should_use_ai_for_event(event, reason, ai_ticks):
     return True
 
 def transient_model_error(exc):
+    if isinstance(exc, ModelRefusalError):
+        return False
     text = str(exc).casefold()
     return any(
         marker in text

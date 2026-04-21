@@ -5,12 +5,15 @@ import unittest
 from unittest.mock import patch
 
 from mew.codex_api import (
+    call_codex_json,
     call_codex_web_api,
     decode_sse_data_line,
+    extract_response_refusal,
     extract_sse_text,
+    extract_sse_response_parts,
     sse_text_delta,
 )
-from mew.errors import CodexApiError
+from mew.errors import CodexApiError, CodexRefusalError
 
 
 class FakeUrlopenResponse:
@@ -95,6 +98,39 @@ class CodexApiTests(unittest.TestCase):
                 deltas.append(delta)
         self.assertEqual(deltas, ["hel", "lo"])
 
+    def test_extract_sse_response_parts_separates_refusal_from_text(self):
+        raw = "\n".join(
+            [
+                'data: {"type":"response.refusal.delta","delta":"no"}',
+                'data: {"type":"response.refusal.delta","delta":"pe"}',
+                "data: [DONE]",
+            ]
+        )
+
+        parts = extract_sse_response_parts(raw)
+
+        self.assertEqual(parts["text"], "")
+        self.assertEqual(parts["refusal"], "nope")
+        self.assertEqual(extract_sse_text(raw), "")
+
+    def test_extract_response_refusal_reads_completed_response_payload(self):
+        payload = {
+            "response": {
+                "output": [
+                    {
+                        "content": [
+                            {
+                                "type": "refusal",
+                                "text": "cannot comply",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        self.assertEqual(extract_response_refusal(payload), "cannot comply")
+
     def test_call_codex_web_api_streams_deltas_when_content_type_is_missing(self):
         lines = [
             sse_line({"type": "response.output_text.delta", "delta": "hel"}),
@@ -142,6 +178,110 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
         self.assertTrue(captured["body"]["stream"])
+
+    def test_call_codex_web_api_raises_refusal_for_streamed_refusal_only(self):
+        response = FakeUrlopenResponse(
+            [
+                sse_line({"type": "response.refusal.delta", "delta": "cannot"}),
+                sse_line({"type": "response.refusal.delta", "delta": " comply"}),
+                b"data: [DONE]\n",
+            ],
+            headers={"content-type": "text/event-stream"},
+        )
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexRefusalError, "model returned refusal: cannot comply"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    5,
+                )
+
+    def test_call_codex_web_api_raises_refusal_for_completed_response_fallback(self):
+        response = FakeUrlopenResponse(
+            [
+                sse_line(
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "output": [
+                                {
+                                    "content": [
+                                        {
+                                            "type": "refusal",
+                                            "text": "fallback refusal",
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                    }
+                ),
+                b"data: [DONE]\n",
+            ],
+            headers={"content-type": "text/event-stream"},
+        )
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexRefusalError, "model returned refusal: fallback refusal"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    5,
+                )
+
+    def test_call_codex_web_api_raises_refusal_for_non_stream_json_payload(self):
+        payload = {
+            "response": {
+                "output": [
+                    {
+                        "content": [
+                            {
+                                "type": "refusal",
+                                "text": "json refusal",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        response = FakeUrlopenResponse(
+            [json.dumps(payload).encode("utf-8")],
+            headers={"content-type": "application/json"},
+        )
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexRefusalError, "model returned refusal: json refusal"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    5,
+                )
+
+    def test_call_codex_json_preserves_refusal_instead_of_parse_failure(self):
+        response = FakeUrlopenResponse(
+            [
+                sse_line({"type": "response.refusal.delta", "delta": "need approval"}),
+                b"data: [DONE]\n",
+            ],
+            headers={"content-type": "text/event-stream"},
+        )
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexRefusalError, "model returned refusal: need approval"):
+                call_codex_json(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    5,
+                )
 
     def test_call_codex_web_api_enforces_total_timeout_while_streaming(self):
         lines = [
