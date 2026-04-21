@@ -5723,6 +5723,22 @@ class WorkSessionTests(unittest.TestCase):
             resume["recent_decisions"][0]["open_questions"],
             ["Should chat expose the same pane?"],
         )
+        self.assertEqual(
+            resume["plan_item_observations"],
+            [
+                {
+                    "plan_item": "Capture the failing approval transcript.",
+                    "target_path": "src/mew/workbench.py",
+                    "cached_window": {
+                        "tool_call_id": 1,
+                        "line_start": 120,
+                        "line_end": 143,
+                        "context_truncated": False,
+                    },
+                    "reason": "first remaining plan item paired to target path src/mew/workbench.py and its recent cached window",
+                }
+            ],
+        )
 
         text = format_work_session_resume(resume)
         self.assertIn("Working memory", text)
@@ -5758,6 +5774,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["target_paths"],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["plan_item_observations"],
+            resume["plan_item_observations"],
         )
         self.assertEqual(
             resume["target_path_cached_window_observations"],

@@ -1099,6 +1099,27 @@ Missing proof:
   after failure recovery; it stays broader multi-file normal-case autonomy and
   durable plan/path recall on slices that need the right paired surfaces from
   the start.
+- M6.6 task #358 / session #346 then turned that broader durable-plan target
+  into a fresh multi-file no-steer mew-side pass. Native mew stayed on the
+  intended `src/mew/work_session.py`, `src/mew/work_loop.py`, and
+  `tests/test_work_session.py` surfaces from the start, recovered the exact
+  windows needed for all three files, noticed the same-file write-batch
+  constraint and returned `wait` once instead of emitting an unsafe partial
+  batch, then proposed and auto-applied a paired `edit_file_hunks` +
+  `edit_file` src/test batch. It passed `uv run python -m unittest
+  tests.test_work_session`, preserved a concise `remember` replan when the
+  step budget exhausted, completed the required same-surface audit on the two
+  touched `src/mew` surfaces, and finished with `rescue_edits=0`. The landed
+  patch now makes `build_work_session_resume()` emit
+  `plan_item_observations`, extends the paired resume/context assertions in
+  `tests/test_work_session.py`, and teaches `build_work_think_prompt()` to
+  prefer `work_session.resume.plan_item_observations` before broader
+  rediscovery while pruning completed `working_memory.plan_items`. Count this
+  as fresh implementation evidence for the frozen M6.6 set, not an extra
+  comparator slot. The remaining M6.6 missing proof is now narrower: broader
+  multi-file normal-case autonomy still shows adjacent same-file reread creep
+  before first edit under medium/high context pressure, even when the correct
+  paired surfaces are chosen from the start.
 
 Done when:
 
@@ -1164,17 +1185,19 @@ Next action:
   surfaces, landed the `work --follow-status` recovery patch, passed both
   `tests.test_work_session` and the inferred broader verifier
   `tests.test_commands`, and closed same-surface audit with `rescue_edits=0`.
-- Keep M6.6 on the mew-side critical path. The next task should be a fresh
-  native no-steer proof task on a broader multi-file coding slice, ideally one
-  that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a
-  broader resume/recovery peer in addition to `tests/test_work_session.py`.
-  Prefer a task that forces mew to pick the correct paired source/test surfaces
-  from the start and reuse the landed durable plan/path signals instead of
-  rediscovering files from scratch, but avoid turning back into prompt-only
-  guidance or comparator work. Choose a fresh task whose premise is not
-  already satisfied by the current worktree, require native verification and
-  same-surface audit, and keep comparator work deferred until the mew-side
-  implementation set is frozen.
+- Record task #358 / session #346 as fresh multi-file durable-plan evidence
+  for the frozen M6.6 set: native mew surfaced `plan_item_observations` in
+  `build_work_session_resume()`, wired the matching prompt rule in
+  `build_work_think_prompt()`, passed `tests.test_work_session`, and closed the
+  required same-surface audit with `rescue_edits=0`.
+- Keep M6.6 on the mew-side critical path. The next task should target the
+  remaining adjacent same-file reread / broad-read creep on broader
+  `work_session.py`-anchored slices while preserving the now-proven correct
+  paired surface selection from the start. Prefer a fresh native no-steer
+  slice whose premise is not already satisfied by the current worktree,
+  requires native verification and same-surface audit, and attacks first-edit
+  efficiency rather than adding another prompt-only reminder or comparator
+  work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

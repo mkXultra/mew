@@ -4386,6 +4386,35 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     }
                 )
                 break
+    plan_item_observations = []
+    plan_items = _coerce_working_memory_plan_items((working_memory or {}).get("plan_items") or [])
+    if plan_items:
+        plan_item_observation = {
+            "plan_item": plan_items[0],
+            "reason": "first remaining working_memory.plan_items entry preserved from the latest THINK turn",
+        }
+        if target_paths:
+            primary_target_path = target_paths[0]
+            plan_item_observation["target_path"] = primary_target_path
+            cached_window = next(
+                (item for item in target_path_cached_window_observations if item.get("path") == primary_target_path),
+                None,
+            )
+            if cached_window:
+                plan_item_observation["cached_window"] = {
+                    "tool_call_id": cached_window.get("tool_call_id"),
+                    "line_start": cached_window.get("line_start"),
+                    "line_end": cached_window.get("line_end"),
+                    "context_truncated": cached_window.get("context_truncated"),
+                }
+                plan_item_observation["reason"] = (
+                    f"first remaining plan item paired to target path {primary_target_path} and its recent cached window"
+                )
+            else:
+                plan_item_observation["reason"] = (
+                    f"first remaining plan item paired to target path {primary_target_path} from working_memory.target_paths"
+                )
+        plan_item_observations.append(plan_item_observation)
     repair_anchor_observations = build_repair_anchor_observations(
         session,
         calls,
@@ -4419,6 +4448,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": build_adjacent_read_observations(calls, limit=3),
         "target_path_cached_window_observations": target_path_cached_window_observations,
+        "plan_item_observations": plan_item_observations,
         "repair_anchor_observations": repair_anchor_observations,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},

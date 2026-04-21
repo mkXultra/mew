@@ -449,3 +449,20 @@ now makes `work --follow-status` prefer the first resume
 output while preserving the generic no-anchor `inspect_resume` fallback. This
 is implementation evidence for the frozen M6.6 set, not an extra comparator
 slot.
+
+Task #358 / session #346 then added fresh mew-side implementation evidence for
+the broader durable-plan slice. Native mew stayed on
+`src/mew/work_session.py`, `src/mew/work_loop.py`, and
+`tests/test_work_session.py` from the start, recovered the exact windows for
+all three files, returned `wait` once when it detected the same-file write
+constraint, then proposed and auto-applied a paired `edit_file_hunks` +
+`edit_file` batch. It passed `uv run python -m unittest tests.test_work_session`,
+preserved a concise `remember` replan when the step budget exhausted,
+completed the required same-surface audit on the touched `src/mew` surfaces,
+and finished with `rescue_edits=0`. The landed feature now makes
+`build_work_session_resume()` emit `plan_item_observations`, teaches
+`build_work_think_prompt()` to prefer that resume-side observation before
+broader rediscovery while pruning completed `working_memory.plan_items`, and
+extends the paired resume/context assertions in `tests/test_work_session.py`.
+This is implementation evidence for the frozen M6.6 set, not an extra
+comparator slot.
