@@ -514,3 +514,16 @@ same shared source of truth. Focused targeted pytest, module-level
 `tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
 passed. This is blocker reduction for the frozen M6.6 set, not an extra
 comparator slot.
+
+Task #362 / session #350 then retried the fresh proof on top of `a74ee69`, but
+it failed immediately for a different reason: the model tried to `read_file` a
+`.mew/memory/private/...` decision file surfaced through active memory and hit
+the tool's sensitive-path guard before it ever touched the src/test slice.
+That is not the milestone blocker itself, but it is avoidable coding-loop
+friction. The feature then landed as direct blocker reduction:
+`build_work_think_prompt()` now tells the model not to call `read_file` on
+`.mew/memory/private` paths surfaced in active memory because the relevant
+excerpt is already present in prompt context. Focused prompt tests,
+module-level `tests.test_work_session`, `ruff`, `py_compile`, and
+`git diff --check` passed. This is blocker reduction for the frozen M6.6 set,
+not an extra comparator slot.

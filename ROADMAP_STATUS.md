@@ -1168,6 +1168,18 @@ Missing proof:
   `ruff`, `py_compile`, and `git diff --check` passed. This is product
   progress for the same first-edit-efficiency blocker, not fresh no-rescue
   evidence.
+- M6.6 task #362 / session #350 then retried the fresh proof on top of
+  `a74ee69`, but it failed immediately for a different reason: the model tried
+  to `read_file` a `.mew/memory/private/...` decision file surfaced through
+  active memory and hit the tool's sensitive-path guard before it ever touched
+  the src/test slice. That is not the milestone blocker itself, but it is
+  avoidable friction in the coding loop. The direct blocker-reduction patch
+  now tells `build_work_think_prompt()` not to call `read_file` on
+  `.mew/memory/private` paths surfaced in active memory because the relevant
+  excerpt is already present in prompt context. Focused prompt tests,
+  module-level `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is prompt hygiene for the
+  same M6.6 first-edit proof path, not fresh no-rescue evidence.
 
 Done when:
 
@@ -1253,15 +1265,19 @@ Next action:
   surfaces and `edit_ready=true`, yet still kept rereading because cached
   window recall was anchored to the last narrow same-path span instead of the
   merged adjacent span.
+- Carry the landed #362 active-memory private-path guard as product progress,
+  but do not count it as no-rescue evidence: the fresh proof task failed
+  before touching src/test because it tried to inspect a sensitive
+  `.mew/memory/private` path already represented in active memory.
 - Keep M6.6 on the mew-side critical path. The next task should target the
-  remaining proof gap after #361: native mew must use the new merged
-  `cached_window_by_path` recall together with `edit_ready` and the rendered
-  resume-text audit to reach a paired dry-run edit without another same-path
-  reread detour on a broader `work_session.py`-anchored slice. Prefer a fresh
-  native no-steer slice whose premise is not already satisfied by the current
-  worktree, requires native verification and same-surface audit, and attacks
-  first-edit efficiency rather than adding another prompt-only reminder or
-  comparator work.
+  remaining proof gap after #362: native mew must use the merged
+  `cached_window_by_path` recall together with `edit_ready`, the rendered
+  resume-text audit, and the new active-memory guard to reach a paired dry-run
+  edit without another same-path reread detour on a broader
+  `work_session.py`-anchored slice. Prefer a fresh native no-steer slice whose
+  premise is not already satisfied by the current worktree, requires native
+  verification and same-surface audit, and attacks first-edit efficiency
+  rather than adding another prompt-only reminder or comparator work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other

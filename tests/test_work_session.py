@@ -6043,6 +6043,7 @@ class WorkSessionTests(unittest.TestCase):
                 compact_prompt = build_work_think_prompt(compact_context)
                 self.assertIn("active_memory.compacted_for_prompt", compact_prompt)
                 self.assertIn("Typed recall belongs in resident startup context.", compact_prompt)
+                self.assertIn("Do not use read_file on .mew/memory/private paths", compact_prompt)
                 self.assertNotIn("Native hands work should surface active typed memory", compact_prompt)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -13691,6 +13692,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Keep working_memory.open_questions limited to unanswered items", prompt)
         self.assertIn("work_session.resume.active_memory", prompt)
         self.assertIn("durable typed recall", prompt)
+        self.assertIn("Do not use read_file on .mew/memory/private paths", prompt)
         self.assertIn("Use work_session.effort as operational pressure", prompt)
         self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
