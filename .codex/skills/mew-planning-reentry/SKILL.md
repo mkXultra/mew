@@ -42,6 +42,8 @@ Do not let a checkpoint "hold", "wait", or "do not spend a proof item" note
 become the new task selector. Treat it as a local constraint only.
 Do not treat a checkpoint, a commit boundary, or a clean worktree as a reason
 to return control to the user during a long session.
+If the latest meaningful event was a git commit, run `mew-post-commit-check`
+before deciding whether to report or continue.
 Do not emit user-visible commentary/status updates during a long session unless
 the saved output gate explicitly allows reporting. Commentary counts as
 returning control.
@@ -89,6 +91,8 @@ If roadmap status is the question, use `mew-roadmap-status` after this reentry c
 If product direction or next implementation target is the question, use
 `mew-product-evaluator` after this reentry check and choose only work that maps
 to the active milestone's Done-when checklist.
+If the latest chunk ended in a commit, use `mew-post-commit-check` before any
+user-visible response.
 
 ## What To Extract
 
