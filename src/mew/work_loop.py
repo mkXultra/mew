@@ -100,6 +100,10 @@ def _work_model_call_child(send_conn, args, kwargs):
         send_conn.close()
 
 
+def _call_model_json_without_guard(*args, **kwargs):
+    return _agent_call_model_json_with_retries(*args, **kwargs)
+
+
 def call_model_json_with_retries(*args, **kwargs):
     kwargs.setdefault("retry_delays", ())
     on_text_delta = kwargs.get("on_text_delta")
@@ -128,15 +132,22 @@ def call_model_json_with_retries(*args, **kwargs):
     process.start()
     send_conn.close()
     payload = None
+    child_crash = None
     try:
         if recv_conn.poll(timeout_value):
-            payload = recv_conn.recv()
+            try:
+                payload = recv_conn.recv()
+            except (EOFError, BrokenPipeError, OSError) as exc:
+                child_crash = exc
         else:
             _terminate_work_model_process(process)
             raise ModelBackendError("request timed out")
     finally:
         recv_conn.close()
     process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
+    if child_crash is not None:
+        _terminate_work_model_process(process)
+        return _call_model_json_without_guard(*args, **kwargs)
     if payload is None:
         raise ModelBackendError("request timed out")
     if payload.get("status") == "ok":

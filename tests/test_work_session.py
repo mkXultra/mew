@@ -6939,6 +6939,62 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertLess(time.monotonic() - started, 0.2)
 
+    def test_work_loop_model_calls_fall_back_after_child_crash(self):
+        from mew.work_loop import call_model_json_with_retries
+
+        class FakeRecvConn:
+            def poll(self, timeout):
+                return True
+
+            def recv(self):
+                raise EOFError
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                return None
+
+        class FakeContext:
+            def Pipe(self, duplex=False):
+                return FakeRecvConn(), FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return FakeProcess()
+
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=FakeContext()):
+                with patch(
+                    "mew.work_loop._call_model_json_without_guard",
+                    return_value={"summary": "fallback ok", "action": {"type": "finish"}},
+                ) as call_model:
+                    result = call_model_json_with_retries(
+                        "codex",
+                        {"path": "auth.json"},
+                        "prompt",
+                        "gpt-5.4",
+                        "https://example.invalid",
+                        45,
+                        log_prefix="work_think codex session=1",
+                    )
+
+        self.assertEqual(result["summary"], "fallback ok")
+        self.assertEqual(call_model.call_count, 1)
+
     def test_compact_model_turns_for_prompt_collapses_redundant_planning_churn(self):
         from mew.work_session import compact_model_turns_for_prompt
 
