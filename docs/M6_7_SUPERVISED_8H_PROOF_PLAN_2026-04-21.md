@@ -48,6 +48,18 @@ Freeze five or six candidates so one failed item does not force mid-proof
 replanning. The first three completed items can close the gate if every
 iteration stays green.
 
+Primary order for the first supervised run:
+
+1. Candidate A
+2. Candidate B
+3. Candidate D
+
+Fallbacks if one primary candidate is rejected by the canary or does not
+converge:
+
+4. Candidate C
+5. Candidate E
+
 ### Candidate A: brief active-work and next-move coherence
 
 - scope fence: `src/mew/brief.py`, `tests/test_brief.py`
