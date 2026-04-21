@@ -135,11 +135,17 @@ class MemoryTests(unittest.TestCase):
                 name="Scope fence rule",
                 description="Keep scope fences explicit.",
                 created_at="2026-04-19T00:00:00Z",
+                approved=True,
+                why="repeated reviewer correction",
+                how_to_apply="keep scope fences explicit in future edits",
             )
 
             self.assertEqual(entry.memory_kind, "reviewer-steering")
             text = entry.path.read_text(encoding="utf-8")
             self.assertIn('kind = "reviewer-steering"', text)
+            self.assertIn('approved = "true"', text)
+            self.assertIn('why = "repeated reviewer correction"', text)
+            self.assertIn('how_to_apply = "keep scope fences explicit in future edits"', text)
             recalled = backend.recall(
                 "scope fences",
                 scope="private",
@@ -147,6 +153,42 @@ class MemoryTests(unittest.TestCase):
                 memory_kind="reviewer-steering",
             )
             self.assertEqual(recalled[0].memory_kind, "reviewer-steering")
+            self.assertTrue(recalled[0].approved)
+
+    def test_file_memory_backend_write_gate_rejects_incomplete_reviewer_steering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = FileMemoryBackend(tmp)
+
+            with self.assertRaisesRegex(ValueError, "--approved"):
+                backend.write(
+                    "Reviewer note",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="reviewer-steering",
+                    name="Broken steering",
+                )
+
+            with self.assertRaisesRegex(ValueError, "--rationale"):
+                backend.write(
+                    "Reusable coding loop template",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="task-template",
+                    name="Loop template",
+                    approved=True,
+                )
+
+            template = backend.write(
+                "Use focused verifier first, then broader unittest.",
+                scope="private",
+                memory_type="project",
+                memory_kind="task-template",
+                name="Verifier ordering template",
+                approved=True,
+                rationale="keeps reviewer-gated iterations small and repeatable",
+            )
+            self.assertEqual(template.memory_kind, "task-template")
+            self.assertEqual(template.rationale, "keeps reviewer-gated iterations small and repeatable")
 
     def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
         state = default_state()
@@ -264,6 +306,11 @@ class MemoryTests(unittest.TestCase):
                                 "Typed memory priority",
                                 "--description",
                                 "Next inhabitation slice.",
+                                "--approved",
+                                "--why",
+                                "reviewer approved this durable rule",
+                                "--how-to-apply",
+                                "reuse it on future typed-memory changes",
                                 "--json",
                             ]
                         ),
@@ -272,6 +319,9 @@ class MemoryTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["entry"]["memory_type"], "project")
                 self.assertEqual(data["entry"]["memory_kind"], "reviewer-steering")
+                self.assertTrue(data["entry"]["approved"])
+                self.assertEqual(data["entry"]["why"], "reviewer approved this durable rule")
+                self.assertEqual(data["entry"]["how_to_apply"], "reuse it on future typed-memory changes")
                 self.assertTrue((Path(data["entry"]["path"])).exists())
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -322,6 +372,11 @@ class MemoryTests(unittest.TestCase):
                                 "private",
                                 "--name",
                                 "Reviewer steering note",
+                                "--approved",
+                                "--why",
+                                "reviewer wants durable steering",
+                                "--how-to-apply",
+                                "apply this rule on future memory edits",
                             ]
                         ),
                         0,
@@ -365,6 +420,7 @@ class MemoryTests(unittest.TestCase):
                 entry = list_data["entries"][0]
                 self.assertEqual(entry["memory_kind"], "reviewer-steering")
                 self.assertEqual(entry["name"], "Reviewer steering note")
+                self.assertTrue(entry["approved"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--show", entry["id"], "--json"]), 0)
@@ -383,6 +439,52 @@ class MemoryTests(unittest.TestCase):
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["memory", "--list", "--show", entry["id"]]), 1)
                 self.assertIn("choose only one", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_rejects_incomplete_d2_write_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Missing reviewer approval",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reviewer-steering",
+                                "--name",
+                                "Broken steering",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--approved", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Missing rationale",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "task-template",
+                                "--name",
+                                "Broken template",
+                                "--approved",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--rationale", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

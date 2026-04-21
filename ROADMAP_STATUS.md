@@ -22,7 +22,7 @@ M5 was archived losslessly in
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves to M6.9 D1. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, and D6 Phase 1 slices: typed `memory_kind`, read-only list/show by id, and a reviewer-owned veto stub. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, and D2a slices: typed `memory_kind`, read-only list/show by id, a reviewer-owned veto stub, and the first write gate for reviewer-steering/task-template. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -1819,13 +1819,19 @@ Missing proof:
   standalone JSONL veto log, default list output suppresses vetoed entries, and
   `mew memory --show <id>` surfaces veto status/reason while leaving the
   original memory file unchanged
+- D2 first slice is landed for reviewer-steering/task-template only:
+  reviewer-steering now requires explicit approval plus `why` and
+  `how_to_apply`; task-template requires explicit approval plus `rationale`;
+  missing evidence rejects cleanly at the write gate and persists the accepted
+  evidence in typed-memory frontmatter
 - no comparator rerun exists yet for the post-split M6.9 slices
-- D2/D3 recall/write-gate work and later observability remain unstarted
+- D2 still lacks failure-shield and file-pair branches
+- D3 recall-time revise gate and later observability remain unstarted
 
 Next action:
 
 - continue with the next bounded Phase 1 slice only after reaffirming the
-  current D1/D7/D6 landings and keeping later D2/D3 work split into separate
+  current D1/D7/D6/D2a landings and keeping later D2/D3 work split into separate
   proofable increments
 
 ### M7: Senses - Inbound Signals

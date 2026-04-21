@@ -34,6 +34,10 @@ class MemoryEntry:
     description: str
     body: str
     created_at: str
+    approved: bool = False
+    why: str = ""
+    how_to_apply: str = ""
+    rationale: str = ""
     path: Path | None = None
 
 
@@ -52,6 +56,10 @@ class FileMemoryBackend:
         name: str = "",
         description: str = "",
         created_at: str | None = None,
+        approved: bool = False,
+        why: str = "",
+        how_to_apply: str = "",
+        rationale: str = "",
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
@@ -59,6 +67,14 @@ class FileMemoryBackend:
         body = str(body or "").strip()
         if not body:
             raise ValueError("memory body must not be empty")
+        approved, why, how_to_apply, rationale = validate_write_gate(
+            memory_type=memory_type,
+            memory_kind=memory_kind,
+            approved=approved,
+            why=why,
+            how_to_apply=how_to_apply,
+            rationale=rationale,
+        )
         created_at = created_at or now_iso()
         name = normalize_text(name) or first_line(body) or "Untitled memory"
         description = clip_description(description or first_line(body))
@@ -75,6 +91,10 @@ class FileMemoryBackend:
             description=description,
             body=body,
             created_at=created_at,
+            approved=approved,
+            why=why,
+            how_to_apply=how_to_apply,
+            rationale=rationale,
             path=path,
         )
         path.write_text(render_memory_entry(entry), encoding="utf-8")
@@ -258,6 +278,35 @@ def normalize_memory_kind(value: str | None, *, memory_type: str | None = None) 
     return normalized
 
 
+def validate_write_gate(
+    *,
+    memory_type: str,
+    memory_kind: str,
+    approved: bool = False,
+    why: str = "",
+    how_to_apply: str = "",
+    rationale: str = "",
+) -> tuple[bool, str, str, str]:
+    normalized_why = normalize_text(why)
+    normalized_how = normalize_text(how_to_apply)
+    normalized_rationale = normalize_text(rationale)
+    if memory_type != "project" or not memory_kind:
+        return bool(approved), normalized_why, normalized_how, normalized_rationale
+    if memory_kind == "reviewer-steering":
+        if not approved:
+            raise ValueError("reviewer-steering writes require --approved")
+        if not normalized_why:
+            raise ValueError("reviewer-steering writes require --why")
+        if not normalized_how:
+            raise ValueError("reviewer-steering writes require --how-to-apply")
+    if memory_kind == "task-template":
+        if not approved:
+            raise ValueError("task-template writes require --approved")
+        if not normalized_rationale:
+            raise ValueError("task-template writes require --rationale")
+    return bool(approved), normalized_why, normalized_how, normalized_rationale
+
+
 def first_line(value: str) -> str:
     for line in str(value or "").splitlines():
         text = normalize_text(line)
@@ -319,6 +368,14 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         "description": entry.description,
         "created_at": entry.created_at,
     }
+    if entry.approved:
+        fields["approved"] = "true"
+    if entry.why:
+        fields["why"] = entry.why
+    if entry.how_to_apply:
+        fields["how_to_apply"] = entry.how_to_apply
+    if entry.rationale:
+        fields["rationale"] = entry.rationale
     lines = [FRONTMATTER_DELIMITER]
     for key, value in fields.items():
         lines.append(f"{key} = {quote_frontmatter(value)}")
@@ -368,6 +425,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
     name = normalize_text(metadata.get("name")) or path.stem
     description = clip_description(metadata.get("description") or first_line(body))
     created_at = normalize_text(metadata.get("created_at"))
+    approved = normalize_text(metadata.get("approved")).casefold() in {"true", "yes", "1"}
+    why = normalize_text(metadata.get("why"))
+    how_to_apply = normalize_text(metadata.get("how_to_apply"))
+    rationale = normalize_text(metadata.get("rationale"))
     if root:
         memory_id = normalize_text(metadata.get("id")) or path.relative_to(root).with_suffix("").as_posix()
     else:
@@ -381,6 +442,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         description=description,
         body=body,
         created_at=created_at,
+        approved=approved,
+        why=why,
+        how_to_apply=how_to_apply,
+        rationale=rationale,
         path=path,
     )
 
@@ -397,6 +462,9 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.scope,
             entry.memory_type,
             entry.memory_kind,
+            entry.why,
+            entry.how_to_apply,
+            entry.rationale,
         ]
     ).casefold()
     if needle in haystack:
@@ -420,6 +488,10 @@ def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> 
         "created_at": entry.created_at,
         "storage": "file",
         "vetoed": bool(veto),
+        "approved": entry.approved,
+        "why": entry.why,
+        "how_to_apply": entry.how_to_apply,
+        "rationale": entry.rationale,
     }
     if entry.path:
         data["path"] = str(entry.path)

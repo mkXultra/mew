@@ -11398,6 +11398,14 @@ def _format_memory_entry_show(item):
         f"description: {item.get('description') or ''}",
         f"created_at: {item.get('created_at') or ''}",
     ]
+    if item.get("approved"):
+        lines.append("approved: yes")
+    if item.get("why"):
+        lines.append(f"why: {item.get('why')}")
+    if item.get("how_to_apply"):
+        lines.append(f"how_to_apply: {item.get('how_to_apply')}")
+    if item.get("rationale"):
+        lines.append(f"rationale: {item.get('rationale')}")
     if item.get("vetoed"):
         lines.append("vetoed: yes")
         lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
@@ -11504,6 +11512,10 @@ def cmd_memory(args):
                     memory_kind=args.memory_kind or "",
                     name=args.name or "",
                     description=args.description or "",
+                    approved=bool(args.approved),
+                    why=args.why or "",
+                    how_to_apply=args.how_to_apply or "",
+                    rationale=args.rationale or "",
                 )
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)

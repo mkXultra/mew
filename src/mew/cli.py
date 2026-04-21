@@ -1484,6 +1484,10 @@ def build_parser():
     )
     memory_parser.add_argument("--name", help="typed memory name for --add --type")
     memory_parser.add_argument("--description", help="typed memory description for --add --type")
+    memory_parser.add_argument("--approved", action="store_true", help="explicit reviewer approval for gated typed-memory writes")
+    memory_parser.add_argument("--why", help="why this reviewer-steering memory should persist")
+    memory_parser.add_argument("--how-to-apply", dest="how_to_apply", help="how to apply a reviewer-steering rule later")
+    memory_parser.add_argument("--rationale", help="rationale for a task-template durable write")
     memory_parser.add_argument(
         "--kind",
         dest="memory_kind",
