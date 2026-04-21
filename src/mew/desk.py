@@ -120,6 +120,42 @@ def stale_for_seconds(item: dict[str, Any], current_time: str | None, *keys: str
     return None
 
 
+def latest_work_session_activity_at(session: dict[str, Any]) -> str:
+    latest_raw = ""
+    latest_ts = None
+    for collection in ("tool_calls", "model_turns"):
+        for item in session.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("finished_at", "updated_at", "started_at", "created_at"):
+                raw = item.get(key)
+                ts = parse_time(raw)
+                if not ts:
+                    continue
+                if latest_ts is None or ts > latest_ts:
+                    latest_ts = ts
+                    latest_raw = raw
+    if latest_raw:
+        return latest_raw
+    for key in ("updated_at", "created_at"):
+        raw = session.get(key)
+        if parse_time(raw):
+            return raw
+    return ""
+
+
+def work_session_stale_for_seconds(session: dict[str, Any], current_time: str | None) -> int | None:
+    activity_at = latest_work_session_activity_at(session)
+    if activity_at:
+        return stale_for_seconds({"activity_at": activity_at}, current_time, "activity_at")
+    return stale_for_seconds(session, current_time, "updated_at", "created_at")
+
+
+def work_session_activity_sort_value(session: dict[str, Any]) -> float:
+    timestamp = parse_time(latest_work_session_activity_at(session))
+    return timestamp.timestamp() if timestamp else float("-inf")
+
+
 def attach_action_metadata(action: dict[str, Any], reason: str, stale_seconds: int | None) -> dict[str, Any]:
     action["reason"] = reason
     if stale_seconds is not None:
@@ -213,6 +249,7 @@ def active_work_sessions_for_desk(state: dict[str, Any], kind: str | None = None
         if kind_filter and not task_matches_kind(task, kind_filter):
             continue
         active.append(session)
+    active.sort(key=work_session_activity_sort_value)
     return active
 
 
@@ -397,7 +434,7 @@ def work_session_action_item(session: dict[str, Any], current_time: str | None =
     return attach_action_metadata(
         action,
         "active work session can be resumed",
-        stale_for_seconds(session, current_time, "updated_at", "created_at"),
+        work_session_stale_for_seconds(session, current_time),
     )
 
 

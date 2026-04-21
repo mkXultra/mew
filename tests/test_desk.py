@@ -245,6 +245,91 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(by_label["Review attention #2"]["stale_for_seconds"], 2400)
         self.assertEqual(by_label["Open task #4"]["stale_for_seconds"], 2700)
 
+    def test_work_session_action_uses_last_execution_activity_for_staleness(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {
+                        "id": 3,
+                        "title": "Execution-stale task",
+                        "status": "ready",
+                        "kind": "coding",
+                        "updated_at": "2026-04-17T00:59:00Z",
+                    }
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Execution-stale task",
+                        "updated_at": "2026-04-17T00:59:00Z",
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "read_file",
+                                "status": "completed",
+                                "finished_at": "2026-04-17T00:45:00Z",
+                            }
+                        ],
+                    }
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
+        )
+
+        self.assertEqual(view["primary_action"]["label"], "Resume task #3")
+        self.assertEqual(view["primary_action"]["stale_for_seconds"], 900)
+
+    def test_build_desk_view_model_prefers_session_with_newer_execution_activity(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {"id": 3, "title": "Older execution", "status": "ready", "kind": "coding"},
+                    {"id": 4, "title": "Newer execution", "status": "ready", "kind": "coding"},
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Older execution",
+                        "updated_at": "2026-04-17T00:59:00Z",
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "read_file",
+                                "status": "completed",
+                                "finished_at": "2026-04-17T00:20:00Z",
+                            }
+                        ],
+                    },
+                    {
+                        "id": 9,
+                        "task_id": 4,
+                        "status": "active",
+                        "goal": "Newer execution",
+                        "updated_at": "2026-04-17T00:30:00Z",
+                        "model_turns": [
+                            {
+                                "id": 3,
+                                "status": "completed",
+                                "finished_at": "2026-04-17T00:50:00Z",
+                            }
+                        ],
+                    },
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
+            kind="coding",
+        )
+
+        self.assertEqual(view["primary_action"]["label"], "Resume task #4")
+        self.assertEqual(view["actions"][0]["label"], "Resume task #4")
+        self.assertEqual(view["actions"][1]["label"], "Resume task #3")
+
     def test_build_desk_view_model_skips_active_work_for_blocked_task(self):
         view = build_desk_view_model(
             {
