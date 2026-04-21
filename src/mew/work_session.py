@@ -2606,6 +2606,19 @@ def _coerce_working_memory_target_paths(value):
     return paths
 
 
+def _relevant_resume_target_paths(target_paths):
+    paths = [str(item or "").strip() for item in (target_paths or []) if str(item or "").strip()]
+    if len(paths) <= 5:
+        return paths
+    relevant = list(paths[:5])
+    if not any(path.startswith("tests/") for path in relevant):
+        for path in paths[5:]:
+            if path.startswith("tests/") and path not in relevant:
+                relevant.append(path)
+                break
+    return relevant
+
+
 def _coerce_working_memory_plan_items(value):
     if isinstance(value, str):
         candidates = [value]
@@ -4615,8 +4628,9 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     cached_window_by_path = {}
     adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
     target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
-    if target_paths:
-        for target_path in target_paths[:3]:
+    relevant_target_paths = _relevant_resume_target_paths(target_paths)
+    if relevant_target_paths:
+        for target_path in relevant_target_paths:
             for call in reversed(calls):
                 if call.get("tool") != "read_file" or call.get("status") != "completed":
                     continue
@@ -4677,7 +4691,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         requested_window = plan_item_exact_read_window(actionable_plan_item)
         if requested_window:
             plan_item_observation["requested_window"] = requested_window
-        relevant_target_paths = target_paths[:3]
+        relevant_target_paths = _relevant_resume_target_paths(target_paths)
         if relevant_target_paths:
             primary_target_path = relevant_target_paths[0]
             plan_item_observation["target_path"] = primary_target_path

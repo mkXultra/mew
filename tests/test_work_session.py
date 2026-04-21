@@ -6488,6 +6488,156 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_item_observation_keeps_test_path_when_first_targets_are_sources(self):
+        from mew.work_loop import build_work_model_context, build_write_ready_work_model_context
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["tool_calls"] = [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/cli.py", "line_start": 1465, "line_count": 12},
+                            "result": {
+                                "path": "src/mew/cli.py",
+                                "line_start": 1465,
+                                "line_end": 1476,
+                                "text": "".join(f"cli_line_{index}\n" for index in range(12)),
+                                "next_line": 1477,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py", "line_start": 11499, "line_count": 60},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "line_start": 11499,
+                                "line_end": 11558,
+                                "text": "".join(f"commands_line_{index}\n" for index in range(60)),
+                                "next_line": 11559,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 3,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/symbol_index.py", "line_start": 82, "line_count": 24},
+                            "result": {
+                                "path": "src/mew/symbol_index.py",
+                                "line_start": 82,
+                                "line_end": 105,
+                                "text": "".join(f"index_line_{index}\n" for index in range(24)),
+                                "next_line": 106,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_memory.py", "line_start": 525, "line_count": 45},
+                            "result": {
+                                "path": "tests/test_memory.py",
+                                "line_start": 525,
+                                "line_end": 569,
+                                "text": "".join(f"memory_test_line_{index}\n" for index in range(45)),
+                                "next_line": 570,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 5,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_symbol_index.py", "line_start": 1, "line_count": 48},
+                            "result": {
+                                "path": "tests/test_symbol_index.py",
+                                "line_start": 1,
+                                "line_end": 48,
+                                "text": "".join(f"symbol_test_line_{index}\n" for index in range(48)),
+                                "next_line": 49,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                    ]
+                    decision_plan = {
+                        "summary": "land reverse symbol-index query",
+                        "working_memory": {
+                            "hypothesis": "All src/test windows are cached, so the next step should be one paired dry-run batch.",
+                            "next_step": "Draft a paired dry-run edit batch for the reverse symbol-index query.",
+                            "plan_items": [
+                                "Prepare paired src/test dry-run edits for resolve_test_path",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": [
+                                "src/mew/cli.py",
+                                "src/mew/commands.py",
+                                "src/mew/symbol_index.py",
+                                "tests/test_memory.py",
+                                "tests/test_symbol_index.py",
+                            ],
+                            "last_verified_state": "All reverse-query source and test windows are cached.",
+                        },
+                    }
+
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        decision_plan,
+                        {"summary": "land reverse symbol-index query"},
+                        {"type": "wait", "reason": "ready to draft from cached windows"},
+                    )
+                    finish_work_model_turn(state, task["id"], turn["id"])
+                    save_state(state)
+
+                resume = build_work_session_resume(session)
+                observation = resume["plan_item_observations"][0]
+                self.assertTrue(observation["edit_ready"])
+                cached_paths = [item["path"] for item in observation["cached_windows"]]
+                self.assertIn("tests/test_memory.py", cached_paths)
+                self.assertIn("tests/test_symbol_index.py", cached_paths)
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    {
+                        "id": task["id"],
+                        "title": task["title"],
+                        "description": task["description"],
+                        "status": task["status"],
+                    },
+                    "now",
+                )
+                fast_context = build_write_ready_work_model_context(context)
+                self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+                fast_paths = [item["path"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]]
+                self.assertIn("tests/test_memory.py", fast_paths)
+                self.assertIn("tests/test_symbol_index.py", fast_paths)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
