@@ -11498,9 +11498,9 @@ def _format_memory_entry_show(item):
 
 def cmd_memory(args):
     if args.active:
-        if args.add or args.search or args.compact or args.list or args.show or args.veto:
+        if args.add or args.search or args.compact or args.list or args.show or args.resolve_source_path or args.veto:
             print(
-                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, or --veto",
+                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, --resolve-source-path, or --veto",
                 file=sys.stderr,
             )
             return 1
@@ -11527,17 +11527,37 @@ def cmd_memory(args):
         print(format_active_memory(active_memory, task=task, session=session))
         return 0
 
-    if args.list or args.show or args.veto:
+    if args.list or args.show or args.resolve_source_path or args.veto:
         if args.add or args.search or args.compact:
-            print("mew: --list/--show/--veto cannot be combined with --add, --search, or --compact", file=sys.stderr)
+            print(
+                "mew: --list/--show/--resolve-source-path/--veto cannot be combined with --add, --search, or --compact",
+                file=sys.stderr,
+            )
             return 1
-        chosen = [flag for flag in (args.list, bool(args.show), bool(args.veto)) if flag]
+        chosen = [flag for flag in (args.list, bool(args.show), bool(args.resolve_source_path), bool(args.veto)) if flag]
         if len(chosen) > 1:
-            print("mew: choose only one of --list, --show, or --veto", file=sys.stderr)
+            print("mew: choose only one of --list, --show, --resolve-source-path, or --veto", file=sys.stderr)
             return 1
         try:
             backend = FileMemoryBackend(".")
             vetoes = backend.latest_vetoes()
+            if args.resolve_source_path:
+                from .symbol_index import resolve_source_path
+
+                payload = resolve_source_path(args.resolve_source_path, base_dir=".")
+                if not payload:
+                    print(
+                        f"mew: typed memory not found for source path: {args.resolve_source_path}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                if args.json:
+                    print(json.dumps({"resolved": payload}, ensure_ascii=False, indent=2))
+                else:
+                    print(f"source_path: {payload['source_path']}")
+                    print(f"test_path: {payload['test_path']}")
+                    print(f"memory_ids: {', '.join(payload['memory_ids'])}")
+                return 0
             if args.veto:
                 payload = backend.veto(args.veto, reason=args.reason or "")
                 if args.json:

@@ -1464,6 +1464,11 @@ def build_parser():
     memory_parser.add_argument("--search", help="search shallow and deep memory text")
     memory_parser.add_argument("--list", action="store_true", help="list typed memory entries")
     memory_parser.add_argument("--show", help="show one typed memory entry by id")
+    memory_parser.add_argument(
+        "--resolve-source-path",
+        dest="resolve_source_path",
+        help="resolve one source path through the durable symbol/file-pair index",
+    )
     memory_parser.add_argument("--veto", help="logically suppress one typed memory entry by id")
     memory_parser.add_argument("--reason", help="required veto reason for --veto")
     memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")

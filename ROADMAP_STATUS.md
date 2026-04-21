@@ -22,7 +22,7 @@ M5 was archived losslessly in
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves through bounded M6.9 Phase 1 slices. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, and D2 slices: typed `memory_kind`, read-only list/show by id, a reviewer-owned veto stub, and write gates for reviewer-steering/task-template/failure-shield/file-pair. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, D2, D3, D4, and D5 slices plus the first post-Phase-1 read-only query surface: `mew memory --resolve-source-path` now resolves a durable file-pair source path back to its paired test path and memory ids. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
@@ -1849,14 +1849,24 @@ Missing proof:
   triple `(ai_draft, reviewer_approved, ai_final)` for that write only;
   focused `tests/test_work_session.py` coverage proves one approve+land cycle
   writes exactly one record, while edit-file approval stays out of scope
+- The first bounded post-Phase-1 slice is landed as product progress with a
+  mew-first implementation loop: `mew memory --resolve-source-path
+  <source_path>` now resolves a durable file-pair source path through
+  `src/mew/symbol_index.py`, returning the paired `test_path` and
+  `memory_ids` in both JSON and human output. Task `#395` / session `#386`
+  required reviewer rejection-and-redraft cycles to tighten the active
+  conflict guard, output contract, import/test coverage, and same-surface
+  audit, then finished with broader `uv run python -m unittest tests.test_memory
+  tests.test_symbol_index tests.test_commands` green. Count this as product
+  progress, not autonomy credit
 - no comparator rerun exists yet for the post-split M6.9 slices
 - later observability and broader retrieval changes remain unstarted
 
 Next action:
 
-- keep the bounded Phase 1 substrate closed at the current D1-D7 shape and
-  use the next decision point to choose either M6.7 close-out (if the frozen
-  watch is eligible) or the first bounded post-Phase-1 M6.9 slice
+- close M6.7 as soon as the frozen close-watch reaches its wall-clock
+  eligibility, then choose the next bounded post-Phase-1 M6.9 slice from a
+  clean mainline
 - keep later observability and broader recall-time rewrites split out until
   M6.7 is closed and the next bounded Phase 2 target is chosen explicitly
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from mew.cli import main
 from mew.memory import add_deep_memory, compact_memory, recall_memory, search_memory
 from mew.state import default_state, load_state, save_state
+from mew.symbol_index import rebuild_symbol_index
 from mew.typed_memory import FileMemoryBackend
 
 
@@ -513,6 +514,59 @@ class MemoryTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["memory", "--list", "--show", entry["id"]]), 1)
+                self.assertIn("choose only one", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["memory", "--active", "--resolve-source-path", "src/mew/cli.py"]), 1)
+                self.assertIn("--active cannot be combined", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_resolve_source_path_reports_pair_and_memory_ids(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                backend = FileMemoryBackend(".")
+                entry = backend.write(
+                    "commands.py and test_memory.py should stay aligned.",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="file-pair",
+                    name="commands/test memory pair",
+                    source_path="src/mew/commands.py",
+                    test_path="tests/test_memory.py",
+                    structural_evidence="same-session source/test review",
+                    focused_test_green=True,
+                )
+                rebuild_symbol_index(".")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--resolve-source-path", "src/mew/commands.py", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["resolved"]["source_path"], "src/mew/commands.py")
+                self.assertEqual(payload["resolved"]["test_path"], "tests/test_memory.py")
+                self.assertEqual(payload["resolved"]["memory_ids"], [entry.id])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--resolve-source-path", "src/mew/commands.py"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("source_path: src/mew/commands.py", text)
+                self.assertIn("test_path: tests/test_memory.py", text)
+                self.assertIn(f"memory_ids: {entry.id}", text)
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["memory", "--resolve-source-path", "src/mew/missing.py"]), 1)
+                self.assertIn("typed memory not found for source path", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(["memory", "--list", "--resolve-source-path", "src/mew/commands.py"]),
+                        1,
+                    )
                 self.assertIn("choose only one", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
