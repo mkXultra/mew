@@ -1,9 +1,11 @@
 import shlex
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mew.toolbox import run_command_record, run_command_record_streaming
 
@@ -52,3 +54,19 @@ class ToolboxTests(unittest.TestCase):
             self.assertEqual(result["exit_code"], 0)
             self.assertIn(".", result["stderr"])
             self.assertTrue(any(name == "stderr" and chunk for name, chunk in streamed))
+
+    def test_run_command_record_streaming_uses_devnull_stdin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join([sys.executable, "-c", "print('ok')"])
+            seen = {}
+            real_popen = subprocess.Popen
+
+            def wrapped_popen(*args, **kwargs):
+                seen["stdin"] = kwargs.get("stdin")
+                return real_popen(*args, **kwargs)
+
+            with patch("mew.toolbox.subprocess.Popen", side_effect=wrapped_popen):
+                result = run_command_record_streaming(command, cwd=tmp, timeout=1)
+
+            self.assertEqual(seen["stdin"], subprocess.DEVNULL)
+            self.assertEqual(result["exit_code"], 0)

@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end, and dedicated governance approve-all scope fencing is now in product; the remaining gap is a fresh no-rescue iteration that proves the fence plus the supervised 8-hour proof. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end, a fourth bounded loop now closes on the repaired live-verifier path, and dedicated governance approve-all scope fencing is in product; the remaining gap is one fresh post-fix no-rescue iteration plus the supervised 8-hour proof. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -70,8 +70,8 @@ Reasoning:
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  the third supervised self-hosting proof aimed at scope-fence hardening, not
-  more speculative coding-loop polish.
+  one more fresh bounded supervised proof on the now-repaired live-verifier
+  runtime, not more speculative coding-loop polish.
 
 Current next action:
 
@@ -81,15 +81,19 @@ Current next action:
    path-recall/anti-churn behavior.
 3. Treat the first two bounded M6.7 iterations as the current supervised
    baseline: visible scope fence plus proof-or-revert finish blocking.
-4. Run the third M6.7 bounded roadmap task under the same shape: drift canary
-   first, dry-run reviewable diff, reviewer decision, then focused plus
+4. Treat task `#372` as strong bounded-loop evidence: the src/test diff itself
+   landed with no reviewer code rescue, but broader live verification only
+   closed after a direct verifier-runtime blocker patch outside the task scope.
+5. Run one more fresh M6.7 bounded roadmap task under the same shape: drift
+   canary first, dry-run reviewable diff, reviewer decision, then focused plus
    broader verification before finish.
-5. Use that third task to prove the now-landed dedicated scope-fence
-   enforcement end to end, not to invent more fence variants.
-6. Do not let mew self-author roadmap-status or milestone-close edits during
+6. Use that fresh task to prove the now-landed dedicated scope-fence
+   enforcement and repaired live-verifier runtime end to end, not to invent
+   more fence variants.
+7. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
-7. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+8. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
 
 Human-role transition rule:
@@ -1485,6 +1489,28 @@ Evidence:
   `pytest`, `uv run python -m unittest tests.test_toolbox`, `ruff`,
   `py_compile`, and `git diff --check` passed. This is blocker reduction plus
   product progress; a fresh bounded M6.7 proof rerun is still required.
+- A second direct blocker-reduction patch then fixed the remaining broader
+  live-verifier hang exposed while rerunning task `#372`: tool subprocesses in
+  `src/mew/toolbox.py` now launch with `stdin=subprocess.DEVNULL`, and the new
+  `tests/test_toolbox.py` regression asserts that the streaming helper passes
+  `DEVNULL` stdin into `subprocess.Popen`. This prevents verifier subprocesses
+  from inheriting reviewer stdin and stalling on approval-prompt tests that
+  expect EOF in non-interactive runs. Focused `pytest`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is blocker reduction plus product
+  progress.
+- Task `#372` / session `#360` then reran the fresh bounded
+  `src/mew/work_session.py` + `tests/test_work_session.py` review-surface
+  slice. The native loop ran the drift canary, searched exact anchors, read
+  exact src/test windows, proposed a paired dry-run diff, stopped for explicit
+  reviewer approval, passed the focused verifier, then resumed to pass the
+  broader verifier `uv run python -m unittest tests.test_work_session`,
+  completed the required same-surface audit, and finished cleanly. The landed
+  change makes single dry-run `write_file` / `edit_file` /
+  `edit_file_hunks` actions surface the planned diff preview instead of only
+  size counts, with direct regression coverage in
+  `tests/test_work_session.py`. Count this as strong supervised-loop evidence
+  plus product progress, but not yet as the clean post-fix milestone-closing
+  proof because the live-verifier runtime changed mid-iteration.
 
 Missing proof:
 
@@ -1497,9 +1523,11 @@ Missing proof:
   bounded no-rescue supervised iteration proving that the native loop can
   surface and complete a reviewer-visible paired dry-run diff end to end after
   the blocker-reduction patches.
-- Native broader verification was recently flaky enough to block #371 proof
-  credit, so a fresh bounded rerun is still needed to prove the streaming fix
-  actually removes that verifier blocker inside the live supervised loop.
+- Native broader verification now passes again inside the live supervised loop,
+  but the current evidence closes only after two adjacent direct verifier-
+  runtime blocker patches (`read()` chunk draining, then `stdin=DEVNULL`).
+  One more fresh bounded iteration is still needed on the stabilized runtime
+  before counting the gate as cleanly proven.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1518,9 +1546,8 @@ Done when:
 Next action:
 
 - Run a fresh 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to rerun a fresh no-rescue bounded iteration on the same paired
-  src/test review surface and verify that the live broader-verifier blocker
-  from #371 is actually gone.
+- Use it to prove the now-stabilized live verifier runtime and scope-fence
+  behavior end to end without any adjacent supervisor runtime patch.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals

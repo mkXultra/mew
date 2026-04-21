@@ -5322,10 +5322,14 @@ def format_work_action(action, parameters=None, tool_call_id=None):
         if isinstance(value, bool) and not value and key != "apply":
             continue
         lines.append(f"{key}: {clip_output(str(value), 500)}")
-    for key in ("content", "old", "new"):
-        value = _display_value(action, parameters, key)
-        if value is not None:
-            lines.append(f"{key}: {len(str(value))} chars")
+    preview = format_work_batch_write_preview(action)
+    if preview:
+        lines.extend(preview.splitlines())
+    else:
+        for key in ("content", "old", "new"):
+            value = _display_value(action, parameters, key)
+            if value is not None:
+                lines.append(f"{key}: {len(str(value))} chars")
     edits = _display_value(action, parameters, "edits")
     if isinstance(edits, list):
         lines.append(f"edits: {len(edits)} hunk(s)")

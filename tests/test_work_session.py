@@ -1044,6 +1044,26 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("-before", text)
         self.assertIn("+after", text)
 
+    def test_work_action_single_dry_run_edit_displays_diff_preview(self):
+        text = format_work_action(
+            {
+                "type": "edit_file",
+                "path": "README.md",
+                "old": "before\n",
+                "new": "after\n",
+                "apply": False,
+            }
+        )
+
+        self.assertIn("action: edit_file", text)
+        self.assertIn("path: README.md", text)
+        self.assertIn("apply: False", text)
+        self.assertIn("Diff preview (+1 -1)", text)
+        self.assertIn("-before", text)
+        self.assertIn("+after", text)
+        self.assertNotIn("old: 7 chars", text)
+        self.assertNotIn("new: 6 chars", text)
+
     def test_work_session_cells_capture_model_command_diff_and_approval(self):
         session = {
             "id": 3,
