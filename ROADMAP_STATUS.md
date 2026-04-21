@@ -20,7 +20,7 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two bounded reviewer-gated iterations passed end to end, a fourth bounded loop now closes on the repaired live-verifier path, and dedicated governance approve-all scope fencing is in product; the remaining gap is one fresh post-fix no-rescue iteration plus the supervised 8-hour proof. |
+| 6.7. Supervised Self-Hosting Loop | `in_progress` | Two early bounded reviewer-gated iterations plus a fresh clean post-fix sixth iteration are recorded; dedicated governance scope fencing and stabilized live verification are in product, and the remaining gate is the supervised 8-hour proof. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -29,7 +29,7 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-21 13:48 JST.
+Last assessed: 2026-04-21 16:57 JST.
 
 Active work: **M6.7 Supervised Self-Hosting Loop** while M5.1, M6, and M6.6
 remain closed baselines and M7 stays deferred.
@@ -63,15 +63,19 @@ Reasoning:
   keeps the session open while approvals, broader verification, or
   same-surface audit are incomplete, and it closed only after focused plus
   paired-source verification and a narrow commands.py same-surface audit.
+- `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md` now records the fresh
+  clean post-fix M6.7 proof: task `#374` / session `#362` stayed inside the
+  declared `src/mew/brief.py` + `tests/test_brief.py` scope, ran the drift
+  canary first, produced a reviewer-visible dry-run diff, passed the focused
+  verifier plus `uv run python -m unittest tests.test_brief`, completed a
+  same-surface audit, and finished with no reviewer rescue edits.
 - M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 still lacks a fresh no-rescue iteration proving the now-
-  landed scope-fence path and the supervised 8-hour proof.
+  ahead while M6.7 still lacks the supervised 8-hour proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  one more fresh bounded supervised proof on the now-repaired live-verifier
-  runtime, not more speculative coding-loop polish.
+  the supervised 8-hour proof, not more speculative coding-loop polish.
 
 Current next action:
 
@@ -79,17 +83,17 @@ Current next action:
 2. Treat M6.6 as a closed baseline. Reopen only if a future native coding loop
    regresses on rescue-edits, verifier choice, approval surfaces, or
    path-recall/anti-churn behavior.
-3. Treat the first two bounded M6.7 iterations as the current supervised
-   baseline: visible scope fence plus proof-or-revert finish blocking.
+3. Treat the first, second, and sixth bounded M6.7 iterations as the current
+   supervised baseline: visible scope fence, proof-or-revert finish blocking,
+   and clean post-fix reviewer-gated brief/focus behavior.
 4. Treat task `#372` as strong bounded-loop evidence: the src/test diff itself
    landed with no reviewer code rescue, but broader live verification only
    closed after a direct verifier-runtime blocker patch outside the task scope.
-5. Run one more fresh M6.7 bounded roadmap task under the same shape: drift
-   canary first, dry-run reviewable diff, reviewer decision, then focused plus
-   broader verification before finish.
-6. Use that fresh task to prove the now-landed dedicated scope-fence
-   enforcement and repaired live-verifier runtime end to end, not to invent
-   more fence variants.
+5. Treat task `#374` as the clean fresh post-fix bounded proof on the now-
+   stabilized live-verifier runtime.
+6. The next gate is the supervised 8-hour M6.7 run with at least three real
+   roadmap items, reviewer decisions recorded per iteration, zero
+   proof-or-revert failures, and a green drift canary throughout.
 7. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
@@ -1527,23 +1531,23 @@ Evidence:
   or brief" --no-testmon`, broader `uv run python -m unittest tests.test_brief`,
   `ruff`, `py_compile`, and `git diff --check` all passed. This is product
   progress, not a fresh no-rescue supervised-iteration proof.
+- `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md` now records the fresh
+  clean post-fix bounded proof that the earlier M6.7 section still lacked.
+  Task `#374` / session `#362` stayed inside the declared `src/mew/brief.py`
+  + `tests/test_brief.py` scope, ran the drift canary first, anchored exact
+  `build_focus_data()` / `build_brief_data()` and nearby brief regressions,
+  surfaced a paired dry-run diff, stopped for explicit reviewer approval,
+  passed the focused verifier
+  `uv run pytest -q tests/test_brief.py -k "focus or brief or active_work_session" --no-testmon`,
+  then passed the broader verifier
+  `uv run python -m unittest tests.test_brief`, completed a same-surface audit,
+  and finished with no reviewer rescue edits. The landed change makes
+  `active_work_session_items()` skip non-actionable tasks, and the new
+  regression proves `mew focus --kind coding` no longer treats a stale blocked
+  work session as active work that should suppress the next useful move.
 
 Missing proof:
 
-- Dedicated scope-fence enforcement now exists in product behavior across
-  CLI/runtime `approve-all`, reply-file actions, and reply-schema
-  `supported_actions`, but there is still no fresh bounded no-rescue
-  supervised iteration that lands and verifies the fence slice end to end
-  without supervisor rescue.
-- Batch-decision reviewability is now stronger, but there is still no fresh
-  bounded no-rescue supervised iteration proving that the native loop can
-  surface and complete a reviewer-visible paired dry-run diff end to end after
-  the blocker-reduction patches.
-- Native broader verification now passes again inside the live supervised loop,
-  but the current evidence closes only after two adjacent direct verifier-
-  runtime blocker patches (`read()` chunk draining, then `stdin=DEVNULL`).
-  One more fresh bounded iteration is still needed on the stabilized runtime
-  before counting the gate as cleanly proven.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1561,9 +1565,10 @@ Done when:
 
 Next action:
 
-- Run a fresh 30-60 minute reviewer-gated roadmap task under the same shape.
-- Use it to prove the now-stabilized live verifier runtime and scope-fence
-  behavior end to end without any adjacent supervisor runtime patch.
+- Plan and run the supervised 8-hour M6.7 proof with at least three bounded
+  real roadmap items and recorded reviewer decisions.
+- Keep the per-iteration drift canary, proof-or-revert discipline, and
+  reviewer-gated dry-run approvals intact throughout the run.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals
@@ -1673,8 +1678,8 @@ Active focus: **M6.7 Supervised Self-Hosting Loop**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- one bounded reviewer-gated M6.7 roadmap iteration aimed at dedicated
-  scope-fence hardening;
+- planning and running the supervised 8-hour M6.7 proof with bounded roadmap
+  items and recorded reviewer decisions;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 milestone close and proof harness fixes as closed baseline work;
 - reviewer-owned roadmap/status updates and checkpointing around M6.7 runs;

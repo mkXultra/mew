@@ -1152,6 +1152,35 @@ class BriefTests(unittest.TestCase):
         )
         self.assertNotIn("memory_next: Read README.md next.", focus)
 
+    def test_focus_ignores_stale_blocked_active_work_session(self):
+        state = default_state()
+        add_task(state, task_id=7, title="Waiting on reviewer", status="blocked", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "Waiting on reviewer",
+                "goal": "Resume only when reviewer unblocks it.",
+                "created_at": "2026-04-16T08:00:00Z",
+                "updated_at": "2026-04-16T12:00:00Z",
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        with patch(
+            "mew.brief.coding_self_improve_focus_from_friction",
+            return_value="Advance M5 audited self-improvement loop",
+        ), patch("mew.brief.now_iso", return_value="2026-04-18T00:00:00Z"):
+            data = build_focus_data(state, limit=3, kind="coding")
+
+        self.assertEqual(data["active_work_sessions"], [])
+        self.assertEqual(
+            data["next_move"],
+            "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+        )
+
     def test_focus_ignores_active_work_session_for_done_task(self):
         state = default_state()
         add_task(state, task_id=7, title="Implemented already", status="done", kind="coding")

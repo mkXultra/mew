@@ -824,6 +824,8 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
             continue
         if task and task.get("status") == "done":
             continue
+        if task and not task_is_actionable(task):
+            continue
         if kind and task_kind(task or {}) != kind:
             continue
         resume = build_work_session_resume(session, task=task, limit=3, state=state) or {}
