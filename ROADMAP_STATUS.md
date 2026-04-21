@@ -1474,6 +1474,17 @@ Evidence:
   unittest module passed directly outside the live loop (`Ran 421 tests in
   23.681s`). Carry #371 as blocker evidence plus product progress, not as
   supervised-iteration credit.
+- A direct blocker-reduction patch then targeted the root cause exposed by
+  #371: `run_command_record_streaming()` in `src/mew/toolbox.py` now drains
+  `stdout`/`stderr` with fixed-size `read()` chunks instead of newline-bound
+  `readline()`, so commands that emit long progress streams without trailing
+  newlines cannot fill the pipe and stall the live verifier path. The new
+  `tests/test_toolbox.py` regression drives `200000` newline-free `stderr`
+  characters through the streaming helper and asserts the command completes
+  without timing out while `on_output` still receives streamed data. Focused
+  `pytest`, `uv run python -m unittest tests.test_toolbox`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is blocker reduction plus
+  product progress; a fresh bounded M6.7 proof rerun is still required.
 
 Missing proof:
 
@@ -1486,11 +1497,9 @@ Missing proof:
   bounded no-rescue supervised iteration proving that the native loop can
   surface and complete a reviewer-visible paired dry-run diff end to end after
   the blocker-reduction patches.
-- Native broader verification inside the live supervised loop is still not
-  reliable enough: `run_tests` timed out on `uv run python -m unittest
-  tests.test_work_session` even though the same module passes directly outside
-  the live loop, so the verifier path itself is now a blocker for honest M6.7
-  proof credit.
+- Native broader verification was recently flaky enough to block #371 proof
+  credit, so a fresh bounded rerun is still needed to prove the streaming fix
+  actually removes that verifier blocker inside the live supervised loop.
 - No supervised 8-hour proof with three real roadmap items exists yet.
 - Any 24h unattended run is still disallowed until the supervised 8-hour proof
   is recorded.
@@ -1509,9 +1518,9 @@ Done when:
 Next action:
 
 - Run a fresh 30-60 minute reviewer-gated roadmap task under the same shape.
-- First reduce the native broader-verifier timeout/capture blocker exposed by
-  #371, then rerun a fresh no-rescue bounded iteration on the same paired
-  src/test review surface.
+- Use it to rerun a fresh no-rescue bounded iteration on the same paired
+  src/test review surface and verify that the live broader-verifier blocker
+  from #371 is actually gone.
 - Keep roadmap-status and milestone-close edits under reviewer control.
 
 ### M7: Senses - Inbound Signals

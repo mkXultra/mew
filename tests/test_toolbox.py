@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from mew.toolbox import run_command_record
+from mew.toolbox import run_command_record, run_command_record_streaming
 
 
 class ToolboxTests(unittest.TestCase):
@@ -29,3 +29,26 @@ class ToolboxTests(unittest.TestCase):
 
             self.assertTrue(result["timed_out"])
             self.assertFalse(marker.exists())
+
+    def test_run_command_record_streaming_drains_stderr_without_newlines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stderr.write('.' * 200000); sys.stderr.flush()",
+                ]
+            )
+            streamed = []
+
+            result = run_command_record_streaming(
+                command,
+                cwd=tmp,
+                timeout=1,
+                on_output=lambda name, chunk: streamed.append((name, chunk)),
+            )
+
+            self.assertFalse(result["timed_out"])
+            self.assertEqual(result["exit_code"], 0)
+            self.assertIn(".", result["stderr"])
+            self.assertTrue(any(name == "stderr" and chunk for name, chunk in streamed))

@@ -182,7 +182,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
     def read_stream(name, stream):
         if stream is None:
             return
-        for chunk in iter(stream.readline, ""):
+        for chunk in iter(lambda: stream.read(1024), ""):
             chunks[name].append(chunk)
             if on_output:
                 on_output(name, chunk)
