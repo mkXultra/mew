@@ -872,6 +872,82 @@ class MemoryTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_memory_active_revises_and_drops_file_pair_entries(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src").mkdir()
+                Path("tests").mkdir()
+                Path("src/demo.py").write_text("def demo():\n    return 1\n", encoding="utf-8")
+                Path("tests/test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Active Recall Debug file pair for src/demo.py and tests/test_demo.py.",
+                                "--type",
+                                "project",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Active Recall Debug pair",
+                                "--kind",
+                                "file-pair",
+                                "--source-path",
+                                "src/demo.py",
+                                "--test-path",
+                                "tests/test_demo.py",
+                                "--structural-evidence",
+                                "same-session read of src/demo.py and tests/test_demo.py",
+                                "--focused-test-green",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "add",
+                                "Active Recall Debug pair",
+                                "--kind",
+                                "coding",
+                                "--description",
+                                "Check active typed memory injection for the Active Recall Debug pair.",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--active", "--task-id", "1", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                active_memory = data["active_memory"]
+                file_pair = next(item for item in active_memory["items"] if item.get("memory_kind") == "file-pair")
+                self.assertEqual(file_pair["revise_status"], "kept")
+                self.assertEqual(file_pair["source_path"], "src/demo.py")
+                self.assertEqual(file_pair["test_path"], "tests/test_demo.py")
+                self.assertNotIn("dropped_items", active_memory)
+
+                Path("tests/test_demo.py").unlink()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--active", "--task-id", "1", "--json"]), 0)
+                dropped_data = json.loads(stdout.getvalue())
+                dropped_memory = dropped_data["active_memory"]
+                self.assertFalse(
+                    any(item.get("memory_kind") == "file-pair" for item in dropped_memory["items"]),
+                    dropped_memory,
+                )
+                self.assertEqual(dropped_memory["dropped_items"][0]["drop_reason"], "precondition_miss")
+                self.assertEqual(dropped_memory["dropped_items"][0]["missing_paths"], ["tests/test_demo.py"])
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

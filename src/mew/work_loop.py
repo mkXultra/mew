@@ -42,11 +42,17 @@ WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT = 300
 WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT = 20
 WORK_COMPACT_CONTEXT_BUDGET = 25000
 WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES = ((6, 4), (4, 2), (2, 2), (1, 1))
+WORK_RECOVERY_CONTEXT_WINDOW_CANDIDATES = ((4, 2), (2, 1), (1, 1))
 WORK_COMPACT_TASK_TEXT_LIMIT = 1200
 WORK_COMPACT_RESUME_TEXT_LIMIT = 600
 WORK_COMPACT_RESUME_ITEM_LIMIT = 6
 WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
+WORK_RECOVERY_RESUME_TEXT_LIMIT = 320
+WORK_RECOVERY_RESUME_ITEM_LIMIT = 4
+WORK_RECOVERY_DECISION_ITEM_LIMIT = 2
+WORK_RECOVERY_DECISION_TEXT_LIMIT = 160
+WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
@@ -806,12 +812,32 @@ def compact_recovery_plan_for_prompt(recovery_plan, *, item_limit=3, text_limit=
 
 def compact_resume_for_prompt(resume, *, mode="compact_memory"):
     compacted = dict(resume or {})
+    if mode == "compact_recovery":
+        resume_text_limit = WORK_RECOVERY_RESUME_TEXT_LIMIT
+        resume_item_limit = WORK_RECOVERY_RESUME_ITEM_LIMIT
+        decision_item_limit = WORK_RECOVERY_DECISION_ITEM_LIMIT
+        decision_text_limit = WORK_RECOVERY_DECISION_TEXT_LIMIT
+        decision_guidance_limit = WORK_RECOVERY_DECISION_GUIDANCE_LIMIT
+        active_memory_item_limit = max(1, WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT - 1)
+    else:
+        resume_text_limit = WORK_COMPACT_RESUME_TEXT_LIMIT
+        resume_item_limit = WORK_COMPACT_RESUME_ITEM_LIMIT
+        decision_item_limit = 4
+        decision_text_limit = 240
+        decision_guidance_limit = 160
+        active_memory_item_limit = WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT
     compacted["active_memory"] = compact_active_memory_for_prompt(
         compacted.get("active_memory"),
         mode=mode,
+        item_limit=active_memory_item_limit,
     )
     compacted["notes"] = compact_resume_notes_for_prompt(compacted.get("notes"))
-    compacted["recent_decisions"] = compact_recent_decisions_for_prompt(compacted.get("recent_decisions"))
+    compacted["recent_decisions"] = compact_recent_decisions_for_prompt(
+        compacted.get("recent_decisions"),
+        item_limit=decision_item_limit,
+        text_limit=decision_text_limit,
+        guidance_limit=decision_guidance_limit,
+    )
     compacted["recovery_plan"] = compact_recovery_plan_for_prompt(compacted.get("recovery_plan"))
     for key in (
         "goal",
@@ -835,14 +861,14 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         if key in compacted:
             compacted[key] = _compact_context_value(
                 compacted.get(key),
-                text_limit=WORK_COMPACT_RESUME_TEXT_LIMIT,
-                item_limit=WORK_COMPACT_RESUME_ITEM_LIMIT,
+                text_limit=resume_text_limit,
+                item_limit=resume_item_limit,
             )
     compacted["prompt_context"] = {
         "mode": mode,
         "active_memory_body_injection": "omitted",
-        "resume_text_limit": WORK_COMPACT_RESUME_TEXT_LIMIT,
-        "resume_item_limit": WORK_COMPACT_RESUME_ITEM_LIMIT,
+        "resume_text_limit": resume_text_limit,
+        "resume_item_limit": resume_item_limit,
     }
     return compacted
 
@@ -928,7 +954,10 @@ def build_budgeted_work_session_context(
     chosen = None
     prompt_compacted = prompt_context_mode != "full"
     budget = WORK_COMPACT_CONTEXT_BUDGET if prompt_compacted else WORK_CONTEXT_BUDGET
-    candidates = WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES if prompt_compacted else WORK_CONTEXT_WINDOW_CANDIDATES
+    if prompt_context_mode == "compact_recovery":
+        candidates = WORK_RECOVERY_CONTEXT_WINDOW_CANDIDATES
+    else:
+        candidates = WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES if prompt_compacted else WORK_CONTEXT_WINDOW_CANDIDATES
     for index, (recent_tool_count, recent_turn_count) in enumerate(candidates):
         candidate = build_work_session_context(
             session,
@@ -958,6 +987,28 @@ def build_budgeted_work_session_context(
     )
 
 
+def _latest_model_turn_timed_out(model_turns):
+    for turn in reversed(list(model_turns or [])):
+        if str((turn or {}).get("status") or "") != "failed":
+            continue
+        error_text = " ".join(
+            str((turn or {}).get(field) or "")
+            for field in ("error", "summary", "finished_note")
+        ).casefold()
+        if "request timed out" in error_text:
+            return True
+    return False
+
+
+def _effective_prompt_context_mode(prompt_context_mode, resume, model_turns):
+    if prompt_context_mode == "full":
+        return "full"
+    pending_steer = str(((resume or {}).get("pending_steer") or {}).get("text") or "").strip()
+    if pending_steer and _latest_model_turn_timed_out(model_turns):
+        return "compact_recovery"
+    return prompt_context_mode
+
+
 def build_work_model_context(
     state,
     session,
@@ -974,6 +1025,7 @@ def build_work_model_context(
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
     resume = build_work_session_resume(session, task=task, limit=8, state=state, current_time=current_time)
+    prompt_context_mode = _effective_prompt_context_mode(prompt_context_mode, resume, model_turns)
     world_state = build_work_world_state(
         resume,
         allowed_read_roots or [],

@@ -6288,6 +6288,107 @@ class WorkSessionTests(unittest.TestCase):
         self.assertFalse(details["active"])
         self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
 
+    def test_plan_item_exact_read_window_blocks_edit_ready_until_cached(self):
+        from mew.work_loop import build_work_model_context, build_write_ready_work_model_context
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["tool_calls"] = [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/workbench.py", "line_start": 120, "line_count": 41},
+                            "result": {
+                                "path": "src/mew/workbench.py",
+                                "line_start": 120,
+                                "line_end": 160,
+                                "text": "".join(f"source_line_{index}\n" for index in range(41)),
+                                "next_line": 161,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_workbench.py", "line_start": 32, "line_count": 12},
+                            "result": {
+                                "path": "tests/test_workbench.py",
+                                "line_start": 32,
+                                "line_end": 43,
+                                "text": "".join(f"test_line_{index}\n" for index in range(12)),
+                                "next_line": 44,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                    ]
+                    decision_plan = {
+                        "summary": "capture missing test fixture window",
+                        "working_memory": {
+                            "hypothesis": "The paired target paths are cached, but the earlier test fixture window is still missing.",
+                            "next_step": "Read the exact file-pair fixture window before drafting edits.",
+                            "plan_items": [
+                                "Read/cache tests/test_workbench.py:60-72",
+                                "Draft one paired dry-run edit batch for tests/test_workbench.py and src/mew/workbench.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                            "open_questions": ["What exact old text appears in the earlier test fixture window?"],
+                            "last_verified_state": "Current cached test window only covers lines 32-43.",
+                        },
+                    }
+
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        decision_plan,
+                        {"summary": "capture missing test fixture window"},
+                        {"type": "wait", "reason": "exact fixture window still missing"},
+                    )
+                    finish_work_model_turn(state, task["id"], turn["id"])
+                    save_state(state)
+
+                resume = build_work_session_resume(session)
+                observation = resume["plan_item_observations"][0]
+                self.assertEqual(
+                    observation["requested_window"],
+                    {"path": "tests/test_workbench.py", "line_start": 60, "line_end": 72},
+                )
+                self.assertFalse(observation["edit_ready"])
+                self.assertEqual(
+                    observation["reason"],
+                    "first remaining plan item still needs an uncached exact read window tests/test_workbench.py:60-72",
+                )
+                self.assertEqual(resume["demoted_adjacent_read_observations"], [])
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    {
+                        "id": task["id"],
+                        "title": task["title"],
+                        "description": task["description"],
+                        "status": task["status"],
+                    },
+                    "now",
+                )
+                self.assertFalse(context["work_session"]["resume"]["plan_item_observations"][0]["edit_ready"])
+                self.assertEqual(build_write_ready_work_model_context(context), {})
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -15108,6 +15209,96 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(work_context["recent_read_file_windows"][0]["text"], text)
         self.assertEqual(work_context["recent_read_file_windows"][0]["tool_call_id"], 1)
         self.assertFalse(work_context["recent_read_file_windows"][0]["context_truncated"])
+
+    def test_work_model_context_uses_compact_recovery_after_timeout_with_pending_steer(self):
+        from mew.work_loop import build_work_model_context
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover after a timed-out steered turn.",
+            "created_at": "then",
+            "updated_at": "now",
+            "pending_steer": {"text": "Use the cached windows now and draft the paired dry-run edit."},
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 10, "line_count": 40},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 10,
+                        "line_end": 49,
+                        "text": "source\n" * 40,
+                        "truncated": False,
+                    },
+                    "summary": "read exact source window",
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_memory.py", "line_start": 205, "line_count": 55},
+                    "result": {
+                        "path": "tests/test_memory.py",
+                        "line_start": 205,
+                        "line_end": 259,
+                        "text": "test window\n" * 55,
+                        "truncated": False,
+                    },
+                    "summary": "read exact test window",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 11,
+                    "status": "completed",
+                    "action": {"type": "read_file"},
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": ["Draft paired dry-run source+test edits", "Run focused verifier"],
+                            "target_paths": ["tests/test_memory.py", "src/mew/work_session.py"],
+                        }
+                    },
+                    "summary": "read exact test window",
+                },
+                {
+                    "id": 12,
+                    "status": "failed",
+                    "action": {"type": "wait"},
+                    "error": "request timed out",
+                    "summary": "model turn failed: request timed out",
+                },
+            ],
+        }
+        task = {"id": 1, "title": "Recover", "description": "Recover the timed-out dry-run edit.", "status": "todo", "kind": "coding"}
+
+        context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_memory",
+        )
+
+        self.assertEqual(
+            context["work_session"]["context_compaction"]["prompt_context_mode"],
+            "compact_recovery",
+        )
+        self.assertEqual(
+            context["work_session"]["resume"]["prompt_context"]["mode"],
+            "compact_recovery",
+        )
+        self.assertLessEqual(
+            len(context["work_session"]["model_turns"]),
+            2,
+        )
+        self.assertLessEqual(
+            len(context["work_session"]["resume"]["recent_decisions"]),
+            2,
+        )
 
     def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):
         from mew.work_loop import work_tool_call_for_model

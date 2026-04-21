@@ -217,6 +217,10 @@ ACTIVE_MEMORY_NEGATED_PHRASE_RE = re.compile(
     r"(?:\s+[a-z0-9_][a-z0-9_-]{2,}){0,2}"
     r")"
 )
+PLAN_ITEM_EXACT_READ_WINDOW_RE = re.compile(
+    r"^(?:read(?:/cache)?|cache)\s+([^\s:]+):(\d+)-(\d+)\b",
+    re.IGNORECASE,
+)
 
 
 def diff_line_counts(diff):
@@ -427,6 +431,77 @@ def active_memory_match(entry, terms):
     }
 
 
+def plan_item_exact_read_window(plan_item):
+    text = str(plan_item or "").strip()
+    if not text:
+        return {}
+    match = PLAN_ITEM_EXACT_READ_WINDOW_RE.match(text)
+    if not match:
+        return {}
+    try:
+        line_start = int(match.group(2))
+        line_end = int(match.group(3))
+    except (TypeError, ValueError):
+        return {}
+    if line_start <= 0 or line_end <= 0:
+        return {}
+    if line_end < line_start:
+        line_start, line_end = line_end, line_start
+    return {
+        "path": match.group(1),
+        "line_start": line_start,
+        "line_end": line_end,
+    }
+
+
+def cached_window_covers_exact_read(cached_window, requested_window):
+    cached_window = cached_window if isinstance(cached_window, dict) else {}
+    requested_window = requested_window if isinstance(requested_window, dict) else {}
+    if not requested_window:
+        return False
+    cached_path = str(cached_window.get("path") or "").strip()
+    requested_path = str(requested_window.get("path") or "").strip()
+    if not cached_path or not requested_path:
+        return False
+    if cached_path != requested_path and not cached_path.endswith(requested_path):
+        return False
+    try:
+        cached_start = int(cached_window.get("line_start") or 0)
+        cached_end = int(cached_window.get("line_end") or 0)
+        requested_start = int(requested_window.get("line_start") or 0)
+        requested_end = int(requested_window.get("line_end") or 0)
+    except (TypeError, ValueError):
+        return False
+    return cached_start <= requested_start and cached_end >= requested_end
+
+
+def revise_active_memory_item(item, *, base_dir="."):
+    item = dict(item or {})
+    if item.get("memory_kind") != "file-pair":
+        return item, None
+    source_path = str(item.get("source_path") or "").strip()
+    test_path = str(item.get("test_path") or "").strip()
+    missing_paths = []
+    for path in (source_path, test_path):
+        if not path:
+            missing_paths.append(path)
+            continue
+        if not (Path(base_dir) / path).exists():
+            missing_paths.append(path)
+    if missing_paths:
+        return None, {
+            "id": item.get("id"),
+            "memory_kind": item.get("memory_kind"),
+            "name": item.get("name") or item.get("key") or "memory",
+            "source_path": source_path,
+            "test_path": test_path,
+            "drop_reason": "precondition_miss",
+            "missing_paths": missing_paths,
+        }
+    item["revise_status"] = "kept"
+    return item, None
+
+
 def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMORY_LIMIT, base_dir="."):
     limit = max(0, int(limit or 0))
     terms = active_memory_terms(session=session, task=task)
@@ -444,6 +519,7 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
     except OSError:
         entries = []
     scored = []
+    dropped = []
     for entry in entries:
         match = active_memory_match(entry, terms)
         if not match:
@@ -453,11 +529,17 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
         item["reason"] = match["reason"]
         item["matched_terms"] = match["matched_terms"]
         item["text"] = clip_output(item.get("text") or "", DEFAULT_ACTIVE_MEMORY_TEXT_MAX_CHARS)
+        item, dropped_item = revise_active_memory_item(item, base_dir=base_dir)
+        if dropped_item:
+            dropped.append(dropped_item)
+            continue
         scored.append(item)
     scored.sort(key=lambda item: (item.get("score") or 0, item.get("created_at") or ""), reverse=True)
     result["total"] = len(scored)
     result["items"] = scored[:limit]
     result["truncated"] = len(scored) > len(result["items"])
+    if dropped:
+        result["dropped_items"] = dropped[:limit]
     return result
 
 
@@ -4561,6 +4643,9 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             "plan_item": plan_items[0],
             "reason": "first remaining working_memory.plan_items entry preserved from the latest THINK turn",
         }
+        requested_window = plan_item_exact_read_window(plan_items[0])
+        if requested_window:
+            plan_item_observation["requested_window"] = requested_window
         relevant_target_paths = target_paths[:3]
         if relevant_target_paths:
             primary_target_path = relevant_target_paths[0]
@@ -4599,6 +4684,17 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             edit_ready = bool(relevant_target_paths) and len(cached_windows) == len(relevant_target_paths) and all(
                 not item.get("context_truncated") for item in cached_windows
             )
+            if edit_ready and requested_window:
+                requested_window_covered = any(
+                    cached_window_covers_exact_read(cached_window, requested_window)
+                    for cached_window in cached_windows
+                )
+                if not requested_window_covered:
+                    edit_ready = False
+                    plan_item_observation["reason"] = (
+                        "first remaining plan item still needs an uncached exact read window "
+                        f"{requested_window['path']}:{requested_window['line_start']}-{requested_window['line_end']}"
+                    )
             plan_item_observation["edit_ready"] = edit_ready
             if edit_ready:
                 plan_item_observation["reason"] = (

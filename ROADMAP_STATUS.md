@@ -1830,15 +1830,20 @@ Missing proof:
   `focused_test_green`. Missing evidence rejects cleanly at the write gate and
   persists the accepted evidence in typed-memory frontmatter and show/list
   surfaces
+- D3 first slice is landed for `file-pair` recall reuse: active recall now
+  keeps valid file-pair entries with `revise_status=kept`, drops entries whose
+  source/test paths are missing with `drop_reason=precondition_miss`, and
+  surfaces those drops in `active_memory.dropped_items`; focused
+  `tests/test_memory.py` coverage now exercises both kept and dropped paths
 - no comparator rerun exists yet for the post-split M6.9 slices
-- D3 recall-time revise gate and later observability remain unstarted
+- D4 minimum symbol/pair index and later observability remain unstarted
 
 Next action:
 
-- keep D2 complete at the current bounded shape and take D3 `revise()`
-  adaptation/drop logic as the next separate Phase 1 slice
-- keep D4 symbol/pair index and later observability split out until D3 is
-  landed and verified on its own
+- keep D3 complete at the current bounded file-pair shape and take D4 minimum
+  symbol/pair index as the next separate Phase 1 slice
+- keep later observability and broader recall-time rewrites split out until D4
+  is landed and verified on its own
 
 ### M6.10: Execution Accelerators
 
