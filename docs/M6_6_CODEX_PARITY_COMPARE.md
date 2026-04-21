@@ -497,3 +497,20 @@ sections with exact cached-window lines, `edit_ready` state, and demoted reread
 hints, and focused formatter/prompt regression checks passed with
 `tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`. This
 is blocker reduction for the frozen M6.6 set, not an extra comparator slot.
+
+Task #361 / session #349 then retried the same first-edit-efficiency slice
+after that rendered-resume patch. Native mew stayed on the correct
+`src/mew/work_session.py` and `tests/test_work_session.py` surfaces from the
+start and reached `edit_ready=true`, but it still issued another chain of
+adjacent test-file rereads instead of proposing the paired dry-run edit batch.
+That narrowed the blocker again: cached-window recall was still exposing the
+latest narrow same-path `read_file` window rather than the already available
+merged adjacent span. The feature then landed as direct blocker reduction:
+`build_adjacent_read_observations()` now propagates `context_truncated`, and
+`build_work_session_resume()` reuses the merged same-path span when populating
+`cached_window_by_path`, so `target_path_cached_window_observations`,
+`plan_item_observations.cached_window`, and `cached_windows` now widen from the
+same shared source of truth. Focused targeted pytest, module-level
+`tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+passed. This is blocker reduction for the frozen M6.6 set, not an extra
+comparator slot.

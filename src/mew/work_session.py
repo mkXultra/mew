@@ -2183,6 +2183,7 @@ def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
             cluster["last_tool_call_id"] = call.get("id")
             cluster["merged_start"] = min(cluster["merged_start"], start)
             cluster["merged_end"] = max(cluster["merged_end"], end)
+            cluster["context_truncated"] = cluster["context_truncated"] or bool(result.get("context_truncated"))
             continue
         if cluster and cluster.get("count", 0) >= 2:
             observations.append(
@@ -2194,6 +2195,7 @@ def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
                     "last_tool_call_id": cluster["last_tool_call_id"],
                     "merged_line_start": cluster["merged_start"],
                     "merged_line_end": cluster["merged_end"],
+                    "context_truncated": cluster["context_truncated"],
                     "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans",
                     "suggested_next": (
                         f"read_file path={cluster['path']} line_start={cluster['merged_start']} "
@@ -2208,6 +2210,7 @@ def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
             "last_tool_call_id": call.get("id"),
             "merged_start": start,
             "merged_end": end,
+            "context_truncated": bool(result.get("context_truncated")),
         }
     if cluster and cluster.get("count", 0) >= 2:
         observations.append(
@@ -2219,6 +2222,7 @@ def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
                 "last_tool_call_id": cluster["last_tool_call_id"],
                 "merged_line_start": cluster["merged_start"],
                 "merged_line_end": cluster["merged_end"],
+                "context_truncated": cluster["context_truncated"],
                 "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans",
                 "suggested_next": (
                     f"read_file path={cluster['path']} line_start={cluster['merged_start']} "
@@ -4362,6 +4366,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         next_action = refresh_stale_memory_next_action(next_action, working_memory)
     target_path_cached_window_observations = []
     cached_window_by_path = {}
+    adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
     target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
     if target_paths:
         for target_path in target_paths[:3]:
@@ -4384,10 +4389,29 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     "reason": f"recent read_file window already covered {target_path}:{line_start}-{line_end}",
                     "context_truncated": bool(result.get("context_truncated")),
                 }
+                for adjacent in reversed(adjacent_read_observations):
+                    adjacent_path = str(adjacent.get("path") or "")
+                    if adjacent.get("last_tool_call_id") != call.get("id"):
+                        continue
+                    if adjacent.get("context_truncated"):
+                        continue
+                    if not adjacent_path or not (
+                        adjacent_path.endswith(target_path) or str(read_path).endswith(adjacent_path)
+                    ):
+                        continue
+                    merged_line_start = adjacent.get("merged_line_start")
+                    merged_line_end = adjacent.get("merged_line_end")
+                    if not isinstance(merged_line_start, int) or not isinstance(merged_line_end, int):
+                        continue
+                    observation["line_start"] = merged_line_start
+                    observation["line_end"] = merged_line_end
+                    observation["reason"] = (
+                        f"merged adjacent read_file windows already covered {target_path}:{merged_line_start}-{merged_line_end}"
+                    )
+                    break
                 target_path_cached_window_observations.append(observation)
                 cached_window_by_path[target_path] = observation
                 break
-    adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
     demoted_adjacent_read_observations = []
     plan_item_observations = []
     plan_items = _coerce_working_memory_plan_items((working_memory or {}).get("plan_items") or [])

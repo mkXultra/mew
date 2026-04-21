@@ -3293,6 +3293,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(warning["count"], 2)
         self.assertEqual(warning["merged_line_start"], 3200)
         self.assertEqual(warning["merged_line_end"], 3225)
+        self.assertFalse(warning["context_truncated"])
         self.assertEqual(
             warning["suggested_next"],
             "read_file path=src/mew/work_session.py line_start=3200 line_count=26",
@@ -5765,7 +5766,7 @@ class WorkSessionTests(unittest.TestCase):
                     "target_path": "src/mew/workbench.py",
                     "cached_window": {
                         "tool_call_id": 2,
-                        "line_start": 144,
+                        "line_start": 120,
                         "line_end": 160,
                         "context_truncated": False,
                     },
@@ -5773,7 +5774,7 @@ class WorkSessionTests(unittest.TestCase):
                         {
                             "path": "src/mew/workbench.py",
                             "tool_call_id": 2,
-                            "line_start": 144,
+                            "line_start": 120,
                             "line_end": 160,
                             "context_truncated": False,
                         },
@@ -5802,6 +5803,7 @@ class WorkSessionTests(unittest.TestCase):
                     "last_tool_call_id": 2,
                     "merged_line_start": 120,
                     "merged_line_end": 160,
+                    "context_truncated": False,
                     "reason": "adjacent or overlapping read_file windows on the same path suggest one merged read would be cheaper than inching through small spans edit_ready is true for this paired target path, so the reread signal is demoted behind the pending edit batch",
                     "suggested_next": "read_file path=src/mew/workbench.py line_start=120 line_count=41",
                 }
@@ -5818,7 +5820,7 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("  cached_windows:", text)
         self.assertIn(
-            "  - src/mew/workbench.py lines=144-160 tool_call=#2 truncated=False",
+            "  - src/mew/workbench.py lines=120-160 tool_call=#2 truncated=False",
             text,
         )
         self.assertIn(
@@ -5827,7 +5829,7 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("Target path cached windows", text)
         self.assertIn(
-            "- src/mew/workbench.py lines=144-160 tool_call=#2 truncated=False",
+            "- src/mew/workbench.py lines=120-160 tool_call=#2 truncated=False",
             text,
         )
         self.assertIn("Demoted adjacent read observations", text)
@@ -5877,9 +5879,9 @@ class WorkSessionTests(unittest.TestCase):
                 {
                     "path": "src/mew/workbench.py",
                     "tool_call_id": 2,
-                    "line_start": 144,
+                    "line_start": 120,
                     "line_end": 160,
-                    "reason": "recent read_file window already covered src/mew/workbench.py:144-160",
+                    "reason": "merged adjacent read_file windows already covered src/mew/workbench.py:120-160",
                     "context_truncated": False,
                 },
                 {
@@ -5898,9 +5900,9 @@ class WorkSessionTests(unittest.TestCase):
                 {
                     "path": "src/mew/workbench.py",
                     "tool_call_id": 2,
-                    "line_start": 144,
+                    "line_start": 120,
                     "line_end": 160,
-                    "reason": "recent read_file window already covered src/mew/workbench.py:144-160",
+                    "reason": "merged adjacent read_file windows already covered src/mew/workbench.py:120-160",
                     "context_truncated": False,
                 },
                 {

@@ -1151,6 +1151,23 @@ Missing proof:
   formatter/prompt regression tests passed with `ruff`, `py_compile`, and
   `git diff --check`. This is product progress for the same first-edit
   efficiency blocker, not fresh no-rescue evidence.
+- M6.6 task #361 / session #349 then retried the same first-edit-efficiency
+  slice after that rendered-resume patch. Native mew stayed on the correct
+  `src/mew/work_session.py` and `tests/test_work_session.py` surfaces from the
+  start and reached `edit_ready=true`, but it still issued another chain of
+  adjacent test-file rereads instead of proposing the paired dry-run edit
+  batch. That narrowed the blocker again: the cached-window recall path was
+  still exposing only the latest narrow same-path `read_file` window instead
+  of the already available merged adjacent span. The direct blocker-reduction
+  patch now propagates `context_truncated` through
+  `build_adjacent_read_observations()`, reuses that merged same-path span when
+  populating `cached_window_by_path`, and therefore widens
+  `target_path_cached_window_observations`, `plan_item_observations.cached_window`,
+  and `cached_windows` from the shared source of truth. Focused targeted
+  pytest, module-level `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is product
+  progress for the same first-edit-efficiency blocker, not fresh no-rescue
+  evidence.
 
 Done when:
 
@@ -1231,15 +1248,20 @@ Next action:
   by reaching `edit_ready=true` and then still failing to produce a paired
   dry-run edit; the landed formatter patch now makes that audit state visible
   in the rendered resume body for the next fresh proof task.
+- Carry the landed #361 merged-cached-window patch as product progress, but do
+  not count it as no-rescue evidence: native mew reached the correct paired
+  surfaces and `edit_ready=true`, yet still kept rereading because cached
+  window recall was anchored to the last narrow same-path span instead of the
+  merged adjacent span.
 - Keep M6.6 on the mew-side critical path. The next task should target the
-  remaining proof gap after #360: native mew must use the new
-  `plan_item_observations[*].cached_windows` + `edit_ready` surface together
-  with the rendered resume-text audit to reach a paired dry-run edit without
-  another same-path reread detour on a broader `work_session.py`-anchored
-  slice. Prefer a fresh native no-steer slice whose premise is not already
-  satisfied by the current worktree, requires native verification and
-  same-surface audit, and attacks first-edit efficiency rather than adding
-  another prompt-only reminder or comparator work.
+  remaining proof gap after #361: native mew must use the new merged
+  `cached_window_by_path` recall together with `edit_ready` and the rendered
+  resume-text audit to reach a paired dry-run edit without another same-path
+  reread detour on a broader `work_session.py`-anchored slice. Prefer a fresh
+  native no-steer slice whose premise is not already satisfied by the current
+  worktree, requires native verification and same-surface audit, and attacks
+  first-edit efficiency rather than adding another prompt-only reminder or
+  comparator work.
 - Defer the remaining/final Codex CLI comparator runs until the M6.6
   implementation set is frozen, then run them in parallel detached worktrees.
 - Continue to treat read-window / prompt-truncation fixes and other
