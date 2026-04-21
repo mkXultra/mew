@@ -1689,6 +1689,11 @@ Missing proof:
 - If any supervised 8-hour proof item fails or soft-stops, M6.7 must classify
   it as proof-or-revert failure, product-only progress, or substrate evidence,
   then fix the exposed blocker before consuming more bounded proof items.
+- Task `#388` is now explicitly marked as a paused debug target via the
+  existing work-session stop request, with `brief`, `focus`, and `desk`
+  updated to surface that paused state honestly instead of recommending it as
+  the default next move. Treat it as a stored fallback/debug target, not as
+  the next proof item to grind.
 
 Done when:
 
@@ -1714,6 +1719,9 @@ Next action:
   alive, record `N-J` with the blocker-fix chain that enabled it, and wait for
   the 8-hour wall-clock criterion before deciding whether another bounded item
   is actually required.
+- Preserve the new operator/debug stance: `#388` stays paused unless a real
+  invalidation forces resume, and `brief` / `focus` / `desk` should keep
+  reflecting that paused state during the wall-clock wait.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.
