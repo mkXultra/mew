@@ -11667,6 +11667,10 @@ def cmd_memory(args):
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)
                 return 1
+            if entry.memory_type == "project" and entry.memory_kind == "file-pair":
+                from .symbol_index import rebuild_symbol_index
+
+                rebuild_symbol_index(".")
             data = entry_to_dict(entry)
             if args.json:
                 print(json.dumps({"entry": data}, ensure_ascii=False, indent=2))

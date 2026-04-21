@@ -734,6 +734,26 @@ class MemoryTests(unittest.TestCase):
                 self.assertTrue(data["entry"]["focused_test_green"])
 
                 with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--resolve-source-path", "src/mew/work_session.py", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["resolved"]["source_path"], "src/mew/work_session.py")
+                self.assertEqual(payload["resolved"]["test_path"], "tests/test_work_session.py")
+                self.assertEqual(payload["resolved"]["memory_ids"], [data["entry"]["id"]])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["memory", "--resolve-test-path", "tests/test_work_session.py", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["resolved"]["source_path"], "src/mew/work_session.py")
+                self.assertEqual(payload["resolved"]["test_path"], "tests/test_work_session.py")
+                self.assertEqual(payload["resolved"]["memory_ids"], [data["entry"]["id"]])
+
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--show", data["entry"]["id"]]), 0)
                 text = stdout.getvalue()
                 self.assertIn("source_path: src/mew/work_session.py", text)

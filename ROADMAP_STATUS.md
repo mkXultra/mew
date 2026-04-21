@@ -1847,13 +1847,23 @@ Missing proof:
   `uv run python -m unittest tests.test_symbol_index`), and a fresh
   same-surface finish session. Count this as product progress, not autonomy
   credit
+- Durable file-pair writes now auto-refresh `.mew/durable/symbol_index.json`:
+  after a successful `mew memory --add --type project --kind file-pair ...`,
+  `src/mew/commands.py` rebuilds the symbol index before formatting output so
+  `mew memory --resolve-source-path` and `--resolve-test-path` see the new pair
+  immediately with no out-of-band rebuild. `tests/test_memory.py` now proves
+  the existing file-pair CLI add flow can resolve both directions right away.
+  Task `#398` stalled twice in mew session `#390` despite exact cached windows,
+  so `claude-ultra` chose a direct patch as product progress rather than
+  autonomy credit
 - no comparator rerun exists yet for the post-split M6.9 slices
 - later observability and broader retrieval changes remain unstarted
 
 Next action:
 
-- choose the next bounded post-Phase-1 M6.9 slice from a clean mainline now
-  that both reverse-query surfaces are landed
+- land the smallest D7 read-only observability slice next:
+  `mew memory --reviewer-diffs` should expose `.mew/durable/reviewer_diffs.jsonl`
+  in human and JSON output without changing the write path or adding filters
 - keep later observability and broader recall-time rewrites split out until
   the next bounded Phase 2 target is chosen explicitly
 
