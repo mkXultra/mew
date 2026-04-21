@@ -40,6 +40,8 @@ Do not let `mew focus` or an attractive recent suggestion override the active
 milestone gate unless it closes that milestone's Done-when criteria.
 Do not let a checkpoint "hold", "wait", or "do not spend a proof item" note
 become the new task selector. Treat it as a local constraint only.
+Do not treat a checkpoint, a commit boundary, or a clean worktree as a reason
+to return control to the user during a long session.
 
 ## Reentry Checklist
 
@@ -99,6 +101,8 @@ Summarize only:
   task closes
 - next safest action
 - the one-line chain `milestone -> criterion -> task`
+- output gate: whether this is an internal checkpoint or a user-visible report
+- remaining long-session budget and the next allowed report trigger
 
 ## Drift Check
 
@@ -129,6 +133,20 @@ Before context may compress or after each meaningful chunk, leave a durable trai
 - save charter changes separately from progress checkpoints; progress checkpoints should not silently replace the charter
 - include exact next action, validation state, and blockers
 - do not rely on chat transcript alone for long-lived decisions
+
+Checkpoint rule:
+
+- A checkpoint is an internal continuity artifact, not a user-visible boundary.
+- After saving a checkpoint, continue working unless the saved output gate says
+  reporting is allowed.
+- During a user-granted long session, return control only when one of these is
+  true:
+  - the explicit time/report boundary was reached
+  - progress is blocked and cannot be worked through locally
+  - approval or another user decision is required
+  - the user explicitly interrupted and asked for control/status
+
+If none of those is true, keep working silently after the checkpoint.
 
 ## Safety
 

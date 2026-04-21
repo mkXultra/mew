@@ -61,6 +61,7 @@ Do not save noisy transcript summaries, temporary thoughts, or facts already obv
 Before a user-approved long session, always save:
 
 - planned time budget and start time
+- absolute stop/report boundary if the user gave one
 - the chosen objective for the session
 - non-goals for the session
 - task selection rules, including what evidence is required before changing direction
@@ -82,6 +83,16 @@ Always save the governing chain explicitly:
 - active milestone
 - single target criterion
 - next task mapped to that criterion
+
+Always save the output gate explicitly:
+
+- `checkpoint_is_internal=true`
+- `no_return_until=<time or condition>`
+- `report_only_if={time_boundary, blocker, approval_needed, explicit_user_interrupt}`
+- `remaining_budget=<best current estimate>`
+
+Do not treat `commit done`, `clean worktree`, `next action clear`, or
+`checkpoint saved` as report triggers.
 
 If the checkpoint says "hold", "wait", or "do not spend a proof item", also
 save **why** that constraint exists and what event would re-open task
@@ -115,3 +126,4 @@ After saving, a future agent should be able to use `mew-planning-reentry` and re
 - latest validation
 - next safest action
 - milestone -> criterion -> task mapping
+- output gate: whether the session must continue silently or may report back
