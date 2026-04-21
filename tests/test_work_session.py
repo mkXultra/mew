@@ -6237,6 +6237,57 @@ class WorkSessionTests(unittest.TestCase):
             [6890, 19433],
         )
 
+    def test_write_ready_fast_path_reports_missing_exact_cached_window_texts_reason(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Explain why write-ready fast path is unavailable.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "working_memory": {
+                        "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 6960,
+                                    "line_end": 7010,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 19405,
+                                    "line_end": 19497,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
+
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -20906,7 +20957,8 @@ class WorkSessionTests(unittest.TestCase):
                                 "think": {
                                     "prompt_chars": 63842,
                                     "timeout_seconds": 45.0,
-                                }
+                                },
+                                "write_ready_fast_path_reason": "missing_exact_cached_window_texts",
                             },
                         }
                     ]
@@ -20954,6 +21006,10 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["summary"], "request timed out")
                 self.assertEqual(data["latest_model_failure"]["prompt_chars"], 63842)
                 self.assertEqual(data["latest_model_failure"]["timeout_seconds"], 45.0)
+                self.assertEqual(
+                    data["latest_model_failure"]["write_ready_fast_path_reason"],
+                    "missing_exact_cached_window_texts",
+                )
                 self.assertEqual(data["suggested_recovery"]["kind"], "replannable")
                 self.assertEqual(
                     data["suggested_recovery"]["command"],
@@ -20967,7 +21023,11 @@ class WorkSessionTests(unittest.TestCase):
                         self.assertEqual(main(["work", "1", "--follow-status"]), 0)
                 text = stdout.getvalue()
                 self.assertIn("latest_model_failure: turn=12 status=failed source=session summary=request timed out", text)
-                self.assertIn("latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0", text)
+                self.assertIn(
+                    "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 "
+                    "write_ready_fast_path_reason=missing_exact_cached_window_texts",
+                    text,
+                )
                 self.assertIn(
                     "recovery_command: mew work 1 --live --auth auth.json --model-backend codex --allow-read . "
                     "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "

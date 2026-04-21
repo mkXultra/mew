@@ -6470,6 +6470,7 @@ def _latest_failed_model_turn(model_turns):
             "prompt_chars": think_metrics.get("prompt_chars"),
             "timeout_seconds": think_metrics.get("timeout_seconds"),
             "write_ready_fast_path": bool((turn.get("model_metrics") or {}).get("write_ready_fast_path")),
+            "write_ready_fast_path_reason": (turn.get("model_metrics") or {}).get("write_ready_fast_path_reason") or "",
         }
     return None
 
@@ -6691,6 +6692,10 @@ def format_work_follow_status(data):
             metrics_bits.append(f"timeout_seconds={latest_model_failure.get('timeout_seconds')}")
         if latest_model_failure.get("write_ready_fast_path"):
             metrics_bits.append("write_ready_fast_path=True")
+        if latest_model_failure.get("write_ready_fast_path_reason"):
+            metrics_bits.append(
+                f"write_ready_fast_path_reason={latest_model_failure.get('write_ready_fast_path_reason')}"
+            )
         if metrics_bits:
             lines.append("latest_model_failure_metrics: " + " ".join(metrics_bits))
     if data.get("next_action"):

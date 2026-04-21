@@ -1026,21 +1026,21 @@ def _work_write_ready_fast_path_state(context):
     resume = work_session.get("resume") or {}
     observations = resume.get("plan_item_observations") or []
     if not observations:
-        return {}
+        return {"active": False, "reason": "missing_plan_item_observations"}
     first = observations[0] or {}
     if not first.get("edit_ready"):
-        return {}
+        return {"active": False, "reason": "first_plan_item_not_edit_ready"}
     cached_windows = [
         item
         for item in (first.get("cached_windows") or [])
         if isinstance(item, dict) and item.get("path")
     ]
     if len(cached_windows) < 2:
-        return {}
+        return {"active": False, "reason": "insufficient_cached_windows"}
     has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in cached_windows)
     has_source = any(_work_batch_path_is_mew_source(item.get("path")) for item in cached_windows)
     if not (has_tests and has_source):
-        return {}
+        return {"active": False, "reason": "missing_source_test_pair"}
     steer_text = str(((resume.get("pending_steer") or {}).get("text")) or "")
     if not steer_text:
         steer_text = str((context or {}).get("guidance") or "")
@@ -1051,8 +1051,10 @@ def _work_write_ready_fast_path_state(context):
             for needle in ("dry-run", "dry run", "paired dry-run", "paired dry run", "draft")
         )
         if not steer_requests_write:
-            return {}
+            return {"active": False, "reason": "guidance_not_requesting_write"}
     return {
+        "active": True,
+        "reason": "paired_cached_windows_edit_ready",
         "plan_item": first,
         "cached_windows": cached_windows,
         "steer_text": steer_text,
@@ -1095,10 +1097,10 @@ def _write_ready_recent_windows_from_target_paths(work_session, resume):
     return matched
 
 
-def build_write_ready_work_model_context(context):
+def _work_write_ready_fast_path_details(context):
     fast_path = _work_write_ready_fast_path_state(context)
-    if not fast_path:
-        return {}
+    if not fast_path.get("active"):
+        return fast_path
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") or {}
     cached_paths = [item.get("path") for item in fast_path.get("cached_windows") or []]
@@ -1110,7 +1112,11 @@ def build_write_ready_work_model_context(context):
             if item.get("line_start") != cached.get("line_start") or item.get("line_end") != cached.get("line_end"):
                 continue
             if not item.get("text") or item.get("context_truncated"):
-                return {}
+                return {
+                    **fast_path,
+                    "active": False,
+                    "reason": "cached_window_text_missing_or_truncated",
+                }
             recent_windows.append(item)
             break
         else:
@@ -1119,7 +1125,26 @@ def build_write_ready_work_model_context(context):
     if not recent_windows:
         recent_windows = _write_ready_recent_windows_from_target_paths(work_session, resume)
         if not recent_windows:
-            return {}
+            return {
+                **fast_path,
+                "active": False,
+                "reason": "missing_exact_cached_window_texts",
+            }
+    return {
+        **fast_path,
+        "recent_windows": recent_windows,
+        "cached_paths": cached_paths,
+    }
+
+
+def build_write_ready_work_model_context(context):
+    fast_path = _work_write_ready_fast_path_details(context)
+    if not fast_path.get("active"):
+        return {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
+    recent_windows = fast_path.get("recent_windows") or []
+    cached_paths = fast_path.get("cached_paths") or []
     resume_context = {
         "working_memory": resume.get("working_memory") or {},
         "plan_item_observations": [fast_path.get("plan_item")],
@@ -1816,7 +1841,12 @@ def plan_work_model_turn(
         guidance=guidance,
         prompt_context_mode=prompt_context_mode,
     )
-    write_ready_context = build_write_ready_work_model_context(context)
+    write_ready_fast_path = _work_write_ready_fast_path_details(context)
+    write_ready_context = (
+        build_write_ready_work_model_context(context)
+        if write_ready_fast_path.get("active")
+        else {}
+    )
     stream_deltas = []
 
     def capture_delta(phase, text):
@@ -1861,7 +1891,8 @@ def plan_work_model_turn(
         "reasoning_policy": reasoning_policy,
         "reasoning_effort": reasoning_policy.get("effort") or "",
         "prompt_context_mode": prompt_context_mode,
-        "write_ready_fast_path": bool(write_ready_context),
+        "write_ready_fast_path": bool(write_ready_fast_path.get("active")),
+        "write_ready_fast_path_reason": write_ready_fast_path.get("reason") or "",
     }
     if pre_model_metrics_sink:
         pre_model_metrics_sink(dict(model_metrics))
