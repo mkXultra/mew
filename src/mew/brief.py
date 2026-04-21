@@ -1445,6 +1445,10 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
     recent_unread = list(reversed(unread[-limit:]))
     context_checkpoint = latest_context_checkpoint() if include_context_checkpoint else {}
     current_git = current_git_reentry_state() if include_context_checkpoint else {}
+    last_request = user.get("last_request") or "(none)"
+    checkpoint_same_day = str(context_checkpoint.get("created_at") or "")[:10] == generated_at[:10]
+    if kind == "coding" and user.get("mode") == "waiting_for_agent" and checkpoint_same_day:
+        last_request = "(checkpoint-guided reentry; see context checkpoint)"
     if kind:
         task_ids = {str(task.get("id")) for task in tasks}
         running_runs = [run for run in running_runs if str(run.get("task_id")) in task_ids]
@@ -1459,7 +1463,7 @@ def build_brief(state, limit=5, kind=None, include_context_checkpoint=False):
         f"runtime: {runtime.get('state')} pid={runtime.get('pid')}",
         f"agent: {agent.get('mode')} focus={agent.get('current_focus') or '(none)'}",
         f"autonomy: {'on' if autonomy.get('enabled') else 'off'} level={autonomy.get('level') or 'off'} cycles={autonomy.get('cycles') or 0}",
-        f"user: {user.get('mode')} last_request={user.get('last_request') or '(none)'}",
+        f"user: {user.get('mode')} last_request={last_request}",
         f"unread_outbox: {len(unread)}",
         f"memory: {_first_nonempty(shallow.get('current_context'), shallow.get('latest_task_summary'), '(empty)')}",
         "",

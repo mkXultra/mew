@@ -608,6 +608,28 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("Next useful move: leave paused work session #3 task #7 paused", brief)
 
+    def test_brief_uses_checkpoint_guided_last_request_for_same_day_coding_reentry(self):
+        state = default_state()
+        state["user_status"] = {
+            "mode": "waiting_for_agent",
+            "last_request": "No. Do not continue #333 in its current 3-file shape.",
+        }
+
+        with patch("mew.brief.now_iso", return_value="2026-04-21T15:35:26Z"), patch(
+            "mew.brief.latest_context_checkpoint",
+            return_value={
+                "name": "Long session checkpoint: post-m6-9-prep-docs",
+                "created_at": "2026-04-21T15:35:25Z",
+            },
+        ):
+            brief = build_brief(state, kind="coding", include_context_checkpoint=True)
+
+        self.assertIn(
+            "user: waiting_for_agent last_request=(checkpoint-guided reentry; see context checkpoint)",
+            brief,
+        )
+        self.assertNotIn("No. Do not continue #333", brief)
+
     def test_brief_hides_plan_needed_for_task_with_active_work_session(self):
         state = default_state()
         add_task(state, task_id=7, title="Do not duplicate active task", kind="coding")
