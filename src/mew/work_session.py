@@ -2878,9 +2878,22 @@ def _annotate_working_memory_with_latest_tool(memory, turn, calls):
     stale_call = _latest_tool_call_after_memory(turn, calls)
     if stale_call:
         path = _working_memory_target_path_text(work_call_path(stale_call))
-        if path and path not in (memory.get("target_paths") or []):
-            memory.setdefault("target_paths", []).append(path)
-            memory["target_paths"] = memory["target_paths"][:5]
+        target_paths = memory.setdefault("target_paths", [])
+        if path:
+            if path not in target_paths:
+                target_paths.append(path)
+            if _is_mew_source_path(path):
+                discovered = discover_tests_for_source(path, limit=1)
+                paired_test_path = (
+                    _working_memory_target_path_text((discovered[0] or {}).get("path"))
+                    if discovered
+                    else inferred_test_path_for_mew_source(path)
+                )
+                if paired_test_path and not any(
+                    str(existing).replace("\\", "/").startswith("tests/") for existing in target_paths
+                ):
+                    target_paths.append(paired_test_path)
+            memory["target_paths"] = target_paths[:5]
         memory["latest_tool_call_id"] = stale_call.get("id")
         memory["latest_tool_state"] = format_work_tool_observation_state(stale_call)
         memory["stale_after_tool_call_id"] = stale_call.get("id")

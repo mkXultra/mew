@@ -1056,7 +1056,21 @@ Missing proof:
   evidence for the frozen M6.6 set, but not as a clean no-steer proof. The
   remaining M6.6 missing proof is now narrower: broader multi-file normal-case
   autonomy and durable plan/path recall without supervisor steer, especially on
-  slices that need correct paired source/test surfacing from the start.
+  slices that need correct paired source/test surfacing from the start. Task
+  #356 then targeted exactly that missing surface-selection gap. Native mew
+  work reached a reviewable paired dry-run batch, auto-applied it, and exposed
+  the intended product patch, but the run drifted on the paired test anchor:
+  it first inserted the new test before the existing `finally` block, then
+  spent multiple repair turns rereading the same stale-test surface under high
+  context pressure. The applied batch failed `uv run python -m unittest
+  tests.test_work_session`, rolled back, and was stopped for supervisor
+  takeover. A direct patch then landed the intended product change anyway:
+  `_annotate_working_memory_with_latest_tool()` now carries a
+  discovered-or-inferred `tests/**` partner when a stale latest-tool path
+  points at `src/mew/**` and no test target is already present, and a focused
+  resume test proves that stale src-path recall now keeps both the source and
+  its paired test path. Count #356 as product progress plus a concrete blocker
+  trace for repair-loop/test-anchor drift, not as no-rescue evidence.
 
 Done when:
 
@@ -1111,6 +1125,11 @@ Next action:
   `src/mew/work_loop.py` + `tests/test_work_session.py` change with native
   verification and same-surface audit, but the run still needed one narrow
   steer to abandon the wrong test surface before the edit.
+- Carry the landed #356 paired-test-path recall patch as product progress, but
+  do not count it as no-rescue evidence: native mew reached a reviewable
+  paired dry-run/apply attempt, but repeated test-anchor drift on
+  `tests/test_work_session.py` forced supervisor takeover before the final
+  passing patch was landed.
 - Keep M6.6 on the mew-side critical path. The next task should be a fresh
   native no-steer proof task on a broader multi-file coding slice, ideally one
   that needs `src/mew/work_session.py` plus one sibling `src/mew` surface or a

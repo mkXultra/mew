@@ -11176,6 +11176,64 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_resume_carries_inferred_test_target_for_stale_src_path(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir(parents=True)
+                Path("src/mew/work_session.py").write_text("VALUE = 1\n", encoding="utf-8")
+                Path("tests/test_work_session.py").write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "read src work_session",
+                    "working_memory": {
+                        "hypothesis": "src/mew/work_session.py is the next evidence source.",
+                        "next_step": "Read src/mew/work_session.py before editing.",
+                        "open_questions": ["Does stale latest-tool resume keep the paired test path?"],
+                        "last_verified_state": "not verified yet",
+                    },
+                    "action": {"type": "read_file", "path": "src/mew/work_session.py"},
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["work", "1", "--session", "--resume", "--json"]), 0)
+                resume = json.loads(stdout.getvalue())["resume"]
+                memory = resume["working_memory"]
+                self.assertEqual(
+                    memory["target_paths"],
+                    ["src/mew/work_session.py", "tests/test_work_session.py"],
+                )
+                self.assertEqual(memory["latest_tool_call_id"], 1)
+                self.assertEqual(memory["stale_after_tool_call_id"], 1)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_progress_streams_model_and_tool_events(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
