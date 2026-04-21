@@ -11414,6 +11414,14 @@ def _format_memory_entry_show(item):
         lines.append(f"fix: {item.get('fix')}")
     if item.get("stop_rule"):
         lines.append(f"stop_rule: {item.get('stop_rule')}")
+    if item.get("source_path"):
+        lines.append(f"source_path: {item.get('source_path')}")
+    if item.get("test_path"):
+        lines.append(f"test_path: {item.get('test_path')}")
+    if item.get("structural_evidence"):
+        lines.append(f"structural_evidence: {item.get('structural_evidence')}")
+    if item.get("focused_test_green"):
+        lines.append("focused_test_green: yes")
     if item.get("vetoed"):
         lines.append("vetoed: yes")
         lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
@@ -11528,6 +11536,10 @@ def cmd_memory(args):
                     root_cause=args.root_cause or "",
                     fix=args.fix or "",
                     stop_rule=args.stop_rule or "",
+                    source_path=args.source_path or "",
+                    test_path=args.test_path or "",
+                    structural_evidence=args.structural_evidence or "",
+                    focused_test_green=bool(args.focused_test_green),
                 )
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)

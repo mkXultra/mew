@@ -205,6 +205,22 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(shield.memory_kind, "failure-shield")
             self.assertEqual(shield.root_cause, "durable stale note reused without reviewer context")
 
+            file_pair = backend.write(
+                "work_session.py changes usually need tests/test_work_session.py updates.",
+                scope="private",
+                memory_type="project",
+                memory_kind="file-pair",
+                name="work_session pair",
+                source_path="src/mew/work_session.py",
+                test_path="tests/test_work_session.py",
+                structural_evidence="same-session read of both files plus observed co-edit",
+                focused_test_green=True,
+            )
+            self.assertEqual(file_pair.memory_kind, "file-pair")
+            self.assertEqual(file_pair.source_path, "src/mew/work_session.py")
+            self.assertEqual(file_pair.test_path, "tests/test_work_session.py")
+            self.assertTrue(file_pair.focused_test_green)
+
             with self.assertRaisesRegex(ValueError, "--root-cause"):
                 backend.write(
                     "Broken failure shield",
@@ -216,6 +232,30 @@ class MemoryTests(unittest.TestCase):
                     symptom="stale note reused",
                     fix="record reviewer veto",
                     stop_rule="stop if reviewer context is missing",
+                )
+
+            with self.assertRaisesRegex(ValueError, "--structural-evidence"):
+                backend.write(
+                    "Broken file pair",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="file-pair",
+                    name="Broken pair",
+                    source_path="src/mew/work_session.py",
+                    test_path="tests/test_work_session.py",
+                    focused_test_green=True,
+                )
+
+            with self.assertRaisesRegex(ValueError, "--focused-test-green"):
+                backend.write(
+                    "Broken file pair",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="file-pair",
+                    name="Broken pair",
+                    source_path="src/mew/work_session.py",
+                    test_path="tests/test_work_session.py",
+                    structural_evidence="same-session read of both files",
                 )
 
     def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
@@ -423,6 +463,13 @@ class MemoryTests(unittest.TestCase):
                                 "private",
                                 "--name",
                                 "Paired test note",
+                                "--source-path",
+                                "src/mew/work_session.py",
+                                "--test-path",
+                                "tests/test_work_session.py",
+                                "--structural-evidence",
+                                "same-session read of both targets",
+                                "--focused-test-green",
                             ]
                         ),
                         0,
@@ -513,6 +560,106 @@ class MemoryTests(unittest.TestCase):
                         1,
                     )
                 self.assertIn("--rationale", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Missing file-pair structure",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "file-pair",
+                                "--name",
+                                "Broken pair",
+                                "--source-path",
+                                "src/mew/work_session.py",
+                                "--test-path",
+                                "tests/test_work_session.py",
+                                "--focused-test-green",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--structural-evidence", stderr.getvalue())
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Missing file-pair green test",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "file-pair",
+                                "--name",
+                                "Broken pair",
+                                "--source-path",
+                                "src/mew/work_session.py",
+                                "--test-path",
+                                "tests/test_work_session.py",
+                                "--structural-evidence",
+                                "same-session read of both files",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--focused-test-green", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_file_pair_surfaces_structural_fields(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "work_session.py maps to tests/test_work_session.py",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "file-pair",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "work_session pair",
+                                "--source-path",
+                                "src/mew/work_session.py",
+                                "--test-path",
+                                "tests/test_work_session.py",
+                                "--structural-evidence",
+                                "same-session read of both targets and observed co-edit",
+                                "--focused-test-green",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["entry"]["memory_kind"], "file-pair")
+                self.assertEqual(data["entry"]["source_path"], "src/mew/work_session.py")
+                self.assertEqual(data["entry"]["test_path"], "tests/test_work_session.py")
+                self.assertEqual(
+                    data["entry"]["structural_evidence"],
+                    "same-session read of both targets and observed co-edit",
+                )
+                self.assertTrue(data["entry"]["focused_test_green"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--show", data["entry"]["id"]]), 0)
+                text = stdout.getvalue()
+                self.assertIn("source_path: src/mew/work_session.py", text)
+                self.assertIn("test_path: tests/test_work_session.py", text)
+                self.assertIn("focused_test_green: yes", text)
             finally:
                 os.chdir(old_cwd)
 

@@ -1492,6 +1492,19 @@ def build_parser():
     memory_parser.add_argument("--root-cause", dest="root_cause", help="root cause required for a failure-shield durable write")
     memory_parser.add_argument("--fix", help="fix required for a failure-shield durable write")
     memory_parser.add_argument("--stop-rule", dest="stop_rule", help="stop rule required for a failure-shield durable write")
+    memory_parser.add_argument("--source-path", dest="source_path", help="source path required for a file-pair durable write")
+    memory_parser.add_argument("--test-path", dest="test_path", help="test path required for a file-pair durable write")
+    memory_parser.add_argument(
+        "--structural-evidence",
+        dest="structural_evidence",
+        help="structural evidence required for a file-pair durable write",
+    )
+    memory_parser.add_argument(
+        "--focused-test-green",
+        dest="focused_test_green",
+        action="store_true",
+        help="mark the paired focused test green for a file-pair durable write",
+    )
     memory_parser.add_argument(
         "--kind",
         dest="memory_kind",

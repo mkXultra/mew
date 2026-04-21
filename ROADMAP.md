@@ -531,6 +531,55 @@ Why it matters:
   than the 1st, which is the only long-term basis for a resident that a
   frontier model would prefer to inhabit over Claude Code or Codex CLI.
 
+## Milestone 6.10: Execution Accelerators
+
+Increase mew's single-session implementation throughput with explicit short-
+horizon todo state and bounded read-only exploration, without widening the
+governance surface.
+
+Target:
+
+- session-scoped Todo state for the current resident coding loop, separate
+  from persistent roadmap tasks and durable coding memory
+- minimum Todo tools to write, update, and list 5-10 bounded items inside one
+  session, with explicit status and duplicate-state guards
+- `mew focus`, `mew brief`, or the equivalent reviewer-facing coding surfaces
+  can show the current Todo state without silently promoting it into durable
+  memory
+- a bounded Explorer helper for read-only repository exploration that can
+  gather cited findings for the main session but cannot edit files, run shell,
+  or mutate mew state
+- Todo lands before Explorer; Explorer may depend on Todo state, but not vice
+  versa
+- explicit non-goals for this milestone: no cross-session Todo persistence, no
+  write-capable Explorer, no multi-Explorer concurrency, and no governance or
+  milestone-close edits through these accelerators
+
+Done when:
+
+- Todo D1 lands with passing tests and is used in at least one real bounded
+  coding iteration to keep short-horizon work decomposition visible without
+  replacing persistent tasks
+- Todo D2 surfaces the current Todo state in reviewer/operator views and
+  prevents obvious duplicate `in_progress` or stale-item churn inside a
+  session
+- Explorer D1 lands as a read-only bounded helper with passing tests, explicit
+  scope fence, and at least one real bounded iteration where its output
+  shortens repository exploration without producing writes
+- at least one post-M6.9 bounded implementation slice shows reduced planning
+  churn or read-only churn attributable to Todo and/or Explorer, with no
+  governance regression
+- the scope fence holds across the proof run: no cross-session Todo writes, no
+  write or shell capability in Explorer, no multi-Explorer fan-out, and no
+  milestone or roadmap-status edits through accelerator surfaces
+
+Why it matters:
+
+- M6.9 makes mew smarter across sessions. M6.10 makes one session move better
+  by separating short-horizon planning from durable memory and keeping
+  exploration additive, bounded, and read-only. Without that split, mew keeps
+  spending turns on avoidable planning churn.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

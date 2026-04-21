@@ -42,6 +42,10 @@ class MemoryEntry:
     root_cause: str = ""
     fix: str = ""
     stop_rule: str = ""
+    source_path: str = ""
+    test_path: str = ""
+    structural_evidence: str = ""
+    focused_test_green: bool = False
     path: Path | None = None
 
 
@@ -68,6 +72,10 @@ class FileMemoryBackend:
         root_cause: str = "",
         fix: str = "",
         stop_rule: str = "",
+        source_path: str = "",
+        test_path: str = "",
+        structural_evidence: str = "",
+        focused_test_green: bool = False,
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
@@ -75,7 +83,20 @@ class FileMemoryBackend:
         body = str(body or "").strip()
         if not body:
             raise ValueError("memory body must not be empty")
-        approved, why, how_to_apply, rationale, symptom, root_cause, fix, stop_rule = validate_write_gate(
+        (
+            approved,
+            why,
+            how_to_apply,
+            rationale,
+            symptom,
+            root_cause,
+            fix,
+            stop_rule,
+            source_path,
+            test_path,
+            structural_evidence,
+            focused_test_green,
+        ) = validate_write_gate(
             memory_type=memory_type,
             memory_kind=memory_kind,
             approved=approved,
@@ -86,6 +107,10 @@ class FileMemoryBackend:
             root_cause=root_cause,
             fix=fix,
             stop_rule=stop_rule,
+            source_path=source_path,
+            test_path=test_path,
+            structural_evidence=structural_evidence,
+            focused_test_green=focused_test_green,
         )
         created_at = created_at or now_iso()
         name = normalize_text(name) or first_line(body) or "Untitled memory"
@@ -111,6 +136,10 @@ class FileMemoryBackend:
             root_cause=root_cause,
             fix=fix,
             stop_rule=stop_rule,
+            source_path=source_path,
+            test_path=test_path,
+            structural_evidence=structural_evidence,
+            focused_test_green=focused_test_green,
             path=path,
         )
         path.write_text(render_memory_entry(entry), encoding="utf-8")
@@ -306,7 +335,11 @@ def validate_write_gate(
     root_cause: str = "",
     fix: str = "",
     stop_rule: str = "",
-) -> tuple[bool, str, str, str, str, str, str, str]:
+    source_path: str = "",
+    test_path: str = "",
+    structural_evidence: str = "",
+    focused_test_green: bool = False,
+) -> tuple[bool, str, str, str, str, str, str, str, str, str, str, bool]:
     normalized_why = normalize_text(why)
     normalized_how = normalize_text(how_to_apply)
     normalized_rationale = normalize_text(rationale)
@@ -314,6 +347,9 @@ def validate_write_gate(
     normalized_root_cause = normalize_text(root_cause)
     normalized_fix = normalize_text(fix)
     normalized_stop_rule = normalize_text(stop_rule)
+    normalized_source_path = normalize_text(source_path)
+    normalized_test_path = normalize_text(test_path)
+    normalized_structural_evidence = normalize_text(structural_evidence)
     if memory_type != "project" or not memory_kind:
         return (
             bool(approved),
@@ -324,6 +360,10 @@ def validate_write_gate(
             normalized_root_cause,
             normalized_fix,
             normalized_stop_rule,
+            normalized_source_path,
+            normalized_test_path,
+            normalized_structural_evidence,
+            bool(focused_test_green),
         )
     if memory_kind == "reviewer-steering":
         if not approved:
@@ -348,6 +388,15 @@ def validate_write_gate(
             raise ValueError("task-template writes require --approved")
         if not normalized_rationale:
             raise ValueError("task-template writes require --rationale")
+    if memory_kind == "file-pair":
+        if not normalized_source_path:
+            raise ValueError("file-pair writes require --source-path")
+        if not normalized_test_path:
+            raise ValueError("file-pair writes require --test-path")
+        if not normalized_structural_evidence:
+            raise ValueError("file-pair writes require --structural-evidence")
+        if not focused_test_green:
+            raise ValueError("file-pair writes require --focused-test-green")
     return (
         bool(approved),
         normalized_why,
@@ -357,6 +406,10 @@ def validate_write_gate(
         normalized_root_cause,
         normalized_fix,
         normalized_stop_rule,
+        normalized_source_path,
+        normalized_test_path,
+        normalized_structural_evidence,
+        bool(focused_test_green),
     )
 
 
@@ -437,6 +490,14 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         fields["fix"] = entry.fix
     if entry.stop_rule:
         fields["stop_rule"] = entry.stop_rule
+    if entry.source_path:
+        fields["source_path"] = entry.source_path
+    if entry.test_path:
+        fields["test_path"] = entry.test_path
+    if entry.structural_evidence:
+        fields["structural_evidence"] = entry.structural_evidence
+    if entry.focused_test_green:
+        fields["focused_test_green"] = "true"
     lines = [FRONTMATTER_DELIMITER]
     for key, value in fields.items():
         lines.append(f"{key} = {quote_frontmatter(value)}")
@@ -494,6 +555,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
     root_cause = normalize_text(metadata.get("root_cause"))
     fix = normalize_text(metadata.get("fix"))
     stop_rule = normalize_text(metadata.get("stop_rule"))
+    source_path = normalize_text(metadata.get("source_path"))
+    test_path = normalize_text(metadata.get("test_path"))
+    structural_evidence = normalize_text(metadata.get("structural_evidence"))
+    focused_test_green = normalize_text(metadata.get("focused_test_green")).casefold() in {"true", "yes", "1"}
     if root:
         memory_id = normalize_text(metadata.get("id")) or path.relative_to(root).with_suffix("").as_posix()
     else:
@@ -515,6 +580,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         root_cause=root_cause,
         fix=fix,
         stop_rule=stop_rule,
+        source_path=source_path,
+        test_path=test_path,
+        structural_evidence=structural_evidence,
+        focused_test_green=focused_test_green,
         path=path,
     )
 
@@ -538,6 +607,10 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.root_cause,
             entry.fix,
             entry.stop_rule,
+            entry.source_path,
+            entry.test_path,
+            entry.structural_evidence,
+            "true" if entry.focused_test_green else "",
         ]
     ).casefold()
     if needle in haystack:
@@ -569,6 +642,10 @@ def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> 
         "root_cause": entry.root_cause,
         "fix": entry.fix,
         "stop_rule": entry.stop_rule,
+        "source_path": entry.source_path,
+        "test_path": entry.test_path,
+        "structural_evidence": entry.structural_evidence,
+        "focused_test_green": entry.focused_test_green,
     }
     if entry.path:
         data["path"] = str(entry.path)

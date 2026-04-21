@@ -20,9 +20,10 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves to M6.9 D1. |
+| 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves through bounded M6.9 Phase 1 slices. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, and D2 slices: typed `memory_kind`, read-only list/show by id, a reviewer-owned veto stub, and write gates for reviewer-steering/task-template/failure-shield. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, and D2 slices: typed `memory_kind`, read-only list/show by id, a reviewer-owned veto stub, and write gates for reviewer-steering/task-template/failure-shield/file-pair. |
+| 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -33,8 +34,9 @@ M5 was archived losslessly in
 
 Last assessed: 2026-04-21 16:57 JST.
 
-Active work: **M6.7 frozen close-watch + M6.9 D1 implementation in mainline**
-while M5.1, M6, and M6.6 remain closed baselines and M7 stays deferred.
+Active work: **M6.7 frozen close-watch + bounded M6.9 Phase 1 implementation
+in mainline** while M5.1, M6, and M6.6 remain closed baselines, M6.10 stays
+registered but inactive, and M7 remains deferred.
 
 Reasoning:
 
@@ -1819,21 +1821,59 @@ Missing proof:
   standalone JSONL veto log, default list output suppresses vetoed entries, and
   `mew memory --show <id>` surfaces veto status/reason while leaving the
   original memory file unchanged
-- D2 bounded slices are landed for reviewer-steering, task-template, and
-  failure-shield: reviewer-steering now requires explicit approval plus `why`
-  and `how_to_apply`; task-template requires explicit approval plus
-  `rationale`; failure-shield requires explicit approval plus `symptom`,
-  `root_cause`, `fix`, and `stop_rule`. Missing evidence rejects cleanly at the
-  write gate and persists the accepted evidence in typed-memory frontmatter
+- D2 bounded slices are landed for reviewer-steering, task-template,
+  failure-shield, and file-pair: reviewer-steering now requires explicit
+  approval plus `why` and `how_to_apply`; task-template requires explicit
+  approval plus `rationale`; failure-shield requires explicit approval plus
+  `symptom`, `root_cause`, `fix`, and `stop_rule`; file-pair now requires
+  `source_path`, `test_path`, `structural_evidence`, and
+  `focused_test_green`. Missing evidence rejects cleanly at the write gate and
+  persists the accepted evidence in typed-memory frontmatter and show/list
+  surfaces
 - no comparator rerun exists yet for the post-split M6.9 slices
-- D2 still lacks the file-pair branch
 - D3 recall-time revise gate and later observability remain unstarted
 
 Next action:
 
-- continue with the next bounded Phase 1 slice only after reaffirming the
-  current D1/D7/D6/D2a landings and keeping later D2/D3 work split into separate
-  proofable increments
+- keep D2 complete at the current bounded shape and take D3 `revise()`
+  adaptation/drop logic as the next separate Phase 1 slice
+- keep D4 symbol/pair index and later observability split out until D3 is
+  landed and verified on its own
+
+### M6.10: Execution Accelerators
+
+Status: `not_started`.
+
+Goal:
+
+- increase single-session implementation throughput with short-horizon Todo
+  state and bounded read-only exploration, while keeping governance and
+  durable-memory responsibilities in earlier milestones
+
+Entry gate:
+
+- M6.7 must be closed
+- M6.9 must have enough Phase 1 substrate to keep Todo and Explorer clearly
+  separate from durable coding memory, especially D2/D3/D6 decisions
+- Todo lands before Explorer; Explorer is not a substitute for M6.8 task
+  selection or M10 multi-agent execution
+
+Missing proof:
+
+- no Todo tool exists yet for session-scoped write/update/list
+- no reviewer/operator surface currently exposes a session Todo list with
+  duplicate-state guards
+- no bounded read-only Explorer helper exists yet
+- no post-M6.9 implementation slice has demonstrated reduced planning churn or
+  read-only churn attributable to Todo or Explorer
+
+Next action:
+
+- finish M6.7 close-gate proof and continue M6.9 Phase 1 first; do not start
+  M6.10 implementation until M6.7 is closed and the remaining M6.9 Phase 1
+  boundary is reaffirmed
+- when M6.10 opens, take Todo D1 first and keep Explorer deferred until Todo
+  state is stable and reviewer-visible
 
 ### M7: Senses - Inbound Signals
 
