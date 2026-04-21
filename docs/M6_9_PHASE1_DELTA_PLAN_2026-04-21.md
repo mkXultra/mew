@@ -451,6 +451,61 @@ Explicit non-goals for D1 first slice:
 If D1 needs any of those to land, stop and split the slice again instead of
 bundling later Phase 1 deliverables into taxonomy scaffolding.
 
+## D7 First Implementation Slice
+
+D7 is second, not concurrent with D1. The first D7 slice should expose D1
+state read-only before it tries to explain recall/write events from later
+deliverables.
+
+Target files only:
+
+- `src/mew/typed_memory.py`
+- `src/mew/commands.py`
+- `src/mew/cli.py`
+- focused tests in `tests/test_memory.py`
+
+First-slice rule:
+
+- read-only surfaces only
+- reuse the existing typed-memory store under `.mew/memory/`
+- do not create `.mew/durable/` yet
+- do not add `trace`, `index query`, or veto behavior yet
+- do not depend on work-session or work-loop changes
+
+Exact intended shape:
+
+1. Add a read-only listing surface for typed memory:
+   - `mew memory --list`
+   - optional filters: `--type`, `--scope`, `--kind`, `--limit`
+2. Add a read-only single-entry surface:
+   - `mew memory --show <id>`
+   - supports typed-memory ids already emitted in JSON/search output
+3. Keep output stable and external-agent friendly:
+   - human format shows `scope.type.kind name`
+   - JSON includes `id`, `scope`, `memory_type`, `memory_kind`, `name`,
+     `description`, `created_at`, and `path`
+4. Preserve legacy compatibility:
+   - entries without `memory_kind` still list/show normally
+   - `--kind` filters only typed-memory entries that actually carry the field
+
+Proof target for this slice:
+
+- `mew memory --list --json` reconstructs typed-memory inventory without
+  importing mew modules
+- `mew memory --show <id> --json` round-trips a D1 entry by id
+- legacy typed-memory entries still list/show cleanly
+
+Explicit non-goals for D7 first slice:
+
+- no `.mew/durable/` directory yet
+- no `mew memory trace`
+- no `mew index query`
+- no recall/write-event trace fields
+- no reviewer veto surfaces
+
+If D7 needs any of those to land, stop and split the slice again instead of
+pulling later observability work into the first read-only surface.
+
 ## Stop Rules
 
 Do not start M6.9 code if any of these is still true:
