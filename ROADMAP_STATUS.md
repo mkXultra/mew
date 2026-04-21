@@ -20,11 +20,11 @@ M5 was archived losslessly in
 | 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
-| 6.7. Supervised Self-Hosting Loop | `gate_pending` | The supervised hybrid gate now only lacks the `>=4h` wall-clock condition; a frozen close-watch copy at `/private/tmp/mew-m67-close-watch-20260422-023401` holds the proof window while mainline moves through bounded M6.9 Phase 1 slices. |
+| 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Under the user-approved split with M6.7 frozen close-watch, mainline has landed bounded D1, D7, D6, D2, D3, D4, and D5 slices plus the first post-Phase-1 read-only query surface: `mew memory --resolve-source-path` now resolves a durable file-pair source path back to its paired test path and memory ids. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Mainline has landed bounded D1, D7, D6, D2, D3, D4, and D5 slices plus the first post-Phase-1 read-only query surface: `mew memory --resolve-source-path` now resolves a durable file-pair source path back to its paired test path and memory ids. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
-| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until the M6.7 supervised loop gate is proven. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
 | 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
@@ -32,11 +32,11 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-21 16:57 JST.
+Last assessed: 2026-04-22 05:29 JST.
 
-Active work: **M6.7 frozen close-watch + bounded M6.9 Phase 1 implementation
-in mainline** while M5.1, M6, and M6.6 remain closed baselines, M6.10 stays
-registered but inactive, and M7 remains deferred.
+Active work: **M6.9 Durable Coding Intelligence** while M5.1, M6, M6.6, and
+M6.7 remain closed baselines, M6.10 stays registered but inactive, and M7
+remains deferred.
 
 Reasoning:
 
@@ -56,7 +56,7 @@ Reasoning:
   three predeclared comparator tasks passed with `rescue_edits=0`, the frozen
   detached Codex CLI comparator batch is recorded, and the first-edit blocker
   closed via task #363.
-- M6.7 is now active. First supervised iteration proof is recorded in
+- M6.7 is now closed. First supervised iteration proof is recorded in
   `docs/M6_7_FIRST_SUPERVISED_ITERATION_2026-04-21.md`: task `#364` /
   session `#352` stayed within the declared `src/mew/work_session.py` +
   `tests/test_work_session.py` scope, stopped for dry-run review, passed both
@@ -73,25 +73,19 @@ Reasoning:
   canary first, produced a reviewer-visible dry-run diff, passed the focused
   verifier plus `uv run python -m unittest tests.test_brief`, completed a
   same-surface audit, and finished with no reviewer rescue edits.
-- M6.8 (Task Chaining) and M6.9 (Durable Coding Intelligence) are now
-  registered as successors. By default M6.7 closes first, including the
-  supervised hybrid close-gate proof. As of 2026-04-22 02:31 JST, the user
-  explicitly approved a split execution mode: freeze the active M6.7 close
-  window in a detached copy, then use mainline time on M6.9 D1 while the
-  `>=4h` wall-clock condition accrues honestly in the frozen copy.
-- The frozen M6.7 close-watch copy is `/private/tmp/mew-m67-close-watch-20260422-023401`
-  at `HEAD b89f35a` with `.mew/` copied from mainline at 2026-04-22 02:31 JST.
-  Earliest close eligibility for that watch is `2026-04-22 05:29 JST`, after a
-  reviewer check confirms that the other already-met gate conditions remain
-  intact in the frozen copy.
-- This ordering keeps M6.7 as the stable supervised substrate while still
-  registering the longer-horizon coding advantage. The M6.9 registration is
-  meant to inform architectural choices made during remaining M6.7 work, not
-  to reprioritize M6.7 implementation before its close gate is met.
-- The user has now overridden that default ordering for the specific case where
-  the only remaining M6.7 criterion is elapsed wall-clock time. Under this
-  override, mainline may start real M6.9 D1 implementation while milestone
-  honesty is preserved by the detached frozen close-watch copy.
+- M6.8 (Task Chaining) and M6.9 (Durable Coding Intelligence) are registered
+  as successors. During the last M6.7 close step, the user explicitly approved
+  a split execution mode: freeze the already-satisfied supervised M6.7 proof
+  window in a detached copy, then let mainline land bounded M6.9 Phase 1
+  slices while the remaining `>=4h` wall-clock condition accrued honestly in
+  the frozen copy.
+- The frozen M6.7 close-watch copy was
+  `/private/tmp/mew-m67-close-watch-20260422-023401` at `HEAD b89f35a` with
+  `.mew/` copied from mainline at 2026-04-22 02:31 JST. Once the watch reached
+  `2026-04-22 05:29 JST`, the remaining wall-clock condition was satisfied and
+  `docs/M6_7_CLOSE_GATE_2026-04-22.md` recorded the close gate.
+- This ordering preserved milestone honesty: M6.7 closed on the detached proof
+  window first, and only then does M6.9 become the active milestone.
 - Bounded M6.9 Phase 1 work is now underway on mainline: D1 typed
   `memory_kind`, D7 list/show inventory, D6 reviewer veto stub, D2 write
   gates for reviewer-steering/task-template/failure-shield/file-pair, D3
@@ -99,13 +93,14 @@ Reasoning:
   landed reviewer-diff capture for approved `write_file` tools are all landed;
   `reasoning-trace` remains schema-only and later recall-time observability
   plus broader retrieval changes remain deferred.
-- M7 signal registry foundation exists, but deeper signal work should not move
-  ahead while M6.7 still lacks the supervised hybrid close-gate proof.
+- M7 signal registry foundation exists, but deeper signal work should remain
+  deferred while M6.9 and M6.10 still dominate execution throughput.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  the supervised hybrid close-gate proof, not more speculative coding-loop polish.
+  bounded M6.9 progress, not speculative cockpit polish or premature M6.10
+  implementation.
 
 Current next action:
 
@@ -125,20 +120,20 @@ Current next action:
    context-reload reentry for the M6.7 hybrid gate. The run stayed in-scope,
    preserved the same supervised session, and returned exact blocker outcomes
    without proof-or-revert failure.
-7. The remaining M6.7 gate is now only the `>=4h` wall-clock condition. The
+7. The remaining M6.7 gate was only the `>=4h` wall-clock condition. The
+   detached frozen close-watch copy preserved the already-satisfied
    `>=3` real roadmap items, reviewer decisions, real reentry, zero
-   proof-or-revert failures, and green drift canary conditions are already
-   satisfied and are preserved in the detached frozen close-watch copy.
-8. Keep the frozen close-watch copy immutable except for reviewer-owned proof
-   artifacts and close-out notes. Do not run new implementation work there.
-9. Mainline implementation may now move through bounded **M6.9 Phase 1**
-   slices while M6.7 remains
-   `gate_pending`, because the user explicitly approved the split and the proof
-   window was frozen before M6.9 code started.
+   proof-or-revert failures, and green drift canary conditions until the proof
+   window reached `2026-04-22 05:29 JST`.
+8. `docs/M6_7_CLOSE_GATE_2026-04-22.md` now records that reviewer-owned close
+   decision. The frozen close-watch copy remains historical evidence only.
+9. Mainline implementation may continue through bounded **M6.9 Phase 1**
+   slices because M6.7 is now closed and M6.9 is the active milestone.
 10. Treat the current M6.9 implementation target as bounded **Phase 1**
-   substrate only: D1/D7/D6/D2/D3/D4 are landed, `reasoning-trace` stays
-   schema-only until Phase 2, and the next separate slice is D5
-   reviewer-diff capture rather than broader recall-time rewrites.
+   substrate plus narrow post-Phase-1 observability/query slices: D1, D7, D6,
+   D2, D3, D4, and D5 are landed, `reasoning-trace` stays schema-only until
+   Phase 2, and the next separate slices should stay read-only or narrowly
+   reviewer-gated rather than broad recall-time rewrites.
 11. Do not let mew self-author roadmap-status or milestone-close edits during
    M6.7; those remain reviewer-controlled until the supervised gate itself is
    proven.
@@ -1407,7 +1402,7 @@ Next action after closure:
 
 ### M6.7: Supervised Self-Hosting Loop
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -1729,20 +1724,9 @@ Evidence:
 
 Missing proof:
 
-- The current supervised run now has three real roadmap items (`N-G`, `N-I`,
-  `N-J`) and one real reentry/pause-resume across a context reload (`#388` /
-  session `#378`), but the hybrid close-gate proof still needs `>=4h`
-  wall-clock under that same supervised run.
-- Any 24h unattended run is still disallowed until the supervised M6.7
-  close-gate proof is recorded.
-- If any future supervised close-gate proof item fails or soft-stops, M6.7
-  must classify it as proof-or-revert failure, product-only progress, or
-  substrate evidence, then fix the exposed blocker before consuming more
-  bounded proof items.
-- Task `#388` is now stored blocker/product work, not the next proof item to
-  grind. Its recent reruns exposed exact-window insufficiency and then
-  prompt/runtime failures after exact-window priming; those findings do not
-  invalidate the already-satisfied reentry criterion.
+- None for the documented M6.7 gate. `docs/M6_7_CLOSE_GATE_2026-04-22.md`
+  records the close decision, including the detached frozen close-watch caveat
+  for the final `>=4h` wall-clock condition.
 
 Done when:
 
@@ -1758,18 +1742,11 @@ Done when:
 
 Next action:
 
-- Do not spend more proof items right now. The `>=3` item count and real
-  reentry condition are already met inside the active supervised run.
-- Keep the current supervised run alive until the `>=4h` wall-clock condition
-  is satisfied, and avoid fake waiting: use the remaining time on bounded
-  blocker/product work or pre-approved successor prep that does not claim new
-  M6.7 proof credit.
-- Preserve the new operator/debug stance: `#388` stays parked as stored
-  blocker/product work unless a real invalidation justifies another rerun, and
-  `brief` / `focus` / `desk` should keep reflecting that state honestly.
-- Keep the per-iteration drift canary, proof-or-revert discipline, and
-  reviewer-gated approvals intact throughout the run.
-- Keep roadmap-status and milestone-close edits under reviewer control.
+- Keep M6.7 closed and reviewer-owned. Reopen only if future self-hosting
+  regressions break proof-or-revert, scope fence, drift canary discipline, or
+  the bounded reviewer-gated iteration shape.
+- Continue bounded M6.9 work on mainline; do not spend new effort on M6.7
+  proof items unless a regression demands it.
 
 ### M6.8: Task Chaining - Supervised Self-Selection
 
@@ -2007,26 +1984,27 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.7 Supervised Self-Hosting Loop**.
+Active focus: **M6.9 Durable Coding Intelligence**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- keeping the active supervised M6.7 run alive until the `>=4h` wall-clock
-  close condition is satisfied, without burning more proof items now that the
-  `>=3` item count and real reentry condition are already met;
-- bounded blocker/product work that does not claim fresh M6.7 proof credit,
-  especially agent-loop debug or substrate fixes exposed by `#388`;
-- roadmap registration and status maintenance for M6.8 / M6.9 only when it
-  clarifies post-M6.7 ordering without changing the active milestone;
+- bounded M6.9 Phase 1 and early post-Phase-1 work that preserves the current
+  reviewer-owned governance boundary;
+- agent-loop debug or substrate fixes only when they directly unblock mew-first
+  M6.9 iterations;
+- roadmap registration and status maintenance for M6.10 or later milestones
+  only when it clarifies post-M6.9 ordering without changing the active
+  milestone;
 - keeping M6.6 as a closed regression baseline for resident coding work;
-- keeping M6 milestone close and proof harness fixes as closed baseline work;
-- reviewer-owned roadmap/status updates and checkpointing around M6.7 runs;
+- keeping M6 and M6.7 close artifacts as closed baseline evidence;
+- reviewer-owned roadmap/status updates and checkpointing around M6.9 runs;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1, M6, and M6.6 as closed baselines while M6.7 proves supervised
-self-hosting before deeper M7 signal work or any unattended self-hosting.
+Keep M5.1, M6, M6.6, and M6.7 as closed baselines while M6.9 turns durable
+state into coding advantage before deeper M7 signal work or any unattended
+self-hosting.
 
 ## Maintenance Rule
 

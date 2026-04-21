@@ -1,8 +1,8 @@
 # M6.7 Supervised Close-Gate Proof Plan 2026-04-21
 
-Status: planned.
+Status: completed. Closed by `docs/M6_7_CLOSE_GATE_2026-04-22.md`.
 
-This document fixes the remaining M6.7 gate after the clean short-loop proof
+This document fixed the remaining M6.7 gate after the clean short-loop proof
 recorded in `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md`.
 
 Legacy note: the filename still says `8H` for continuity, but the active gate
@@ -10,7 +10,7 @@ is now the hybrid M6.7 close-gate proof.
 
 ## Remaining Gate
 
-M6.7 is not done until a supervised close-gate proof completes with:
+M6.7 was not done until a supervised close-gate proof completed with:
 
 1. `>=4h` wall-clock under one supervised run
 2. `>=3` real roadmap items
