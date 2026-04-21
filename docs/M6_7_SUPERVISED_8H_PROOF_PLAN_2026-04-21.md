@@ -54,15 +54,14 @@ green.
 
 Primary order for the next supervised run:
 
-1. Candidate N-A
-2. Candidate N-B
-3. Candidate N-C
+1. Candidate N-F
+2. Candidate N-G
+3. Candidate N-I
 
 Fallbacks if one primary candidate is rejected by the canary or does not
 converge:
 
 4. Candidate N-D
-5. Candidate N-E
 
 ## Current Outcomes
 
@@ -83,6 +82,19 @@ converge:
   timeout diagnostics and one focused regression. This is product progress, not
   supervised-proof credit, because mew session `#372` stalled twice during edit
   planning.
+- Candidate N-H: direct supervisor product patch landed in
+  `src/mew/mood.py` + `tests/test_mood.py`, making plain-text `mew mood`
+  output append a `signals:` section that mirrors the existing markdown/JSON
+  surface and adding formatter coverage in `tests/test_mood.py`. Focused
+  `uv run pytest -q tests/test_mood.py -k "mood_command or format_mood or signals" --no-testmon`,
+  broader `uv run python -m unittest tests.test_mood`, `ruff`, `py_compile`,
+  and `git diff --check` all passed. This is product progress, not
+  supervised-proof credit, because task `#384` / session `#373` stalled in
+  edit planning before a reviewable paired dry-run diff surfaced.
+- Candidate N-D: still untried, but do not run it as a solo next proof item.
+  After N-A/N-B soft-stop, N-C no-change, and N-E product-only progress, the
+  queue needed to be replenished back to at least three untried bounded items
+  before reopening the supervised 8-hour proof.
 
 ### Candidate N-A: proof-summary supervised-iteration validator
 
@@ -175,6 +187,79 @@ uv run pytest -q tests/test_toolbox.py -k "timeout or streaming_kill" --no-testm
 
 ```bash
 uv run python -m unittest tests.test_toolbox
+```
+
+### Candidate N-F: `mew agent sweep --json` structured output
+
+- scope fence: `src/mew/sweep.py`, `tests/test_sweep.py`, plus minimal JSON
+  wiring in `src/mew/commands.py`
+- target shape: `mew agent sweep --json` returns the eight report categories
+  plus a top-level `ok` boolean derived from `not errors`; text mode stays
+  unchanged
+- drift canary / focused verifier:
+
+```bash
+uv run pytest -q tests/test_sweep.py -k "json or format_sweep_report" --no-testmon
+```
+
+- broader verifier:
+
+```bash
+uv run python -m unittest tests.test_sweep
+```
+
+### Candidate N-G: `mew journal --json` item detail surfacing
+
+- scope fence: `src/mew/journal.py`, `tests/test_journal.py`, plus minimal JSON
+  wiring in `src/mew/commands.py`
+- target shape: `mew journal --json` emits `completed`, `active`, `questions`,
+  `sessions`, `runtime_effects`, and `tomorrow_hints` arrays alongside the
+  existing `counts` and `mew_note`
+- drift canary / focused verifier:
+
+```bash
+uv run pytest -q tests/test_journal.py -k "journal_command or json" --no-testmon
+```
+
+- broader verifier:
+
+```bash
+uv run python -m unittest tests.test_journal
+```
+
+### Candidate N-H: `mew mood` text signal surface
+
+- scope fence: `src/mew/mood.py`, `tests/test_mood.py`
+- target shape: `mew mood` text output appends a `signals:` section that
+  renders `view_model["signals"]` (or an explicit `no active signals recorded`
+  line when empty), matching the already richer markdown/JSON data
+- drift canary / focused verifier:
+
+```bash
+uv run pytest -q tests/test_mood.py -k "mood_command or format_mood or signals" --no-testmon
+```
+
+- broader verifier:
+
+```bash
+uv run python -m unittest tests.test_mood
+```
+
+### Candidate N-I: `mew signals journal` entry richness
+
+- scope fence: `src/mew/signals.py`, `tests/test_signals.py`
+- target shape: `mew signals journal` text output renders `reason_for_use` and
+  `recorded_at` for each journal entry; JSON output stays unchanged
+- drift canary / focused verifier:
+
+```bash
+uv run pytest -q tests/test_signals.py -k "cli or journal or reason_for_use" --no-testmon
+```
+
+- broader verifier:
+
+```bash
+uv run python -m unittest tests.test_signals
 ```
 
 ## Per-Iteration Runbook

@@ -350,15 +350,20 @@ def render_mood_markdown(view_model: dict[str, Any]) -> str:
 
 def format_mood_view(view_model: dict[str, Any]) -> str:
     scores = view_model["scores"]
-    return "\n".join(
-        [
-            f"Mew mood {view_model['date']}",
-            f"label: {view_model['label']}",
-            f"energy: {scores['energy']['score']}",
-            f"worry: {scores['worry']['score']}",
-            f"joy: {scores['joy']['score']}",
-        ]
-    )
+    lines = [
+        f"Mew mood {view_model['date']}",
+        f"label: {view_model['label']}",
+        f"energy: {scores['energy']['score']}",
+        f"worry: {scores['worry']['score']}",
+        f"joy: {scores['joy']['score']}",
+    ]
+    signals = view_model["signals"]
+    if signals:
+        lines.append("signals:")
+        lines.extend(f"- {signal}" for signal in signals)
+    else:
+        lines.append("signals: no active signals recorded")
+    return "\n".join(lines)
 
 
 def write_mood_report(view_model: dict[str, Any], output_dir: Path) -> Path:

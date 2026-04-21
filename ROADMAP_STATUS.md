@@ -1583,6 +1583,19 @@ Evidence:
   broader `uv run python -m unittest tests.test_toolbox`, `ruff`,
   `py_compile`, and `git diff --check` all passed. This is product progress,
   not supervised-proof credit.
+- Task `#384` / session `#373` then targeted Candidate N-H. mew anchored the
+  correct `src/mew/mood.py` + `tests/test_mood.py` scope and read the exact
+  formatter/test windows, but repeated live retries stalled in edit planning
+  before a reviewable paired dry-run diff surfaced. The direct supervisor patch
+  then landed the bounded text-surface gap: `format_mood_view()` in
+  `src/mew/mood.py` now appends a `signals:` section that renders
+  `view_model["signals"]` or an explicit no-signals line, and
+  `tests/test_mood.py` now asserts the plain-text formatter carries the same
+  signal content as the existing markdown/JSON surface. Focused
+  `uv run pytest -q tests/test_mood.py -k 'mood_command or format_mood or signals' --no-testmon`,
+  broader `uv run python -m unittest tests.test_mood`, `ruff`, `py_compile`,
+  and `git diff --check` all passed. This is product progress, not
+  supervised-proof credit.
 
 Missing proof:
 
@@ -1604,12 +1617,13 @@ Done when:
 Next action:
 
 - Refresh `docs/M6_7_SUPERVISED_8H_PROOF_PLAN_2026-04-21.md` around the new
-  N-A..N-E candidate queue and use that queue for the supervised 8-hour run;
-  the first frozen queue is exhausted as honest no-change evidence and should
-  not be reused as closure proof.
-- Decide whether Candidate N-D is the last honest M6.7 proof item still worth
-  running, or whether the queue now needs another refresh before spending more
-  supervised-proof time on M6.7.
+  N-F/N-G/N-I primary queue with N-D fallback and use that refreshed queue for
+  the supervised 8-hour run; the earlier frozen queue is exhausted as
+  soft-stop/no-change/product-only evidence and should not be reused as closure
+  proof.
+- Start the refreshed queue with the smallest honest remaining bounded item
+  first (`mew agent sweep --json` structured output), then take the next JSON
+  candidates (`journal`, `signals journal`) if the canaries stay green.
 - Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
   still live product gaps and can plausibly produce reviewer-gated dry-run
   diffs.

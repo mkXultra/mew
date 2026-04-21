@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 
 from mew.cli import main
-from mew.mood import build_mood_view_model, render_mood_markdown
+from mew.mood import build_mood_view_model, format_mood_view, render_mood_markdown
 from mew.state import add_question, load_state, save_state, state_lock
 
 
@@ -27,6 +27,7 @@ class MoodTests(unittest.TestCase):
 
         view = build_mood_view_model(state, explicit_date="2026-04-17")
         text = render_mood_markdown(view)
+        plain = format_mood_view(view)
 
         self.assertEqual(view["label"], "steady")
         self.assertEqual(view["scores"]["energy"]["score"], 54)
@@ -36,6 +37,9 @@ class MoodTests(unittest.TestCase):
         self.assertIn("runtime effect #6: applied/passive_tick", view["signals"])
         self.assertIn("# Mew Mood 2026-04-17", text)
         self.assertIn("Current mood: **steady**", text)
+        self.assertIn("signals:", plain)
+        self.assertIn("- open task: #1 Open work [ready]", plain)
+        self.assertIn("- open question #2: What next?", plain)
 
     def test_build_mood_uses_canonical_question_status_when_available(self):
         state = {
