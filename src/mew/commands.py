@@ -6564,16 +6564,35 @@ def _latest_failed_model_turn(model_turns):
                 summary = json.dumps(error, sort_keys=True)
             else:
                 summary = ""
-        think_metrics = ((turn.get("model_metrics") or {}).get("think") or {})
-        return {
+        turn_metrics = turn.get("model_metrics") or {}
+        think_metrics = (turn_metrics.get("think") or {})
+        latest_failed_model_turn = {
             "model_turn_id": turn.get("model_turn_id") or turn.get("id"),
             "status": turn_status,
             "summary": summary,
             "prompt_chars": think_metrics.get("prompt_chars"),
             "timeout_seconds": think_metrics.get("timeout_seconds"),
-            "write_ready_fast_path": bool((turn.get("model_metrics") or {}).get("write_ready_fast_path")),
-            "write_ready_fast_path_reason": (turn.get("model_metrics") or {}).get("write_ready_fast_path_reason") or "",
+            "write_ready_fast_path": bool(turn_metrics.get("write_ready_fast_path")),
+            "write_ready_fast_path_reason": (turn_metrics.get("write_ready_fast_path_reason") or ""),
         }
+        if latest_failed_model_turn["write_ready_fast_path"]:
+            latest_failed_model_turn.update(
+                {
+                    "draft_phase": turn_metrics.get("draft_phase") or "",
+                    "draft_attempts": turn_metrics.get("draft_attempts"),
+                    "cached_window_ref_count": turn_metrics.get("cached_window_ref_count"),
+                    "cached_window_hashes": turn_metrics.get("cached_window_hashes") or [],
+                    "draft_runtime_mode": turn_metrics.get("draft_runtime_mode") or "",
+                    "draft_prompt_contract_version": turn_metrics.get("draft_prompt_contract_version") or "",
+                    "draft_prompt_static_chars": turn_metrics.get("draft_prompt_static_chars"),
+                    "draft_prompt_dynamic_chars": turn_metrics.get("draft_prompt_dynamic_chars"),
+                }
+            )
+            if "draft_retry_same_prefix" in turn_metrics:
+                latest_failed_model_turn["draft_retry_same_prefix"] = bool(
+                    turn_metrics.get("draft_retry_same_prefix")
+                )
+        return latest_failed_model_turn
     return None
 
 
@@ -6798,6 +6817,29 @@ def format_work_follow_status(data):
             metrics_bits.append(
                 f"write_ready_fast_path_reason={latest_model_failure.get('write_ready_fast_path_reason')}"
             )
+        if latest_model_failure.get("draft_phase"):
+            metrics_bits.append(f"draft_phase={latest_model_failure.get('draft_phase')}")
+        if latest_model_failure.get("draft_attempts") is not None:
+            metrics_bits.append(f"draft_attempts={latest_model_failure.get('draft_attempts')}")
+        if latest_model_failure.get("cached_window_ref_count") is not None:
+            metrics_bits.append(f"cached_window_ref_count={latest_model_failure.get('cached_window_ref_count')}")
+        if latest_model_failure.get("cached_window_hashes"):
+            metrics_bits.append(
+                "cached_window_hashes="
+                + ",".join((str(item) for item in latest_model_failure.get("cached_window_hashes") or []))
+            )
+        if latest_model_failure.get("draft_runtime_mode"):
+            metrics_bits.append(f"draft_runtime_mode={latest_model_failure.get('draft_runtime_mode')}")
+        if latest_model_failure.get("draft_prompt_contract_version"):
+            metrics_bits.append(
+                f"draft_prompt_contract_version={latest_model_failure.get('draft_prompt_contract_version')}"
+            )
+        if latest_model_failure.get("draft_prompt_static_chars") is not None:
+            metrics_bits.append(f"draft_prompt_static_chars={latest_model_failure.get('draft_prompt_static_chars')}")
+        if latest_model_failure.get("draft_prompt_dynamic_chars") is not None:
+            metrics_bits.append(f"draft_prompt_dynamic_chars={latest_model_failure.get('draft_prompt_dynamic_chars')}")
+        if latest_model_failure.get("draft_retry_same_prefix") is not None:
+            metrics_bits.append(f"draft_retry_same_prefix={latest_model_failure.get('draft_retry_same_prefix')}")
         if metrics_bits:
             lines.append("latest_model_failure_metrics: " + " ".join(metrics_bits))
     if data.get("next_action"):

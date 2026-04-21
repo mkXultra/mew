@@ -1,5 +1,6 @@
 import difflib
 import json
+import hashlib
 from pathlib import Path
 import re
 import shlex
@@ -4301,6 +4302,64 @@ def select_work_recovery_plan_item(recovery_plan):
     return items[-1]
 
 
+def _hash_value(value):
+    return hashlib.sha1(str(value).encode("utf-8")).hexdigest()
+
+
+def _cached_window_signature(window):
+    if not isinstance(window, dict):
+        return ""
+    return (
+        "sha1:"
+        + _hash_value(
+            f"{window.get('path')}|{window.get('line_start')}|{window.get('line_end')}|{window.get('text') or ''}"
+        )
+    )
+
+
+def _build_draft_state_from_turns(model_turns, plan_item_observations):
+    draft_state = {
+        "draft_phase": "",
+        "draft_attempts": 0,
+        "cached_window_ref_count": 0,
+        "cached_window_hashes": [],
+        "draft_runtime_mode": "",
+        "draft_prompt_contract_version": "",
+        "draft_prompt_static_chars": None,
+        "draft_prompt_dynamic_chars": None,
+        "draft_retry_same_prefix": False,
+    }
+    latest_draft_metrics = None
+    for turn in (model_turns or []):
+        metrics = turn.get("model_metrics") or {}
+        if bool(metrics.get("write_ready_fast_path")):
+            draft_state["draft_attempts"] += 1
+            latest_draft_metrics = metrics
+    if latest_draft_metrics:
+        draft_state["draft_phase"] = latest_draft_metrics.get("draft_phase") or "write_ready"
+        draft_state["cached_window_ref_count"] = latest_draft_metrics.get("cached_window_ref_count") or 0
+        draft_state["cached_window_hashes"] = latest_draft_metrics.get("cached_window_hashes") or []
+        draft_state["draft_runtime_mode"] = latest_draft_metrics.get("draft_runtime_mode") or ""
+        draft_state["draft_prompt_contract_version"] = (
+            latest_draft_metrics.get("draft_prompt_contract_version") or ""
+        )
+        draft_state["draft_prompt_static_chars"] = latest_draft_metrics.get("draft_prompt_static_chars")
+        draft_state["draft_prompt_dynamic_chars"] = latest_draft_metrics.get("draft_prompt_dynamic_chars")
+        draft_state["draft_retry_same_prefix"] = bool(latest_draft_metrics.get("draft_retry_same_prefix"))
+        return draft_state
+    if not plan_item_observations:
+        return draft_state
+    first_observation = plan_item_observations[0]
+    if first_observation.get("edit_ready"):
+        cached_windows = first_observation.get("cached_windows") or []
+        draft_state["draft_phase"] = "write_ready"
+        draft_state["cached_window_ref_count"] = len(cached_windows)
+        draft_state["cached_window_hashes"] = [
+            _cached_window_signature(item) for item in cached_windows
+        ]
+    return draft_state
+
+
 def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):
     if not session:
         return None
@@ -4764,6 +4823,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 continue
             kept_adjacent_read_observations.append(observation)
         adjacent_read_observations = kept_adjacent_read_observations
+    draft_state = _build_draft_state_from_turns(turns, plan_item_observations)
     repair_anchor_observations = build_repair_anchor_observations(
         session,
         calls,
@@ -4785,6 +4845,15 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "goal": session.get("goal") or "",
         "phase": phase,
         "updated_at": session.get("updated_at"),
+        "draft_phase": draft_state.get("draft_phase") or "",
+        "draft_attempts": draft_state.get("draft_attempts", 0),
+        "cached_window_ref_count": draft_state.get("cached_window_ref_count", 0),
+        "cached_window_hashes": draft_state.get("cached_window_hashes") or [],
+        "draft_runtime_mode": draft_state.get("draft_runtime_mode") or "",
+        "draft_prompt_contract_version": draft_state.get("draft_prompt_contract_version") or "",
+        "draft_prompt_static_chars": draft_state.get("draft_prompt_static_chars"),
+        "draft_prompt_dynamic_chars": draft_state.get("draft_prompt_dynamic_chars"),
+        "draft_retry_same_prefix": bool(draft_state.get("draft_retry_same_prefix")),
         "files_touched": paths[-limit:],
         "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],

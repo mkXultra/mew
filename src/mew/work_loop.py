@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+import hashlib
 import os
 import shlex
 import time
@@ -56,6 +57,7 @@ WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
+WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v1"
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -637,6 +639,46 @@ def _json_size(value):
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
     except (TypeError, ValueError):
         return len(str(value))
+
+
+def _sha1_hex(value):
+    return hashlib.sha1(str(value).encode("utf-8")).hexdigest()
+
+
+def _write_ready_draft_window_signature(window):
+    if not isinstance(window, dict):
+        return ""
+    return "sha1:" + _sha1_hex(
+        f"{window.get('path')}|{window.get('line_start')}|{window.get('line_end')}|{window.get('text') or ''}"
+    )
+
+
+def _write_ready_draft_prompt_chars(think_prompt):
+    prompt = str(think_prompt or "")
+    marker = "\nFocusedContext JSON:\n"
+    marker_index = prompt.find(marker)
+    if marker_index < 0:
+        return len(prompt), 0
+    marker_end = marker_index + len(marker)
+    return marker_end, len(prompt) - marker_end
+
+
+def _write_ready_draft_runtime_mode(stream_model):
+    if stream_model:
+        return "streaming"
+    return "guarded" if _work_model_timeout_guard_available() else "fallback_unguarded"
+
+
+def _write_ready_draft_attempts(session, write_ready_fast_path_active):
+    turns = list((session or {}).get("model_turns") or [])
+    attempts = 0
+    for turn in turns:
+        metrics = turn.get("model_metrics") or {}
+        if bool(metrics.get("write_ready_fast_path")):
+            attempts += 1
+    if write_ready_fast_path_active:
+        attempts += 1
+    return attempts
 
 
 def _round_seconds(value):
@@ -1927,6 +1969,10 @@ def plan_work_model_turn(
         if write_ready_context
         else build_work_think_prompt(context)
     )
+    think_prompt_static_chars = 0
+    think_prompt_dynamic_chars = 0
+    if write_ready_fast_path.get("active"):
+        think_prompt_static_chars, think_prompt_dynamic_chars = _write_ready_draft_prompt_chars(think_prompt)
     think_timeout = (
         max(float(timeout), WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
         if write_ready_context
@@ -1957,6 +2003,27 @@ def plan_work_model_turn(
         "write_ready_fast_path": bool(write_ready_fast_path.get("active")),
         "write_ready_fast_path_reason": write_ready_fast_path.get("reason") or "",
     }
+    if write_ready_fast_path.get("active"):
+        draft_windows = (
+            write_ready_fast_path.get("recent_windows")
+            or write_ready_fast_path.get("cached_windows")
+            or []
+        )
+        model_metrics.update(
+            {
+                "draft_phase": "write_ready",
+                "draft_attempts": _write_ready_draft_attempts(session, write_ready_fast_path.get("active")),
+                "cached_window_ref_count": len(draft_windows),
+                "cached_window_hashes": [
+                    _write_ready_draft_window_signature(item) for item in draft_windows
+                ],
+                "draft_runtime_mode": _write_ready_draft_runtime_mode(stream_model),
+                "draft_prompt_contract_version": WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION,
+                "draft_prompt_static_chars": think_prompt_static_chars,
+                "draft_prompt_dynamic_chars": think_prompt_dynamic_chars,
+                "draft_retry_same_prefix": False,
+            }
+        )
     if pre_model_metrics_sink:
         pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()

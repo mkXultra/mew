@@ -6785,10 +6785,107 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(observed[0]["timeout"], WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
         self.assertIn("Write-ready fast path is active.", observed[0]["prompt"])
         self.assertTrue(planned["model_metrics"]["write_ready_fast_path"])
+        self.assertEqual(planned["model_metrics"]["draft_phase"], "write_ready")
+        self.assertEqual(planned["model_metrics"]["draft_attempts"], 1)
+        self.assertEqual(planned["model_metrics"]["cached_window_ref_count"], 2)
+        self.assertEqual(len(planned["model_metrics"]["cached_window_hashes"]), 2)
+        self.assertTrue(
+            all(str(item).startswith("sha1:") for item in planned["model_metrics"]["cached_window_hashes"])
+        )
+        self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v1")
+        self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
+        self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
         self.assertEqual(
             planned["model_metrics"]["think"]["timeout_seconds"],
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
         )
+        self.assertEqual(planned["model_metrics"]["draft_runtime_mode"], "guarded")
+
+    def test_write_ready_draft_runtime_mode_contract(self):
+        from mew.work_loop import _write_ready_draft_runtime_mode
+
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            self.assertEqual(_write_ready_draft_runtime_mode(False), "guarded")
+            self.assertEqual(_write_ready_draft_runtime_mode(True), "streaming")
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=False):
+            self.assertEqual(_write_ready_draft_runtime_mode(False), "fallback_unguarded")
+
+    def test_draft_window_hash_contract_is_stable_between_model_turns_and_resume_fallback(self):
+        from mew.work_loop import _write_ready_draft_window_signature
+        from mew.work_session import _cached_window_signature
+
+        window = {
+            "path": "src/mew/work_loop.py",
+            "line_start": 10,
+            "line_end": 20,
+            "text": "shared source text",
+        }
+        window_without_text = {"path": "src/mew/work_loop.py", "line_start": 10, "line_end": 20}
+        self.assertEqual(_write_ready_draft_window_signature(window), _cached_window_signature(window))
+        self.assertEqual(
+            _write_ready_draft_window_signature(window_without_text),
+            _cached_window_signature(window_without_text),
+        )
+
+    def test_build_work_session_resume_surfaces_draft_placeholders(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Draft placeholders",
+            "goal": "Expose write-ready draft debug fields in resume.",
+            "created_at": "2026-04-21T13:25:16Z",
+            "updated_at": "2026-04-21T13:25:16Z",
+            "tool_calls": [],
+            "calls": [],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "failed",
+                    "error": "request timed out",
+                    "model_metrics": {
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "draft_attempts": 2,
+                        "cached_window_ref_count": 2,
+                        "cached_window_hashes": ["sha1:one", "sha1:two"],
+                        "draft_runtime_mode": "guarded",
+                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_static_chars": 123,
+                        "draft_prompt_dynamic_chars": 456,
+                        "draft_retry_same_prefix": False,
+                    },
+                },
+                {
+                    "id": 2,
+                    "status": "interrupted",
+                    "error": "request timed out",
+                    "model_metrics": {
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "draft_attempts": 3,
+                        "cached_window_ref_count": 1,
+                        "cached_window_hashes": ["sha1:three"],
+                        "draft_runtime_mode": "guarded",
+                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_static_chars": 100,
+                        "draft_prompt_dynamic_chars": 200,
+                        "draft_retry_same_prefix": True,
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["draft_phase"], "write_ready")
+        self.assertEqual(resume["draft_attempts"], 2)
+        self.assertEqual(resume["cached_window_ref_count"], 1)
+        self.assertEqual(resume["cached_window_hashes"], ["sha1:three"])
+        self.assertEqual(resume["draft_runtime_mode"], "guarded")
+        self.assertEqual(resume["draft_prompt_contract_version"], "v1")
+        self.assertEqual(resume["draft_prompt_static_chars"], 100)
+        self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
+        self.assertTrue(resume["draft_retry_same_prefix"])
 
     def test_work_session_context_and_resume_surface_active_typed_memory(self):
         old_cwd = os.getcwd()
@@ -21362,6 +21459,15 @@ class WorkSessionTests(unittest.TestCase):
                                     "timeout_seconds": 90.0,
                                 },
                                 "write_ready_fast_path": True,
+                                "draft_phase": "write_ready",
+                                "draft_attempts": 2,
+                                "cached_window_ref_count": 2,
+                                "cached_window_hashes": ["sha1:window-a", "sha1:window-b"],
+                                "draft_runtime_mode": "fallback_unguarded",
+                                "draft_prompt_contract_version": "v1",
+                                "draft_prompt_static_chars": 1000,
+                                "draft_prompt_dynamic_chars": 75,
+                                "draft_retry_same_prefix": False,
                             },
                         }
                     ]
@@ -21411,6 +21517,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["prompt_chars"], 34567)
                 self.assertEqual(data["latest_model_failure"]["timeout_seconds"], 90.0)
                 self.assertTrue(data["latest_model_failure"]["write_ready_fast_path"])
+                self.assertEqual(data["latest_model_failure"]["draft_phase"], "write_ready")
+                self.assertEqual(data["latest_model_failure"]["draft_attempts"], 2)
+                self.assertEqual(data["latest_model_failure"]["cached_window_ref_count"], 2)
+                self.assertEqual(data["latest_model_failure"]["draft_runtime_mode"], "fallback_unguarded")
+                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v1")
                 self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
                 self.assertIn("current session state is newer", data["suggested_recovery"]["reason"])
                 self.assertIn("mew work 1 --session --resume", data["suggested_recovery"]["command"])
@@ -21432,6 +21543,11 @@ class WorkSessionTests(unittest.TestCase):
                     "latest_model_failure_metrics: prompt_chars=34567 timeout_seconds=90.0 write_ready_fast_path=True",
                     text,
                 )
+                self.assertIn("draft_phase=write_ready", text)
+                self.assertIn("draft_attempts=2", text)
+                self.assertIn("cached_window_ref_count=2", text)
+                self.assertIn("draft_runtime_mode=fallback_unguarded", text)
+                self.assertIn("draft_prompt_contract_version=v1", text)
                 self.assertIn("recovery: inspect_resume", text)
                 self.assertIn("recovery_command: mew work 1 --session --resume", text)
             finally:
@@ -21469,6 +21585,16 @@ class WorkSessionTests(unittest.TestCase):
                                     "prompt_chars": 63842,
                                     "timeout_seconds": 45.0,
                                 },
+                                "write_ready_fast_path": True,
+                                "draft_phase": "write_ready",
+                                "draft_attempts": 1,
+                                "cached_window_ref_count": 1,
+                                "cached_window_hashes": ["sha1:only"],
+                                "draft_runtime_mode": "guarded",
+                                "draft_prompt_contract_version": "v1",
+                                "draft_prompt_static_chars": 120,
+                                "draft_prompt_dynamic_chars": 44,
+                                "draft_retry_same_prefix": True,
                                 "write_ready_fast_path_reason": "missing_exact_cached_window_texts",
                             },
                         }
@@ -21517,6 +21643,12 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["summary"], "request timed out")
                 self.assertEqual(data["latest_model_failure"]["prompt_chars"], 63842)
                 self.assertEqual(data["latest_model_failure"]["timeout_seconds"], 45.0)
+                self.assertTrue(data["latest_model_failure"]["write_ready_fast_path"])
+                self.assertEqual(data["latest_model_failure"]["draft_phase"], "write_ready")
+                self.assertEqual(data["latest_model_failure"]["draft_attempts"], 1)
+                self.assertEqual(data["latest_model_failure"]["cached_window_ref_count"], 1)
+                self.assertEqual(data["latest_model_failure"]["draft_runtime_mode"], "guarded")
+                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v1")
                 self.assertEqual(
                     data["latest_model_failure"]["write_ready_fast_path_reason"],
                     "missing_exact_cached_window_texts",
@@ -21536,9 +21668,14 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("latest_model_failure: turn=12 status=failed source=session summary=request timed out", text)
                 self.assertIn(
                     "latest_model_failure_metrics: prompt_chars=63842 timeout_seconds=45.0 "
-                    "write_ready_fast_path_reason=missing_exact_cached_window_texts",
+                    "write_ready_fast_path=True write_ready_fast_path_reason=missing_exact_cached_window_texts",
                     text,
                 )
+                self.assertIn("draft_phase=write_ready", text)
+                self.assertIn("draft_attempts=1", text)
+                self.assertIn("cached_window_ref_count=1", text)
+                self.assertIn("draft_runtime_mode=guarded", text)
+                self.assertIn("draft_prompt_contract_version=v1", text)
                 self.assertIn(
                     "recovery_command: mew work 1 --live --auth auth.json --model-backend codex --allow-read . "
                     "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "
@@ -21546,6 +21683,80 @@ class WorkSessionTests(unittest.TestCase):
                     "--no-prompt-approval --max-steps 1",
                     text,
                 )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_omits_draft_placeholders_for_non_draft_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["status"] = "closed"
+                    session["model_turns"] = [
+                        {
+                            "id": 7,
+                            "status": "failed",
+                            "summary": "non-draft write path failed",
+                            "model_metrics": {
+                                "think": {
+                                    "prompt_chars": 10,
+                                    "timeout_seconds": 5.0,
+                                }
+                            },
+                        }
+                    ]
+                    save_state(state)
+
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / f"session-{session['id']}.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": session["id"],
+                            "task_id": 1,
+                            "heartbeat_at": "2020-01-01T00:00:00Z",
+                            "producer": {"pid": 999999},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                latest = data["latest_model_failure"] or {}
+                self.assertEqual(latest.get("model_turn_id"), 7)
+                self.assertTrue(latest.get("write_ready_fast_path") is False)
+                self.assertEqual(latest.get("prompt_chars"), 10)
+                self.assertEqual(latest.get("timeout_seconds"), 5.0)
+                self.assertNotIn("draft_retry_same_prefix", latest)
+                self.assertNotIn("draft_phase", latest)
+                self.assertNotIn("cached_window_ref_count", latest)
+                self.assertNotIn("cached_window_hashes", latest)
+                self.assertNotIn("draft_runtime_mode", latest)
+
+                with patch("mew.commands.pid_alive", return_value=False):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn(
+                    "latest_model_failure: turn=7 status=failed source=session summary=non-draft write path failed",
+                    text,
+                )
+                self.assertIn(
+                    "latest_model_failure_metrics: prompt_chars=10 timeout_seconds=5.0",
+                    text,
+                )
+                self.assertNotIn("draft_phase=", text)
+                self.assertNotIn("draft_retry_same_prefix=", text)
+                self.assertNotIn("cached_window_ref_count=", text)
             finally:
                 os.chdir(old_cwd)
 
