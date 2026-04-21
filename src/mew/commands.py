@@ -5090,6 +5090,7 @@ def _deferred_approval_rollback_snapshot(source_call, parameters):
 
 
 WORK_TOOL_RESULT_STALE_ERROR = "work tool result could not be recorded; work session changed during tool execution"
+REVIEWER_DIFFS_LOG_FILENAME = "reviewer_diffs.jsonl"
 
 
 def _missing_finished_work_tool_call(tool, tool_call_id, error=WORK_TOOL_RESULT_STALE_ERROR):
@@ -5101,6 +5102,66 @@ def _missing_finished_work_tool_call(tool, tool_call_id, error=WORK_TOOL_RESULT_
         "error": error,
         "summary": f"{tool_name} failed: {error}",
     }
+
+
+def _reviewer_diffs_log_path(base_dir=".") -> Path:
+    return Path(base_dir) / STATE_DIR / "durable" / REVIEWER_DIFFS_LOG_FILENAME
+
+
+def _approved_reviewer_diff_payload(task, session, source_call, tool_call):
+    if not isinstance(source_call, dict) or not isinstance(tool_call, dict):
+        return None
+    if source_call.get("tool") != "write_file":
+        return None
+    source_result = source_call.get("result") or {}
+    landed_result = tool_call.get("result") or {}
+    if not source_result.get("dry_run") or not source_result.get("changed"):
+        return None
+    if tool_call.get("status") != "completed" or not landed_result.get("written"):
+        return None
+    draft_diff = source_result.get("diff") or ""
+    final_diff = landed_result.get("diff") or ""
+    return {
+        "task_id": task.get("id") if isinstance(task, dict) else None,
+        "session_id": session.get("id") if isinstance(session, dict) else None,
+        "path": landed_result.get("path") or source_result.get("path") or "",
+        "reviewer_decision_at": source_call.get("approved_at") or "",
+        "recorded_at": now_iso(),
+        "ai_draft": {
+            "tool_call_id": source_call.get("id"),
+            "tool": source_call.get("tool") or "",
+            "diff": draft_diff,
+            "diff_preview": format_diff_preview(
+                draft_diff,
+                max_chars=1200,
+                diff_stats=source_result.get("diff_stats"),
+            ),
+            "diff_stats": source_result.get("diff_stats") or {},
+        },
+        "reviewer_approved": {
+            "source_tool_call_id": source_call.get("id"),
+            "landed_tool_call_id": tool_call.get("id"),
+            "approved_at": source_call.get("approved_at") or "",
+            "status": source_call.get("approval_status") or "",
+        },
+        "ai_final": {
+            "tool_call_id": tool_call.get("id"),
+            "path": landed_result.get("path") or "",
+            "written": bool(landed_result.get("written")),
+            "diff": final_diff,
+            "diff_stats": landed_result.get("diff_stats") or {},
+        },
+    }
+
+
+def _append_reviewer_diff_record(payload, *, base_dir="."):
+    if not isinstance(payload, dict):
+        return None
+    path = _reviewer_diffs_log_path(base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    return path
 
 
 def _mark_work_recovery_chain(session, source_call, status, recovered_by_tool_call_id, recovered_at):
@@ -5321,6 +5382,9 @@ def _apply_work_approval(args, approve_tool_id):
                     source_call,
                     f"Approved work tool #{approve_tool_id}.",
                 )
+                reviewer_diff_payload = _approved_reviewer_diff_payload(task, session, source_call, tool_call)
+                if reviewer_diff_payload:
+                    _append_reviewer_diff_record(reviewer_diff_payload)
         save_state(state)
     if progress:
         progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} {tool_call.get('status')}")

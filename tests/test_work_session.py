@@ -6389,6 +6389,105 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cached_exact_read_plan_item_is_skipped_for_write_ready_fast_path(self):
+        from mew.work_loop import build_work_model_context, build_write_ready_work_model_context
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["tool_calls"] = [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py", "line_start": 5203, "line_count": 146},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "line_start": 5203,
+                                "line_end": 5348,
+                                "text": "".join(f"command_line_{index}\n" for index in range(146)),
+                                "next_line": 5349,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_work_session.py", "line_start": 10170, "line_count": 41},
+                            "result": {
+                                "path": "tests/test_work_session.py",
+                                "line_start": 10170,
+                                "line_end": 10210,
+                                "text": "".join(f"test_line_{index}\n" for index in range(41)),
+                                "next_line": 10211,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                    ]
+                    decision_plan = {
+                        "summary": "land reviewer diff capture",
+                        "working_memory": {
+                            "hypothesis": "Exact source/test windows are already cached, so the draft patch should be next.",
+                            "next_step": "Draft a dry-run source+test patch for landed reviewer diff capture.",
+                            "plan_items": [
+                                "Read/cache src/mew/commands.py:5203-5348",
+                                "Draft one paired dry-run edit batch for src/mew/commands.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                            "last_verified_state": "Commands and paired test windows are already cached.",
+                        },
+                    }
+
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        decision_plan,
+                        {"summary": "land reviewer diff capture"},
+                        {"type": "wait", "reason": "ready to draft patch from cached windows"},
+                    )
+                    finish_work_model_turn(state, task["id"], turn["id"])
+                    save_state(state)
+
+                resume = build_work_session_resume(session)
+                self.assertEqual(
+                    resume["skipped_exact_read_plan_items"][0]["requested_window"],
+                    {"path": "src/mew/commands.py", "line_start": 5203, "line_end": 5348},
+                )
+                observation = resume["plan_item_observations"][0]
+                self.assertEqual(
+                    observation["plan_item"],
+                    "Draft one paired dry-run edit batch for src/mew/commands.py and tests/test_work_session.py",
+                )
+                self.assertTrue(observation["edit_ready"])
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    {
+                        "id": task["id"],
+                        "title": task["title"],
+                        "description": task["description"],
+                        "status": task["status"],
+                    },
+                    "now",
+                )
+                fast_context = build_write_ready_work_model_context(context)
+                self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_context_and_resume_surface_user_preferences(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -10171,6 +10270,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(approved["tool_call"]["parameters"]["approved_from_tool_call_id"], 1)
                 self.assertTrue(approved["tool_call"]["result"]["written"])
                 self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                reviewer_diffs = Path(".mew") / "durable" / "reviewer_diffs.jsonl"
+                self.assertFalse(reviewer_diffs.exists())
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(
@@ -11600,6 +11701,19 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(approved["approved_tool_call"]["approval_status"], "applied")
                 self.assertTrue(approved["tool_call"]["result"]["written"])
                 self.assertEqual(approved["tool_call"]["result"]["verification"]["exit_code"], 0)
+                reviewer_diffs = Path(".mew") / "durable" / "reviewer_diffs.jsonl"
+                self.assertTrue(reviewer_diffs.exists())
+                records = [json.loads(line) for line in reviewer_diffs.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertEqual(len(records), 1)
+                record = records[0]
+                self.assertEqual(record["task_id"], 1)
+                self.assertEqual(record["session_id"], 1)
+                self.assertEqual(record["path"], str(target.resolve()))
+                self.assertEqual(record["reviewer_approved"]["source_tool_call_id"], 1)
+                self.assertEqual(record["reviewer_approved"]["landed_tool_call_id"], 2)
+                self.assertEqual(record["reviewer_approved"]["status"], "applied")
+                self.assertIn("+++ b", record["ai_draft"]["diff"])
+                self.assertIn("+++ b", record["ai_final"]["diff"])
             finally:
                 os.chdir(old_cwd)
 

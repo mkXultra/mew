@@ -95,10 +95,10 @@ Reasoning:
 - Bounded M6.9 Phase 1 work is now underway on mainline: D1 typed
   `memory_kind`, D7 list/show inventory, D6 reviewer veto stub, D2 write
   gates for reviewer-steering/task-template/failure-shield/file-pair, D3
-  bounded file-pair revise(), and D4 minimum file-pair durable index are all
-  landed; `reasoning-trace` remains schema-only and later recall-time
-  observability, reviewer-diff capture, and broader retrieval changes remain
-  deferred.
+  bounded file-pair revise(), D4 minimum file-pair durable index, and D5
+  landed reviewer-diff capture for approved `write_file` tools are all landed;
+  `reasoning-trace` remains schema-only and later recall-time observability
+  plus broader retrieval changes remain deferred.
 - M7 signal registry foundation exists, but deeper signal work should not move
   ahead while M6.7 still lacks the supervised hybrid close-gate proof.
 - `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
@@ -1844,15 +1844,21 @@ Missing proof:
   entries only, writes `schema_version=1` atomically, and resolves a
   `source_path` back to its paired `test_path` and `memory_ids`; focused
   `tests/test_symbol_index.py` covers rebuild/save/resolve on a known pair
+- D5 first slice is landed: approving a dry-run `write_file` now appends a
+  durable `.mew/durable/reviewer_diffs.jsonl` record that captures the landed
+  triple `(ai_draft, reviewer_approved, ai_final)` for that write only;
+  focused `tests/test_work_session.py` coverage proves one approve+land cycle
+  writes exactly one record, while edit-file approval stays out of scope
 - no comparator rerun exists yet for the post-split M6.9 slices
-- D5 reviewer-diff capture and later observability remain unstarted
+- later observability and broader retrieval changes remain unstarted
 
 Next action:
 
-- keep D4 complete at the current bounded file-pair shape and take D5
-  reviewer-diff capture as the next separate Phase 1 slice
-- keep later observability and broader recall-time rewrites split out until D5
-  is landed and verified on its own
+- keep the bounded Phase 1 substrate closed at the current D1-D7 shape and
+  use the next decision point to choose either M6.7 close-out (if the frozen
+  watch is eligible) or the first bounded post-Phase-1 M6.9 slice
+- keep later observability and broader recall-time rewrites split out until
+  M6.7 is closed and the next bounded Phase 2 target is chosen explicitly
 
 ### M6.10: Execution Accelerators
 

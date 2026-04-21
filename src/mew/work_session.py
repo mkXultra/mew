@@ -475,6 +475,30 @@ def cached_window_covers_exact_read(cached_window, requested_window):
     return cached_start <= requested_start and cached_end >= requested_end
 
 
+def first_actionable_plan_item(plan_items, cached_windows):
+    items = [str(item or "").strip() for item in (plan_items or []) if str(item or "").strip()]
+    cached_windows = list(cached_windows or [])
+    skipped = []
+    for item in items:
+        requested_window = plan_item_exact_read_window(item)
+        if not requested_window:
+            return item, skipped
+        if any(cached_window_covers_exact_read(cached_window, requested_window) for cached_window in cached_windows):
+            skipped.append(
+                {
+                    "plan_item": item,
+                    "requested_window": requested_window,
+                    "reason": (
+                        "exact read window already cached; skip this leading read/cache plan item "
+                        "and evaluate the next actionable item"
+                    ),
+                }
+            )
+            continue
+        return item, skipped
+    return "", skipped
+
+
 def revise_active_memory_item(item, *, base_dir="."):
     item = dict(item or {})
     if item.get("memory_kind") != "file-pair":
@@ -4638,12 +4662,19 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     demoted_adjacent_read_observations = []
     plan_item_observations = []
     plan_items = _coerce_working_memory_plan_items((working_memory or {}).get("plan_items") or [])
+    actionable_plan_item = ""
+    skipped_exact_read_plan_items = []
     if plan_items:
+        actionable_plan_item, skipped_exact_read_plan_items = first_actionable_plan_item(
+            plan_items,
+            target_path_cached_window_observations,
+        )
+    if actionable_plan_item:
         plan_item_observation = {
-            "plan_item": plan_items[0],
+            "plan_item": actionable_plan_item,
             "reason": "first remaining working_memory.plan_items entry preserved from the latest THINK turn",
         }
-        requested_window = plan_item_exact_read_window(plan_items[0])
+        requested_window = plan_item_exact_read_window(actionable_plan_item)
         if requested_window:
             plan_item_observation["requested_window"] = requested_window
         relevant_target_paths = target_paths[:3]
@@ -4755,6 +4786,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
         "target_path_cached_window_observations": target_path_cached_window_observations,
         "plan_item_observations": plan_item_observations,
+        "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
