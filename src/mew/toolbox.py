@@ -48,6 +48,17 @@ def _terminate_process_group(process):
             pass
 
 
+def _tail_output(text, max_chars=2000, max_lines=20):
+    if not text:
+        return ""
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        text = "\n".join(lines[-max_lines:])
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
 def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False):
     argv, env_overrides = split_command_env(command)
     if not argv:
@@ -199,12 +210,29 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
         thread.start()
 
     timed_out = False
+    kill_status = ""
     try:
         exit_code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        process.kill()
-        process.wait()
+        try:
+            process.terminate()
+            kill_status = "terminated"
+        except OSError:
+            kill_status = "kill_failed"
+        if kill_status != "kill_failed":
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                    kill_status = "killed_after_grace"
+                except OSError:
+                    kill_status = "kill_failed"
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    kill_status = "kill_failed"
         exit_code = None
 
     for thread in threads:
@@ -212,6 +240,8 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
 
     stdout = "".join(chunks["stdout"])
     stderr = "".join(chunks["stderr"])
+    stdout_tail = _tail_output(stdout) if timed_out else ""
+    stderr_tail = _tail_output(stderr) if timed_out else ""
     if timed_out:
         timeout_message = f"command timed out after {timeout} second(s)"
         if stderr and not stderr.endswith("\n"):
@@ -230,6 +260,10 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
         "timed_out": timed_out,
         "stdout": clip_output(stdout),
         "stderr": clip_output(stderr),
+        "kill_status": kill_status,
+        "stdout_tail": stdout_tail,
+        "stderr_tail": stderr_tail,
+        "timeout_seconds": timeout if timed_out else None,
     }
 
 

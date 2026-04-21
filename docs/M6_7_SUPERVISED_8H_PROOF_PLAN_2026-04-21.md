@@ -64,6 +64,26 @@ converge:
 4. Candidate N-D
 5. Candidate N-E
 
+## Current Outcomes
+
+- Candidate N-A: soft-stopped. After the focused verifier shape was repaired,
+  the bounded run stayed inside `src/mew/proof_summary.py` +
+  `tests/test_proof_summary.py`, but two fresh attempts stalled before a
+  reviewable paired dry-run diff surfaced. Carry this as non-converging proof
+  evidence, not closure credit.
+- Candidate N-B: soft-stopped. The initial task framing drifted toward
+  focus-only `active_work_session_items()` work, while the real target is
+  `brief` / `next` / JSON output. Keep the task notes as repair guidance, but
+  do not count it as M6.7 proof credit.
+- Candidate N-C: reviewer no-change. Existing `active_work_session_items()`
+  gates plus the current `tests/test_brief.py` blocked/done coverage already
+  satisfy the target, so no product patch landed.
+- Candidate N-E: direct supervisor product patch landed in
+  `src/mew/toolbox.py` + `tests/test_toolbox.py`, adding additive structured
+  timeout diagnostics and one focused regression. This is product progress, not
+  supervised-proof credit, because mew session `#372` stalled twice during edit
+  planning.
+
 ### Candidate N-A: proof-summary supervised-iteration validator
 
 - scope fence: `src/mew/proof_summary.py`, `tests/test_proof_summary.py`

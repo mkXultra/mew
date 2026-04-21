@@ -55,6 +55,31 @@ class ToolboxTests(unittest.TestCase):
             self.assertIn(".", result["stderr"])
             self.assertTrue(any(name == "stderr" and chunk for name, chunk in streamed))
 
+    def test_run_command_record_streaming_records_timeout_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys, time; "
+                        "print('hello-out', flush=True); "
+                        "print('hello-err', file=sys.stderr, flush=True); "
+                        "time.sleep(5)"
+                    ),
+                ]
+            )
+
+            result = run_command_record_streaming(command, cwd=tmp, timeout=0.3)
+
+            self.assertTrue(result["timed_out"])
+            self.assertIsNone(result["exit_code"])
+            self.assertEqual(result["timeout_seconds"], 0.3)
+            self.assertTrue(result["kill_status"])
+            self.assertIn("hello-out", result["stdout_tail"])
+            self.assertIn("hello-err", result["stderr_tail"])
+            self.assertIn("command timed out after 0.3 second(s)", result["stderr"])
+
     def test_run_command_record_streaming_uses_devnull_stdin(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = shlex.join([sys.executable, "-c", "print('ok')"])

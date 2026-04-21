@@ -1556,6 +1556,33 @@ Evidence:
   `active_work_session_items()` skip non-actionable tasks, and the new
   regression proves `mew focus --kind coding` no longer treats a stale blocked
   work session as active work that should suppress the next useful move.
+- The refreshed 8-hour proof queue has now been exercised further. Task `#380`
+  / sessions `#368` and `#369` soft-stopped Candidate N-A after the focused
+  verifier shape was repaired: the run stayed inside
+  `src/mew/proof_summary.py` + `tests/test_proof_summary.py`, but two fresh
+  attempts stalled before a reviewable paired dry-run diff surfaced. Carry
+  this as non-converging proof evidence, not closure credit.
+- Task `#381` / session `#370` soft-stopped Candidate N-B. The initial work
+  drifted toward focus-only `active_work_session_items()` edits, while the real
+  target is `brief` / `next` / JSON output. Keep the stored repair guidance in
+  task notes, but do not count this as M6.7 proof credit.
+- Task `#382` / session `#371` closed Candidate N-C as reviewer no-change.
+  Existing `active_work_session_items()` gates already filter non-actionable
+  work through `session.status != active`, missing-task, `task.status == done`,
+  and blocked-task checks, and the existing `tests/test_brief.py` coverage for
+  stale blocked and done-task branches already pins that behavior. No product
+  patch landed.
+- Task `#383` / session `#372` then targeted Candidate N-E. mew anchored the
+  correct `src/mew/toolbox.py` + `tests/test_toolbox.py` scope and read both
+  files, but the edit-planning model turns stalled twice. The direct supervisor
+  patch then landed additive structured timeout diagnostics in
+  `src/mew/toolbox.py` (`kill_status`, `stdout_tail`, `stderr_tail`,
+  `timeout_seconds`) plus a focused timeout regression in
+  `tests/test_toolbox.py`. Focused
+  `uv run pytest -q tests/test_toolbox.py -k 'timeout or streaming_kill' --no-testmon`,
+  broader `uv run python -m unittest tests.test_toolbox`, `ruff`,
+  `py_compile`, and `git diff --check` all passed. This is product progress,
+  not supervised-proof credit.
 
 Missing proof:
 
@@ -1580,8 +1607,12 @@ Next action:
   N-A..N-E candidate queue and use that queue for the supervised 8-hour run;
   the first frozen queue is exhausted as honest no-change evidence and should
   not be reused as closure proof.
-- Plan and run the supervised 8-hour M6.7 proof with at least three bounded
-  real roadmap items and recorded reviewer decisions.
+- Decide whether Candidate N-D is the last honest M6.7 proof item still worth
+  running, or whether the queue now needs another refresh before spending more
+  supervised-proof time on M6.7.
+- Plan and run the supervised 8-hour M6.7 proof only on bounded items that are
+  still live product gaps and can plausibly produce reviewer-gated dry-run
+  diffs.
 - Keep the per-iteration drift canary, proof-or-revert discipline, and
   reviewer-gated dry-run approvals intact throughout the run.
 - Keep roadmap-status and milestone-close edits under reviewer control.
