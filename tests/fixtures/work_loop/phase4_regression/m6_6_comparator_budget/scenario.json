@@ -1,0 +1,26 @@
+{
+  "B0": {
+    "iter_wall": 4.0,
+    "source": "Deterministic M6.11 comparator budget baseline from M6.6 evidence"
+  },
+  "comparator_cases": [
+    {
+      "case_id": "M6.6-A",
+      "shape": "M6.6-A",
+      "iter_wall_seconds": 3.7,
+      "source_reference": "M6.6-A comparator evidence"
+    },
+    {
+      "case_id": "M6.6-B",
+      "shape": "M6.6-B",
+      "iter_wall_seconds": 3.8,
+      "source_reference": "M6.6-B comparator evidence"
+    },
+    {
+      "case_id": "M6.6-C",
+      "shape": "M6.6-C",
+      "iter_wall_seconds": 3.9,
+      "source_reference": "M6.6-C comparator evidence"
+    }
+  ]
+}

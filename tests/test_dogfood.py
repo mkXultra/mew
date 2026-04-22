@@ -603,29 +603,62 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_11_refusal_separation_phase_is_blocked_on_patch", {item["name"] for item in scenario["checks"]})
             self.assertIn("m6_11-refusal-separation: pass", text)
 
-    def test_run_dogfood_m6_11_not_implemented_scenarios(self):
-        for scenario_name in ("m6_11-phase4-regression",):
-            with self.subTest(scenario=scenario_name):
-                with tempfile.TemporaryDirectory() as tmp:
-                    args = SimpleNamespace(
-                        workspace=str(Path(tmp) / "dog"),
-                        scenario=scenario_name,
-                        cleanup=False,
-                    )
+    def test_run_dogfood_m6_11_phase4_regression_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_11-phase4-regression",
+                cleanup=False,
+            )
+            fixture_path = (
+                Path(__file__).resolve().parents[1]
+                / "tests"
+                / "fixtures"
+                / "work_loop"
+                / "phase4_regression"
+                / "m6_6_comparator_budget"
+                / "scenario.json"
+            )
+            fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
 
-                    report = run_dogfood_scenario(args)
-                    text = format_dogfood_scenario_report(report)
-                    scenario = report["scenarios"][0]
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            fixture_b0 = (fixture.get("B0") or {}).get("iter_wall")
+            comparator_cases = fixture.get("comparator_cases", [])
+            expected_mapping = {
+                "M6.6-A": "M6.6-A",
+                "M6.6-B": "M6.6-B",
+                "M6.6-C": "M6.6-C",
+            }
+            expected_provenance = {
+                item.get("case_id"): item.get("source_reference") for item in comparator_cases
+            }
 
-                    self.assertEqual(report["status"], "fail")
-                    self.assertEqual(scenario["name"], scenario_name)
-                    self.assertEqual(scenario["status"], "not_implemented")
-                    self.assertEqual(scenario["artifacts"]["status"], "not_implemented")
-                    self.assertFalse(scenario["checks"][0]["passed"])
-                    self.assertIn("not implemented", scenario["checks"][0]["observed"]["reason"])
-                    self.assertIn("scenario_implementation_status", text)
+            case_walls = [case.get("iter_wall_seconds") for case in comparator_cases]
+            median_wall = sorted(case_walls)[len(case_walls) // 2]
 
-    def test_run_dogfood_m6_11_all_subset_aggregate_reflects_not_implemented(self):
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_11-phase4-regression")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["command_count"], 0)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertIn("m6_11-phase4-regression: pass", text)
+            self.assertEqual(artifacts["b0_iter_wall_seconds"], fixture_b0)
+            self.assertEqual(artifacts["budget_wall_seconds"], fixture_b0 * 1.10)
+            self.assertEqual(artifacts["median_wall_seconds"], median_wall)
+            self.assertEqual(
+                {case.get("case_id"): case.get("shape") for case in artifacts["comparator_cases"]},
+                expected_mapping,
+            )
+            self.assertEqual(
+                {case.get("case_id"): case.get("source_reference") for case in artifacts["comparator_cases"]},
+                expected_provenance,
+            )
+            self.assertEqual(len(artifacts["comparator_cases"]), 3)
+
+    def test_run_dogfood_m6_11_all_subset_aggregate_reflects_full_coverage(self):
         with tempfile.TemporaryDirectory() as tmp, patch(
             "mew.dogfood.DOGFOOD_SCENARIOS",
                 (
@@ -646,7 +679,7 @@ class DogfoodTests(unittest.TestCase):
             text = format_dogfood_scenario_report(report)
             by_name = {scenario["name"]: scenario for scenario in report["scenarios"]}
 
-            self.assertEqual(report["status"], "fail")
+            self.assertEqual(report["status"], "pass")
             self.assertEqual(
                 set(by_name),
                 {
@@ -660,13 +693,13 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(by_name["m6_11-compiler-replay"]["status"], "pass")
             self.assertEqual(by_name["m6_11-drafting-recovery"]["status"], "pass")
             self.assertEqual(by_name["m6_11-draft-timeout"]["status"], "pass")
-            for scenario_name in ("m6_11-phase4-regression",):
-                self.assertEqual(by_name[scenario_name]["status"], "not_implemented")
-                self.assertEqual(by_name[scenario_name]["artifacts"]["status"], "not_implemented")
+            self.assertEqual(by_name["m6_11-refusal-separation"]["status"], "pass")
+            self.assertEqual(by_name["m6_11-phase4-regression"]["status"], "pass")
             self.assertIn("m6_11-compiler-replay: pass", text)
             self.assertIn("m6_11-draft-timeout: pass", text)
             self.assertIn("m6_11-drafting-recovery: pass", text)
             self.assertIn("m6_11-refusal-separation: pass", text)
+            self.assertIn("m6_11-phase4-regression: pass", text)
 
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

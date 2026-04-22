@@ -2045,19 +2045,24 @@ Missing proof:
   - strips fixture-provided `active_work_todo` before the dogfood run so
     resume/follow must reconstruct the refusal blocker from the persisted
     refusal turn itself rather than replaying pre-seeded todo state.
-  Only `m6_11-phase4-regression` remains explicitly `not_implemented`.
-  The aggregate `m6_11-*` subset intentionally still fails while the
-  implemented sub-report is now honestly `4 pass + 1 not_implemented`.
+  The phase4-regression slice now:
+  - loads a pinned `B0.iter_wall` fixture plus the frozen M6.6-A/B/C
+    comparator cases,
+  - enforces the exact `(case_id, shape)` mapping rather than only the id set,
+  - preserves per-case `source_reference` provenance in emitted artifacts,
+  - proves the Phase 4 regression budget by checking median comparator wall
+    time against the pinned `B0.iter_wall × 1.10` ceiling.
+  All five `m6_11-*` dogfood scenarios now pass, and the aggregate
+  `m6_11-*` subset is honestly `5 pass`.
   Final codex-ultra and claude-ultra reviews both approved the
-  `m6_11-refusal-separation` slice after a follow-up fix pass.
+  `m6_11-phase4-regression` slice after a small follow-up fix pass.
 
 Next action:
 
 - keep the Phase 2/3 calibration checkpoint active and move from Phase 4
   surface parity into close-gate evidence collection:
-  continue implementing the deferred `m6_11-*` scenarios, starting with
-  `m6_11-phase4-regression` as the next bounded missing proof, and then
-  run bounded live slices against `#399/#401` buckets, using the now-
+  with the full `m6_11-*` dogfood subset now green, start the bounded live
+  incidence gate against `#399/#401`, using the now-
   authoritative follow-status surface to measure whether timeout concentration
   and combined `#399/#401` incidence are actually dropping
 - if live evidence still shows the stale-timeout `latest_model_failure` field
