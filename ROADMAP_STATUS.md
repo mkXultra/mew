@@ -144,8 +144,9 @@ Current next action:
    is active. Do not expand durable-memory surfaces until the drafting loop is
    replayable and structurally stable.
 10. Start M6.11 Phase 0 first: land refusal separation, freeze blocker and
-    recovery enums, and add the draft metrics/placeholders that the design
-    depends on.
+   recovery enums, keep tiny write-ready draft context anchored to the first
+   actionable plan-item surface, and add the draft metrics/placeholders that the
+   design depends on.
 11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
     `mew proof-summary --m6_11-phase2-calibration`, scanning
     `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure

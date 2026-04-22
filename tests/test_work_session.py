@@ -6242,6 +6242,94 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
 
+    def test_tiny_write_ready_draft_context_prefers_first_actionable_plan_item_surface(self):
+        from mew.work_loop import (
+            build_write_ready_tiny_draft_model_context,
+            build_work_write_ready_tiny_draft_prompt,
+        )
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Write-ready tiny draft surface narrowing",
+                "description": "Draft paired edit from the first actionable plan-item surface.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "stale task-surface cleanup",
+                            "target_paths": [
+                                "src/mew/commands.py",
+                                "tests/test_memory.py",
+                                "src/mew/cli.py",
+                            ],
+                        },
+                        "attempts": {"draft": 0, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "plan_item": "Pair commands.py and tests/test_memory.py edits",
+                            "cached_windows": [
+                                {"path": "src/mew/commands.py", "line_start": 120, "line_end": 165},
+                                {"path": "tests/test_memory.py", "line_start": 35, "line_end": 57},
+                            ],
+                            "edit_ready": True,
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "path": "src/mew/commands.py",
+                        "line_start": 120,
+                        "line_end": 165,
+                        "text": "commands window\n" * 22,
+                        "context_truncated": False,
+                    },
+                    {
+                        "path": "tests/test_memory.py",
+                        "line_start": 35,
+                        "line_end": 57,
+                        "text": "tests window\n" * 24,
+                        "context_truncated": False,
+                    },
+                    {
+                        "path": "src/mew/cli.py",
+                        "line_start": 8,
+                        "line_end": 32,
+                        "text": "stale cli window\n" * 8,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft a paired dry-run batch for this plan item.",
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+            "Pair commands.py and tests/test_memory.py edits",
+        )
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_memory.py"],
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/commands.py", "tests/test_memory.py"],
+        )
+        tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+        self.assertNotIn("stale task-surface cleanup", tiny_prompt)
+        self.assertIn("Pair commands.py and tests/test_memory.py edits", tiny_prompt)
+        self.assertNotIn("src/mew/cli.py", tiny_prompt)
+
     def test_write_ready_prompt_v2_stays_bounded_for_two_cached_windows_fixture(self):
         from mew.work_loop import _write_ready_draft_prompt_chars, build_work_write_ready_think_prompt
 

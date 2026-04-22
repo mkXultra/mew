@@ -1766,6 +1766,29 @@ def _write_ready_prompt_active_work_todo(resume, recent_windows):
     }
 
 
+def _write_ready_tiny_draft_observation_target_paths(resume):
+    plan_item_observations = (resume or {}).get("plan_item_observations") or []
+    if not isinstance(plan_item_observations, list) or not plan_item_observations:
+        return []
+    first_observation = plan_item_observations[0]
+    if not isinstance(first_observation, dict):
+        return []
+    target_paths = []
+    for item in first_observation.get("cached_windows") or []:
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in target_paths):
+            continue
+        target_paths.append(path)
+    if target_paths:
+        return target_paths
+    target_path = first_observation.get("target_path")
+    if isinstance(target_path, str) and target_path:
+        target_paths.append(target_path)
+    return target_paths
+
+
 def build_write_ready_work_model_context(context):
     fast_path = _work_write_ready_fast_path_details(context)
     if not fast_path.get("active"):
@@ -1806,15 +1829,57 @@ def build_write_ready_tiny_draft_model_context(context):
     write_ready_context = build_write_ready_work_model_context(context)
     if not write_ready_context:
         return {}
+    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    actionable_target_paths = _write_ready_tiny_draft_observation_target_paths(resume)
+    if not actionable_target_paths:
+        actionable_target_paths = [str(path or "") for path in (fast_path.get("cached_paths") or []) if str(path).strip()]
     recent_windows = fast_path.get("recent_windows") or []
     active_work_todo = write_ready_context.get("active_work_todo") or {}
+    plan_item_observations = resume.get("plan_item_observations") or []
+    actionable_plan_item = ""
+    if plan_item_observations and isinstance(plan_item_observations[0], dict):
+        actionable_plan_item = str(plan_item_observations[0].get("plan_item") or "").strip()
+    if actionable_plan_item:
+        active_todo_plan_item = actionable_plan_item
+    else:
+        active_todo_plan_item = str((active_work_todo.get("source") or {}).get("plan_item") or "").strip()
+    if actionable_target_paths:
+        active_todo_target_paths = actionable_target_paths
+        cached_window_texts = [
+            {
+                "path": item.get("path"),
+                "line_start": item.get("line_start"),
+                "line_end": item.get("line_end"),
+                "tool_call_id": item.get("tool_call_id"),
+                "window_sha256": item.get("window_sha256") or "",
+                "file_sha256": item.get("file_sha256") or "",
+                "text": item.get("text") or "",
+            }
+            for item in recent_windows
+            if isinstance(item, dict)
+            and any(_work_paths_match(item.get("path"), action_path) for action_path in actionable_target_paths)
+        ]
+    else:
+        active_todo_target_paths = list(((active_work_todo.get("source") or {}).get("target_paths") or []))
+        cached_window_texts = [
+            {
+                "path": item.get("path"),
+                "line_start": item.get("line_start"),
+                "line_end": item.get("line_end"),
+                "tool_call_id": item.get("tool_call_id"),
+                "window_sha256": item.get("window_sha256") or "",
+                "file_sha256": item.get("file_sha256") or "",
+                "text": item.get("text") or "",
+            }
+            for item in recent_windows
+        ]
     return {
         "active_work_todo": {
             "id": active_work_todo.get("id"),
             "status": active_work_todo.get("status"),
             "source": {
-                "plan_item": ((active_work_todo.get("source") or {}).get("plan_item") or ""),
-                "target_paths": list(((active_work_todo.get("source") or {}).get("target_paths") or [])),
+                "plan_item": active_todo_plan_item,
+                "target_paths": active_todo_target_paths,
                 "verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
             },
             "attempts": dict(active_work_todo.get("attempts") or {}),
@@ -1823,18 +1888,7 @@ def build_write_ready_tiny_draft_model_context(context):
         "write_ready_fast_path": {
             "active": True,
             "reason": "paired cached windows are edit-ready; emit one patch artifact or one blocker",
-            "cached_window_texts": [
-                {
-                    "path": item.get("path"),
-                    "line_start": item.get("line_start"),
-                    "line_end": item.get("line_end"),
-                    "tool_call_id": item.get("tool_call_id"),
-                    "window_sha256": item.get("window_sha256") or "",
-                    "file_sha256": item.get("file_sha256") or "",
-                    "text": item.get("text") or "",
-                }
-                for item in recent_windows
-            ],
+            "cached_window_texts": cached_window_texts,
         },
         "allowed_roots": {
             "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
