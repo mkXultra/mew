@@ -1967,11 +1967,14 @@ Missing proof:
   it does not yet exist
 - the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
   exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
-  scenarios, but compiler inputs/outputs are not yet captured into replay
-  bundles and the broader recovery/follow-status harnesses do not exist yet
-- draft-related model failures now emit replay bundles under
-  `.mew/replays/work-loop/...`, but compiler inputs/outputs and validator
-  blockers are not yet captured because the compiler is still offline-only
+  scenarios, and compiler replay bundles now persist canonical compiler
+  inputs (`todo`, `proposal`, `cached_windows`, `live_files`,
+  `allowed_write_roots`) plus `validator_result` under
+  `.mew/replays/work-loop/...`, but the broader recovery/follow-status
+  harnesses and rollout calibration still do not exist yet
+- draft-related model failures and offline compiler captures now share the same
+  replay root, but the Phase 2/3 calibration checker that measures
+  off-schema/refusal incidence from those bundles is not wired yet
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -1983,9 +1986,9 @@ Missing proof:
 Next action:
 
 - continue Phase 2:
-  prepare compiler input/output capture and the next replay harness so `#399`
-  stays an offline deterministic compiler/blocker problem and `#401` gets a
-  draft-time recovery fixture before any live Phase 3 wiring starts
+  wire the Phase 2/3 replay-bundle calibration checkpoint so compiler and
+  model-failure bundles can measure off-schema/refusal incidence before any
+  live Phase 3 rollout starts
 - do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
   ready to gate rollout using replay-bundle off-schema/refusal ratios
 

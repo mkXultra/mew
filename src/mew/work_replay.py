@@ -46,6 +46,12 @@ def _safe_int(value):
         return None
 
 
+def _sanitize_replay_path_component(value):
+    sanitized = str(value if value is not None else "").strip()
+    sanitized = sanitized.replace("/", "-").replace("\\", "-")
+    return sanitized
+
+
 def _next_attempt(base_dir: Path):
     if not base_dir.exists():
         return 1
@@ -188,3 +194,82 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return str(report_path)
+
+
+def write_patch_draft_compiler_replay(
+    *,
+    session_id,
+    todo_id,
+    todo,
+    proposal,
+    cached_windows,
+    live_files,
+    allowed_write_roots,
+    validator_result,
+):
+    if not isinstance(todo, dict):
+        return None
+    if not isinstance(proposal, dict):
+        return None
+    if not isinstance(cached_windows, dict):
+        return None
+    if not isinstance(live_files, dict):
+        return None
+    if not isinstance(validator_result, dict):
+        return None
+    if not isinstance(allowed_write_roots, (list, tuple)):
+        return None
+
+    normalized_session_id = _sanitize_replay_path_component(session_id)
+    normalized_todo_id = _sanitize_replay_path_component(todo_id)
+    if not normalized_session_id or not normalized_todo_id:
+        return None
+
+    date_bucket = now_date_iso()
+    base = REPLAYS_ROOT / date_bucket / f"session-{normalized_session_id}" / f"todo-{normalized_todo_id}"
+    attempt = _next_attempt(base)
+    attempt_dir = base / f"attempt-{attempt}"
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    captured_at = now_iso()
+
+    payloads = {
+        "todo": todo,
+        "proposal": proposal,
+        "cached_windows": cached_windows,
+        "live_files": live_files,
+        "allowed_write_roots": list(allowed_write_roots),
+        "validator_result": validator_result,
+    }
+
+    for filename, payload in (
+        ("todo.json", payloads["todo"]),
+        ("proposal.json", payloads["proposal"]),
+        ("cached_windows.json", payloads["cached_windows"]),
+        ("live_files.json", payloads["live_files"]),
+        ("allowed_write_roots.json", payloads["allowed_write_roots"]),
+        ("validator_result.json", payloads["validator_result"]),
+    ):
+        (attempt_dir / filename).write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    metadata = {
+        "schema_version": 1,
+        "bundle": "patch_draft_compiler",
+        "session_id": normalized_session_id,
+        "todo_id": normalized_todo_id,
+        "attempt": attempt,
+        "captured_at": captured_at,
+        "files": {
+            "todo": "todo.json",
+            "proposal": "proposal.json",
+            "cached_windows": "cached_windows.json",
+            "live_files": "live_files.json",
+            "allowed_write_roots": "allowed_write_roots.json",
+            "validator_result": "validator_result.json",
+        },
+    }
+    metadata_path = attempt_dir / "replay_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    return str(metadata_path)
