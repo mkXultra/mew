@@ -1965,6 +1965,10 @@ Missing proof:
   first offline `PatchDraftCompiler` scaffold now exists in
   `src/mew/patch_draft.py`, but the live compiler/recovery path that consumes
   it does not yet exist
+- the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
+  exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
+  scenarios, but compiler inputs/outputs are not yet captured into replay
+  bundles and the broader recovery/follow-status harnesses do not exist yet
 - draft-related model failures now emit replay bundles under
   `.mew/replays/work-loop/...`, but compiler inputs/outputs and validator
   blockers are not yet captured because the compiler is still offline-only
@@ -1979,10 +1983,9 @@ Missing proof:
 Next action:
 
 - continue Phase 2:
-  finish the compiler contract by reconciling recovery-action vocabulary,
-  adding the first fixture lane, and preparing compiler input/output capture so
-  `#399` stays an offline deterministic compiler/blocker problem before live
-  Phase 3 wiring starts
+  prepare compiler input/output capture and the next replay harness so `#399`
+  stays an offline deterministic compiler/blocker problem and `#401` gets a
+  draft-time recovery fixture before any live Phase 3 wiring starts
 - do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
   ready to gate rollout using replay-bundle off-schema/refusal ratios
 

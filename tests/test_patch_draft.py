@@ -1,4 +1,6 @@
 import unittest
+import json
+from pathlib import Path
 
 from mew.patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
@@ -37,6 +39,83 @@ def _live_file(text, *, sha256=None):
 
 
 ALLOWED_WRITE_ROOTS = ["."]
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "work_loop" / "patch_draft"
+
+
+def _load_fixture(name):
+    path = FIXTURE_DIR / name / "scenario.json"
+    with path.open("r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def _hydrate_fixture_payload(payload):
+    for raw_window in (payload.get("cached_windows") or {}).values():
+        if not isinstance(raw_window, dict):
+            continue
+        text = raw_window.get("text")
+        if "window_sha256" not in raw_window and isinstance(text, str):
+            raw_window["window_sha256"] = sha256_text(text)
+        if "file_sha256" not in raw_window and isinstance(text, str):
+            raw_window["file_sha256"] = sha256_text(text)
+
+    for raw_live in (payload.get("live_files") or {}).values():
+        if not isinstance(raw_live, dict):
+            continue
+        text = raw_live.get("text")
+        if "sha256" not in raw_live and isinstance(text, str):
+            raw_live["sha256"] = sha256_text(text)
+
+    return payload
+
+
+def _run_fixture_case(case_name):
+    scenario = _hydrate_fixture_payload(_load_fixture(case_name))
+
+    artifact = compile_patch_draft(
+        todo=scenario["todo"],
+        proposal=scenario["model_output"],
+        cached_windows=scenario["cached_windows"],
+        live_files=scenario["live_files"],
+        allowed_write_roots=scenario.get("allowed_write_roots", ALLOWED_WRITE_ROOTS),
+    )
+
+    return scenario, artifact
+
+
+def _assert_fixture_expectation(test_case, scenario, artifact):
+    expected = scenario["expected"]
+    test_case.assertEqual(artifact["kind"], expected["kind"])
+
+    if expected["kind"] == "patch_draft":
+        test_case.assertEqual(artifact["status"], expected.get("status"))
+        test_case.assertEqual(artifact["todo_id"], expected.get("todo_id", scenario["todo"].get("id")))
+        if "file_count" in expected:
+            test_case.assertEqual(len(artifact["files"]), expected["file_count"])
+        if "file_kinds" in expected:
+            test_case.assertEqual([item["kind"] for item in artifact["files"]], expected["file_kinds"])
+        for fragment in expected.get("diff_contains", []):
+            test_case.assertIn(fragment, artifact["unified_diff"])
+        return
+
+    test_case.assertEqual(artifact["code"], expected["code"])
+    if "detail_contains" in expected:
+        test_case.assertIn(expected["detail_contains"], artifact["detail"])
+    if "path" in expected:
+        test_case.assertEqual(artifact["path"], expected["path"])
+
+
+class PatchDraftFixtureTests(unittest.TestCase):
+    def test_compile_patch_draft_fixture_paired_src_test_happy(self):
+        scenario, artifact = _run_fixture_case("paired_src_test_happy")
+        _assert_fixture_expectation(self, scenario, artifact)
+
+    def test_compile_patch_draft_fixture_ambiguous_old_text_match(self):
+        scenario, artifact = _run_fixture_case("ambiguous_old_text_match")
+        _assert_fixture_expectation(self, scenario, artifact)
+
+    def test_compile_patch_draft_fixture_stale_cached_window_text(self):
+        scenario, artifact = _run_fixture_case("stale_cached_window_text")
+        _assert_fixture_expectation(self, scenario, artifact)
 
 
 class PatchDraftTests(unittest.TestCase):

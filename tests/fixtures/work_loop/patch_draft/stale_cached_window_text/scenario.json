@@ -1,0 +1,47 @@
+{
+  "name": "stale_cached_window_text",
+  "todo": {
+    "id": "todo-18",
+    "source": {
+      "target_paths": ["tests/test_patch_draft.py"]
+    }
+  },
+  "model_output": {
+    "kind": "patch_proposal",
+    "files": [
+      {
+        "path": "tests/test_patch_draft.py",
+        "edits": [
+          {
+            "old": "value = 1",
+            "new": "value = 2"
+          }
+        ]
+      }
+    ]
+  },
+  "cached_windows": {
+    "tests/test_patch_draft.py": {
+      "path": "tests/test_patch_draft.py",
+      "line_start": 1,
+      "line_end": 1,
+      "text": "value = 1\n",
+      "context_truncated": false,
+      "window_sha256": "585c93666fcb046b7b264d3fa73202aa2a38254ae82a4b3ba19e873c2d5a9886",
+      "file_sha256": "585c93666fcb046b7b264d3fa73202aa2a38254ae82a4b3ba19e873c2d5a9886"
+    }
+  },
+  "live_files": {
+    "tests/test_patch_draft.py": {
+      "text": "value = 1\n",
+      "sha256": "badba5efb1f6c8a4a1dc3f1b7f6d7c6e1c9b3ab5e3fef2d7c0c7f8a9e5b8d6f4"
+    }
+  },
+  "allowed_write_roots": ["."],
+  "expected": {
+    "kind": "patch_blocker",
+    "code": "stale_cached_window_text",
+    "detail_contains": "provided live file text/hash mismatch",
+    "path": "tests/test_patch_draft.py"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "name": "paired_src_test_happy",
+  "todo": {
+    "id": "todo-17",
+    "source": {
+      "target_paths": [
+        "src/mew/patch_draft.py",
+        "tests/test_patch_draft.py"
+      ]
+    }
+  },
+  "model_output": {
+    "kind": "patch_proposal",
+    "summary": "increment the paired meaning value",
+    "files": [
+      {
+        "path": "src/mew/patch_draft.py",
+        "edits": [
+          {
+            "old": "return 41",
+            "new": "return 42"
+          }
+        ]
+      },
+      {
+        "path": "tests/test_patch_draft.py",
+        "edits": [
+          {
+            "old": "meaning(), 41",
+            "new": "meaning(), 42"
+          }
+        ]
+      }
+    ]
+  },
+  "cached_windows": {
+    "src/mew/patch_draft.py": {
+      "path": "src/mew/patch_draft.py",
+      "line_start": 1,
+      "line_end": 2,
+      "text": "def meaning():\n    return 41\n",
+      "context_truncated": false,
+      "window_sha256": "1ce935529e5166242b24bbd85f3486fc87501d23054289074cb170409c09add2",
+      "file_sha256": "1ce935529e5166242b24bbd85f3486fc87501d23054289074cb170409c09add2"
+    },
+    "tests/test_patch_draft.py": {
+      "path": "tests/test_patch_draft.py",
+      "line_start": 1,
+      "line_end": 2,
+      "text": "def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+      "context_truncated": false,
+      "window_sha256": "5ff3cc65a9b5a8c8d12caea4ee8b18a16eb4bef571c9c38c0dcecee4d4c71e7f",
+      "file_sha256": "5ff3cc65a9b5a8c8d12caea4ee8b18a16eb4bef571c9c38c0dcecee4d4c71e7f"
+    }
+  },
+  "live_files": {
+    "src/mew/patch_draft.py": {
+      "text": "def meaning():\n    return 41\n",
+      "sha256": "1ce935529e5166242b24bbd85f3486fc87501d23054289074cb170409c09add2"
+    },
+    "tests/test_patch_draft.py": {
+      "text": "def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+      "sha256": "5ff3cc65a9b5a8c8d12caea4ee8b18a16eb4bef571c9c38c0dcecee4d4c71e7f"
+    }
+  },
+  "allowed_write_roots": ["."],
+  "expected": {
+    "kind": "patch_draft",
+    "status": "validated",
+    "file_count": 2,
+    "file_kinds": [
+      "edit_file",
+      "edit_file"
+    ],
+    "diff_contains": [
+      "--- a/src/mew/patch_draft.py",
+      "+++ b/tests/test_patch_draft.py",
+      "+    return 42",
+      "+    self.assertEqual(meaning(), 42)"
+    ]
+  }
+}

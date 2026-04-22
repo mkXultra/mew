@@ -1,0 +1,47 @@
+{
+  "name": "ambiguous_old_text_match",
+  "todo": {
+    "id": "todo-17",
+    "source": {
+      "target_paths": ["tests/test_patch_draft.py"]
+    }
+  },
+  "model_output": {
+    "kind": "patch_proposal",
+    "files": [
+      {
+        "path": "tests/test_patch_draft.py",
+        "edits": [
+          {
+            "old": "x = 1",
+            "new": "x = 3"
+          }
+        ]
+      }
+    ]
+  },
+  "cached_windows": {
+    "tests/test_patch_draft.py": {
+      "path": "tests/test_patch_draft.py",
+      "line_start": 1,
+      "line_end": 3,
+      "text": "x = 1\nx = 1\nx = 2\n",
+      "context_truncated": false,
+      "window_sha256": "4a7d8c5dfbe2d0159993ef972e856e2d08d85839c0c3d5f63aac97001052ce87",
+      "file_sha256": "4a7d8c5dfbe2d0159993ef972e856e2d08d85839c0c3d5f63aac97001052ce87"
+    }
+  },
+  "live_files": {
+    "tests/test_patch_draft.py": {
+      "text": "x = 1\nx = 1\nx = 2\n",
+      "sha256": "4a7d8c5dfbe2d0159993ef972e856e2d08d85839c0c3d5f63aac97001052ce87"
+    }
+  },
+  "allowed_write_roots": ["."],
+  "expected": {
+    "kind": "patch_blocker",
+    "code": "ambiguous_old_text_match",
+    "detail_contains": "matched 2 times",
+    "path": "tests/test_patch_draft.py"
+  }
+}
