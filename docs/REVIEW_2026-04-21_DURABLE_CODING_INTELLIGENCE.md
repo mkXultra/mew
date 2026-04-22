@@ -142,6 +142,14 @@ coding begins.
 
 All IDs confirmed via arxiv.org on 2026-04-21.
 
+Quantitative expectations derived from these sources — per-deliverable
+expected values, adaptation rules, falsification criteria, and an
+observation log populated during Phase 2-4 implementation — are
+recorded separately in
+`docs/REVIEW_2026-04-22_M6_9_EXPECTED_VALUES.md`. That document is a
+supplementary scientific reference and does not alter the formal close
+gate defined in §2 or the NFR budgets in §12.
+
 ### 5.1 Memory architecture
 - Sumers et al., *Cognitive Architectures for Language Agents* (CoALA),
   arXiv:2309.02427. Canonical split: working / episodic / semantic /
