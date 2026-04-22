@@ -84,7 +84,11 @@ from .mood import (
     render_mood_markdown,
     write_mood_report,
 )
-from .proof_summary import format_proof_summary, summarize_proof_artifacts
+from .proof_summary import (
+    format_proof_summary,
+    summarize_m6_11_replay_calibration,
+    summarize_proof_artifacts,
+)
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
     build_morning_paper_view_model,
@@ -10427,7 +10431,10 @@ def cmd_dogfood(args):
     return 0
 
 def cmd_proof_summary(args):
-    summary = summarize_proof_artifacts(args.artifact_dir)
+    if getattr(args, "m6_11_phase2_calibration", False):
+        summary = summarize_m6_11_replay_calibration(args.artifact_dir)
+    else:
+        summary = summarize_proof_artifacts(args.artifact_dir)
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:

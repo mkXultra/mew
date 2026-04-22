@@ -146,12 +146,16 @@ Current next action:
 10. Start M6.11 Phase 0 first: land refusal separation, freeze blocker and
     recovery enums, and add the draft metrics/placeholders that the design
     depends on.
-11. Do not let mew self-author roadmap-status or milestone-close edits; those
+11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
+    `mew proof-summary --m6_11-phase2-calibration`, scanning
+    `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
+    bundles.
+12. Do not let mew self-author roadmap-status or milestone-close edits; those
     remain reviewer-controlled until a later milestone explicitly moves that
     boundary.
-12. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+13. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
-13. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
+14. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
    written. The reconsideration trigger fired on fresh bounded item `#389`,
    but the exposed blocker was narrower than Explorer/Todo: write-ready diff
    generation. `work_loop.py` now carries the blocker-specific fix set
@@ -1971,10 +1975,12 @@ Missing proof:
   inputs (`todo`, `proposal`, `cached_windows`, `live_files`,
   `allowed_write_roots`) plus `validator_result` under
   `.mew/replays/work-loop/...`, but the broader recovery/follow-status
-  harnesses and rollout calibration still do not exist yet
+  harnesses and rollout calibration gate is now implemented; this section will
+  measure whether off-schema/refusal incidence stays within M6.11 calibration
+  gate thresholds
 - draft-related model failures and offline compiler captures now share the same
-  replay root, but the Phase 2/3 calibration checker that measures
-  off-schema/refusal incidence from those bundles is not wired yet
+  replay root, and the Phase 2/3 calibration checker for off-schema/refusal
+  incidence from those bundles now exists
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -1986,9 +1992,8 @@ Missing proof:
 Next action:
 
 - continue Phase 2:
-  wire the Phase 2/3 replay-bundle calibration checkpoint so compiler and
-  model-failure bundles can measure off-schema/refusal incidence before any
-  live Phase 3 rollout starts
+  use the replay-bundle calibration checkpoint to confirm compiler and
+  model-failure incidence is within gate before any live Phase 3 rollout
 - do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
   ready to gate rollout using replay-bundle off-schema/refusal ratios
 

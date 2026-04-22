@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from pathlib import Path
 
 
@@ -95,6 +96,240 @@ def _int_or_none(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_rate(numerator, denominator):
+    try:
+        numerator = float(numerator)
+        denominator = float(denominator)
+        if denominator <= 0:
+            return 0.0
+        return numerator / denominator
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+def _read_validator_result_code(metadata_path, metadata):
+    files = metadata.get("files") if isinstance(metadata.get("files"), dict) else {}
+    validator_file = files.get("validator_result")
+    validator_path = metadata_path.parent / (
+        validator_file if isinstance(validator_file, str) else "validator_result.json"
+    )
+    try:
+        validator = _load_json_file(validator_path)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(validator, dict):
+        return None
+    return validator.get("code")
+
+
+def _calibration_compiler_type(code):
+    if code == "model_returned_non_schema":
+        return "patch_draft_compiler.off_schema"
+    if code == "model_returned_refusal":
+        return "patch_draft_compiler.refusal"
+    return "patch_draft_compiler.other"
+
+
+def _calibration_model_failure_type(failure_code):
+    code = str(failure_code or "").strip()
+    if code == "model_refused":
+        return "work-loop-model-failure.model_refused"
+    if code:
+        return f"work-loop-model-failure.{code}"
+    return "work-loop-model-failure.other"
+
+
+def _summarize_patch_draft_compiler_bundle(metadata_path):
+    summary = {
+        "bundle_type": "patch_draft_compiler",
+        "calibration_bundle_type": "patch_draft_compiler.other",
+        "off_schema": False,
+        "refusal": False,
+        "errors": [],
+    }
+    try:
+        metadata = _load_json_file(metadata_path)
+    except json.JSONDecodeError as exc:
+        summary["errors"].append(f"invalid compiler metadata JSON: {metadata_path}: {exc}")
+        return summary
+
+    if not isinstance(metadata, dict):
+        summary["errors"].append(f"invalid compiler metadata payload: {metadata_path}")
+        return summary
+
+    bundle_name = metadata.get("bundle")
+    if isinstance(bundle_name, str) and bundle_name.strip():
+        summary["bundle_type"] = bundle_name.strip()
+
+    code = _read_validator_result_code(metadata_path, metadata)
+    if code is None:
+        summary["errors"].append(f"missing or invalid validator_result JSON for {metadata_path}")
+        return summary
+    summary["calibration_bundle_type"] = _calibration_compiler_type(code)
+    summary["off_schema"] = code == "model_returned_non_schema"
+    summary["refusal"] = code == "model_returned_refusal"
+    return summary
+
+
+def _summarize_model_failure_bundle(report_path):
+    summary = {
+        "bundle_type": "work-loop-model-failure",
+        "calibration_bundle_type": "work-loop-model-failure.other",
+        "off_schema": False,
+        "refusal": False,
+        "errors": [],
+    }
+    try:
+        report = _load_json_file(report_path)
+    except json.JSONDecodeError as exc:
+        summary["errors"].append(f"invalid model-failure report JSON: {report_path}: {exc}")
+        return summary
+
+    if not isinstance(report, dict):
+        summary["errors"].append(f"invalid model-failure report payload: {report_path}")
+        return summary
+
+    bundle_name = report.get("bundle")
+    if isinstance(bundle_name, str) and bundle_name.strip():
+        summary["bundle_type"] = bundle_name.strip()
+    failure = report.get("failure") if isinstance(report.get("failure"), dict) else {}
+    summary["calibration_bundle_type"] = _calibration_model_failure_type(failure.get("code"))
+    summary["refusal"] = str(failure.get("code") or "") == "model_refused"
+    return summary
+
+
+def summarize_m6_11_replay_calibration(replay_root):
+    replay_path = Path(replay_root)
+    errors = []
+    if not replay_path.exists():
+        errors.append(f"replay root not found: {replay_path}")
+
+    bundle_type_counts = defaultdict(int)
+    malformed_bundle_counts = defaultdict(int)
+    malformed_bundle_count = 0
+    malformed_relevant_bundle_count = 0
+    total_bundles = 0
+    off_schema_count = 0
+    refusal_count = 0
+    dominant_bundle_type = ""
+    refusal_by_type = defaultdict(int)
+    compiler_bundles = 0
+    relevant_bundles = 0
+
+    for metadata_path in sorted(replay_path.rglob("replay_metadata.json")):
+        if not metadata_path.is_file():
+            continue
+        bundle_summary = _summarize_patch_draft_compiler_bundle(metadata_path)
+        bundle_type = bundle_summary.get("bundle_type") or "patch_draft_compiler"
+        if bundle_type != "patch_draft_compiler":
+            malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
+            malformed_bundle_count += 1
+            continue
+        relevant_bundles += 1
+        if bundle_summary.get("errors"):
+            malformed_bundle_counts[bundle_type] += 1
+            malformed_bundle_count += 1
+            malformed_relevant_bundle_count += 1
+            for error in bundle_summary.get("errors") or []:
+                errors.append(error)
+            continue
+        calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "patch_draft_compiler.other"
+        total_bundles += 1
+        compiler_bundles += 1
+        bundle_type_counts[calibration_bundle_type] += 1
+        if bundle_summary.get("off_schema"):
+            off_schema_count += 1
+        if bundle_summary.get("refusal"):
+            refusal_count += 1
+            refusal_by_type[calibration_bundle_type] += 1
+
+    for report_path in sorted(replay_path.rglob("report.json")):
+        if not report_path.is_file():
+            continue
+        bundle_summary = _summarize_model_failure_bundle(report_path)
+        bundle_type = bundle_summary.get("bundle_type") or "work-loop-model-failure"
+        if bundle_type != "work-loop-model-failure":
+            malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
+            malformed_bundle_count += 1
+            continue
+        relevant_bundles += 1
+        if bundle_summary.get("errors"):
+            malformed_bundle_counts[bundle_type] += 1
+            malformed_bundle_count += 1
+            malformed_relevant_bundle_count += 1
+            for error in bundle_summary.get("errors") or []:
+                errors.append(error)
+            continue
+        calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "work-loop-model-failure.other"
+        total_bundles += 1
+        bundle_type_counts[calibration_bundle_type] += 1
+        if bundle_summary.get("refusal"):
+            refusal_count += 1
+            refusal_by_type[calibration_bundle_type] += 1
+        for error in bundle_summary.get("errors") or []:
+            errors.append(error)
+
+    dominant_bundle_count = 0
+    dominant_bundle_share = 0.0
+    if bundle_type_counts:
+        dominant_bundle_type, dominant_bundle_count = max(
+            bundle_type_counts.items(),
+            key=lambda item: item[1],
+        )
+        dominant_bundle_share = _safe_rate(dominant_bundle_count, total_bundles)
+    off_schema_rate = _safe_rate(off_schema_count, compiler_bundles)
+    refusal_rate = _safe_rate(refusal_count, total_bundles)
+
+    dominant_share_ok = total_bundles == 0 or dominant_bundle_share <= 0.4
+    malformed_bundle_ok = malformed_relevant_bundle_count == 0
+
+    thresholds = {
+        "off_schema_rate_max": 0.05,
+        "off_schema_rate_ok": off_schema_rate <= 0.05,
+        "refusal_rate_max": 0.03,
+        "refusal_rate_ok": refusal_rate <= 0.03,
+        "failure_mode_concentration_max": 0.4,
+        "failure_mode_concentration_ok": dominant_share_ok,
+        "malformed_relevant_bundles_ok": malformed_bundle_ok,
+        "has_bundles": total_bundles > 0,
+        "has_relevant_bundles": relevant_bundles > 0,
+    }
+
+    thresholds_pass = all(
+        (
+            thresholds["off_schema_rate_ok"],
+            thresholds["refusal_rate_ok"],
+            thresholds["failure_mode_concentration_ok"],
+            thresholds["malformed_relevant_bundles_ok"],
+            thresholds["has_bundles"],
+        )
+    )
+
+    return {
+        "artifact_dir": str(replay_path),
+        "mode": "m6_11_phase2_calibration",
+        "ok": thresholds_pass,
+        "errors": errors,
+        "calibration": {
+            "total_bundles": total_bundles,
+            "bundle_type_counts": dict(bundle_type_counts),
+            "relevant_bundles": relevant_bundles,
+            "compiler_bundles": compiler_bundles,
+            "off_schema_count": off_schema_count,
+            "off_schema_rate": off_schema_rate,
+            "off_schema_denominator": compiler_bundles,
+            "refusal_count": refusal_count,
+            "refusal_rate": refusal_rate,
+            "refusal_by_type": dict(refusal_by_type),
+            "dominant_bundle_type": dominant_bundle_type,
+            "dominant_bundle_share": dominant_bundle_share,
+            "malformed_bundle_count": malformed_bundle_count,
+            "malformed_relevant_bundle_count": malformed_relevant_bundle_count,
+            "malformed_bundle_counts": dict(malformed_bundle_counts),
+            "thresholds": thresholds,
+        },
+    }
 
 
 def _expected_passive_events_min(duration, interval):
@@ -264,6 +499,64 @@ def summarize_proof_artifacts(artifact_dir):
 
 
 def format_proof_summary(summary):
+    calibration = summary.get("calibration")
+    if calibration:
+        refusal_by_type = calibration.get("refusal_by_type") or {}
+        refusal_breakdown = ", ".join(
+            f"{key}={value}" for key, value in sorted(refusal_by_type.items())
+        )
+        rates = [
+            (
+                "off_schema="
+                f"{calibration.get('off_schema_rate', 0.0):.4f}"
+                f" ({calibration.get('off_schema_count', 0)}/{calibration.get('off_schema_denominator', 0)})"
+            ),
+            (
+                "refusal="
+                f"{calibration.get('refusal_rate', 0.0):.4f}"
+                f" ({calibration.get('refusal_count', 0)}/{calibration.get('total_bundles', 0)})"
+            ),
+            f"dominant_share={calibration.get('dominant_bundle_share', 0.0):.4f}",
+            f"refusal_breakdown={refusal_breakdown or 'none'}",
+        ]
+        bundle_counts = calibration.get("bundle_type_counts") or {}
+        counts = ", ".join(
+            f"{key}={value}"
+            for key, value in sorted(bundle_counts.items())
+        )
+        lines = [
+            f"Proof summary: {summary.get('artifact_dir', '')}",
+            f"status: {'pass' if summary.get('ok') else 'review'}",
+            "mode: m6.11 phase2/phase3 calibration",
+            f"calibration_bundles: total={calibration.get('total_bundles', 0)}",
+            f"calibration_bundle_types: {counts or 'none'}",
+            f"calibration_rates: {', '.join(rates)}",
+            (
+            f"calibration_thresholds: "
+            f"off_schema_ok={calibration.get('thresholds', {}).get('off_schema_rate_ok', False)} "
+            f"refusal_ok={calibration.get('thresholds', {}).get('refusal_rate_ok', False)} "
+            f"failure_mode_concentration_ok={calibration.get('thresholds', {}).get('failure_mode_concentration_ok', False)} "
+            f"malformed_relevant_ok={calibration.get('thresholds', {}).get('malformed_relevant_bundles_ok', False)} "
+            f"has_bundles={calibration.get('thresholds', {}).get('has_bundles', False)}"
+        ),
+            (
+                "calibration_dominant_type: "
+                f"{calibration.get('dominant_bundle_type', '')} "
+                f"share={calibration.get('dominant_bundle_share', 0.0):.4f}"
+            ),
+            f"malformed_bundles: total={calibration.get('malformed_bundle_count', 0)}",
+            (
+                "malformed_bundle_types: "
+                + ", ".join(
+                    f"{key}={value}"
+                    for key, value in sorted((calibration.get("malformed_bundle_counts") or {}).items())
+                )
+            ),
+        ]
+        for error in summary.get("errors") or []:
+            lines.append(f"error: {error}")
+        return "\n".join(lines)
+
     container = summary.get("container", {})
     dogfood = summary.get("dogfood", {})
     resident = summary.get("resident_loop", {})

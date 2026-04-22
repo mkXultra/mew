@@ -946,6 +946,11 @@ def build_parser():
         action="store_true",
         help="return non-zero when the collected proof did not pass cleanly",
     )
+    proof_summary_parser.add_argument(
+        "--m6_11-phase2-calibration",
+        action="store_true",
+        help="interpret artifact_dir as replay-root for the M6.11 phase2/3 calibration checkpoint",
+    )
     proof_summary_parser.set_defaults(func=cmd_proof_summary)
 
     perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")

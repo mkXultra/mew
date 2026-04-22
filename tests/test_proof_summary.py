@@ -4,10 +4,91 @@ import unittest
 from pathlib import Path
 
 from mew.cli import build_parser
-from mew.proof_summary import format_proof_summary, summarize_proof_artifacts
+from mew.proof_summary import (
+    format_proof_summary,
+    summarize_m6_11_replay_calibration,
+    summarize_proof_artifacts,
+)
 
 
 class ProofSummaryTests(unittest.TestCase):
+    @staticmethod
+    def _write_json(path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    @staticmethod
+    def _build_mixed_replay_bundles(replay_root):
+        replay_root = Path(replay_root)
+        compiler_root = replay_root / "2026-04-22" / "session-1" / "todo-compiler"
+        for attempt in range(1, 4):
+            attempt_dir = compiler_root / f"attempt-{attempt}"
+            code = "patch_valid"
+            ProofSummaryTests._write_json(
+                attempt_dir / "validator_result.json",
+                {"code": code},
+            )
+            ProofSummaryTests._write_json(
+                attempt_dir / "replay_metadata.json",
+                {
+                    "bundle": "patch_draft_compiler",
+                    "files": {"validator_result": "validator_result.json"},
+                },
+            )
+
+        unknown_root = replay_root / "2026-04-22" / "session-2" / "todo-failed-timeout"
+        for attempt in range(1, 4):
+            attempt_dir = unknown_root / f"attempt-{attempt}"
+            ProofSummaryTests._write_json(
+                attempt_dir / "report.json",
+                {
+                    "bundle": "work-loop-model-failure",
+                    "failure": {"code": "model_failed_timeout"},
+                },
+            )
+
+        dominant_root = replay_root / "2026-04-22" / "session-3" / "todo-failed-refusal"
+        for attempt in range(1, 3):
+            attempt_dir = dominant_root / f"attempt-{attempt}"
+            ProofSummaryTests._write_json(
+                attempt_dir / "report.json",
+                {
+                    "bundle": "work-loop-model-failure",
+                    "failure": {"code": "model_input_rejected"},
+                },
+            )
+
+    @staticmethod
+    def _write_relevant_compiler_bundle(attempt_root, attempt, code):
+        attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
+        ProofSummaryTests._write_json(
+            attempt_dir / "validator_result.json",
+            {"code": code},
+        )
+        ProofSummaryTests._write_json(
+            attempt_dir / "replay_metadata.json",
+            {
+                "bundle": "patch_draft_compiler",
+                "files": {"validator_result": "validator_result.json"},
+            },
+        )
+
+    @staticmethod
+    def _write_model_failure_bundle(attempt_root, attempt, code="model_failed_timeout"):
+        attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
+        ProofSummaryTests._write_json(
+            attempt_dir / "report.json",
+            {"bundle": "work-loop-model-failure", "failure": {"code": code}},
+        )
+
+    @staticmethod
+    def _write_legacy_report_bundle(attempt_root, attempt, bundle_name="legacy-work-loop-failure"):
+        attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
+        ProofSummaryTests._write_json(
+            attempt_dir / "report.json",
+            {"bundle": bundle_name, "failure": {"code": "model_failed_timeout"}},
+        )
+
     def test_summarize_resident_loop_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)
@@ -286,3 +367,233 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(args.artifact_dir, "proof-artifacts/example")
         self.assertTrue(args.json)
         self.assertTrue(args.strict)
+        self.assertFalse(args.m6_11_phase2_calibration)
+
+    def test_cli_proof_summary_parses_m6_11_phase2_calibration(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            ["proof-summary", "proof-artifacts/replays", "--m6_11-phase2-calibration"]
+        )
+
+        self.assertEqual(args.artifact_dir, "proof-artifacts/replays")
+        self.assertTrue(args.m6_11_phase2_calibration)
+
+    def test_summarize_m6_11_calibration_mixed_distribution_can_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            for attempt in range(1, 5):
+                self._write_relevant_compiler_bundle(replay_root / "compiler", attempt, "patch_valid")
+            for attempt in range(1, 4):
+                self._write_model_failure_bundle(
+                    replay_root / "failure_timeout",
+                    attempt,
+                    "model_failed_timeout",
+                )
+            for attempt in range(1, 4):
+                self._write_model_failure_bundle(
+                    replay_root / "failure_rejected",
+                    attempt,
+                    "model_input_rejected",
+                )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        self.assertTrue(summary["ok"])
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 10)
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {
+                "patch_draft_compiler.other": 4,
+                "work-loop-model-failure.model_failed_timeout": 3,
+                "work-loop-model-failure.model_input_rejected": 3,
+            },
+        )
+        self.assertEqual(calibration["off_schema_count"], 0)
+        self.assertEqual(calibration["off_schema_denominator"], 4)
+        self.assertAlmostEqual(calibration["off_schema_rate"], 0.0, places=6)
+        self.assertEqual(calibration["refusal_count"], 0)
+        self.assertAlmostEqual(calibration["refusal_rate"], 0.0, places=6)
+        self.assertEqual(calibration["malformed_bundle_count"], 0)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 0)
+        self.assertTrue(calibration["thresholds"]["off_schema_rate_ok"])
+        self.assertTrue(calibration["thresholds"]["refusal_rate_ok"])
+        self.assertTrue(calibration["thresholds"]["failure_mode_concentration_ok"])
+        self.assertEqual(calibration["dominant_bundle_share"], 0.4)
+        self.assertIn("work-loop-model-failure.model_failed_timeout", calibration["bundle_type_counts"])
+        self.assertTrue(calibration["thresholds"]["malformed_relevant_bundles_ok"])
+
+    def test_summarize_m6_11_calibration_legacy_bundles_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            for attempt in range(1, 3):
+                self._write_relevant_compiler_bundle(replay_root / "compiler", attempt, "patch_valid")
+            for attempt in range(1, 3):
+                self._write_model_failure_bundle(replay_root / "failure_timeout", attempt)
+            for attempt in range(1, 2):
+                self._write_model_failure_bundle(
+                    replay_root / "failure_rejected",
+                    attempt,
+                    "model_input_rejected",
+                )
+            for attempt in range(1, 5):
+                self._write_legacy_report_bundle(replay_root / "legacy", attempt)
+            self._write_legacy_report_bundle(
+                replay_root / "ignored",
+                1,
+                bundle_name="work-loop-model-failure-retry",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 5)
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {
+                "patch_draft_compiler.other": 2,
+                "work-loop-model-failure.model_failed_timeout": 2,
+                "work-loop-model-failure.model_input_rejected": 1,
+            },
+        )
+        self.assertEqual(calibration["relevant_bundles"], 5)
+        self.assertEqual(calibration["malformed_bundle_count"], 5)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 0)
+        self.assertTrue(calibration["thresholds"]["failure_mode_concentration_ok"])
+        self.assertIn("ignored_legacy-work-loop-failure", calibration["malformed_bundle_counts"])
+        self.assertIn(
+            "ignored_work-loop-model-failure-retry",
+            calibration["malformed_bundle_counts"],
+        )
+
+    def test_summarize_m6_11_calibration_off_schema_uses_compiler_denom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            compiler_root = replay_root / "compiler"
+            self._write_relevant_compiler_bundle(compiler_root, 1, "model_returned_non_schema")
+            self._write_relevant_compiler_bundle(compiler_root, 2, "patch_valid")
+            for attempt in range(1, 21):
+                self._write_legacy_report_bundle(replay_root / "legacy", attempt)
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["compiler_bundles"], 2)
+        self.assertEqual(calibration["total_bundles"], 2)
+        self.assertEqual(calibration["off_schema_count"], 1)
+        self.assertEqual(calibration["off_schema_denominator"], 2)
+        self.assertAlmostEqual(calibration["off_schema_rate"], 0.5, places=6)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 0)
+        self.assertFalse(calibration["thresholds"]["off_schema_rate_ok"])
+
+    def test_summarize_m6_11_calibration_threshold_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            failure_root = replay_root / "2026-04-22" / "session-1" / "todo-fail"
+            for attempt in range(1, 11):
+                attempt_dir = failure_root / f"attempt-{attempt}"
+                ProofSummaryTests._write_json(
+                    attempt_dir / "replay_metadata.json",
+                    {"bundle": "patch_draft_compiler", "files": {"validator_result": "validator_result.json"}},
+                )
+                ProofSummaryTests._write_json(
+                    attempt_dir / "validator_result.json",
+                    {"code": "model_returned_non_schema"},
+                )
+            report_root = replay_root / "2026-04-22" / "session-2" / "todo-refusal"
+            report_path = report_root / "attempt-1" / "report.json"
+            ProofSummaryTests._write_json(
+                report_path,
+                {"bundle": "work-loop-model-failure", "failure": {"code": "model_refused"}},
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        self.assertFalse(summary["ok"])
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 11)
+        self.assertEqual(calibration["off_schema_count"], 10)
+        self.assertEqual(calibration["refusal_count"], 1)
+        self.assertFalse(calibration["thresholds"]["off_schema_rate_ok"])
+        self.assertFalse(calibration["thresholds"]["refusal_rate_ok"])
+        self.assertFalse(calibration["thresholds"]["failure_mode_concentration_ok"])
+        self.assertTrue(summary["calibration"]["thresholds"]["has_bundles"])
+
+    def test_summarize_m6_11_calibration_malformed_relevant_bundle_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            compiler_root = replay_root / "compiler"
+            self._write_relevant_compiler_bundle(compiler_root, 1, "patch_valid")
+            malformed_path = compiler_root / "attempt-2" / "replay_metadata.json"
+            malformed_path.parent.mkdir(parents=True, exist_ok=True)
+            malformed_path.write_text("{", encoding="utf-8")
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        self.assertFalse(summary["ok"])
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 1)
+        self.assertEqual(calibration["compiler_bundles"], 1)
+        self.assertEqual(calibration["malformed_bundle_count"], 1)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 1)
+        self.assertFalse(calibration["thresholds"]["malformed_relevant_bundles_ok"])
+        self.assertEqual(len(summary["errors"]), 1)
+        self.assertIn("invalid compiler metadata JSON", summary["errors"][0])
+
+    def test_format_m6_11_calibration_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._build_mixed_replay_bundles(replay_root)
+            summary = summarize_m6_11_replay_calibration(replay_root)
+            rendered = format_proof_summary(summary)
+
+        self.assertIn("mode: m6.11 phase2/phase3 calibration", rendered)
+        self.assertIn("calibration_bundles: total=8", rendered)
+        self.assertIn("calibration_bundle_types:", rendered)
+        self.assertIn("calibration_thresholds:", rendered)
+        self.assertIn("off_schema_ok=True", rendered)
+        self.assertIn("failure_mode_concentration_ok=True", rendered)
+        self.assertIn("malformed_relevant_ok=True", rendered)
+        self.assertIn("malformed_bundles:", rendered)
+
+    def test_format_m6_11_calibration_refusal_breakdown_uses_real_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(replay_root / "compiler", 1, "model_returned_refusal")
+            self._write_relevant_compiler_bundle(replay_root / "compiler", 2, "patch_valid")
+            self._write_model_failure_bundle(
+                replay_root / "failure_refused",
+                1,
+                "model_refused",
+            )
+            self._write_model_failure_bundle(
+                replay_root / "failure_timeout",
+                1,
+                "model_failed_timeout",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+            rendered = format_proof_summary(summary)
+
+        calibration = summary["calibration"]
+        self.assertEqual(
+            calibration["refusal_by_type"],
+            {
+                "patch_draft_compiler.refusal": 1,
+                "work-loop-model-failure.model_refused": 1,
+            },
+        )
+        self.assertIn("refusal_breakdown=patch_draft_compiler.refusal=1", rendered)
+        self.assertIn(
+            "work-loop-model-failure.model_refused=1",
+            rendered,
+        )
+
+    def test_summarize_m6_11_calibration_compiler_monoculture_fails_concentration_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            for attempt in range(1, 11):
+                self._write_relevant_compiler_bundle(replay_root / "compiler", attempt, "patch_valid")
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        self.assertFalse(summary["ok"])
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 10)
+        self.assertEqual(calibration["dominant_bundle_type"], "patch_draft_compiler.other")
+        self.assertEqual(calibration["dominant_bundle_share"], 1.0)
+        self.assertFalse(calibration["thresholds"]["failure_mode_concentration_ok"])
