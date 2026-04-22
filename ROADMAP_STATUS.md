@@ -1969,6 +1969,11 @@ Missing proof:
   blockers are not yet captured because `PatchDraftCompiler` does not exist
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
+- `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
+  M6.11 close additionally requires dogfood scenario registration, a 20-slice
+  `#399/#401` incidence gate, and a Phase 2/3 replay-bundle calibration
+  checkpoint. These strengthen close verification but do not widen the
+  implementation scope beyond Phases 0-4
 
 Next action:
 
@@ -1976,6 +1981,8 @@ Next action:
   add the first `PatchDraftCompiler` scaffolding and fixture lane so `#399`
   stops as a live-loop timeout/refusal problem and becomes a deterministic
   compiler/blocker problem offline
+- do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
+  ready to gate rollout using replay-bundle off-schema/refusal ratios
 
 ### M7: Senses - Inbound Signals
 

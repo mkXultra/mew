@@ -784,6 +784,9 @@ What this phase proves:
 - `#399` can be reproduced as a compiler/blocker problem without a live model
 - any live draft failure after Phase 2 leaves a replayable local bundle
 - the validator can deterministically accept or reject patch proposals
+- replay bundles become the measurement surface for the mandatory Phase 2/3
+  calibration checkpoint; Phase 3 should not start until that checkpoint is
+  ready to evaluate off-schema and refusal incidence
 
 ### Phase 3: Rewire write-ready fast path to patch contract
 
@@ -797,6 +800,12 @@ What this phase proves:
 
 - exact cached windows now produce a diff or exact blocker in one narrow turn
 - the loop no longer depends on generic tool-batch planning while drafting
+
+Phase 3 entry gate:
+
+- the Phase 2/3 calibration checkpoint from
+  `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` must be wired and
+  ready to evaluate replay-bundle off-schema/refusal ratios before rollout
 
 ### Phase 4: Add drafting-specific recovery and follow-status
 
@@ -857,6 +866,23 @@ What this phase proves:
 - Multi-todo scheduling beyond "exactly one active drafting todo."
 - Broad follow-status UX redesign beyond draft-specific observability fields.
 - Any roadmap/status file updates tied to this design.
+
+## Appendix: Close-Gate Strengthening
+
+The proposal in `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is
+adopted as additive close-gate verification for M6.11. It does not widen the
+Phase 0-4 implementation scope, but it does add three required verification
+surfaces for milestone close:
+
+1. `m6_11-*` dogfood scenarios covering compiler replay, draft timeout,
+   refusal separation, drafting recovery, and phase-4 regression
+2. a 20-slice bounded iteration incidence gate for `#399` + `#401`
+3. a Phase 2/3 replay-bundle calibration checkpoint that can pause rollout and
+   require a Phase 2.5 calibration slice before Phase 3
+
+The important ordering rule is explicit: Phase 2 continues normally, but Phase
+3 does not start until the calibration checkpoint exists and is ready to gate
+rollout.
 
 ## Risks / Tradeoffs
 

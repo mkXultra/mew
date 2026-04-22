@@ -626,6 +626,16 @@ Done when:
 - at least one bounded mew-first implementation slice completes through the new
   drafting path with reviewer-visible dry-run preview, approval/apply/verify,
   and no rescue edits attributable to the old drafting failure buckets
+- `m6_11-*` dogfood scenarios for compiler replay, draft timeout, refusal
+  separation, drafting recovery, and phase-4 regression are registered and pass
+  under `proof-summary --strict` during M6.11 validation
+- a 20-slice bounded iteration batch shows at least a 50% combined reduction in
+  `#399` + `#401` incidence versus the documented pre-M6.11 baseline, or a
+  reviewer-signed documented reason explains a smaller reduction
+- a Phase 2/3 calibration checkpoint passes before Phase 3 starts, or an
+  explicit Phase 2.5 calibration slice lands first; the checkpoint uses replay
+  bundles to measure off-schema/refusal rates and prevent an unstable Phase 3
+  rollout
 
 Why it matters:
 
