@@ -1344,7 +1344,24 @@ def _write_ready_patch_draft_environment(
     write_ready_fast_path,
 ):
     def canonical_path(path):
-        return normalize_work_path(path)
+        normalized = normalize_work_path(path)
+        if not normalized:
+            return ""
+
+        candidate = Path(normalized)
+        if candidate.is_absolute():
+            try:
+                return candidate.resolve(strict=False).relative_to(Path.cwd().resolve()).as_posix()
+            except ValueError:
+                return normalized
+            except OSError:
+                return normalized
+
+        root_without_leading_slash = str(Path.cwd().resolve()).lstrip("/")
+        if root_without_leading_slash and normalized.startswith(f"{root_without_leading_slash}/"):
+            normalized = normalized[len(root_without_leading_slash) + 1 :]
+
+        return normalized
 
     fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
     recent_windows = fast_path.get("recent_windows") or []
