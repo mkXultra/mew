@@ -22,6 +22,7 @@ from .test_discovery import convention_test_path_for_mew_source, discover_tests_
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
 from .typed_memory import FileMemoryBackend, entry_to_dict
+from .patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from .write_tools import (
     build_write_intent,
     classify_write_intent_world_state,
@@ -47,6 +48,177 @@ WORK_TODO_STATUSES = {
     "completed",
 }
 WORK_TODO_PHASE_STATUSES = {"drafting", "blocked_on_patch"}
+_TINY_WRITE_READY_DRAFT_BLOCKER_UNKNOWN_RECOVERY_ACTION = "refresh_cached_window"
+_TINY_WRITE_READY_DRAFT_BLOCKER_REASON_PREFIX = "write-ready tiny draft blocker:"
+
+
+def _tiny_write_ready_draft_recovery_action(blocker_code):
+    code = str(blocker_code or "").strip()
+    return PATCH_BLOCKER_RECOVERY_ACTIONS.get(
+        code,
+        _TINY_WRITE_READY_DRAFT_BLOCKER_UNKNOWN_RECOVERY_ACTION,
+    )
+
+
+def _tiny_write_ready_draft_turn_todo_id(*, decision_plan=None, action_plan=None, action=None):
+    action_plan = action_plan if isinstance(action_plan, dict) else {}
+    decision_plan = decision_plan if isinstance(decision_plan, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    for candidate in (action_plan, action, decision_plan):
+        candidate_todo_id = str(candidate.get("todo_id") or "").strip()
+        if not candidate_todo_id:
+            blocker = candidate.get("blocker")
+            if isinstance(blocker, dict):
+                candidate_todo_id = str(blocker.get("todo_id") or "").strip()
+        if candidate_todo_id:
+            return candidate_todo_id
+    return ""
+
+
+def _tiny_write_ready_draft_blocker_from_turn(
+    *, decision_plan=None, action_plan=None, action=None
+):
+    decision_plan = decision_plan if isinstance(decision_plan, dict) else {}
+    action_plan = action_plan if isinstance(action_plan, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    structured_blocker = {}
+    for candidate in (
+        action_plan.get("blocker"),
+        action.get("blocker"),
+        decision_plan.get("blocker"),
+    ):
+        if isinstance(candidate, dict):
+            structured_blocker = candidate
+            break
+    reason = str(action.get("reason") or "").strip()
+    if structured_blocker:
+        code = str(structured_blocker.get("code") or "").strip()
+    elif reason.startswith(_TINY_WRITE_READY_DRAFT_BLOCKER_REASON_PREFIX):
+        code = reason[len(_TINY_WRITE_READY_DRAFT_BLOCKER_REASON_PREFIX) :].strip()
+    else:
+        code = str(decision_plan.get("code") or "").strip()
+    detail = str(
+        (structured_blocker.get("detail") if structured_blocker else None)
+        or decision_plan.get("detail")
+        or action_plan.get("summary")
+        or action.get("reason")
+        or ""
+    ).strip()
+    blocker = {
+        "code": code,
+        "detail": detail,
+        "recovery_action": _tiny_write_ready_draft_recovery_action(code),
+    }
+    path = str(
+        (structured_blocker.get("path") if structured_blocker else None)
+        or decision_plan.get("path")
+        or ""
+    ).strip()
+    if path:
+        blocker["path"] = path
+    line_start = structured_blocker.get("line_start") if structured_blocker else decision_plan.get("line_start")
+    line_end = structured_blocker.get("line_end") if structured_blocker else decision_plan.get("line_end")
+    try:
+        line_start = int(line_start)
+        if line_start > 0:
+            blocker["line_start"] = line_start
+    except (TypeError, ValueError):
+        pass
+    try:
+        line_end = int(line_end)
+        if line_end > 0:
+            blocker["line_end"] = line_end
+    except (TypeError, ValueError):
+        pass
+    return blocker
+
+
+def _coerce_non_negative_int(value, default=0):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _latest_tiny_write_ready_draft_turn(model_turns, *, todo_id=None):
+    todo_id = str(todo_id or "").strip()
+    for turn in reversed(list(model_turns or [])):
+        if str(turn.get("status") or "") != "completed":
+            continue
+        metrics = turn.get("model_metrics") or {}
+        outcome = str(metrics.get("tiny_write_ready_draft_outcome") or "").strip()
+        if outcome not in {"blocker", "succeeded"}:
+            continue
+        if todo_id and _tiny_write_ready_draft_turn_todo_id(
+            decision_plan=turn.get("decision_plan"),
+            action_plan=turn.get("action_plan"),
+            action=turn.get("action"),
+        ) != todo_id:
+            continue
+        return turn
+    return {}
+
+
+def _tiny_write_ready_draft_turn_matches_todo(turn, *, todo_id):
+    expected_todo_id = str(todo_id or "").strip()
+    if not expected_todo_id:
+        return False
+    return (
+        _tiny_write_ready_draft_turn_todo_id(
+            decision_plan=turn.get("decision_plan"),
+            action_plan=turn.get("action_plan"),
+            action=turn.get("action"),
+        )
+        == expected_todo_id
+    )
+
+
+def _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
+    todo,
+    *,
+    turn,
+    current_time=None,
+    todo_id=None,
+):
+    turn = turn if isinstance(turn, dict) else {}
+    todo = todo if isinstance(todo, dict) else {}
+    if not todo:
+        return todo
+    metrics = turn.get("model_metrics") or {}
+    outcome = str(metrics.get("tiny_write_ready_draft_outcome") or "").strip()
+    if outcome not in {"blocker", "succeeded"}:
+        return todo
+    if not _tiny_write_ready_draft_turn_matches_todo(
+        turn,
+        todo_id=todo_id if todo_id is not None else todo.get("id"),
+    ):
+        return todo
+    attempts = todo.get("attempts") if isinstance(todo.get("attempts"), dict) else {}
+    draft_attempts = _coerce_non_negative_int(attempts.get("draft"), 0)
+    review_attempts = _coerce_non_negative_int(attempts.get("review"), 0)
+    observed_draft_attempts = _coerce_non_negative_int(metrics.get("draft_attempts"), 0)
+    old_status = str(todo.get("status") or "").strip()
+    decision_plan = turn.get("decision_plan") or {}
+    action_plan = turn.get("action_plan") or {}
+    action = turn.get("action") or {}
+    if observed_draft_attempts > draft_attempts:
+        draft_attempts = observed_draft_attempts
+    elif observed_draft_attempts == 0 and old_status != "blocked_on_patch" and outcome == "blocker":
+        draft_attempts += 1
+    if outcome == "blocker":
+        todo["status"] = "blocked_on_patch"
+        todo["blocker"] = _tiny_write_ready_draft_blocker_from_turn(
+            decision_plan=decision_plan,
+            action_plan=action_plan,
+            action=action,
+        )
+    else:
+        todo["status"] = "drafting"
+        todo["blocker"] = {}
+    todo["attempts"] = {"draft": draft_attempts, "review": review_attempts}
+    todo["updated_at"] = current_time or now_iso()
+    return todo
+
 WORK_TOOLS = {
     "inspect_dir",
     "read_file",
@@ -4265,6 +4437,63 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
     return {"next_action": next_action, "items": items}
 
 
+def _tiny_write_ready_draft_recovery_plan_item(
+    blocker_todo,
+    *,
+    tiny_turn=None,
+    task_id=None,
+    fallback_turn_id=None,
+):
+    todo = _normalize_active_work_todo(blocker_todo) if blocker_todo else {}
+    if todo.get("status") != "blocked_on_patch":
+        return {}
+    blocker = todo.get("blocker") if isinstance(todo.get("blocker"), dict) else {}
+    if not blocker:
+        return {}
+    task_arg = f" {task_id}" if task_id is not None else ""
+    blocker_code = str(blocker.get("code") or "").strip()
+    detail = str(blocker.get("detail") or "").strip()
+    model_turn_id = (tiny_turn or {}).get("id") or fallback_turn_id
+    item = {
+        "kind": "model_turn",
+        "model_turn_id": model_turn_id,
+        "action": "needs_user_review",
+        "safety": "read_only",
+        "effect_classification": "unknown",
+        "reason": (
+            f"tiny draft blocker {blocker_code or 'unknown'}; {detail or 'refresh the cached windows or todo source before retrying'}"
+        ).strip(),
+        "source_summary": detail or f"tiny draft blocker: {blocker_code}",
+        "source_error": "",
+        "review_hint": f"{mew_executable()} work{task_arg} --session --resume --allow-read . --auto-recover-safe",
+        "hint": f"{mew_executable()} work{task_arg} --session --resume --allow-read . --auto-recover-safe",
+        "review_steps": [
+            "open the resume with live world state",
+            "refresh cached windows or target source before retrying the tiny-lane draft",
+            "retry the edit-ready draft lane",
+        ],
+    }
+    return item
+
+
+def _append_unique_recovery_plan_item(recovery_plan, item):
+    if not item:
+        return recovery_plan
+    recovery_plan = recovery_plan if isinstance(recovery_plan, dict) else {}
+    items = list(recovery_plan.get("items") or [])
+    for existing in items:
+        if existing.get("action") == item.get("action") and (
+            existing.get("model_turn_id") == item.get("model_turn_id")
+            or existing.get("tool_call_id") == item.get("tool_call_id")
+        ):
+            return recovery_plan
+    items.append(item)
+    recovery_plan["items"] = items[-8:]
+    if not recovery_plan.get("next_action"):
+        recovery_plan["next_action"] = str(item.get("reason") or "resolve the tiny-lane draft blocker and retry")
+    return recovery_plan
+
+
 def work_recovery_effect_classification(call):
     tool = (call or {}).get("tool") or ""
     parameters = (call or {}).get("parameters") or {}
@@ -4501,12 +4730,32 @@ def _observe_active_work_todo(
         return {}
     if not existing:
         candidate["id"] = _next_active_work_todo_id(session)
-        session["active_work_todo"] = candidate
-        return candidate
+        latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
+            model_turns,
+            todo_id=candidate["id"],
+        )
+        candidate = _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
+            candidate,
+            turn=latest_tiny_turn,
+            todo_id=candidate["id"],
+            current_time=current_time,
+        )
+        session["active_work_todo"] = _normalize_active_work_todo(candidate)
+        return session["active_work_todo"]
     if _active_work_todo_frontier_key(existing) != _active_work_todo_frontier_key(candidate):
         candidate["id"] = _next_active_work_todo_id(session)
-        session["active_work_todo"] = candidate
-        return candidate
+        latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
+            model_turns,
+            todo_id=candidate["id"],
+        )
+        candidate = _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
+            candidate,
+            turn=latest_tiny_turn,
+            todo_id=candidate["id"],
+            current_time=current_time,
+        )
+        session["active_work_todo"] = _normalize_active_work_todo(candidate)
+        return session["active_work_todo"]
 
     updated = dict(existing)
     updated["source"] = candidate["source"]
@@ -4522,6 +4771,16 @@ def _observe_active_work_todo(
     }
     if not updated.get("status"):
         updated["status"] = "drafting"
+    latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
+        model_turns,
+        todo_id=updated.get("id"),
+    )
+    updated = _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
+        updated,
+        turn=latest_tiny_turn,
+        todo_id=updated.get("id"),
+        current_time=current_time,
+    )
     normalized_updated = _normalize_active_work_todo(updated)
     if normalized_updated != existing:
         session["active_work_todo"] = normalized_updated
@@ -5004,6 +5263,19 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         verify_command=verify_command,
         model_turns=turns,
         current_time=current_time,
+    )
+    latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
+        turns,
+        todo_id=(active_work_todo or {}).get("id"),
+    )
+    recovery_plan = _append_unique_recovery_plan_item(
+        recovery_plan,
+        _tiny_write_ready_draft_recovery_plan_item(
+            active_work_todo,
+            tiny_turn=latest_tiny_turn,
+            task_id=task_id,
+            fallback_turn_id=session.get("last_model_turn_id"),
+        ),
     )
     draft_state = _build_draft_state_from_turns(turns, plan_item_observations, active_work_todo=active_work_todo)
     phase = work_session_phase(session, calls, turns, pending_approvals, active_work_todo=active_work_todo)

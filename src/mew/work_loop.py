@@ -714,6 +714,33 @@ def _stable_write_ready_tiny_draft_blocker_reason(blocker):
     return f"write-ready tiny draft blocker: {code}"
 
 
+def _work_loop_tiny_write_ready_draft_blocker_payload(blocker):
+    blocker = blocker if isinstance(blocker, dict) else {}
+    todo_id = str(blocker.get("todo_id") or "").strip()
+    payload = {
+        "code": str(blocker.get("code") or "").strip(),
+        "detail": str(blocker.get("detail") or "").strip(),
+    }
+    if todo_id:
+        payload["todo_id"] = todo_id
+    path = str(blocker.get("path") or "").strip()
+    if path:
+        payload["path"] = path
+    try:
+        line_start = int(blocker.get("line_start"))
+        if line_start > 0:
+            payload["line_start"] = line_start
+    except (TypeError, ValueError):
+        pass
+    try:
+        line_end = int(blocker.get("line_end"))
+        if line_end > 0:
+            payload["line_end"] = line_end
+    except (TypeError, ValueError):
+        pass
+    return payload
+
+
 def _empty_patch_draft_compiler_observation():
     return {
         "patch_draft_compiler_ran": False,
@@ -1567,6 +1594,9 @@ def _attempt_write_ready_tiny_draft_turn(
         "tiny_write_ready_draft_exit_stage": "",
     }
     started = time.monotonic()
+    tiny_write_ready_todo_id = str(
+        (context.get("active_work_todo") or {}).get("id") or ""
+    ).strip()
 
     def _finalize_tiny_draft_metrics(exit_stage):
         elapsed_seconds = time.monotonic() - started
@@ -1666,11 +1696,15 @@ def _attempt_write_ready_tiny_draft_turn(
             "type": "wait",
             "reason": _stable_write_ready_tiny_draft_blocker_reason(validator_result),
         }
+        blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(validator_result)
         action_plan = {
             "summary": decision_plan.get("summary") or validator_result.get("detail") or action["reason"],
             "action": action,
             "act_mode": "tiny_write_ready_draft",
+            "blocker": blocker_payload,
         }
+        if tiny_write_ready_todo_id:
+            action_plan["todo_id"] = tiny_write_ready_todo_id
         metrics["tiny_write_ready_draft_outcome"] = "blocker"
         metrics["tiny_write_ready_draft_exit_stage"] = "blocker_accepted"
         return {
@@ -1691,11 +1725,15 @@ def _attempt_write_ready_tiny_draft_turn(
                 "type": "wait",
                 "reason": _stable_write_ready_tiny_draft_blocker_reason(validator_result),
             }
+            blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(validator_result)
             action_plan = {
                 "summary": decision_plan.get("summary") or validator_result.get("detail") or action["reason"],
                 "action": action,
                 "act_mode": "tiny_write_ready_draft",
+                "blocker": blocker_payload,
             }
+            if tiny_write_ready_todo_id:
+                action_plan["todo_id"] = tiny_write_ready_todo_id
             metrics["tiny_write_ready_draft_outcome"] = "blocker"
             metrics["tiny_write_ready_draft_exit_stage"] = "compiler_blocker"
             return {
@@ -1749,6 +1787,8 @@ def _attempt_write_ready_tiny_draft_turn(
         "action": preview_action,
         "act_mode": "tiny_write_ready_draft",
     }
+    if tiny_write_ready_todo_id:
+        action_plan["todo_id"] = tiny_write_ready_todo_id
     action = normalize_work_model_action(action_plan)
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
