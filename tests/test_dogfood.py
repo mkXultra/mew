@@ -575,11 +575,36 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["follow_status"], "stale")
             self.assertEqual(scenario["artifacts"]["suggested_recovery_kind"], "needs_human_review")
 
+    def test_run_dogfood_m6_11_refusal_separation_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_11-refusal-separation",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_11-refusal-separation")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["command_count"], 1)
+            self.assertEqual(scenario["artifacts"]["resume_source"], "session_overlay")
+            self.assertIs(scenario["artifacts"]["session_state_newer"], False)
+            self.assertEqual(scenario["artifacts"]["next_recovery_action"], "inspect_refusal")
+            self.assertEqual(scenario["artifacts"]["recovery_plan_item_action"], "needs_user_review")
+            self.assertTrue(scenario["artifacts"]["blocker_code"])
+            self.assertTrue(scenario["artifacts"]["blocker_detail"])
+            self.assertEqual(scenario["artifacts"]["blocker_code"], "model_returned_refusal")
+            self.assertEqual(scenario["artifacts"]["suggested_recovery_kind"], "needs_human_review")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertIn("m6_11_refusal_separation_phase_is_blocked_on_patch", {item["name"] for item in scenario["checks"]})
+            self.assertIn("m6_11-refusal-separation: pass", text)
+
     def test_run_dogfood_m6_11_not_implemented_scenarios(self):
-        for scenario_name in (
-            "m6_11-refusal-separation",
-            "m6_11-phase4-regression",
-        ):
+        for scenario_name in ("m6_11-phase4-regression",):
             with self.subTest(scenario=scenario_name):
                 with tempfile.TemporaryDirectory() as tmp:
                     args = SimpleNamespace(
@@ -635,15 +660,13 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(by_name["m6_11-compiler-replay"]["status"], "pass")
             self.assertEqual(by_name["m6_11-drafting-recovery"]["status"], "pass")
             self.assertEqual(by_name["m6_11-draft-timeout"]["status"], "pass")
-            for scenario_name in (
-                "m6_11-refusal-separation",
-                "m6_11-phase4-regression",
-            ):
+            for scenario_name in ("m6_11-phase4-regression",):
                 self.assertEqual(by_name[scenario_name]["status"], "not_implemented")
                 self.assertEqual(by_name[scenario_name]["artifacts"]["status"], "not_implemented")
             self.assertIn("m6_11-compiler-replay: pass", text)
             self.assertIn("m6_11-draft-timeout: pass", text)
             self.assertIn("m6_11-drafting-recovery: pass", text)
+            self.assertIn("m6_11-refusal-separation: pass", text)
 
     def test_run_dogfood_native_advance_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

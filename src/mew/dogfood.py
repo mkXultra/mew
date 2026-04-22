@@ -986,11 +986,221 @@ def _scenario_not_implemented_report(name, workspace, reason):
 
 
 def run_m6_11_refusal_separation_scenario(workspace, env=None):
-    return _scenario_not_implemented_report(
-        "m6_11-refusal-separation",
-        workspace,
-        "scenario is not implemented in this slice",
+    commands = []
+    checks = []
+    fixture = _load_json_file(
+        WORK_LOOP_TIMEOUT_BEFORE_DRAFT_ROOT / "402_tiny_draft_refusal" / "scenario.json"
     )
+    state = default_state()
+    fixture_state = fixture.get("state") if isinstance(fixture, dict) else {}
+    if isinstance(fixture_state, dict):
+        if "tasks" in fixture_state:
+            state["tasks"] = list(fixture_state.get("tasks") or [])
+        if "work_sessions" in fixture_state:
+            state["work_sessions"] = list(fixture_state.get("work_sessions") or [])
+            sanitized_work_sessions = []
+            for session_entry in state["work_sessions"]:
+                if isinstance(session_entry, dict):
+                    session_entry = dict(session_entry)
+                    session_entry.pop("active_work_todo", None)
+                    sanitized_work_sessions.append(session_entry)
+                else:
+                    sanitized_work_sessions.append(session_entry)
+            state["work_sessions"] = sanitized_work_sessions
+        if "version" in fixture_state:
+            state["version"] = fixture_state.get("version", state["version"])
+    write_json_file(workspace / STATE_FILE, state)
+
+    work_sessions = state.get("work_sessions") or []
+    session = work_sessions[0] if work_sessions else {}
+    task_id = fixture.get("task_id")
+    if task_id is None:
+        task_id = session.get("task_id")
+    task = {}
+    for item in state.get("tasks") or []:
+        if str(item.get("id")) == str(task_id):
+            task = item
+            break
+
+    if isinstance(task_id, int):
+        task_id_text = str(task_id)
+    elif task_id is None:
+        task_id_text = None
+    else:
+        task_id_text = str(task_id).strip()
+
+    session_for_snapshot = session.get("id") or task_id_text or "latest"
+    follow_path = workspace / STATE_DIR / "follow" / f"session-{session_for_snapshot}.json"
+    follow_payload = fixture.get("follow_snapshot")
+    follow_snapshot = dict(follow_payload) if isinstance(follow_payload, dict) else {}
+    follow_snapshot.setdefault("session_id", session.get("id") or task_id)
+    follow_snapshot.setdefault("task_id", task_id)
+    follow_snapshot.setdefault("heartbeat_at", "2026-04-22T00:00:05Z")
+    follow_snapshot.setdefault("session_updated_at", session.get("updated_at") or "2026-04-22T00:00:00Z")
+    follow_snapshot.setdefault("model_timeout_seconds", 60)
+    write_json_file(follow_path, follow_snapshot)
+
+    follow_result = run_command(
+        _scenario_command("work", task_id_text, "--follow-status", "--json"),
+        workspace,
+        timeout=20,
+        env=env,
+    )
+    commands.append(follow_result)
+    follow_data = _json_stdout(follow_result)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(workspace)
+        resume = build_work_session_resume(session, task=task, state=state) or {}
+    finally:
+        os.chdir(old_cwd)
+
+    resume_active_todo = resume.get("active_work_todo") or {}
+    resume_blocker = resume_active_todo.get("blocker") or {}
+    resume_blocker_code = str(resume_blocker.get("code") or "")
+    resume_blocker_detail = str(resume_blocker.get("detail") or "")
+    resume_recovery_plan = resume.get("recovery_plan") or {}
+    resume_recovery_items = resume_recovery_plan.get("items") or []
+    resume_recovery_action = str((resume_recovery_items[0] or {}).get("action") or "")
+    resume_next_recovery_action = str(resume_blocker.get("recovery_action") or "")
+    resume_next_recovery_hint = str((resume_recovery_items[0] or {}).get("hint") or "")
+    resume_next_action = str(resume.get("next_action") or "")
+    resume_todo_id = str(resume_active_todo.get("id") or "")
+
+    follow_todo = follow_data.get("active_work_todo") or {}
+    follow_todo_id = str(follow_todo.get("id") or "")
+    follow_blocker = follow_todo.get("blocker") or {}
+    follow_blocker_code = str(follow_blocker.get("code") or "")
+    follow_blocker_detail = str(follow_blocker.get("detail") or "")
+    follow_next_recovery_action = str(follow_data.get("next_recovery_action") or "")
+    follow_next_action = str(follow_data.get("next_action") or "")
+    follow_suggested_recovery = follow_data.get("suggested_recovery") or {}
+
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_scenario_command_succeeds",
+        follow_result.get("exit_code") == 0,
+        observed=follow_result.get("exit_code"),
+        expected=0,
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_phase_matches_follow_status",
+        resume.get("phase") == follow_data.get("phase"),
+        observed={"resume": resume.get("phase"), "follow": follow_data.get("phase")},
+        expected="resume and follow should agree",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_phase_is_blocked_on_patch",
+        resume.get("phase") == "blocked_on_patch",
+        observed=resume.get("phase"),
+        expected="blocked_on_patch",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_blocker_code_matches",
+        resume_blocker_code == follow_blocker_code == "model_returned_refusal",
+        observed={"resume": resume_blocker_code, "follow": follow_blocker_code},
+        expected={"resume": "model_returned_refusal", "follow": "model_returned_refusal"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_blocker_detail_matches",
+        bool(resume_blocker_detail)
+        and bool(follow_blocker_detail)
+        and resume_blocker_detail == follow_blocker_detail,
+        observed={"resume": resume_blocker_detail, "follow": follow_blocker_detail},
+        expected={"resume": "non-empty blocker detail", "follow": "same blocker detail"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_next_recovery_action_matches",
+        resume_next_recovery_action == follow_next_recovery_action == "inspect_refusal",
+        observed={"resume": resume_next_recovery_action, "follow": follow_next_recovery_action},
+        expected={"resume": "inspect_refusal", "follow": "inspect_refusal"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_recovery_item_is_user_review",
+        resume_recovery_action == "needs_user_review",
+        observed=resume_recovery_action,
+        expected="needs_user_review",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_next_action_matches",
+        resume_next_action == follow_next_action and bool(resume_next_action),
+        observed={"resume": resume_next_action, "follow": follow_next_action},
+        expected={"resume": "non-empty next_action", "follow": "same next_action"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_recovery_next_recovery_hint_exists",
+        bool(resume_next_recovery_hint),
+        observed=resume_next_recovery_hint,
+        expected="non-empty resume recovery hint",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_suggested_recovery_shape",
+        str(follow_suggested_recovery.get("kind") or "") == "needs_human_review"
+        and bool(str(follow_suggested_recovery.get("command") or "").strip()),
+        observed={
+            "kind": follow_suggested_recovery.get("kind"),
+            "command": follow_suggested_recovery.get("command"),
+        },
+        expected={"kind": "needs_human_review", "command": "non-empty"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_todo_ids_match",
+        resume_todo_id == follow_todo_id and bool(resume_todo_id),
+        observed={"resume": resume_todo_id, "follow": follow_todo_id},
+        expected={"resume": "same task id", "follow": "same task id"},
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_snapshot_status_is_stale",
+        follow_data.get("status") in {"stale", "overdue", "dead"},
+        observed=follow_data.get("status"),
+        expected="stale/overdue/dead is acceptable",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_resume_source_is_session_overlay",
+        follow_data.get("resume_source") == "session_overlay",
+        observed=follow_data.get("resume_source"),
+        expected="session_overlay",
+    )
+    _scenario_check(
+        checks,
+        "m6_11_refusal_separation_equal_timestamp_overlay_path",
+        follow_data.get("session_state_newer") is False and follow_data.get("resume_source") == "session_overlay",
+        observed={
+            "session_state_newer": follow_data.get("session_state_newer"),
+            "resume_source": follow_data.get("resume_source"),
+        },
+        expected={"session_state_newer": False, "resume_source": "session_overlay"},
+    )
+
+    report = _scenario_report("m6_11-refusal-separation", workspace, commands, checks)
+    report["artifacts"] = {
+        "blocker_code": resume_blocker_code,
+        "blocker_detail": resume_blocker_detail,
+        "next_recovery_action": resume_next_recovery_action,
+        "next_action": resume_next_action,
+        "todo_id": resume_todo_id,
+        "resume_source": follow_data.get("resume_source") or "session_overlay",
+        "session_state_newer": follow_data.get("session_state_newer"),
+        "follow_status": follow_data.get("status"),
+        "resume_command": resume_next_recovery_hint,
+        "recovery_plan_item_action": resume_recovery_action,
+        "follow_todo_id": follow_todo_id,
+        "suggested_recovery_kind": follow_suggested_recovery.get("kind"),
+    }
+    return report
 
 
 def run_m6_11_drafting_recovery_scenario(workspace, env=None):

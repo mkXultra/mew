@@ -2015,7 +2015,7 @@ Missing proof:
   `next_recovery_action=refresh_cached_window`, and a populated
   `suggested_recovery` command while preserving snapshot-owned metadata. Final
   codex-ultra and claude-ultra reviews approved this bounded slice.
-- The first three close-gate evidence slices are now landed in `src/mew/dogfood.py`:
+- The first four close-gate evidence slices are now landed in `src/mew/dogfood.py`:
   five `m6_11-*` scenarios are registered; `m6_11-compiler-replay` passes as
   deterministic offline `#399` evidence using the patch-draft fixtures,
   `m6_11-drafting-recovery` passes as deterministic offline
@@ -2037,21 +2037,26 @@ Missing proof:
     `resume_draft_from_cached_windows` from the recovery plan,
   - restores the aggregate `m6_11-*` subset so `m6_11-draft-timeout` is
     asserted as `pass`.
-  Only `m6_11-refusal-separation` and `m6_11-phase4-regression` remain
-  explicitly `not_implemented`.
+  The refusal-separation slice now:
+  - promotes tiny-draft refusal exceptions into the same
+    `blocked_on_patch` blocker contract as validator-derived blockers,
+  - emits `model_returned_refusal` with `inspect_refusal` through resume and
+    `work --follow-status`,
+  - strips fixture-provided `active_work_todo` before the dogfood run so
+    resume/follow must reconstruct the refusal blocker from the persisted
+    refusal turn itself rather than replaying pre-seeded todo state.
+  Only `m6_11-phase4-regression` remains explicitly `not_implemented`.
   The aggregate `m6_11-*` subset intentionally still fails while the
-  implemented sub-report is now honestly `3 pass + 2 not_implemented`.
-  Final codex-ultra approved the `m6_11-draft-timeout` slice after a
-  follow-up fix pass; the earlier `claude-ultra` review stayed
-  `approve_with_nits`, and a second `claude-ultra` pass hit provider limits
-  before returning an updated report.
+  implemented sub-report is now honestly `4 pass + 1 not_implemented`.
+  Final codex-ultra and claude-ultra reviews both approved the
+  `m6_11-refusal-separation` slice after a follow-up fix pass.
 
 Next action:
 
 - keep the Phase 2/3 calibration checkpoint active and move from Phase 4
   surface parity into close-gate evidence collection:
   continue implementing the deferred `m6_11-*` scenarios, starting with
-  `m6_11-refusal-separation` as the next bounded missing proof, and then
+  `m6_11-phase4-regression` as the next bounded missing proof, and then
   run bounded live slices against `#399/#401` buckets, using the now-
   authoritative follow-status surface to measure whether timeout concentration
   and combined `#399/#401` incidence are actually dropping

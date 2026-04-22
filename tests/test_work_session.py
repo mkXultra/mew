@@ -7534,6 +7534,79 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tiny_write_ready_draft_lane_refusal_exception_becomes_blocker(self):
+        from mew.errors import ModelRefusalError
+        from mew.work_loop import (
+            _attempt_write_ready_tiny_draft_turn,
+            _work_write_ready_fast_path_details,
+            build_work_model_context,
+            build_write_ready_tiny_draft_model_context,
+        )
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    task,
+                    "",
+                    allowed_read_roots=["."],
+                    allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                )
+                tiny_context = build_write_ready_tiny_draft_model_context(context)
+                write_ready_fast_path = _work_write_ready_fast_path_details(context)
+
+                refusal_detail = "policy refused: write-ready draft request is disallowed in this context"
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    raise ModelRefusalError(refusal_detail)
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    result = _attempt_write_ready_tiny_draft_turn(
+                        session=session,
+                        context=context,
+                        tiny_context=tiny_context,
+                        write_ready_fast_path=write_ready_fast_path,
+                        model_auth={"path": "auth.json"},
+                        model="codex",
+                        base_url="https://example.invalid",
+                        model_backend="codex",
+                        timeout=60,
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                    )
+
+                self.assertEqual(result["status"], "blocker")
+                action = result["action"]
+                self.assertEqual(action["type"], "wait")
+                self.assertEqual(
+                    action["reason"],
+                    "write-ready tiny draft blocker: model_returned_refusal",
+                )
+                action_plan = result["action_plan"]
+                blocker = action_plan.get("blocker") or {}
+                self.assertEqual(action_plan.get("act_mode"), "tiny_write_ready_draft")
+                self.assertEqual(blocker.get("code"), "model_returned_refusal")
+                self.assertIn("policy refused", blocker.get("detail") or "")
+                metrics = result["metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_fallback_reason"], "")
+                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "model_exception_refusal")
+                self.assertFalse(result["compiler_observed"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_tiny_write_ready_draft_lane_model_exception_records_elapsed_exit_stage_and_utilization(self):
         from mew.work_loop import plan_work_model_turn
 

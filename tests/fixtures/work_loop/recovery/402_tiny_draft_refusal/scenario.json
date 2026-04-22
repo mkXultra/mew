@@ -1,0 +1,180 @@
+{
+  "state": {
+    "tasks": [
+      {
+        "id": 402,
+        "title": "Refusal-separation task",
+        "description": "Deterministic tiny draft refusal blocker parity for blocked-on-patch.",
+        "status": "active",
+        "priority": "normal",
+        "kind": "coding",
+        "notes": ""
+      }
+    ],
+    "work_sessions": [
+      {
+        "id": 402,
+        "task_id": 402,
+        "status": "active",
+        "title": "Refusal separation session",
+        "goal": "Prove tiny draft refusal surfaces as blocked-on-patch with inspect_refusal recovery",
+        "started_at": "2026-04-22T00:00:00Z",
+        "updated_at": "2026-04-22T00:00:10Z",
+        "tool_calls": [
+          {
+            "id": 1,
+            "tool": "read_file",
+            "status": "completed",
+            "parameters": {
+              "path": "src/mew/work_loop.py",
+              "line_start": 1560,
+              "line_end": 1645
+            },
+            "result": {
+              "path": "src/mew/work_loop.py",
+              "line_start": 1560,
+              "line_end": 1645,
+              "text": "deterministic refusal tiny draft source window"
+            }
+          },
+          {
+            "id": 2,
+            "tool": "read_file",
+            "status": "completed",
+            "parameters": {
+              "path": "tests/test_work_session.py",
+              "line_start": 7300,
+              "line_end": 7355
+            },
+            "result": {
+              "path": "tests/test_work_session.py",
+              "line_start": 7300,
+              "line_end": 7355,
+              "text": "deterministic refusal tiny draft test window"
+            }
+          }
+        ],
+        "model_turns": [
+          {
+            "id": 201,
+            "status": "completed",
+            "summary": "write-ready tiny draft returned a model refusal",
+            "decision_plan": {
+              "summary": "tiny draft refused by model safety policy",
+              "working_memory": {
+                "plan_items": [
+                  "Draft one bounded patch from the cached paired windows"
+                ],
+                "target_paths": [
+                  "src/mew/work_loop.py",
+                  "tests/test_work_session.py"
+                ]
+              }
+            },
+            "action_plan": {
+              "summary": "model returned refusal before any patch proposal was produced",
+              "action": {
+                "type": "wait",
+                "reason": "write-ready tiny draft blocker: model_returned_refusal"
+              },
+              "act_mode": "tiny_write_ready_draft",
+              "blocker": {
+                "code": "model_returned_refusal",
+                "detail": "policy refused this draft generation request",
+                "todo_id": "todo-402-1"
+              },
+              "todo_id": "todo-402-1"
+            },
+            "action": {
+              "type": "wait",
+              "reason": "write-ready tiny draft blocker: model_returned_refusal",
+              "blocker": {
+                "code": "model_returned_refusal",
+                "detail": "policy refused this draft generation request",
+                "todo_id": "todo-402-1"
+              }
+            },
+            "model_metrics": {
+              "tiny_write_ready_draft_attempted": true,
+              "tiny_write_ready_draft_outcome": "blocker",
+              "tiny_write_ready_draft_exit_stage": "model_exception_refusal",
+              "tiny_write_ready_draft_fallback_reason": "",
+              "tiny_write_ready_draft_error": "policy refused this draft generation request",
+              "tiny_write_ready_draft_attempts": 1,
+              "draft_attempts": 1,
+              "write_ready_fast_path": true,
+              "draft_phase": "write_ready",
+              "cached_window_ref_count": 2,
+              "cached_window_hashes": [
+                "sha1:source-window",
+                "sha1:test-window"
+              ],
+              "patch_draft_compiler_artifact_kind": "patch_blocker"
+            }
+          }
+        ],
+        "active_work_todo": {
+          "id": "todo-402-1",
+          "status": "blocked_on_patch",
+          "source": {
+            "plan_item": "Draft one bounded patch from the cached paired windows",
+            "target_paths": [
+              "src/mew/work_loop.py",
+              "tests/test_work_session.py"
+            ],
+            "verify_command": "uv run pytest tests/test_work_session.py -q"
+          },
+          "cached_window_refs": [
+            {
+              "path": "src/mew/work_loop.py",
+              "tool_call_id": 1,
+              "line_start": 1560,
+              "line_end": 1645,
+              "context_truncated": false,
+              "window_sha1": "sha1:source-window"
+            },
+            {
+              "path": "tests/test_work_session.py",
+              "tool_call_id": 2,
+              "line_start": 7300,
+              "line_end": 7355,
+              "context_truncated": false,
+              "window_sha1": "sha1:test-window"
+            }
+          ],
+          "attempts": {
+            "draft": 1,
+            "review": 0
+          },
+          "patch_draft_id": "",
+          "blocker": {
+            "kind": "patch_blocker",
+            "todo_id": "todo-402-1",
+            "code": "model_returned_refusal",
+            "detail": "policy refused this draft generation request",
+            "recovery_action": "inspect_refusal",
+            "path": "src/mew/work_loop.py"
+          },
+          "created_at": "2026-04-22T00:00:00Z",
+          "updated_at": "2026-04-22T00:00:10Z"
+        }
+      }
+    ]
+  },
+  "follow_snapshot": {
+    "schema_version": 1,
+    "mode": "work",
+    "task_id": 402,
+    "session_id": 402,
+    "session_updated_at": "2026-04-22T00:00:10Z",
+    "heartbeat_at": "2026-04-22T00:00:05Z",
+    "model_timeout_seconds": 60,
+    "resume": {
+      "phase": "drafting"
+    },
+    "session": {
+      "tool_calls": [],
+      "model_turns": []
+    }
+  }
+}

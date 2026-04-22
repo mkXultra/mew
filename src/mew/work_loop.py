@@ -1620,12 +1620,46 @@ def _attempt_write_ready_tiny_draft_turn(
                 **(think_kwargs or {}),
             )
     except Exception as exc:
+        if _work_model_error_looks_like_refusal(exc):
+            refusal_detail = clip_output(str(exc), 500)
+            blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(
+                {
+                    "code": "model_returned_refusal",
+                    "detail": refusal_detail,
+                    "todo_id": tiny_write_ready_todo_id,
+                }
+            )
+            action = {
+                "type": "wait",
+                "reason": _stable_write_ready_tiny_draft_blocker_reason(blocker_payload),
+            }
+            action_plan = {
+                "summary": refusal_detail or action["reason"],
+                "action": action,
+                "act_mode": "tiny_write_ready_draft",
+                "blocker": blocker_payload,
+            }
+            if tiny_write_ready_todo_id:
+                action_plan["todo_id"] = tiny_write_ready_todo_id
+            metrics["tiny_write_ready_draft_outcome"] = "blocker"
+            metrics["tiny_write_ready_draft_fallback_reason"] = ""
+            metrics["tiny_write_ready_draft_error"] = refusal_detail
+            return {
+                "status": "blocker",
+                "decision_plan": {
+                    "summary": refusal_detail or action_plan["summary"],
+                },
+                "action_plan": action_plan,
+                "action": action,
+                "metrics": metrics,
+                "elapsed_seconds": _finalize_tiny_draft_metrics("model_exception_refusal"),
+                "compiler_observed": False,
+            }
+
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_exit_stage"] = "model_exception"
         if _work_model_error_looks_like_timeout(exc):
             metrics["tiny_write_ready_draft_fallback_reason"] = "timeout"
-        elif _work_model_error_looks_like_refusal(exc):
-            metrics["tiny_write_ready_draft_fallback_reason"] = "refusal"
         else:
             metrics["tiny_write_ready_draft_fallback_reason"] = "error"
         metrics["tiny_write_ready_draft_error"] = clip_output(str(exc), 500)
