@@ -6887,6 +6887,475 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
         self.assertTrue(resume["draft_retry_same_prefix"])
 
+    def test_active_work_todo_round_trips_through_session_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task, current_time="2026-04-22T00:00:00Z")
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                            "verify_command": "uv run pytest tests/test_work_session.py -q",
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/work_session.py",
+                                "tool_call_id": 4,
+                                "line_start": 4363,
+                                "line_end": 4388,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:source-window",
+                            },
+                            {
+                                "path": "tests/test_work_session.py",
+                                "tool_call_id": 5,
+                                "line_start": 6830,
+                                "line_end": 6888,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:test-window",
+                            },
+                        ],
+                        "attempts": {"draft": 2, "review": 0},
+                        "patch_draft_id": "",
+                        "blocker": {},
+                        "created_at": "2026-04-22T00:00:00Z",
+                        "updated_at": "2026-04-22T00:01:00Z",
+                    }
+                    save_state(state)
+
+                reloaded = load_state()
+                todo = reloaded["work_sessions"][0]["active_work_todo"]
+                self.assertEqual(todo["id"], "todo-1-1")
+                self.assertEqual(todo["status"], "drafting")
+                self.assertEqual(todo["source"]["target_paths"], ["src/mew/work_session.py", "tests/test_work_session.py"])
+                self.assertEqual(todo["source"]["verify_command"], "uv run pytest tests/test_work_session.py -q")
+                self.assertEqual(todo["cached_window_refs"][0]["window_sha1"], "sha1:source-window")
+                self.assertEqual(todo["attempts"], {"draft": 2, "review": 0})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_build_work_session_resume_prefers_persisted_active_work_todo(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Persisted todo",
+            "goal": "Prefer the persisted todo over inferred draft placeholders.",
+            "updated_at": "2026-04-22T00:00:00Z",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "text": "source window\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "text": "test window\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                    "model_metrics": {
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "draft_attempts": 1,
+                        "cached_window_ref_count": 1,
+                        "cached_window_hashes": ["sha1:turn-window"],
+                        "draft_runtime_mode": "guarded",
+                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_static_chars": 100,
+                        "draft_prompt_dynamic_chars": 200,
+                        "draft_retry_same_prefix": True,
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-1-1",
+                "status": "blocked_on_patch",
+                "source": {
+                    "plan_item": "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                    "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "tool_call_id": 4,
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:todo-window",
+                    }
+                ],
+                "attempts": {"draft": 4, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {"code": "missing_exact_cached_window_texts"},
+                "created_at": "2026-04-22T00:00:00Z",
+                "updated_at": "2026-04-22T00:01:00Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["phase"], "blocked_on_patch")
+        self.assertEqual(resume["draft_phase"], "blocked_on_patch")
+        self.assertEqual(resume["draft_attempts"], 4)
+        self.assertEqual(resume["cached_window_ref_count"], 2)
+        self.assertEqual(len(resume["cached_window_hashes"]), 2)
+        self.assertTrue(all(item.startswith("sha1:") for item in resume["cached_window_hashes"]))
+        self.assertEqual(resume["draft_runtime_mode"], "guarded")
+        self.assertEqual(resume["draft_prompt_contract_version"], "v1")
+        self.assertEqual(resume["draft_prompt_static_chars"], 100)
+        self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
+        self.assertTrue(resume["draft_retry_same_prefix"])
+        self.assertEqual(
+            resume["next_action"],
+            "inspect the active patch blocker and refresh the exact cached windows or todo source before retrying",
+        )
+        self.assertEqual(resume["active_work_todo"]["blocker"]["code"], "missing_exact_cached_window_texts")
+        text = format_work_session_resume(resume)
+        self.assertIn("active_work_todo: id=todo-1-1 status=blocked_on_patch draft_attempts=4", text)
+        self.assertIn(
+            "active_work_todo_plan_item: Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+            text,
+        )
+
+    def test_build_work_session_resume_ignores_stale_active_work_todo_when_frontier_is_not_edit_ready(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Ignore stale todo",
+            "goal": "Do not pin resume to an old frontier.",
+            "updated_at": "2026-04-22T00:00:00Z",
+            "tool_calls": [],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": ["Investigate logs before deciding whether an edit is needed."],
+                            "target_paths": ["src/mew/work_session.py"],
+                        }
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-1-1",
+                "status": "blocked_on_patch",
+                "source": {
+                    "plan_item": "Draft old patch",
+                    "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "tool_call_id": 4,
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:old-window",
+                    }
+                ],
+                "attempts": {"draft": 1, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {"code": "missing_exact_cached_window_texts"},
+                "created_at": "2026-04-22T00:00:00Z",
+                "updated_at": "2026-04-22T00:01:00Z",
+                "extra_key": "preserve-on-ignore",
+            },
+        }
+
+        before = json.loads(json.dumps(session))
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["phase"], "idle")
+        self.assertEqual(resume["active_work_todo"], {})
+        self.assertEqual(resume["draft_phase"], "")
+        self.assertEqual(session, before)
+        self.assertNotIn("active_work_todo:", format_work_session_resume(resume))
+
+    def test_build_work_session_resume_replaces_stale_active_work_todo_on_frontier_change(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Replace stale todo",
+            "goal": "Switch to the newer edit-ready frontier.",
+            "updated_at": "2026-04-22T00:00:00Z",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/commands.py",
+                        "line_start": 5203,
+                        "line_end": 5348,
+                        "text": "command window\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 10170,
+                        "line_end": 10210,
+                        "text": "test window\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/commands.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-1-1",
+                "status": "blocked_on_patch",
+                "source": {
+                    "plan_item": "Draft old patch",
+                    "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [],
+                "attempts": {"draft": 2, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {"code": "missing_exact_cached_window_texts"},
+                "created_at": "2026-04-22T00:00:00Z",
+                "updated_at": "2026-04-22T00:01:00Z",
+            },
+            "last_work_todo_ordinal": 1,
+        }
+
+        resume = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+        self.assertEqual(resume["phase"], "drafting")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            todo["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(todo["id"], "todo-1-2")
+        self.assertEqual(session["active_work_todo"]["id"], "todo-1-2")
+        self.assertEqual(session["last_work_todo_ordinal"], 2)
+
+    def test_build_work_session_resume_creates_active_work_todo_for_edit_ready_frontier(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Create active todo",
+            "goal": "Persist the write-ready frontier.",
+            "created_at": "2026-04-22T00:00:00Z",
+            "updated_at": "2026-04-22T00:00:00Z",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "text": "def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "text": "def test_build_work_session_resume_surfaces_draft_placeholders(self):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        resumed_again = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+        self.assertEqual(resume["phase"], "drafting")
+        self.assertEqual(resume["draft_phase"], "drafting")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            todo["source"]["target_paths"],
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(todo["attempts"], {"draft": 0, "review": 0})
+        self.assertEqual(len(todo["cached_window_refs"]), 2)
+        self.assertTrue(all(item["window_sha1"].startswith("sha1:") for item in todo["cached_window_refs"]))
+        self.assertEqual(session["active_work_todo"]["id"], todo["id"])
+        self.assertEqual(resume["next_action"], "draft one bounded patch from the cached paired windows or record one exact blocker")
+        self.assertEqual(resumed_again["active_work_todo"]["id"], todo["id"])
+        self.assertEqual(session["last_work_todo_ordinal"], 1)
+
+    def test_work_session_resume_failure_beats_active_work_todo_phase(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Failure beats todo",
+            "goal": "Prefer fresher failure state over draft phase.",
+            "updated_at": "2026-04-22T00:00:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "text": "source window\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "text": "test window\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "failed",
+                    "error": "file changed underneath us",
+                    "result": {"path": "src/mew/work_session.py"},
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-1-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                    "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "tool_call_id": 1,
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:source-window",
+                    },
+                    {
+                        "path": "tests/test_work_session.py",
+                        "tool_call_id": 2,
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:test-window",
+                    },
+                ],
+                "attempts": {"draft": 1, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {},
+                "created_at": "2026-04-22T00:00:00Z",
+                "updated_at": "2026-04-22T00:01:00Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["phase"], "failed")
+        self.assertEqual(resume["draft_phase"], "drafting")
+        self.assertEqual(
+            resume["next_action"],
+            "inspect the latest failure and decide whether to retry, edit, or ask the user",
+        )
+        self.assertEqual(resume["failures"][-1]["tool_call_id"], 3)
+
     def test_work_session_context_and_resume_surface_active_typed_memory(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

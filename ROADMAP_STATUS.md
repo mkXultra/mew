@@ -1958,9 +1958,11 @@ Evidence:
   `#401` exact cached windows reached but timeout before drafting
 
 Missing proof:
-
-- refusal separation is not yet landed in `src/mew/codex_api.py`
-- `WorkTodo` does not yet exist in session state
+- refusal separation is landed in `src/mew/codex_api.py`, but the later
+  drafting path still needs to consume `model_returned_refusal` through the
+  new blocker/recovery contract
+- `WorkTodo` now exists as a bounded session-state frontier skeleton, but the
+  compiler/recovery path that consumes it does not yet exist
 - `PatchDraftCompiler` does not yet exist
 - live draft failures do not yet emit the replay bundles the design expects
 - draft-time recovery still collapses to generic `replan`
@@ -1968,9 +1970,10 @@ Missing proof:
 
 Next action:
 
-- start Phase 0 now:
-  land refusal separation and the first draft-state metrics/placeholders from
-  the design, then move to `WorkTodo` and `PatchDraftCompiler`
+- start Phase 2 now:
+  add replay-bundle capture and the first `PatchDraftCompiler` scaffolding so
+  `#399/#401` become offline-replayable instead of timing out inside the live
+  loop
 
 ### M7: Senses - Inbound Signals
 

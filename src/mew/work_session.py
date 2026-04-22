@@ -37,6 +37,16 @@ from .write_tools import (
 WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed", "interrupted"}
+WORK_TODO_STATUSES = {
+    "drafting",
+    "blocked_on_patch",
+    "awaiting_review",
+    "awaiting_approval",
+    "applying",
+    "verifying",
+    "completed",
+}
+WORK_TODO_PHASE_STATUSES = {"drafting", "blocked_on_patch"}
 WORK_TOOLS = {
     "inspect_dir",
     "read_file",
@@ -947,6 +957,7 @@ def create_work_session(state, task, current_time=None, inherit_defaults=True):
         "last_model_turn_id": None,
         "tool_calls": [],
         "model_turns": [],
+        "active_work_todo": {},
         "startup_memory": startup_working_memory(task),
     }
     if inherit_defaults and latest and latest.get("default_options"):
@@ -3882,7 +3893,7 @@ def build_compressed_prior_think(turns, *, recent_limit=8, limit=4):
     }
 
 
-def work_session_phase(session, calls, turns, pending_approvals):
+def work_session_phase(session, calls, turns, pending_approvals, active_work_todo=None):
     if not session:
         return "none"
     if session.get("status") == "closed":
@@ -3903,6 +3914,10 @@ def work_session_phase(session, calls, turns, pending_approvals):
         return "interrupted"
     if latest_call and (latest_call.get("status") == "failed" or work_tool_failure_record(latest_call)):
         return "failed"
+    todo = active_work_todo if isinstance(active_work_todo, dict) else session.get("active_work_todo") or {}
+    todo_phase = str(todo.get("status") or "").strip()
+    if todo_phase in WORK_TODO_PHASE_STATUSES:
+        return todo_phase
     return "idle"
 
 
@@ -4317,7 +4332,204 @@ def _cached_window_signature(window):
     )
 
 
-def _build_draft_state_from_turns(model_turns, plan_item_observations):
+def _write_ready_draft_metrics(model_turns):
+    draft_attempts = 0
+    latest_draft_metrics = None
+    for turn in (model_turns or []):
+        metrics = turn.get("model_metrics") or {}
+        if bool(metrics.get("write_ready_fast_path")):
+            draft_attempts += 1
+            latest_draft_metrics = metrics
+    return draft_attempts, latest_draft_metrics
+
+
+def _normalize_active_work_todo(todo):
+    if not isinstance(todo, dict):
+        return {}
+    status = str(todo.get("status") or "").strip()
+    if status and status not in WORK_TODO_STATUSES:
+        return {}
+    source = todo.get("source") if isinstance(todo.get("source"), dict) else {}
+    cached_window_refs = []
+    for item in todo.get("cached_window_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        try:
+            line_start = int(item.get("line_start") or 0)
+            line_end = int(item.get("line_end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not path or line_start <= 0 or line_end <= 0:
+            continue
+        cached_window_refs.append(
+            {
+                "path": path,
+                "tool_call_id": item.get("tool_call_id"),
+                "line_start": line_start,
+                "line_end": line_end,
+                "context_truncated": bool(item.get("context_truncated")),
+                "window_sha1": str(item.get("window_sha1") or "").strip(),
+            }
+        )
+    attempts = todo.get("attempts") if isinstance(todo.get("attempts"), dict) else {}
+    normalized = {
+        "id": str(todo.get("id") or "").strip(),
+        "status": status,
+        "source": {
+            "plan_item": str(source.get("plan_item") or "").strip(),
+            "target_paths": _coerce_working_memory_target_paths(source.get("target_paths") or []),
+            "verify_command": str(source.get("verify_command") or "").strip(),
+        },
+        "cached_window_refs": cached_window_refs,
+        "attempts": {
+            "draft": max(0, int(attempts.get("draft") or 0)),
+            "review": max(0, int(attempts.get("review") or 0)),
+        },
+        "patch_draft_id": str(todo.get("patch_draft_id") or "").strip(),
+        "blocker": dict(todo.get("blocker") or {}),
+        "created_at": str(todo.get("created_at") or "").strip(),
+        "updated_at": str(todo.get("updated_at") or "").strip(),
+    }
+    if not normalized["id"] and not normalized["status"] and not normalized["source"]["plan_item"]:
+        return {}
+    return normalized
+
+
+def _active_work_todo_frontier_key(todo):
+    todo = _normalize_active_work_todo(todo)
+    source = todo.get("source") or {}
+    return (
+        source.get("plan_item") or "",
+        tuple(source.get("target_paths") or []),
+    )
+
+
+def _cached_window_ref_from_observation(window):
+    window = window if isinstance(window, dict) else {}
+    path = str(window.get("path") or "").strip()
+    try:
+        line_start = int(window.get("line_start") or 0)
+        line_end = int(window.get("line_end") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if not path or line_start <= 0 or line_end <= 0:
+        return {}
+    cached_window_ref = {
+        "path": path,
+        "tool_call_id": window.get("tool_call_id"),
+        "line_start": line_start,
+        "line_end": line_end,
+        "context_truncated": bool(window.get("context_truncated")),
+    }
+    window_sha1 = str(window.get("window_sha1") or "").strip() or _cached_window_signature(window)
+    if window_sha1:
+        cached_window_ref["window_sha1"] = window_sha1
+    return cached_window_ref
+
+
+def _next_active_work_todo_id(session):
+    ordinal = int(session.get("last_work_todo_ordinal") or 0) + 1
+    session["last_work_todo_ordinal"] = ordinal
+    session_id = session.get("id")
+    if session_id is None:
+        return f"todo-{ordinal}"
+    return f"todo-{session_id}-{ordinal}"
+
+
+def _build_active_work_todo_candidate(
+    *,
+    target_paths,
+    cached_window_by_path,
+    first_observation,
+    verify_command,
+    model_turns,
+    current_time=None,
+):
+    if not first_observation.get("edit_ready"):
+        return {}
+
+    relevant_target_paths = _relevant_resume_target_paths(target_paths)
+    cached_window_refs = []
+    for target_path in relevant_target_paths:
+        cached_window_ref = _cached_window_ref_from_observation(cached_window_by_path.get(target_path) or {})
+        if cached_window_ref:
+            cached_window_refs.append(cached_window_ref)
+    if not relevant_target_paths or len(cached_window_refs) != len(relevant_target_paths):
+        return {}
+
+    draft_attempts, _latest_metrics = _write_ready_draft_metrics(model_turns)
+    return {
+        "id": "",
+        "status": "drafting",
+        "source": {
+            "plan_item": str(first_observation.get("plan_item") or "").strip(),
+            "target_paths": relevant_target_paths,
+            "verify_command": str(verify_command or "").strip(),
+        },
+        "cached_window_refs": cached_window_refs,
+        "attempts": {"draft": draft_attempts, "review": 0},
+        "patch_draft_id": "",
+        "blocker": {},
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+
+
+def _observe_active_work_todo(
+    session,
+    *,
+    plan_item_observations,
+    target_paths,
+    cached_window_by_path,
+    verify_command,
+    model_turns,
+    current_time=None,
+):
+    current_time = current_time or session.get("updated_at") or now_iso()
+    existing = _normalize_active_work_todo(session.get("active_work_todo") or {})
+    first_observation = (plan_item_observations or [{}])[0] if plan_item_observations else {}
+    candidate = _build_active_work_todo_candidate(
+        target_paths=target_paths,
+        cached_window_by_path=cached_window_by_path,
+        first_observation=first_observation,
+        verify_command=verify_command,
+        model_turns=model_turns,
+        current_time=current_time,
+    )
+    if not candidate:
+        return {}
+    if not existing:
+        candidate["id"] = _next_active_work_todo_id(session)
+        session["active_work_todo"] = candidate
+        return candidate
+    if _active_work_todo_frontier_key(existing) != _active_work_todo_frontier_key(candidate):
+        candidate["id"] = _next_active_work_todo_id(session)
+        session["active_work_todo"] = candidate
+        return candidate
+
+    updated = dict(existing)
+    updated["source"] = candidate["source"]
+    updated["cached_window_refs"] = candidate["cached_window_refs"]
+    updated["updated_at"] = current_time
+    updated.setdefault("created_at", candidate["created_at"])
+    updated["attempts"] = {
+        "draft": max(
+            (existing.get("attempts") or {}).get("draft") or 0,
+            (candidate.get("attempts") or {}).get("draft") or 0,
+        ),
+        "review": max((existing.get("attempts") or {}).get("review") or 0, 0),
+    }
+    if not updated.get("status"):
+        updated["status"] = "drafting"
+    normalized_updated = _normalize_active_work_todo(updated)
+    if normalized_updated != existing:
+        session["active_work_todo"] = normalized_updated
+        return normalized_updated
+    return existing
+
+
+def _build_draft_state_from_turns(model_turns, plan_item_observations, active_work_todo=None):
     draft_state = {
         "draft_phase": "",
         "draft_attempts": 0,
@@ -4329,16 +4541,9 @@ def _build_draft_state_from_turns(model_turns, plan_item_observations):
         "draft_prompt_dynamic_chars": None,
         "draft_retry_same_prefix": False,
     }
-    latest_draft_metrics = None
-    for turn in (model_turns or []):
-        metrics = turn.get("model_metrics") or {}
-        if bool(metrics.get("write_ready_fast_path")):
-            draft_state["draft_attempts"] += 1
-            latest_draft_metrics = metrics
+    draft_attempts, latest_draft_metrics = _write_ready_draft_metrics(model_turns)
+    draft_state["draft_attempts"] = draft_attempts
     if latest_draft_metrics:
-        draft_state["draft_phase"] = latest_draft_metrics.get("draft_phase") or "write_ready"
-        draft_state["cached_window_ref_count"] = latest_draft_metrics.get("cached_window_ref_count") or 0
-        draft_state["cached_window_hashes"] = latest_draft_metrics.get("cached_window_hashes") or []
         draft_state["draft_runtime_mode"] = latest_draft_metrics.get("draft_runtime_mode") or ""
         draft_state["draft_prompt_contract_version"] = (
             latest_draft_metrics.get("draft_prompt_contract_version") or ""
@@ -4346,6 +4551,25 @@ def _build_draft_state_from_turns(model_turns, plan_item_observations):
         draft_state["draft_prompt_static_chars"] = latest_draft_metrics.get("draft_prompt_static_chars")
         draft_state["draft_prompt_dynamic_chars"] = latest_draft_metrics.get("draft_prompt_dynamic_chars")
         draft_state["draft_retry_same_prefix"] = bool(latest_draft_metrics.get("draft_retry_same_prefix"))
+    active_work_todo = _normalize_active_work_todo(active_work_todo)
+    if active_work_todo:
+        cached_window_refs = active_work_todo.get("cached_window_refs") or []
+        draft_state["draft_phase"] = active_work_todo.get("status") or ""
+        draft_state["draft_attempts"] = max(
+            draft_state["draft_attempts"],
+            (active_work_todo.get("attempts") or {}).get("draft") or 0,
+        )
+        draft_state["cached_window_ref_count"] = len(cached_window_refs)
+        draft_state["cached_window_hashes"] = [
+            item.get("window_sha1") or ""
+            for item in cached_window_refs
+            if item.get("window_sha1")
+        ]
+        return draft_state
+    if latest_draft_metrics:
+        draft_state["draft_phase"] = latest_draft_metrics.get("draft_phase") or "write_ready"
+        draft_state["cached_window_ref_count"] = latest_draft_metrics.get("cached_window_ref_count") or 0
+        draft_state["cached_window_hashes"] = latest_draft_metrics.get("cached_window_hashes") or []
         return draft_state
     if not plan_item_observations:
         return draft_state
@@ -4607,7 +4831,6 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         )
     compressed_prior_think = build_compressed_prior_think(turns_for_prompt, recent_limit=limit, limit=4)
 
-    phase = work_session_phase(session, calls, turns, pending_approvals)
     latest_call = calls[-1] if calls else None
     latest_failed = bool(
         latest_call
@@ -4617,63 +4840,12 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         )
     )
 
-    if session.get("status") == "closed":
-        if task_id and task and task.get("status") == "done":
-            reopen_command = mew_command("task", "update", task_id, "--status", "ready")
-            next_action = (
-                "review this closed work session; "
-                f"task #{task_id} is done, so reopen it before starting a new one with {reopen_command}"
-            )
-        elif task_id:
-            start_command = mew_command("work", task_id, "--start-session")
-            next_action = f"review this closed work session or start a new one with {start_command}"
-        else:
-            start_command = mew_command("work", "--start-session")
-            next_action = f"review this closed work session or start a new one with {start_command}"
-    elif phase == "stop_requested":
-        if session.get("stop_action") == "interrupt_submit":
-            if work_session_has_running_activity(session):
-                next_action = "interrupt-submit requested; wait for the running step to reach a boundary"
-            else:
-                if task_id:
-                    live_command = work_session_runtime_command(session, task_id)
-                else:
-                    live_command = work_session_runtime_command(session, None)
-                next_action = f"continue to submit pending interrupt with /continue in chat or {live_command}"
-        else:
-            if work_session_has_running_activity(session):
-                next_action = "stop requested; the running work loop should pause at the next boundary"
-            else:
-                if task_id:
-                    resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
-                else:
-                    resume_command = mew_command("work", "--session", "--resume", "--allow-read", ".")
-                next_action = f"work session is paused; resume only when needed with {resume_command}"
-    elif pending_approvals:
-        next_action = "approve or reject pending write tool calls"
-    elif phase == "running_tool":
-        next_action = f"wait for the running work tool, or run {mew_command('repair')} if the process died"
-    elif phase == "planning":
-        next_action = f"wait for the running work model turn, or run {mew_command('repair')} if the process died"
-    elif phase == "interrupted":
-        next_action = "inspect interrupted work state, verify the world, then retry or choose a new action"
-    elif latest_failed:
-        next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
-    else:
-        if task_id:
-            live_command = work_session_runtime_command(session, task_id)
-        else:
-            live_command = work_session_runtime_command(session, None)
-        next_action = f"continue the work session with /continue in chat or {live_command}"
-
     queued_followups = [
         dict(item)
         for item in (session.get("queued_followups") or [])
         if item.get("status") == "queued" and str(item.get("text") or "").strip()
     ]
     recovery_plan = build_work_recovery_plan(session, calls, turns, limit=limit)
-    if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
-        next_action = recovery_plan["next_action"]
     working_memory = _suppress_resolved_approval_memory(
         build_working_memory(turns, calls, task=task),
         calls,
@@ -4681,8 +4853,6 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     if not working_memory and isinstance(session.get("startup_memory"), dict):
         working_memory = dict(session.get("startup_memory") or {})
-    if phase == "idle":
-        next_action = refresh_stale_memory_next_action(next_action, working_memory)
     target_path_cached_window_observations = []
     cached_window_by_path = {}
     adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
@@ -4730,7 +4900,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     )
                     break
                 target_path_cached_window_observations.append(observation)
-                cached_window_by_path[target_path] = observation
+                cached_window_by_path[target_path] = {
+                    **observation,
+                    "text": result.get("text") or "",
+                }
                 break
     demoted_adjacent_read_observations = []
     plan_item_observations = []
@@ -4823,7 +4996,75 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 continue
             kept_adjacent_read_observations.append(observation)
         adjacent_read_observations = kept_adjacent_read_observations
-    draft_state = _build_draft_state_from_turns(turns, plan_item_observations)
+    active_work_todo = _observe_active_work_todo(
+        session,
+        plan_item_observations=plan_item_observations,
+        target_paths=target_paths,
+        cached_window_by_path=cached_window_by_path,
+        verify_command=verify_command,
+        model_turns=turns,
+        current_time=current_time,
+    )
+    draft_state = _build_draft_state_from_turns(turns, plan_item_observations, active_work_todo=active_work_todo)
+    phase = work_session_phase(session, calls, turns, pending_approvals, active_work_todo=active_work_todo)
+
+    if session.get("status") == "closed":
+        if task_id and task and task.get("status") == "done":
+            reopen_command = mew_command("task", "update", task_id, "--status", "ready")
+            next_action = (
+                "review this closed work session; "
+                f"task #{task_id} is done, so reopen it before starting a new one with {reopen_command}"
+            )
+        elif task_id:
+            start_command = mew_command("work", task_id, "--start-session")
+            next_action = f"review this closed work session or start a new one with {start_command}"
+        else:
+            start_command = mew_command("work", "--start-session")
+            next_action = f"review this closed work session or start a new one with {start_command}"
+    elif phase == "stop_requested":
+        if session.get("stop_action") == "interrupt_submit":
+            if work_session_has_running_activity(session):
+                next_action = "interrupt-submit requested; wait for the running step to reach a boundary"
+            else:
+                if task_id:
+                    live_command = work_session_runtime_command(session, task_id)
+                else:
+                    live_command = work_session_runtime_command(session, None)
+                next_action = f"continue to submit pending interrupt with /continue in chat or {live_command}"
+        else:
+            if work_session_has_running_activity(session):
+                next_action = "stop requested; the running work loop should pause at the next boundary"
+            else:
+                if task_id:
+                    resume_command = mew_command("work", task_id, "--session", "--resume", "--allow-read", ".")
+                else:
+                    resume_command = mew_command("work", "--session", "--resume", "--allow-read", ".")
+                next_action = f"work session is paused; resume only when needed with {resume_command}"
+    elif pending_approvals:
+        next_action = "approve or reject pending write tool calls"
+    elif phase == "running_tool":
+        next_action = f"wait for the running work tool, or run {mew_command('repair')} if the process died"
+    elif phase == "planning":
+        next_action = f"wait for the running work model turn, or run {mew_command('repair')} if the process died"
+    elif phase == "interrupted":
+        next_action = "inspect interrupted work state, verify the world, then retry or choose a new action"
+    elif phase == "drafting":
+        next_action = "draft one bounded patch from the cached paired windows or record one exact blocker"
+    elif phase == "blocked_on_patch":
+        next_action = "inspect the active patch blocker and refresh the exact cached windows or todo source before retrying"
+    elif latest_failed:
+        next_action = "inspect the latest failure and decide whether to retry, edit, or ask the user"
+    else:
+        if task_id:
+            live_command = work_session_runtime_command(session, task_id)
+        else:
+            live_command = work_session_runtime_command(session, None)
+        next_action = f"continue the work session with /continue in chat or {live_command}"
+
+    if recovery_plan.get("next_action") and phase in ("interrupted", "idle", "failed"):
+        next_action = recovery_plan["next_action"]
+    if phase == "idle":
+        next_action = refresh_stale_memory_next_action(next_action, working_memory)
     repair_anchor_observations = build_repair_anchor_observations(
         session,
         calls,
@@ -4845,6 +5086,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "goal": session.get("goal") or "",
         "phase": phase,
         "updated_at": session.get("updated_at"),
+        "active_work_todo": active_work_todo or {},
         "draft_phase": draft_state.get("draft_phase") or "",
         "draft_attempts": draft_state.get("draft_attempts", 0),
         "cached_window_ref_count": draft_state.get("cached_window_ref_count", 0),
@@ -4965,6 +5207,17 @@ def format_work_session_resume(resume):
         f"phase: {resume.get('phase') or 'unknown'}",
         f"updated_at: {resume.get('updated_at')}",
     ]
+    active_work_todo = resume.get("active_work_todo") or {}
+    if active_work_todo:
+        lines.append(
+            "active_work_todo: "
+            f"id={active_work_todo.get('id') or ''} "
+            f"status={active_work_todo.get('status') or ''} "
+            f"draft_attempts={(active_work_todo.get('attempts') or {}).get('draft', 0)}"
+        )
+        todo_source = active_work_todo.get("source") or {}
+        if todo_source.get("plan_item"):
+            lines.append(f"active_work_todo_plan_item: {todo_source.get('plan_item')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
