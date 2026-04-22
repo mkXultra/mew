@@ -7137,7 +7137,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v2")
         self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
         self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
-        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_prompt_contract_version"], "v2")
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_prompt_contract_version"], "v3")
         self.assertTrue(planned["model_metrics"]["tiny_write_ready_draft_attempted"])
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_outcome"], "fallback")
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_fallback_reason"], "invalid_shape")
@@ -7157,6 +7157,146 @@ class WorkSessionTests(unittest.TestCase):
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
         )
         self.assertEqual(planned["model_metrics"]["draft_runtime_mode"], "guarded")
+
+    def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
+        from mew.work_loop import _attempt_write_ready_tiny_draft_turn
+
+        class _EffortScope:
+            def __init__(self, observed):
+                self.observed = observed
+
+            def __call__(self, effort):
+                self.observed.append(effort)
+
+                class _Context:
+                    def __enter__(self_inner):
+                        return None
+
+                    def __exit__(self_inner, exc_type, exc, tb):
+                        return False
+
+                return _Context()
+
+        for inherited_source, inherited_effort, expected_reasoning_effort, expected_source in (
+            ("auto", "medium", "low", "tiny_draft_auto_override"),
+            ("auto", "high", "low", "tiny_draft_auto_override"),
+            ("env_override", "xhigh", "xhigh", "env_override"),
+        ):
+            observed_scope = []
+            with self.subTest(
+                inherited_reasoning_source=inherited_source,
+                inherited_reasoning_effort=inherited_effort,
+            ):
+                with patch(
+                    "mew.work_loop.codex_reasoning_effort_scope",
+                    side_effect=_EffortScope(observed_scope),
+                ):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value="invalid-shape"):
+                        result = _attempt_write_ready_tiny_draft_turn(
+                            session={"id": "write"},
+                            context={},
+                            tiny_context={},
+                            write_ready_fast_path={},
+                            model_auth={},
+                            model="codex",
+                            base_url="",
+                            model_backend="codex",
+                            timeout=60,
+                            reasoning_effort_source=inherited_source,
+                            reasoning_effort=inherited_effort,
+                        )
+                self.assertEqual(observed_scope, [expected_reasoning_effort])
+                metrics = result["metrics"]
+                self.assertEqual(
+                    metrics["tiny_write_ready_draft_inherited_reasoning_effort"],
+                    inherited_effort,
+                )
+                self.assertEqual(metrics["tiny_write_ready_draft_inherited_reasoning_effort_source"], inherited_source)
+                self.assertEqual(metrics["tiny_write_ready_draft_reasoning_effort"], expected_reasoning_effort)
+                self.assertEqual(metrics["tiny_write_ready_draft_reasoning_effort_source"], expected_source)
+
+    def test_tiny_write_ready_draft_pre_model_sink_records_reasoning_effort_context(self):
+        from mew.work_loop import WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                pre_model_payloads = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    if log_prefix and "work_write_ready_tiny_draft" in str(log_prefix):
+                        raise TimeoutError("timed out while generating tiny draft")
+                    return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
+
+                for source, effort, expected_reasoning_effort, expected_reasoning_source in (
+                    ("auto", "high", WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT, "tiny_draft_auto_override"),
+                    ("env_override", "xhigh", "xhigh", "env_override"),
+                ):
+                    pre_model_payloads = []
+                    with self.subTest(inherited_reasoning_source=source, inherited_reasoning_effort=effort):
+                        pre_model_payloads = []
+
+                        def capture_pre_model_metrics(metrics):
+                            pre_model_payloads.append(metrics)
+
+                        with patch(
+                            "mew.work_loop.select_work_reasoning_policy",
+                            return_value={"effort": effort, "source": source},
+                        ):
+                            with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                                planned = plan_work_model_turn(
+                                    state,
+                                    session,
+                                    task,
+                                    {"path": "auth.json"},
+                                    allowed_read_roots=["."],
+                                    allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                                    allow_verify=True,
+                                    verify_command="uv run python -m unittest tests.test_patch_draft",
+                                    act_mode="deterministic",
+                                    pre_model_metrics_sink=capture_pre_model_metrics,
+                                )
+
+                        self.assertTrue(pre_model_payloads)
+                        self.assertNotIn(
+                            "tiny_write_ready_draft_exit_stage",
+                            pre_model_payloads[0],
+                        )
+                        self.assertEqual(
+                            pre_model_payloads[0]["tiny_write_ready_draft_reasoning_effort"],
+                            expected_reasoning_effort,
+                        )
+                        self.assertEqual(
+                            pre_model_payloads[0]["tiny_write_ready_draft_reasoning_effort_source"],
+                            expected_reasoning_source,
+                        )
+                        self.assertEqual(
+                            pre_model_payloads[0]["tiny_write_ready_draft_inherited_reasoning_effort"],
+                            effort,
+                        )
+                        self.assertEqual(
+                            pre_model_payloads[0]["tiny_write_ready_draft_inherited_reasoning_effort_source"],
+                            source,
+                        )
+                        metrics = planned["model_metrics"]
+                        self.assertEqual(metrics["tiny_write_ready_draft_reasoning_effort"], expected_reasoning_effort)
+                        self.assertEqual(metrics["tiny_write_ready_draft_reasoning_effort_source"], expected_reasoning_source)
+                        self.assertEqual(metrics["tiny_write_ready_draft_inherited_reasoning_effort"], effort)
+                        self.assertEqual(metrics["tiny_write_ready_draft_inherited_reasoning_effort_source"], source)
+            finally:
+                os.chdir(old_cwd)
 
     def test_tiny_write_ready_draft_lane_model_exception_records_elapsed_exit_stage_and_utilization(self):
         from mew.work_loop import plan_work_model_turn

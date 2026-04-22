@@ -63,7 +63,8 @@ WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
 WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
-WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
+WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
+WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -1525,16 +1526,39 @@ def _attempt_write_ready_tiny_draft_turn(
     timeout,
     allowed_write_roots=None,
     reasoning_effort="",
+    reasoning_effort_source="",
     current_time="",
     think_kwargs=None,
 ):
     prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
     timeout_seconds = _write_ready_tiny_draft_timeout(timeout)
+    tiny_write_ready_draft_inherited_reasoning_effort = reasoning_effort or ""
+    tiny_write_ready_draft_inherited_reasoning_effort_source = reasoning_effort_source or "auto"
+    tiny_write_ready_draft_reasoning_effort = (
+        tiny_write_ready_draft_inherited_reasoning_effort
+        if tiny_write_ready_draft_inherited_reasoning_effort_source == "env_override"
+        else WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+    )
+    tiny_write_ready_draft_reasoning_effort_source = (
+        "env_override"
+        if tiny_write_ready_draft_inherited_reasoning_effort_source == "env_override"
+        else "tiny_draft_auto_override"
+    )
     metrics = {
         "tiny_write_ready_draft_attempted": True,
         "tiny_write_ready_draft_outcome": "",
         "tiny_write_ready_draft_prompt_chars": len(prompt),
         "tiny_write_ready_draft_timeout_seconds": timeout_seconds,
+        "tiny_write_ready_draft_reasoning_effort": tiny_write_ready_draft_reasoning_effort,
+        "tiny_write_ready_draft_inherited_reasoning_effort": (
+            tiny_write_ready_draft_inherited_reasoning_effort
+        ),
+        "tiny_write_ready_draft_reasoning_effort_source": (
+            tiny_write_ready_draft_reasoning_effort_source
+        ),
+        "tiny_write_ready_draft_inherited_reasoning_effort_source": (
+            tiny_write_ready_draft_inherited_reasoning_effort_source
+        ),
         "tiny_write_ready_draft_fallback_reason": "",
         "tiny_write_ready_draft_error": "",
         "tiny_write_ready_draft_compiler_artifact_kind": "",
@@ -1554,7 +1578,7 @@ def _attempt_write_ready_tiny_draft_turn(
         return elapsed_seconds
 
     try:
-        with codex_reasoning_effort_scope(reasoning_effort):
+        with codex_reasoning_effort_scope(tiny_write_ready_draft_reasoning_effort):
             decision_plan = call_model_json_with_retries(
                 model_backend,
                 model_auth,
@@ -2683,6 +2707,22 @@ def plan_work_model_turn(
                 "tiny_write_ready_draft_fallback_reason": "",
                 "tiny_write_ready_draft_error": "",
                 "tiny_write_ready_draft_compiler_artifact_kind": "",
+                "tiny_write_ready_draft_reasoning_effort": (
+                    reasoning_policy.get("effort") or ""
+                    if (reasoning_policy.get("source") or "auto") == "env_override"
+                    else WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+                ),
+                "tiny_write_ready_draft_reasoning_effort_source": (
+                    "env_override"
+                    if (reasoning_policy.get("source") or "auto") == "env_override"
+                    else "tiny_draft_auto_override"
+                ),
+                "tiny_write_ready_draft_inherited_reasoning_effort": (
+                    reasoning_policy.get("effort") or ""
+                ),
+                "tiny_write_ready_draft_inherited_reasoning_effort_source": (
+                    reasoning_policy.get("source") or "auto"
+                ),
                 "tiny_write_ready_draft_prompt_contract_version": (
                     WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION
                 ),
@@ -2705,6 +2745,7 @@ def plan_work_model_turn(
             timeout=timeout,
             allowed_write_roots=allowed_write_roots,
             reasoning_effort=reasoning_policy.get("effort") or "",
+            reasoning_effort_source=reasoning_policy.get("source") or "",
             current_time=current_time,
             think_kwargs=think_kwargs,
         )
