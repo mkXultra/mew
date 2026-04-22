@@ -1,6 +1,10 @@
 import unittest
 
-from mew.patch_draft import compile_patch_draft, sha256_text
+from mew.patch_draft import (
+    PATCH_BLOCKER_RECOVERY_ACTIONS,
+    compile_patch_draft,
+    sha256_text,
+)
 
 
 def _todo(*paths):
@@ -504,6 +508,25 @@ class PatchDraftTests(unittest.TestCase):
         self.assertEqual(artifact["kind"], "patch_blocker")
         self.assertEqual(artifact["code"], "stale_cached_window_text")
         self.assertEqual(artifact["detail"], "missing live file sha256")
+
+    def test_recovery_action_vocabulary_is_frozen_for_phase_2(self):
+        self.assertEqual(
+            PATCH_BLOCKER_RECOVERY_ACTIONS,
+            {
+                "missing_exact_cached_window_texts": "refresh_cached_window",
+                "cached_window_text_truncated": "refresh_cached_window",
+                "stale_cached_window_text": "refresh_cached_window",
+                "old_text_not_found": "refresh_cached_window",
+                "ambiguous_old_text_match": "narrow_old_text",
+                "overlapping_hunks": "merge_or_split_hunks",
+                "no_material_change": "revise_patch",
+                "unpaired_source_edit_blocked": "add_paired_test_edit",
+                "write_policy_violation": "revise_patch_scope",
+                "model_returned_non_schema": "retry_with_schema",
+                "model_returned_refusal": "inspect_refusal",
+                "review_rejected": "revise_patch_from_review_findings",
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -562,16 +562,42 @@ Recovery should become contract-driven and todo-aware.
 
 ### Recovery action vocabulary
 
-These recovery actions should replace generic replan in draft-related cases:
+Draft-vocabulary is split by lane so recovery behavior stays explicit:
 
-- `resume_draft_from_cached_windows`
-- `refresh_cached_window`
-- `revise_patch_from_review_findings`
-- `retry_dry_run_preview`
-- `retry_apply_validated_patch`
-- `verify_completed_patch`
+- Draft-lane actions emitted by compiler/blockers:
+  - `refresh_cached_window`
+  - `narrow_old_text`
+  - `merge_or_split_hunks`
+  - `revise_patch`
+  - `add_paired_test_edit`
+  - `revise_patch_scope`
+  - `retry_with_schema`
+  - `inspect_refusal`
+  - `revise_patch_from_review_findings`
 
-`replan` remains valid only for genuinely pre-draft failures.
+- Downstream apply/verify actions already in loop recovery:
+  - `retry_dry_run_write`
+  - `retry_apply_write`
+  - `verify_completed_write`
+  - `retry_verification`
+  - `resume_draft_from_cached_windows`
+
+For this phase, draft-blocker-to-recovery mapping is pinned to:
+
+- `missing_exact_cached_window_texts` -> `refresh_cached_window`
+- `cached_window_text_truncated` -> `refresh_cached_window`
+- `stale_cached_window_text` -> `refresh_cached_window`
+- `old_text_not_found` -> `refresh_cached_window`
+- `ambiguous_old_text_match` -> `narrow_old_text`
+- `overlapping_hunks` -> `merge_or_split_hunks`
+- `no_material_change` -> `revise_patch`
+- `unpaired_source_edit_blocked` -> `add_paired_test_edit`
+- `write_policy_violation` -> `revise_patch_scope`
+- `model_returned_non_schema` -> `retry_with_schema`
+- `model_returned_refusal` -> `inspect_refusal`
+- `review_rejected` -> `revise_patch_from_review_findings`
+
+`replan` remains valid only for genuinely pre-draft failures or when this contract is not active.
 
 ### Terminal-state rule
 
