@@ -5,6 +5,7 @@ from pathlib import Path
 from mew.patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
     compile_patch_draft,
+    compile_patch_draft_previews,
     sha256_text,
 )
 
@@ -82,6 +83,14 @@ def _run_fixture_case(case_name):
     return scenario, artifact
 
 
+def _run_fixture_preview_case(case_name):
+    scenario, artifact = _run_fixture_case(case_name)
+    return scenario, artifact, compile_patch_draft_previews(
+        artifact,
+        allowed_write_roots=scenario.get("allowed_write_roots", ALLOWED_WRITE_ROOTS),
+    )
+
+
 def _assert_fixture_expectation(test_case, scenario, artifact):
     expected = scenario["expected"]
     test_case.assertEqual(artifact["kind"], expected["kind"])
@@ -116,6 +125,201 @@ class PatchDraftFixtureTests(unittest.TestCase):
     def test_compile_patch_draft_fixture_stale_cached_window_text(self):
         scenario, artifact = _run_fixture_case("stale_cached_window_text")
         _assert_fixture_expectation(self, scenario, artifact)
+
+
+class PatchDraftTranslatorFixtureTests(unittest.TestCase):
+    def test_compile_patch_draft_previews_from_fixture_happy_path(self):
+        scenario, artifact, preview = _run_fixture_preview_case("paired_src_test_happy")
+        self.assertEqual(artifact["kind"], "patch_draft")
+        self.assertEqual(artifact["status"], "validated")
+        self.assertEqual(artifact["todo_id"], scenario["todo"]["id"])
+
+        self.assertEqual(len(preview), 2)
+        self.assertEqual(preview[0]["type"], "edit_file")
+        self.assertEqual(preview[1]["type"], "edit_file")
+        self.assertEqual(preview[0]["path"], "src/mew/patch_draft.py")
+        self.assertEqual(preview[1]["path"], "tests/test_patch_draft.py")
+        self.assertEqual(preview[0]["path"], scenario["todo"]["source"]["target_paths"][0])
+        self.assertEqual(preview[1]["path"], scenario["todo"]["source"]["target_paths"][1])
+        self.assertEqual(preview[0]["old"], "return 41")
+        self.assertEqual(preview[1]["new"], "meaning(), 42")
+        self.assertTrue(preview[0]["dry_run"])
+        self.assertTrue(preview[1]["dry_run"])
+        self.assertFalse(preview[0]["apply"])
+        self.assertFalse(preview[1]["apply"])
+
+    def test_compile_patch_draft_previews_blocker_passthrough(self):
+        blocker = {
+            "kind": "patch_blocker",
+            "todo_id": "todo-17",
+            "code": "stale_cached_window_text",
+            "detail": "cached window no longer matches live",
+            "recovery_action": "refresh_cached_window",
+        }
+
+        preview = compile_patch_draft_previews(
+            blocker,
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(preview, blocker)
+
+    def test_compile_patch_draft_previews_rejects_invalid_draft(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {"kind": "edit_file", "path": "src/mew/patch_draft.py", "edits": "bad"},
+            ],
+        }
+
+        preview = compile_patch_draft_previews(
+            artifact,
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(preview["kind"], "patch_blocker")
+        self.assertEqual(preview["code"], "model_returned_non_schema")
+
+    def test_compile_patch_draft_previews_requires_allowed_write_roots(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {
+                    "kind": "edit_file",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                }
+            ],
+        }
+
+        preview = compile_patch_draft_previews(
+            artifact,
+            allowed_write_roots=[],
+        )
+
+        self.assertEqual(preview["kind"], "patch_blocker")
+        self.assertEqual(preview["code"], "write_policy_violation")
+        self.assertIn("allowed_write_roots is required", preview["detail"])
+
+    def test_compile_patch_draft_previews_rejects_path_outside_allowed_roots(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {
+                    "kind": "edit_file_hunks",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                }
+            ],
+        }
+
+        preview = compile_patch_draft_previews(
+            artifact,
+            allowed_write_roots=["/tmp/forbidden-root"],
+        )
+
+        self.assertEqual(preview["kind"], "patch_blocker")
+        self.assertEqual(preview["code"], "write_policy_violation")
+        self.assertEqual(preview["path"], "src/mew/patch_draft.py")
+
+    def test_compile_patch_draft_previews_rejects_duplicate_same_path_entries(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {
+                    "kind": "edit_file",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                },
+                {
+                    "kind": "edit_file_hunks",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 43"}],
+                },
+            ],
+        }
+
+        preview = compile_patch_draft_previews(
+            artifact,
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(preview["kind"], "patch_blocker")
+        self.assertEqual(preview["code"], "model_returned_non_schema")
+        self.assertIn("duplicate path", preview["detail"])
+
+    def test_compile_patch_draft_previews_single_hunk_shape(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {
+                    "kind": "edit_file",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                }
+            ],
+        }
+
+        preview = compile_patch_draft_previews(artifact, allowed_write_roots=ALLOWED_WRITE_ROOTS)
+
+        self.assertIsInstance(preview, list)
+        self.assertEqual(len(preview), 1)
+        self.assertEqual(
+            preview[0],
+            {
+                "type": "edit_file",
+                "path": "src/mew/patch_draft.py",
+                "old": "return 41",
+                "new": "return 42",
+                "apply": False,
+                "dry_run": True,
+            },
+        )
+
+    def test_compile_patch_draft_previews_multi_hunk_shape_and_order(self):
+        artifact = {
+            "kind": "patch_draft",
+            "todo_id": "todo-17",
+            "status": "validated",
+            "files": [
+                {
+                    "kind": "edit_file_hunks",
+                    "path": "tests/test_patch_draft.py",
+                    "edits": [
+                        {"old": "def alpha\n", "new": "def beta\n"},
+                        {"old": "def gamma\n", "new": "def omega\n"},
+                    ],
+                },
+                {
+                    "kind": "edit_file",
+                    "path": "src/mew/patch_draft.py",
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                },
+            ],
+        }
+
+        preview = compile_patch_draft_previews(artifact, allowed_write_roots=ALLOWED_WRITE_ROOTS)
+
+        self.assertEqual([item["path"] for item in preview], ["tests/test_patch_draft.py", "src/mew/patch_draft.py"])
+        self.assertEqual(preview[0]["type"], "edit_file_hunks")
+        self.assertEqual(preview[1]["type"], "edit_file")
+        self.assertEqual(
+            preview[0]["edits"],
+            [
+                {"old": "def alpha\n", "new": "def beta\n"},
+                {"old": "def gamma\n", "new": "def omega\n"},
+            ],
+        )
 
 
 class PatchDraftTests(unittest.TestCase):

@@ -98,6 +98,151 @@ def compile_patch_draft(*, todo, proposal, cached_windows, live_files, allowed_w
     }
 
 
+def compile_patch_draft_previews(patch_draft, *, allowed_write_roots=None):
+    """
+    Convert a validated PatchDraft into dry-run write action specs for the existing
+    write-action execution path (edit_file/edit_file_hunks payload shape), not
+    write_tool result objects.
+    """
+    patch_draft = patch_draft if isinstance(patch_draft, dict) else {}
+    if not patch_draft:
+        return build_patch_blocker(
+            "",
+            "model_returned_non_schema",
+            detail="patch_draft must be a patch artifact object",
+        )
+
+    kind = str(patch_draft.get("kind") or "").strip()
+    todo_id = str(patch_draft.get("todo_id") or patch_draft.get("id") or "").strip()
+    if kind == "patch_blocker":
+        return patch_draft
+    if kind != "patch_draft":
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="patch_draft.kind must be patch_draft or patch_blocker",
+        )
+    if patch_draft.get("status") != "validated":
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="patch_draft must be validated before preview translation",
+        )
+
+    files = patch_draft.get("files")
+    if not isinstance(files, list) or not files:
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="patch_draft.files must be a non-empty array",
+        )
+    if not allowed_write_roots:
+        return build_patch_blocker(
+            todo_id,
+            "write_policy_violation",
+            detail="allowed_write_roots is required for preview translation",
+        )
+
+    previews = []
+    seen_paths = set()
+    for file_item in files:
+        if not isinstance(file_item, dict):
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail="patch_draft.files entry must be an object",
+            )
+        path = normalize_work_path(file_item.get("path"))
+        if not path:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail="patch_draft.files item missing path",
+            )
+        if path in seen_paths:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"patch_draft.files has duplicate path: {path}",
+                path=path,
+            )
+        if not _path_under_allowed_roots(path, allowed_write_roots):
+            return build_patch_blocker(
+                todo_id,
+                "write_policy_violation",
+                path=path,
+                detail="preview path is outside allowed_write_roots",
+            )
+
+        file_kind = str(file_item.get("kind") or "").strip()
+        if file_kind not in {"edit_file", "edit_file_hunks"}:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"patch_draft.files[{path}] kind must be edit_file or edit_file_hunks",
+            )
+
+        raw_edits = file_item.get("edits")
+        if not isinstance(raw_edits, list) or not raw_edits:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"patch_draft.files[{path}] edits must be a non-empty array",
+                path=path,
+            )
+
+        edits = []
+        for edit in raw_edits:
+            if not isinstance(edit, dict):
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"patch_draft.files[{path}] edit must be an object",
+                    path=path,
+                )
+            old = edit.get("old")
+            new = edit.get("new")
+            if not isinstance(old, str) or old == "":
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"patch_draft.files[{path}] edit old must be a non-empty string",
+                    path=path,
+                )
+            if not isinstance(new, str):
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"patch_draft.files[{path}] edit new must be a string",
+                    path=path,
+                )
+            edits.append({"old": old, "new": new})
+
+        if file_kind == "edit_file" and len(edits) != 1:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+            detail=f"patch_draft.files[{path}] edit_file must contain exactly one edit",
+                path=path,
+            )
+        seen_paths.add(path)
+
+        preview = {
+            "type": file_kind,
+            "path": path,
+            "apply": False,
+            "dry_run": True,
+        }
+        if file_kind == "edit_file":
+            preview["old"] = edits[0]["old"]
+            preview["new"] = edits[0]["new"]
+        else:
+            preview["edits"] = edits
+        previews.append(preview)
+
+    return previews
+
+
 def _normalize_todo(todo):
     todo = todo if isinstance(todo, dict) else {}
     source = todo.get("source") if isinstance(todo.get("source"), dict) else {}

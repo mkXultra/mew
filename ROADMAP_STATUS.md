@@ -1967,8 +1967,9 @@ Missing proof:
   new blocker/recovery contract
 - `WorkTodo` now exists as a bounded session-state frontier skeleton, and the
   first offline `PatchDraftCompiler` scaffold now exists in
-  `src/mew/patch_draft.py`, but the live compiler/recovery path that consumes
-  it does not yet exist
+  `src/mew/patch_draft.py`; the first offline `PatchDraft` -> dry-run preview
+  translator also now exists there, but the live compiler/recovery path that
+  consumes either artifact does not yet exist
 - the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
   exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
   scenarios, and compiler replay bundles now persist canonical compiler
@@ -1980,7 +1981,8 @@ Missing proof:
   gate thresholds
 - draft-related model failures and offline compiler captures now share the same
   replay root, and the Phase 2/3 calibration checker for off-schema/refusal
-  incidence from those bundles now exists
+  incidence from those bundles now exists, but the live replay root is still
+  empty so the gate is wired rather than yet exercised on real Phase 3 output
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -1991,11 +1993,13 @@ Missing proof:
 
 Next action:
 
-- continue Phase 2:
-  use the replay-bundle calibration checkpoint to confirm compiler and
-  model-failure incidence is within gate before any live Phase 3 rollout
-- do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
-  ready to gate rollout using replay-bundle off-schema/refusal ratios
+- begin Phase 3 live bridging:
+  route validated `PatchDraft` / `PatchBlocker` artifacts into the existing
+  dry-run preview path in `src/mew/work_loop.py` and `src/mew/commands.py`
+  without changing `write_tools.py` semantics
+- keep the Phase 2/3 calibration checkpoint active during Phase 3 rollout and
+  pause if replay-bundle off-schema/refusal incidence crosses the configured
+  thresholds
 
 ### M7: Senses - Inbound Signals
 
