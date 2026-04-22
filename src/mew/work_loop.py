@@ -61,7 +61,9 @@ WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
+WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
+WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v1"
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -685,6 +687,41 @@ def _write_ready_draft_attempts(session, write_ready_fast_path_active):
     return attempts
 
 
+def _write_ready_tiny_draft_timeout(timeout):
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        timeout_value = WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS
+    if timeout_value <= 0:
+        timeout_value = WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS
+    return min(timeout_value, WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS)
+
+
+def _work_model_error_looks_like_timeout(exc):
+    text = str(exc or "").lower()
+    return "timed out" in text or "timeout" in text
+
+
+def _work_model_error_looks_like_refusal(exc):
+    name = exc.__class__.__name__.lower()
+    text = str(exc or "").lower()
+    return "refusal" in name or "model returned refusal" in text
+
+
+def _stable_write_ready_tiny_draft_blocker_reason(blocker):
+    code = str((blocker or {}).get("code") or "").strip() or "unspecified_blocker"
+    return f"write-ready tiny draft blocker: {code}"
+
+
+def _empty_patch_draft_compiler_observation():
+    return {
+        "patch_draft_compiler_ran": False,
+        "patch_draft_compiler_artifact_kind": "",
+        "patch_draft_compiler_replay_path": "",
+        "patch_draft_compiler_error": "",
+    }
+
+
 def _round_seconds(value):
     return round(float(value), 3)
 
@@ -1255,17 +1292,32 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
     write_ready_fast_path,
     allowed_write_roots=None,
 ):
+    observation = _empty_patch_draft_compiler_observation()
+    proposal = _write_ready_patch_draft_proposal_from_action(
+        action_plan=action_plan,
+        action=action,
+    )
+    if not proposal:
+        observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+        return observation
+    return _compile_write_ready_patch_draft_proposal(
+        session=session,
+        context=context,
+        proposal=proposal,
+        write_ready_fast_path=write_ready_fast_path,
+        allowed_write_roots=allowed_write_roots,
+    ).get("observation") or observation
+
+
+def _write_ready_patch_draft_environment(
+    *,
+    session,
+    context,
+    write_ready_fast_path,
+):
     def canonical_path(path):
         return normalize_work_path(path)
 
-    observation = {
-        "patch_draft_compiler_ran": False,
-        "patch_draft_compiler_artifact_kind": "",
-        "patch_draft_compiler_replay_path": "",
-        "patch_draft_compiler_error": "",
-    }
-    action = action if isinstance(action, dict) else {}
-    action_plan = action_plan if isinstance(action_plan, dict) else {}
     fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
     recent_windows = fast_path.get("recent_windows") or []
     resume = ((context or {}).get("work_session") or {}).get("resume") or {}
@@ -1292,69 +1344,6 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
     todo = {
         "id": str(active_work_todo.get("id") or "").strip(),
         "source": {"target_paths": target_paths},
-    }
-
-    summary = (
-        str(action_plan.get("summary") or action.get("summary") or action.get("reason") or "").strip()
-        or "shadow write-ready compiler proposal"
-    )
-    action_type = str(action.get("type") or "").strip()
-    if action_type == "batch":
-        candidate_tools = action.get("tools") or []
-    elif action_type in {"edit_file", "edit_file_hunks"}:
-        candidate_tools = [action]
-    else:
-        observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-        return observation
-
-    proposal_files = []
-    for tool in candidate_tools:
-        if not isinstance(tool, dict):
-            observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-            return observation
-        tool_type = str(tool.get("type") or "").strip()
-        path = canonical_path(tool.get("path"))
-        if not path:
-            observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-            return observation
-        if tool_type == "edit_file":
-            old = tool.get("old")
-            new = tool.get("new")
-            if not isinstance(old, str) or old == "" or not isinstance(new, str):
-                observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-                return observation
-            proposal_files.append({"path": path, "edits": [{"old": old, "new": new}]})
-            continue
-        if tool_type == "edit_file_hunks":
-            edits = tool.get("edits")
-            valid_edits = (
-                isinstance(edits, list)
-                and bool(edits)
-                and all(
-                    isinstance(item, dict)
-                    and isinstance(item.get("old"), str)
-                    and item.get("old") != ""
-                    and isinstance(item.get("new"), str)
-                    for item in edits
-                )
-            )
-            if not valid_edits:
-                observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-                return observation
-            proposal_files.append(
-                {
-                    "path": path,
-                    "edits": [{"old": item.get("old"), "new": item.get("new")} for item in edits],
-                }
-            )
-            continue
-        observation["patch_draft_compiler_artifact_kind"] = "unadapted"
-        return observation
-
-    proposal = {
-        "kind": "patch_proposal",
-        "summary": summary,
-        "files": proposal_files,
     }
     cached_windows = {}
     for window in recent_windows:
@@ -1389,7 +1378,99 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
             "text": text,
             "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         }
+    return {
+        "todo": todo,
+        "cached_windows": cached_windows,
+        "live_files": live_files,
+    }
 
+
+def _write_ready_patch_draft_proposal_from_action(
+    *,
+    action_plan,
+    action,
+):
+    action = action if isinstance(action, dict) else {}
+    action_plan = action_plan if isinstance(action_plan, dict) else {}
+    summary = (
+        str(action_plan.get("summary") or action.get("summary") or action.get("reason") or "").strip()
+        or "shadow write-ready compiler proposal"
+    )
+    action_type = str(action.get("type") or "").strip()
+    if action_type == "batch":
+        candidate_tools = action.get("tools") or []
+    elif action_type in {"edit_file", "edit_file_hunks"}:
+        candidate_tools = [action]
+    else:
+        return None
+
+    proposal_files = []
+    for tool in candidate_tools:
+        if not isinstance(tool, dict):
+            return None
+        tool_type = str(tool.get("type") or "").strip()
+        path = normalize_work_path(tool.get("path"))
+        if not path:
+            return None
+        if tool_type == "edit_file":
+            old = tool.get("old")
+            new = tool.get("new")
+            if not isinstance(old, str) or old == "" or not isinstance(new, str):
+                return None
+            proposal_files.append({"path": path, "edits": [{"old": old, "new": new}]})
+            continue
+        if tool_type == "edit_file_hunks":
+            edits = tool.get("edits")
+            valid_edits = (
+                isinstance(edits, list)
+                and bool(edits)
+                and all(
+                    isinstance(item, dict)
+                    and isinstance(item.get("old"), str)
+                    and item.get("old") != ""
+                    and isinstance(item.get("new"), str)
+                    for item in edits
+                )
+            )
+            if not valid_edits:
+                return None
+            proposal_files.append(
+                {
+                    "path": path,
+                    "edits": [{"old": item.get("old"), "new": item.get("new")} for item in edits],
+                }
+            )
+            continue
+        return None
+
+    return {
+        "kind": "patch_proposal",
+        "summary": summary,
+        "files": proposal_files,
+    }
+
+
+def _compile_write_ready_patch_draft_proposal(
+    *,
+    session,
+    context,
+    proposal,
+    write_ready_fast_path,
+    allowed_write_roots=None,
+):
+    observation = _empty_patch_draft_compiler_observation()
+    proposal = proposal if isinstance(proposal, dict) else {}
+    environment = _write_ready_patch_draft_environment(
+        session=session,
+        context=context,
+        write_ready_fast_path=write_ready_fast_path,
+    )
+    todo = environment.get("todo") or {}
+    cached_windows = environment.get("cached_windows") or {}
+    live_files = environment.get("live_files") or {}
+    validator_result = {}
+    preview_result = None
+    previews = []
     try:
         validator_result = compile_patch_draft(
             todo=todo,
@@ -1401,10 +1482,12 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
         observation["patch_draft_compiler_ran"] = True
         observation["patch_draft_compiler_artifact_kind"] = str(validator_result.get("kind") or "").strip()
         if observation["patch_draft_compiler_artifact_kind"] == "patch_draft":
-            compile_patch_draft_previews(
+            preview_result = compile_patch_draft_previews(
                 validator_result,
                 allowed_write_roots=allowed_write_roots or [],
             )
+            if isinstance(preview_result, list):
+                previews = preview_result
         replay_path = write_patch_draft_compiler_replay(
             session_id=(session or {}).get("id"),
             todo_id=todo.get("id") or "",
@@ -1421,7 +1504,206 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
         observation["patch_draft_compiler_artifact_kind"] = "exception"
         observation["patch_draft_compiler_replay_path"] = ""
         observation["patch_draft_compiler_error"] = clip_output(str(exc), 500)
-    return observation
+    return {
+        "observation": observation,
+        "validator_result": validator_result,
+        "preview_result": preview_result,
+        "previews": previews,
+    }
+
+
+def _attempt_write_ready_tiny_draft_turn(
+    *,
+    session,
+    context,
+    tiny_context,
+    write_ready_fast_path,
+    model_auth,
+    model,
+    base_url,
+    model_backend,
+    timeout,
+    allowed_write_roots=None,
+    reasoning_effort="",
+    current_time="",
+    think_kwargs=None,
+):
+    prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+    timeout_seconds = _write_ready_tiny_draft_timeout(timeout)
+    metrics = {
+        "tiny_write_ready_draft_attempted": True,
+        "tiny_write_ready_draft_outcome": "",
+        "tiny_write_ready_draft_prompt_chars": len(prompt),
+        "tiny_write_ready_draft_timeout_seconds": timeout_seconds,
+        "tiny_write_ready_draft_fallback_reason": "",
+        "tiny_write_ready_draft_error": "",
+        "tiny_write_ready_draft_compiler_artifact_kind": "",
+    }
+    started = time.monotonic()
+    try:
+        with codex_reasoning_effort_scope(reasoning_effort):
+            decision_plan = call_model_json_with_retries(
+                model_backend,
+                model_auth,
+                prompt,
+                model,
+                base_url,
+                timeout_seconds,
+                log_prefix=f"{current_time}: work_write_ready_tiny_draft {model_backend} session={session.get('id')}",
+                **(think_kwargs or {}),
+            )
+    except Exception as exc:
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        if _work_model_error_looks_like_timeout(exc):
+            metrics["tiny_write_ready_draft_fallback_reason"] = "timeout"
+        elif _work_model_error_looks_like_refusal(exc):
+            metrics["tiny_write_ready_draft_fallback_reason"] = "refusal"
+        else:
+            metrics["tiny_write_ready_draft_fallback_reason"] = "error"
+        metrics["tiny_write_ready_draft_error"] = clip_output(str(exc), 500)
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": False,
+        }
+
+    if not isinstance(decision_plan, dict):
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = "invalid_shape"
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": False,
+        }
+
+    proposal_kind = str(decision_plan.get("kind") or "").strip()
+    if proposal_kind not in {"patch_proposal", "patch_blocker"}:
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = "invalid_shape"
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": False,
+        }
+
+    compiled = _compile_write_ready_patch_draft_proposal(
+        session=session,
+        context=context,
+        proposal=decision_plan,
+        write_ready_fast_path=write_ready_fast_path,
+        allowed_write_roots=allowed_write_roots,
+    )
+    observation = compiled.get("observation") or _empty_patch_draft_compiler_observation()
+    metrics["tiny_write_ready_draft_compiler_artifact_kind"] = (
+        observation.get("patch_draft_compiler_artifact_kind") or ""
+    )
+    if observation.get("patch_draft_compiler_error"):
+        metrics["tiny_write_ready_draft_error"] = observation.get("patch_draft_compiler_error") or ""
+    if any(observation.get(key) for key in observation):
+        metrics.update(observation)
+    compiler_observed = bool(
+        observation.get("patch_draft_compiler_artifact_kind")
+        or observation.get("patch_draft_compiler_ran")
+        or observation.get("patch_draft_compiler_replay_path")
+        or observation.get("patch_draft_compiler_error")
+    )
+    validator_result = compiled.get("validator_result") or {}
+    if proposal_kind == "patch_blocker":
+        code = str(validator_result.get("code") or "").strip()
+        if validator_result.get("kind") != "patch_blocker" or not code or code == "model_returned_non_schema":
+            metrics["tiny_write_ready_draft_outcome"] = "fallback"
+            metrics["tiny_write_ready_draft_fallback_reason"] = "invalid_shape"
+            return {
+                "status": "fallback",
+                "metrics": metrics,
+                "elapsed_seconds": time.monotonic() - started,
+                "compiler_observed": compiler_observed,
+            }
+        action = {
+            "type": "wait",
+            "reason": _stable_write_ready_tiny_draft_blocker_reason(validator_result),
+        }
+        action_plan = {
+            "summary": decision_plan.get("summary") or validator_result.get("detail") or action["reason"],
+            "action": action,
+            "act_mode": "tiny_write_ready_draft",
+        }
+        metrics["tiny_write_ready_draft_outcome"] = "blocker"
+        return {
+            "status": "blocker",
+            "decision_plan": decision_plan,
+            "action_plan": action_plan,
+            "action": action,
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": compiler_observed,
+        }
+
+    compiler_kind = str(validator_result.get("kind") or "").strip()
+    if compiler_kind != "patch_draft":
+        code = str(validator_result.get("code") or "").strip()
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = (
+            "invalid_shape" if code == "model_returned_non_schema" else f"compiler_{code or 'unusable_output'}"
+        )
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": compiler_observed,
+        }
+
+    preview_result = compiled.get("preview_result")
+    previews = list(compiled.get("previews") or [])
+    if isinstance(preview_result, dict) and preview_result.get("kind") == "patch_blocker":
+        code = str(preview_result.get("code") or "").strip()
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = f"preview_{code or 'patch_blocker'}"
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": compiler_observed,
+        }
+    if not previews:
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = "preview_unusable"
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": compiler_observed,
+        }
+
+    preview_action = {"type": "batch", "tools": previews} if len(previews) > 1 else dict(previews[0])
+    action_plan = {
+        "summary": decision_plan.get("summary") or validator_result.get("summary") or "draft write-ready preview",
+        "action": preview_action,
+        "act_mode": "tiny_write_ready_draft",
+    }
+    action = normalize_work_model_action(action_plan)
+    if action.get("type") == "wait":
+        metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_fallback_reason"] = "translated_preview_unusable"
+        return {
+            "status": "fallback",
+            "metrics": metrics,
+            "elapsed_seconds": time.monotonic() - started,
+            "compiler_observed": compiler_observed,
+        }
+    metrics["tiny_write_ready_draft_outcome"] = "succeeded"
+    return {
+        "status": "succeeded",
+        "decision_plan": decision_plan,
+        "action_plan": action_plan,
+        "action": action,
+        "metrics": metrics,
+        "elapsed_seconds": time.monotonic() - started,
+        "compiler_observed": compiler_observed,
+    }
 
 
 def _write_ready_prompt_target_paths(active_work_todo, recent_windows):
@@ -1514,6 +1796,50 @@ def build_write_ready_work_model_context(context):
             "write": capabilities.get("allowed_write_roots") or [],
         },
         "focused_verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
+    }
+
+
+def build_write_ready_tiny_draft_model_context(context):
+    fast_path = _work_write_ready_fast_path_details(context)
+    if not fast_path.get("active"):
+        return {}
+    write_ready_context = build_write_ready_work_model_context(context)
+    if not write_ready_context:
+        return {}
+    recent_windows = fast_path.get("recent_windows") or []
+    active_work_todo = write_ready_context.get("active_work_todo") or {}
+    return {
+        "active_work_todo": {
+            "id": active_work_todo.get("id"),
+            "status": active_work_todo.get("status"),
+            "source": {
+                "plan_item": ((active_work_todo.get("source") or {}).get("plan_item") or ""),
+                "target_paths": list(((active_work_todo.get("source") or {}).get("target_paths") or [])),
+                "verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
+            },
+            "attempts": dict(active_work_todo.get("attempts") or {}),
+            "blocker": dict(active_work_todo.get("blocker") or {}),
+        },
+        "write_ready_fast_path": {
+            "active": True,
+            "reason": "paired cached windows are edit-ready; emit one patch artifact or one blocker",
+            "cached_window_texts": [
+                {
+                    "path": item.get("path"),
+                    "line_start": item.get("line_start"),
+                    "line_end": item.get("line_end"),
+                    "tool_call_id": item.get("tool_call_id"),
+                    "window_sha256": item.get("window_sha256") or "",
+                    "file_sha256": item.get("file_sha256") or "",
+                    "text": item.get("text") or "",
+                }
+                for item in recent_windows
+            ],
+        },
+        "allowed_roots": {
+            "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
+        },
+        "focused_verify_command": str(write_ready_context.get("focused_verify_command") or "").strip(),
     }
 
 
@@ -1663,6 +1989,30 @@ def build_work_write_ready_think_prompt(context):
         "If you still cannot draft the dry-run batch, return wait with one exact blocker tied to the cached windows.\n"
         "Do not invent uncached old text and do not propose a partial sibling edit set.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
+        f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+    )
+
+
+def build_work_write_ready_tiny_draft_prompt(context):
+    return (
+        "You are the THINK phase for mew work mode.\n"
+        "Return only JSON. Do not use markdown.\n"
+        "Write-ready tiny draft lane is active.\n"
+        "Return exactly one patch artifact for the active paired src/test slice.\n"
+        "Allowed kinds are patch_proposal or patch_blocker.\n"
+        "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
+        "Stay inside allowed_roots.write and do not invent uncached old text.\n"
+        "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
+        "If one file needs multiple hunks, express them in one files[i].edits array.\n"
+        "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
+        "Schema:\n"
+        "{\n"
+        '  "kind": "patch_proposal|patch_blocker",\n'
+        '  "summary": "short reason",\n'
+        '  "files": [{"path": "src/mew/file.py", "edits": [{"old": "exact old text", "new": "replacement text"}]}],\n'
+        '  "code": "blocker code when kind=patch_blocker",\n'
+        '  "detail": "why drafting cannot proceed"\n'
+        "}\n\n"
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
 
@@ -2177,6 +2527,11 @@ def plan_work_model_turn(
         if write_ready_fast_path.get("active")
         else {}
     )
+    tiny_write_ready_context = (
+        build_write_ready_tiny_draft_model_context(context)
+        if write_ready_fast_path.get("active")
+        else {}
+    )
     stream_deltas = []
 
     def capture_delta(phase, text):
@@ -2202,6 +2557,16 @@ def plan_work_model_turn(
         max(float(timeout), WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
         if write_ready_context
         else float(timeout)
+    )
+    tiny_write_ready_prompt = (
+        build_work_write_ready_tiny_draft_prompt(tiny_write_ready_context)
+        if tiny_write_ready_context
+        else ""
+    )
+    tiny_write_ready_timeout = (
+        _write_ready_tiny_draft_timeout(timeout)
+        if tiny_write_ready_context
+        else 0.0
     )
     work_session_context = (context or {}).get("work_session") or {}
     resume_context = work_session_context.get("resume") or {}
@@ -2251,10 +2616,71 @@ def plan_work_model_turn(
                 "patch_draft_compiler_artifact_kind": "",
                 "patch_draft_compiler_replay_path": "",
                 "patch_draft_compiler_error": "",
+                "tiny_write_ready_draft_attempted": bool(tiny_write_ready_prompt),
+                "tiny_write_ready_draft_outcome": "",
+                "tiny_write_ready_draft_prompt_chars": len(tiny_write_ready_prompt),
+                "tiny_write_ready_draft_timeout_seconds": tiny_write_ready_timeout,
+                "tiny_write_ready_draft_fallback_reason": "",
+                "tiny_write_ready_draft_error": "",
+                "tiny_write_ready_draft_compiler_artifact_kind": "",
+                "tiny_write_ready_draft_prompt_contract_version": (
+                    WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION
+                ),
             }
         )
     if pre_model_metrics_sink:
         pre_model_metrics_sink(dict(model_metrics))
+    tiny_write_ready_elapsed = 0.0
+    skip_shadow_compile = False
+    if tiny_write_ready_context:
+        tiny_result = _attempt_write_ready_tiny_draft_turn(
+            session=session,
+            context=context,
+            tiny_context=tiny_write_ready_context,
+            write_ready_fast_path=write_ready_fast_path,
+            model_auth=model_auth,
+            model=model,
+            base_url=base_url,
+            model_backend=model_backend,
+            timeout=timeout,
+            allowed_write_roots=allowed_write_roots,
+            reasoning_effort=reasoning_policy.get("effort") or "",
+            current_time=current_time,
+            think_kwargs=think_kwargs,
+        )
+        tiny_write_ready_elapsed = float(tiny_result.get("elapsed_seconds") or 0.0)
+        model_metrics.update(tiny_result.get("metrics") or {})
+        skip_shadow_compile = bool(tiny_result.get("compiler_observed"))
+        if tiny_result.get("status") != "fallback":
+            if progress:
+                progress(f"session #{session.get('id')}: THINK ok")
+            model_metrics["think"] = {
+                "prompt_chars": len(tiny_write_ready_prompt),
+                "timeout_seconds": tiny_write_ready_timeout,
+                "elapsed_seconds": _round_seconds(tiny_write_ready_elapsed),
+            }
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "tiny_write_ready_draft",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(
+                (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
+                + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
+            )
+            action = tiny_result.get("action") or {"type": "wait", "reason": "missing action"}
+            if progress:
+                progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
+            return {
+                "decision_plan": tiny_result.get("decision_plan") or {},
+                "action_plan": tiny_result.get("action_plan") or {},
+                "action": action,
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": compact_model_stream(stream_deltas),
+            }
+        if pre_model_metrics_sink:
+            pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
     with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
         decision_plan = call_model_json_with_retries(
@@ -2270,7 +2696,7 @@ def plan_work_model_turn(
     think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
-    model_metrics["think"]["elapsed_seconds"] = _round_seconds(think_elapsed)
+    model_metrics["think"]["elapsed_seconds"] = _round_seconds(tiny_write_ready_elapsed + think_elapsed)
     if act_mode == "deterministic":
         action = normalize_work_model_action(
             decision_plan,
@@ -2319,7 +2745,7 @@ def plan_work_model_turn(
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
     )
-    if write_ready_fast_path.get("active"):
+    if write_ready_fast_path.get("active") and not skip_shadow_compile:
         model_metrics.update(
             _shadow_compile_patch_draft_for_write_ready_turn(
                 session=session,

@@ -1970,9 +1970,11 @@ Missing proof:
   `src/mew/patch_draft.py`; the first offline `PatchDraft` -> dry-run preview
   translator also now exists there, and the first shadow-only live bridge in
   `src/mew/work_loop.py` now records validated/blocker/exception compiler
-  observations plus replay paths without changing outer action semantics, but
-  the real write-ready prompt swap and live compiler/recovery path that
-  consumes either artifact does not yet exist
+  observations plus replay paths without changing outer action semantics; the
+  write-ready path now also attempts a dedicated tiny `patch_proposal |
+  patch_blocker` lane first and consumes validated previews or blockers
+  authoritatively on success, but broader recovery/follow-status integration
+  and live calibration proof still remain open
 - the write-ready prompt envelope is now reduced and versioned as `v2`, and
   live shadow collection on task `#402` cut write-ready `think.prompt_chars`
   from roughly `41k-42k` to about `20k`, but the collected bundles remain
@@ -2003,11 +2005,10 @@ Missing proof:
 
 Next action:
 
-- continue M6.11 with the post-v2 follow-up:
-  add a dedicated tiny write-ready draft lane that attempts a
-  `patch_proposal | patch_blocker` call first and falls back to the current
-  generic runtime path when that tiny lane times out or returns unusable
-  output; do not spend another slice on prompt trimming alone
+- continue M6.11 with the post-tiny-draft follow-up:
+  run live collection on task `#402` and confirm the tiny write-ready lane can
+  produce non-zero compiler bundles and acceptable tiny-lane
+  attempted/outcome/fallback distributions before widening recovery work
 - keep the Phase 2/3 calibration checkpoint active during Phase 3 rollout and
   pause if replay-bundle off-schema/refusal incidence crosses the configured
   thresholds

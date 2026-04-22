@@ -5912,7 +5912,9 @@ class WorkSessionTests(unittest.TestCase):
             build_work_model_context,
             build_work_think_prompt,
             build_work_write_ready_think_prompt,
+            build_work_write_ready_tiny_draft_prompt,
             build_write_ready_work_model_context,
+            build_write_ready_tiny_draft_model_context,
         )
         from mew.work_session import (
             build_work_session_resume,
@@ -6229,6 +6231,16 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("patch_proposal", fast_prompt)
         self.assertNotIn("patch_blocker", fast_prompt)
         self.assertLess(len(fast_prompt), len(prompt))
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/workbench.py", "tests/test_workbench.py"],
+        )
+        self.assertIn("Write-ready tiny draft lane is active.", tiny_prompt)
+        self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
+        self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
+        self.assertLess(len(tiny_prompt), len(fast_prompt))
 
     def test_write_ready_prompt_v2_stays_bounded_for_two_cached_windows_fixture(self):
         from mew.work_loop import _write_ready_draft_prompt_chars, build_work_write_ready_think_prompt
@@ -6803,6 +6815,7 @@ class WorkSessionTests(unittest.TestCase):
     def test_plan_work_model_turn_extends_timeout_for_write_ready_fast_path(self):
         from mew.work_loop import (
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
+            WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS,
             plan_work_model_turn,
         )
         from mew.work_session import finish_work_model_turn, start_work_model_turn
@@ -6886,6 +6899,8 @@ class WorkSessionTests(unittest.TestCase):
 
         def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
             observed.append({"prompt": prompt, "timeout": timeout})
+            if "Write-ready tiny draft lane is active." in prompt:
+                return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
             return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
 
         with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
@@ -6902,9 +6917,11 @@ class WorkSessionTests(unittest.TestCase):
                 act_mode="deterministic",
             )
 
-        self.assertEqual(len(observed), 1)
-        self.assertEqual(observed[0]["timeout"], WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
-        self.assertIn("Write-ready fast path is active.", observed[0]["prompt"])
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[0]["timeout"], WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS)
+        self.assertIn("Write-ready tiny draft lane is active.", observed[0]["prompt"])
+        self.assertEqual(observed[1]["timeout"], WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
+        self.assertIn("Write-ready fast path is active.", observed[1]["prompt"])
         self.assertTrue(planned["model_metrics"]["write_ready_fast_path"])
         self.assertEqual(planned["model_metrics"]["draft_phase"], "write_ready")
         self.assertEqual(planned["model_metrics"]["draft_attempts"], 1)
@@ -6916,11 +6933,135 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v2")
         self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
         self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
+        self.assertTrue(planned["model_metrics"]["tiny_write_ready_draft_attempted"])
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_outcome"], "fallback")
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_fallback_reason"], "invalid_shape")
+        self.assertEqual(
+            planned["model_metrics"]["tiny_write_ready_draft_timeout_seconds"],
+            WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS,
+        )
+        self.assertLess(
+            planned["model_metrics"]["tiny_write_ready_draft_prompt_chars"],
+            planned["model_metrics"]["think"]["prompt_chars"],
+        )
         self.assertEqual(
             planned["model_metrics"]["think"]["timeout_seconds"],
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
         )
         self.assertEqual(planned["model_metrics"]["draft_runtime_mode"], "guarded")
+
+    def test_tiny_write_ready_draft_lane_returns_authoritative_preview_batch(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                observed = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed.append({"prompt": prompt, "timeout": timeout})
+                    return dict(scenario.get("model_output") or {})
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="model",
+                    )
+
+                self.assertEqual(len(observed), 1)
+                self.assertIn("Write-ready tiny draft lane is active.", observed[0]["prompt"])
+                self.assertEqual(planned["action"]["type"], "batch")
+                self.assertEqual(
+                    [tool["path"] for tool in planned["action"]["tools"]],
+                    ["tests/test_patch_draft.py", "src/mew/patch_draft.py"],
+                )
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "succeeded")
+                self.assertEqual(metrics["tiny_write_ready_draft_compiler_artifact_kind"], "patch_draft")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_draft")
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertTrue(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
+                self.assertEqual(metrics["act"]["mode"], "tiny_write_ready_draft")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tiny_write_ready_draft_lane_returns_wait_for_patch_blocker(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                observed = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed.append({"prompt": prompt, "timeout": timeout})
+                    return {
+                        "kind": "patch_blocker",
+                        "summary": "refresh the cached windows first",
+                        "code": "missing_exact_cached_window_texts",
+                        "detail": "refresh the paired cached windows before drafting",
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="model",
+                    )
+
+                self.assertEqual(len(observed), 1)
+                self.assertIn("Write-ready tiny draft lane is active.", observed[0]["prompt"])
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: missing_exact_cached_window_texts",
+                )
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertTrue(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
+                self.assertEqual(metrics["act"]["mode"], "tiny_write_ready_draft")
+            finally:
+                os.chdir(old_cwd)
 
     def test_patch_draft_compiler_shadow_bridge_records_validated_replay_for_write_ready_batch(self):
         from mew.work_loop import plan_work_model_turn
