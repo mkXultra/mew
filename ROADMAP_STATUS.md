@@ -1964,16 +1964,18 @@ Missing proof:
 - `WorkTodo` now exists as a bounded session-state frontier skeleton, but the
   compiler/recovery path that consumes it does not yet exist
 - `PatchDraftCompiler` does not yet exist
-- live draft failures do not yet emit the replay bundles the design expects
+- draft-related model failures now emit replay bundles under
+  `.mew/replays/work-loop/...`, but compiler inputs/outputs and validator
+  blockers are not yet captured because `PatchDraftCompiler` does not exist
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 
 Next action:
 
-- start Phase 2 now:
-  add replay-bundle capture and the first `PatchDraftCompiler` scaffolding so
-  `#399/#401` become offline-replayable instead of timing out inside the live
-  loop
+- continue Phase 2:
+  add the first `PatchDraftCompiler` scaffolding and fixture lane so `#399`
+  stops as a live-loop timeout/refusal problem and becomes a deterministic
+  compiler/blocker problem offline
 
 ### M7: Senses - Inbound Signals
 

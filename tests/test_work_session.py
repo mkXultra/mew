@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 import os
 import shlex
 import shutil
@@ -26,6 +27,7 @@ from mew.commands import (
 )
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.state import load_state, save_state, state_lock
+from mew.work_replay import write_work_model_failure_replay
 from mew.work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from mew.work_session import (
     DEFAULT_RESUME_APPROVAL_DIFF_MAX_CHARS,
@@ -8518,6 +8520,416 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["pending_steer"]["text"], "retry this after model recovers")
                 self.assertNotIn("steer for step", "\n".join(note.get("text", "") for note in session.get("notes", [])))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_replay_bundle_written_for_write_ready_timeout_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import ModelBackendError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                def fail_with_write_ready_timeout(*args, **kwargs):
+                    session = args[1] if len(args) > 1 else {}
+                    session_id = session.get("id")
+                    turns = session.get("model_turns") if isinstance(session, dict) else []
+                    for turn in reversed(turns or []):
+                        if str(turn.get("status") or "") == "running":
+                            turn["model_metrics"] = {
+                                "write_ready_fast_path": True,
+                                "draft_phase": "write_ready",
+                                "draft_attempts": 1,
+                            }
+                            break
+                    with state_lock():
+                        state = load_state()
+                        persisted_session = None
+                        for candidate in state.get("work_sessions") or []:
+                            if str(candidate.get("id")) == str(session_id):
+                                persisted_session = candidate
+                                break
+                        if persisted_session is not None:
+                            for turn in reversed(persisted_session.get("model_turns") or []):
+                                if str(turn.get("status") or "") == "running":
+                                    turn["model_metrics"] = {
+                                        "write_ready_fast_path": True,
+                                        "draft_phase": "write_ready",
+                                        "draft_attempts": 1,
+                                    }
+                                    break
+                        save_state(state)
+                    raise ModelBackendError("request timed out")
+
+                with patch("mew.commands.plan_work_model_turn", side_effect=fail_with_write_ready_timeout):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "model_error")
+                session = load_state()["work_sessions"][0]
+                failed_turn = session["model_turns"][-1]
+                replay_path = failed_turn.get("replay_bundle_path")
+                self.assertTrue(replay_path)
+                replay_path_obj = Path(replay_path)
+                self.assertIn("attempt-1", replay_path_obj.parts)
+                self.assertIn(f"turn-{failed_turn['id']}", replay_path_obj.parts)
+                self.assertIn(f"session-{session['id']}", replay_path_obj.parts)
+                bundle = json.loads(Path(replay_path).read_text(encoding="utf-8"))
+                self.assertEqual(bundle["failure"]["kind"], "timeout")
+                self.assertEqual(bundle["failure"]["code"], "request_timed_out")
+                self.assertEqual(bundle["session_id"], session["id"])
+                self.assertEqual(bundle["model_turn_id"], failed_turn["id"])
+                self.assertEqual(bundle["date_bucket"], report["steps"][0]["model_turn"]["finished_at"][:10])
+                self.assertTrue(bundle["model_metrics"].get("write_ready_fast_path"))
+                self.assertIn("session-" + str(session["id"]), replay_path)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_draft_failure_bundle_written_for_active_work_todo(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Draft paired change while blocked",
+                            "target_paths": ["src/mew/work_loop.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    }
+                    save_state(state)
+
+                with patch("mew.commands.plan_work_model_turn", side_effect=MewError("schema mismatch for model action")):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "model_error")
+                session = load_state()["work_sessions"][0]
+                failed_turn = session["model_turns"][-1]
+                replay_path = failed_turn.get("replay_bundle_path")
+                self.assertTrue(replay_path)
+                self.assertIn("todo-todo-1-1", replay_path)
+                bundle = json.loads(Path(replay_path).read_text(encoding="utf-8"))
+                self.assertEqual(bundle["failure"]["kind"], "generic")
+                self.assertEqual(bundle["failure"]["code"], "model_failure")
+                self.assertEqual(bundle["active_work_todo"]["status"], "blocked_on_patch")
+                self.assertEqual(bundle["active_work_todo"]["id"], "todo-1-1")
+                self.assertEqual(str(bundle["attempt"]), replay_path.split("/attempt-")[-1].split("/")[0])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_replay_bundle_path_is_stable_and_attempt_increments(self):
+        old_cwd = os.getcwd()
+        session = {
+            "id": 3,
+            "task_id": 3,
+            "status": "active",
+            "active_work_todo": {"id": "todo-3-2", "status": "drafting"},
+            "model_turns": [],
+            "tool_calls": [],
+            "default_options": {},
+            "updated_at": "2026-04-21T00:00:00Z",
+        }
+        model_turn = {
+            "id": 7,
+            "status": "failed",
+            "summary": "seed failure turn",
+            "finished_at": "2026-04-21T00:05:00Z",
+            "model_metrics": {"write_ready_fast_path": True},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                first = write_work_model_failure_replay(
+                    session=session,
+                    model_turn=model_turn,
+                    exc=Exception("request timed out"),
+                    task={"id": 3},
+                )
+                second = write_work_model_failure_replay(
+                    session=session,
+                    model_turn=model_turn,
+                    exc=Exception("request timed out"),
+                    task={"id": 3},
+                )
+
+                self.assertTrue(first)
+                self.assertTrue(second)
+                self.assertNotEqual(first, second)
+                self.assertIn("2026-04-21", first)
+                self.assertIn("attempt-2", second)
+                self.assertIn(f"turn-{model_turn['id']}", first)
+                self.assertIn(f"turn-{model_turn['id']}", second)
+                self.assertIn("todo-todo-3-2", first)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_replay_capture_is_read_only_for_session_frontier_state(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import ModelBackendError
+
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _ = create_work_session(state, task)
+                    session["id"] = 11
+                    session["active_work_todo"] = {
+                        "id": "todo-11-4",
+                        "status": "drafting",
+                        "source": {"plan_item": "Replay side-effect test", "target_paths": ["src/mew/commands.py"]},
+                        "attempts": {"draft": 3, "review": 1},
+                    }
+                    session["last_work_todo_ordinal"] = 4
+                    save_state(state)
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    before = deepcopy(session)
+                    write_work_model_failure_replay(
+                        session=session,
+                        model_turn={
+                            "id": 99,
+                            "status": "running",
+                            "model_metrics": {"write_ready_fast_path": True},
+                            "finished_at": "2026-04-21T00:10:00Z",
+                        },
+                        exc=ModelBackendError("request timed out"),
+                        task=None,
+                    )
+                    self.assertEqual(before, session)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_replay_bundle_write_failure_does_not_block_turn_persistence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import ModelBackendError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                def fail_with_write_ready_timeout(*args, **kwargs):
+                    session = args[1] if len(args) > 1 else {}
+                    for turn in reversed(session.get("model_turns") or []):
+                        if str(turn.get("status") or "") == "running":
+                            turn["model_metrics"] = {"write_ready_fast_path": True}
+                            break
+                    raise ModelBackendError("request timed out")
+
+                with patch("mew.commands.plan_work_model_turn", side_effect=fail_with_write_ready_timeout):
+                    with patch("mew.commands.write_work_model_failure_replay", side_effect=RuntimeError("disk write failed")):
+                        with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--json",
+                                        ]
+                                    ),
+                                    1,
+                                )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "model_error")
+                session = load_state()["work_sessions"][0]
+                failed_turn = session["model_turns"][-1]
+                self.assertEqual(failed_turn["status"], "failed")
+                self.assertNotIn("replay_bundle_path", failed_turn)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_replay_bundle_records_refusal_failure_kind(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import CodexRefusalError, ModelRefusalError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one bounded patch for refusal test",
+                            "target_paths": ["src/mew/work_loop.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    }
+                    save_state(state)
+
+                def raise_refusal(exc_type, message):
+                    def _inner(*args, **kwargs):
+                        session = args[1] if len(args) > 1 else {}
+                        for turn in reversed(session.get("model_turns") or []):
+                            if str(turn.get("status") or "") == "running":
+                                turn["model_metrics"] = {"write_ready_fast_path": True}
+                                break
+                        raise exc_type(message)
+
+                    return _inner
+
+                cases = (
+                    ("model", ModelRefusalError),
+                    ("codex", CodexRefusalError),
+                )
+                for _, exc_type in cases:
+                    with patch(
+                        "mew.commands.plan_work_model_turn",
+                        side_effect=raise_refusal(exc_type, f"{exc_type.__name__.lower().replace('_', ' ')} failure"),
+                    ):
+                        with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--json",
+                                        ]
+                                    ),
+                                    1,
+                                )
+                    report = json.loads(stdout.getvalue())
+                    self.assertEqual(report["stop_reason"], "model_error")
+                    failed_session = load_state()["work_sessions"][0]
+                    failed_turn = failed_session["model_turns"][-1]
+                    replay_path = failed_turn.get("replay_bundle_path")
+                    self.assertTrue(replay_path)
+                    bundle = json.loads(Path(replay_path).read_text(encoding="utf-8"))
+                    self.assertEqual(bundle["failure"]["kind"], "refusal")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_non_draft_failure_does_not_write_replay_bundle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with patch("mew.commands.plan_work_model_turn", side_effect=MewError("non draft failure")):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "model_error")
+                session = load_state()["work_sessions"][0]
+                failed_turn = session["model_turns"][-1]
+                self.assertEqual(failed_turn["status"], "failed")
+                self.assertNotIn("replay_bundle_path", failed_turn)
+                self.assertFalse(Path(".mew/replays/work-loop").exists())
             finally:
                 os.chdir(old_cwd)
 

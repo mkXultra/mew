@@ -270,6 +270,7 @@ from .work_session import (
     work_write_pairing_status,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
+from .work_replay import write_work_model_failure_replay
 from .work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from .work_world import build_work_world_state
 from .write_tools import resolve_allowed_write_path
@@ -4108,6 +4109,18 @@ def cmd_work_ai(args):
                     {"type": "wait", "reason": error},
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error)
+                if turn:
+                    try:
+                        replay_bundle_path = write_work_model_failure_replay(
+                            session=session,
+                            model_turn=turn,
+                            exc=exc,
+                            task=prompt_task,
+                        )
+                        if replay_bundle_path:
+                            turn["replay_bundle_path"] = replay_bundle_path
+                    except Exception:
+                        pass
                 save_state(state)
             report["steps"].append(
                 {
