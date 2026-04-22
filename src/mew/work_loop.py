@@ -1538,8 +1538,21 @@ def _attempt_write_ready_tiny_draft_turn(
         "tiny_write_ready_draft_fallback_reason": "",
         "tiny_write_ready_draft_error": "",
         "tiny_write_ready_draft_compiler_artifact_kind": "",
+        "tiny_write_ready_draft_elapsed_seconds": 0.0,
+        "tiny_write_ready_draft_timeout_budget_utilization": 0.0,
+        "tiny_write_ready_draft_exit_stage": "",
     }
     started = time.monotonic()
+
+    def _finalize_tiny_draft_metrics(exit_stage):
+        elapsed_seconds = time.monotonic() - started
+        metrics["tiny_write_ready_draft_elapsed_seconds"] = elapsed_seconds
+        metrics["tiny_write_ready_draft_timeout_budget_utilization"] = (
+            elapsed_seconds / timeout_seconds if timeout_seconds else 0.0
+        )
+        metrics["tiny_write_ready_draft_exit_stage"] = exit_stage
+        return elapsed_seconds
+
     try:
         with codex_reasoning_effort_scope(reasoning_effort):
             decision_plan = call_model_json_with_retries(
@@ -1554,6 +1567,7 @@ def _attempt_write_ready_tiny_draft_turn(
             )
     except Exception as exc:
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
+        metrics["tiny_write_ready_draft_exit_stage"] = "model_exception"
         if _work_model_error_looks_like_timeout(exc):
             metrics["tiny_write_ready_draft_fallback_reason"] = "timeout"
         elif _work_model_error_looks_like_refusal(exc):
@@ -1564,17 +1578,18 @@ def _attempt_write_ready_tiny_draft_turn(
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("model_exception"),
             "compiler_observed": False,
         }
 
     if not isinstance(decision_plan, dict):
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "invalid_shape"
+        metrics["tiny_write_ready_draft_exit_stage"] = "non_dict_response"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("non_dict_response"),
             "compiler_observed": False,
         }
 
@@ -1582,10 +1597,11 @@ def _attempt_write_ready_tiny_draft_turn(
     if proposal_kind not in {"patch_proposal", "patch_blocker"}:
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "invalid_shape"
+        metrics["tiny_write_ready_draft_exit_stage"] = "unknown_kind"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("unknown_kind"),
             "compiler_observed": False,
         }
 
@@ -1619,7 +1635,7 @@ def _attempt_write_ready_tiny_draft_turn(
             return {
                 "status": "fallback",
                 "metrics": metrics,
-                "elapsed_seconds": time.monotonic() - started,
+                "elapsed_seconds": _finalize_tiny_draft_metrics("blocker_invalid_shape"),
                 "compiler_observed": compiler_observed,
             }
         action = {
@@ -1632,13 +1648,14 @@ def _attempt_write_ready_tiny_draft_turn(
             "act_mode": "tiny_write_ready_draft",
         }
         metrics["tiny_write_ready_draft_outcome"] = "blocker"
+        metrics["tiny_write_ready_draft_exit_stage"] = "blocker_accepted"
         return {
             "status": "blocker",
             "decision_plan": decision_plan,
             "action_plan": action_plan,
             "action": action,
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("blocker_accepted"),
             "compiler_observed": compiler_observed,
         }
 
@@ -1649,10 +1666,11 @@ def _attempt_write_ready_tiny_draft_turn(
         metrics["tiny_write_ready_draft_fallback_reason"] = (
             "invalid_shape" if code == "model_returned_non_schema" else f"compiler_{code or 'unusable_output'}"
         )
+        metrics["tiny_write_ready_draft_exit_stage"] = "compiler_fallback"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("compiler_fallback"),
             "compiler_observed": compiler_observed,
         }
 
@@ -1662,19 +1680,21 @@ def _attempt_write_ready_tiny_draft_turn(
         code = str(preview_result.get("code") or "").strip()
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = f"preview_{code or 'patch_blocker'}"
+        metrics["tiny_write_ready_draft_exit_stage"] = "preview_blocker"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("preview_blocker"),
             "compiler_observed": compiler_observed,
         }
     if not previews:
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "preview_unusable"
+        metrics["tiny_write_ready_draft_exit_stage"] = "preview_unusable"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("preview_unusable"),
             "compiler_observed": compiler_observed,
         }
 
@@ -1688,20 +1708,22 @@ def _attempt_write_ready_tiny_draft_turn(
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "translated_preview_unusable"
+        metrics["tiny_write_ready_draft_exit_stage"] = "translated_preview_unusable"
         return {
             "status": "fallback",
             "metrics": metrics,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": _finalize_tiny_draft_metrics("translated_preview_unusable"),
             "compiler_observed": compiler_observed,
         }
     metrics["tiny_write_ready_draft_outcome"] = "succeeded"
+    metrics["tiny_write_ready_draft_exit_stage"] = "succeeded"
     return {
         "status": "succeeded",
         "decision_plan": decision_plan,
         "action_plan": action_plan,
         "action": action,
         "metrics": metrics,
-        "elapsed_seconds": time.monotonic() - started,
+        "elapsed_seconds": _finalize_tiny_draft_metrics("succeeded"),
         "compiler_observed": compiler_observed,
     }
 

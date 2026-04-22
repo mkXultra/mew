@@ -7145,6 +7145,9 @@ class WorkSessionTests(unittest.TestCase):
             planned["model_metrics"]["tiny_write_ready_draft_timeout_seconds"],
             WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS,
         )
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_exit_stage"], "unknown_kind")
+        self.assertGreaterEqual(planned["model_metrics"]["tiny_write_ready_draft_elapsed_seconds"], 0.0)
+        self.assertGreaterEqual(planned["model_metrics"]["tiny_write_ready_draft_timeout_budget_utilization"], 0.0)
         self.assertLess(
             planned["model_metrics"]["tiny_write_ready_draft_prompt_chars"],
             planned["model_metrics"]["think"]["prompt_chars"],
@@ -7154,6 +7157,50 @@ class WorkSessionTests(unittest.TestCase):
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
         )
         self.assertEqual(planned["model_metrics"]["draft_runtime_mode"], "guarded")
+
+    def test_tiny_write_ready_draft_lane_model_exception_records_elapsed_exit_stage_and_utilization(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    if log_prefix and "work_write_ready_tiny_draft" in str(log_prefix):
+                        raise TimeoutError("timed out while generating tiny draft")
+                    return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="deterministic",
+                    )
+
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "fallback")
+                self.assertEqual(metrics["tiny_write_ready_draft_fallback_reason"], "timeout")
+                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "model_exception")
+                self.assertGreaterEqual(metrics["tiny_write_ready_draft_elapsed_seconds"], 0.0)
+                self.assertGreaterEqual(metrics["tiny_write_ready_draft_timeout_budget_utilization"], 0.0)
+            finally:
+                os.chdir(old_cwd)
 
     def test_tiny_write_ready_draft_lane_returns_authoritative_preview_batch(self):
         from mew.work_loop import plan_work_model_turn
@@ -7206,6 +7253,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(metrics["patch_draft_compiler_replay_path"])
                 self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
                 self.assertEqual(metrics["act"]["mode"], "tiny_write_ready_draft")
+                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "succeeded")
+                self.assertGreaterEqual(metrics["tiny_write_ready_draft_elapsed_seconds"], 0.0)
+                self.assertGreaterEqual(metrics["tiny_write_ready_draft_timeout_budget_utilization"], 0.0)
             finally:
                 os.chdir(old_cwd)
 
