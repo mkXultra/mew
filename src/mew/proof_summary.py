@@ -141,6 +141,7 @@ def _new_m6_11_cohort_summary():
     return {
         "total_bundles": 0,
         "bundle_type_counts": defaultdict(int),
+        "blocker_code_counts": defaultdict(int),
         "relevant_bundles": 0,
         "compiler_bundles": 0,
         "off_schema_count": 0,
@@ -191,6 +192,9 @@ def _finalize_m6_11_cohort_summary(cohort):
     return {
         "total_bundles": total_bundles,
         "bundle_type_counts": dict(bundle_type_counts),
+        "blocker_code_counts": dict(
+            defaultdict(int, cohort.get("blocker_code_counts", {}))
+        ),
         "relevant_bundles": relevant_bundles,
         "compiler_bundles": compiler_bundles,
         "off_schema_count": off_schema_count,
@@ -335,6 +339,7 @@ def summarize_m6_11_replay_calibration(replay_root):
     total_bundles = 0
     off_schema_count = 0
     refusal_count = 0
+    blocker_code_counts = defaultdict(int)
     dominant_bundle_type = ""
     refusal_by_type = defaultdict(int)
     compiler_bundles = 0
@@ -387,6 +392,10 @@ def summarize_m6_11_replay_calibration(replay_root):
             cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
             cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
+        blocker_code = str(bundle_summary.get("blocker_code") or "").strip()
+        if blocker_code:
+            blocker_code_counts[blocker_code] += 1
+            cohort_summary["blocker_code_counts"][blocker_code] += 1
 
     for report_path in sorted(replay_path.rglob("report.json")):
         if not report_path.is_file():
@@ -423,6 +432,10 @@ def summarize_m6_11_replay_calibration(replay_root):
             cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
             cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
+        blocker_code = str(bundle_summary.get("blocker_code") or "").strip()
+        if blocker_code:
+            blocker_code_counts[blocker_code] += 1
+            cohort_summary["blocker_code_counts"][blocker_code] += 1
         for error in bundle_summary.get("errors") or []:
             errors.append(error)
 
@@ -478,6 +491,7 @@ def summarize_m6_11_replay_calibration(replay_root):
             "refusal_count": refusal_count,
             "refusal_rate": refusal_rate,
             "refusal_by_type": dict(refusal_by_type),
+            "blocker_code_counts": dict(blocker_code_counts),
             "dominant_bundle_type": dominant_bundle_type,
             "dominant_bundle_share": dominant_bundle_share,
             "malformed_bundle_count": malformed_bundle_count,
@@ -668,6 +682,10 @@ def format_proof_summary(summary):
         refusal_breakdown = ", ".join(
             f"{key}={value}" for key, value in sorted(refusal_by_type.items())
         )
+        blocker_code_by_type = calibration.get("blocker_code_counts") or {}
+        blocker_code_breakdown = ", ".join(
+            f"{key}={value}" for key, value in sorted(blocker_code_by_type.items())
+        )
         rates = [
             (
                 "off_schema="
@@ -679,6 +697,7 @@ def format_proof_summary(summary):
                 f"{calibration.get('refusal_rate', 0.0):.4f}"
                 f" ({calibration.get('refusal_count', 0)}/{calibration.get('total_bundles', 0)})"
             ),
+            f"blocker_code_breakdown={blocker_code_breakdown or 'none'}",
             f"dominant_share={calibration.get('dominant_bundle_share', 0.0):.4f}",
             f"refusal_breakdown={refusal_breakdown or 'none'}",
         ]
@@ -723,6 +742,10 @@ def format_proof_summary(summary):
             refusal_breakdown = ", ".join(
                 f"{key}={value}" for key, value in sorted(refusal_by_type.items())
             )
+            blocker_code_by_type = cohort.get("blocker_code_counts") or {}
+            blocker_code_breakdown = ", ".join(
+                f"{key}={value}" for key, value in sorted(blocker_code_by_type.items())
+            )
             bundle_types = ", ".join(
                 f"{key}={value}" for key, value in sorted((cohort.get("bundle_type_counts") or {}).items())
             )
@@ -736,6 +759,7 @@ def format_proof_summary(summary):
                     f"({cohort.get('off_schema_count', 0)}/{cohort.get('off_schema_denominator', 0)}) "
                     f"refusal={cohort.get('refusal_rate', 0.0):.4f} "
                     f"({cohort.get('refusal_count', 0)}/{cohort.get('total_bundles', 0)}) "
+                    f"blocker_code_breakdown={blocker_code_breakdown or 'none'} "
                     f"refusal_breakdown={refusal_breakdown or 'none'}"
                 )
             )

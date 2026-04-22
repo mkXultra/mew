@@ -779,6 +779,90 @@ class ProofSummaryTests(unittest.TestCase):
             rendered,
         )
 
+    def test_summarize_m6_11_calibration_blocker_code_counts_are_additive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler_other",
+                1,
+                "patch_valid",
+                blocker_code="BK-A",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler_other",
+                2,
+                "patch_valid",
+                blocker_code="BK-B",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {"patch_draft_compiler.other": 2},
+        )
+        self.assertEqual(
+            calibration["blocker_code_counts"],
+            {"BK-A": 1, "BK-B": 1},
+        )
+        unknown_cohort = calibration["cohorts"]["unknown"]
+        self.assertEqual(
+            unknown_cohort["bundle_type_counts"],
+            {"patch_draft_compiler.other": 2},
+        )
+        self.assertEqual(
+            unknown_cohort["blocker_code_counts"],
+            {"BK-A": 1, "BK-B": 1},
+        )
+
+    def test_format_m6_11_calibration_blocker_code_breakdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                1,
+                "patch_valid",
+                blocker_code="CK-1",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                2,
+                "patch_valid",
+                blocker_code="",
+            )
+            self._write_model_failure_bundle(
+                replay_root / "failure_refused",
+                1,
+                "model_refused",
+                blocker_code="MK-R",
+            )
+            self._write_model_failure_bundle(
+                replay_root / "failure_timeout",
+                1,
+                "model_failed_timeout",
+                blocker_code="MK-T",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+            rendered = format_proof_summary(summary)
+
+        self.assertEqual(
+            summary["calibration"]["blocker_code_counts"],
+            {"CK-1": 1, "MK-R": 1, "MK-T": 1},
+        )
+        self.assertIn(
+            "blocker_code_breakdown=CK-1=1, MK-R=1, MK-T=1",
+            rendered,
+        )
+        self.assertIn(
+            (
+                "cohort[unknown]_rates: "
+                "off_schema=0.0000 (0/2) refusal=0.2500 (1/4) "
+                "blocker_code_breakdown=CK-1=1, MK-R=1, MK-T=1 "
+                "refusal_breakdown=work-loop-model-failure.model_refused=1"
+            ),
+            rendered,
+        )
+
     def test_summarize_m6_11_calibration_compiler_monoculture_fails_concentration_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)

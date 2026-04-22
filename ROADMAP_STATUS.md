@@ -2006,6 +2006,28 @@ Missing proof:
   red at the top level and currently lands under `cohort[unknown]`, which means
   the measurement gap is now narrowed to collecting fresh current-HEAD bundles
   rather than guessing from stale mixed-history calibration.
+- Fresh current-HEAD live evidence now exists beyond `#402`. Two bounded
+  canary slices on historical session `#392` (`#402`) emitted concrete
+  compiler blockers instead of `request_timed_out`
+  (`unpaired_source_edit_blocked`, `insufficient_cached_test_context`), and
+  one fresh non-`#402` bounded slice on session `#393` (`#403`) emitted two
+  additional compiler blockers
+  (`missing_exact_cached_window_texts`, `insufficient_cached_context`) on a
+  clean paired `src/mew/dogfood.py` + `tests/test_dogfood.py` surface. The
+  current-head cohort is therefore no longer empty and no longer timeout-only,
+  but the coarse calibration bundle taxonomy still reports
+  `patch_draft_compiler.other=4` and fails concentration.
+- Blocker-code visibility is now landed in `src/mew/proof_summary.py` and
+  `tests/test_proof_summary.py`. `mew proof-summary --m6_11-phase2-calibration`
+  now renders additive `blocker_code_breakdown` lines at top level and per
+  cohort without changing threshold math, dominant bundle-type math, or cohort
+  classification. This makes the current-head shift visible to the operator:
+  current-head blocker codes are now
+  `missing_exact_cached_window_texts=1`,
+  `insufficient_cached_context=1`,
+  `unpaired_source_edit_blocked=1`,
+  `insufficient_cached_test_context=1`, while current-head timeout incidence is
+  zero.
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -2069,12 +2091,12 @@ Next action:
 
 - keep the Phase 2/3 calibration checkpoint active and move from Phase 4
   surface parity into close-gate evidence collection:
-  with the full `m6_11-*` dogfood subset now green, start the bounded live
-  incidence gate against `#399/#401`; use the new cohort-aware replay summaries
-  to collect fresh current-HEAD bundles first, then rerun
-  `./mew proof-summary .mew/replays/work-loop --m6_11-phase2-calibration`
-  and measure whether current-head timeout concentration and combined
-  `#399/#401` incidence are actually dropping
+  with the full `m6_11-*` dogfood subset now green and the first non-`#402`
+  current-head source landed, continue the bounded live incidence gate against
+  `#399/#401`; use the cohort-aware replay summaries plus the additive
+  `blocker_code_breakdown` output to collect the remaining current-head slices
+  and measure whether current-head timeout incidence stays at zero while the
+  combined `#399/#401` blocker mix actually drops versus the pre-M6.11 sample
 - if live evidence still shows the stale-timeout `latest_model_failure` field
   obscuring blocker-backed recovery despite `resume_source=session_overlay`,
   cut one more bounded operator-surface slice before starting Phase 5/6 work
