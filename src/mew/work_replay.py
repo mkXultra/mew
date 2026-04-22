@@ -1,6 +1,7 @@
 import json
 from copy import deepcopy
 from pathlib import Path
+import subprocess
 
 from .errors import CodexRefusalError, ModelBackendError, ModelRefusalError
 from .timeutil import now_date_iso, now_iso, parse_time
@@ -44,6 +45,76 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _current_git_head():
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if head.returncode == 0:
+            return (head.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return ""
+
+
+def _build_bucket_tag(*parts):
+    labels = [
+        f"{key}={str(value).strip()}"
+        for key, value in parts
+        if str(value).strip()
+    ]
+    return "/".join(labels)
+
+
+def _derive_model_failure_bucket_tag(model_metrics):
+    contract = str(model_metrics.get("draft_prompt_contract_version") or "").strip()
+    tiny_contract = str(
+        model_metrics.get("tiny_write_ready_draft_prompt_contract_version") or ""
+    ).strip()
+    exit_stage = str(model_metrics.get("tiny_write_ready_draft_exit_stage") or "").strip()
+    return _build_bucket_tag(
+        ("contract", contract),
+        ("tiny", tiny_contract),
+        ("exit", exit_stage),
+    )
+
+
+def _derive_model_failure_blocker_code(model_metrics):
+    fallback_reason = str(
+        model_metrics.get("tiny_write_ready_draft_fallback_reason") or ""
+    ).strip()
+    artifact_kind = str(
+        model_metrics.get("patch_draft_compiler_artifact_kind") or ""
+    ).strip()
+    if fallback_reason:
+        return fallback_reason
+    return artifact_kind
+
+
+def _derive_compiler_bucket_tag(validator_result, todo):
+    validator_code = str((validator_result or {}).get("code") or "").strip()
+    contract = str((todo or {}).get("draft_prompt_contract_version") or "").strip()
+    tiny_contract = str(
+        (todo or {}).get("tiny_write_ready_draft_prompt_contract_version") or ""
+    ).strip()
+    return _build_bucket_tag(
+        ("code", validator_code),
+        ("contract", contract),
+        ("tiny", tiny_contract),
+    )
+
+
+def _derive_compiler_blocker_code(validator_code):
+    code = str(validator_code or "").strip()
+    if code in {"", "patch_valid", "patch_adapted"}:
+        return ""
+    return code
 
 
 def _sanitize_replay_path_component(value):
@@ -168,10 +239,13 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
             "code": failure["code"],
             "summary": failure["summary"],
         },
+        "git_head": _current_git_head(),
+        "bucket_tag": _derive_model_failure_bucket_tag(model_metrics),
         "error": {
             "text": str(exc),
             "summary": model_turn.get("summary") or model_turn.get("error") or failure["summary"],
         },
+        "blocker_code": _derive_model_failure_blocker_code(model_metrics),
         "active_work_todo": resume_context.get("active_work_todo") or session.get("active_work_todo") or {},
         "model_metrics": dict(model_metrics),
         "draft_metrics": {
@@ -257,8 +331,13 @@ def write_patch_draft_compiler_replay(
     metadata = {
         "schema_version": 1,
         "bundle": "patch_draft_compiler",
+        "git_head": _current_git_head(),
+        "bucket_tag": _derive_compiler_bucket_tag(validator_result, todo),
         "session_id": normalized_session_id,
         "todo_id": normalized_todo_id,
+        "blocker_code": _derive_compiler_blocker_code(
+            validator_result.get("code"),
+        ),
         "attempt": attempt,
         "captured_at": captured_at,
         "files": {

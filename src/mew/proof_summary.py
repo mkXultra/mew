@@ -1,6 +1,7 @@
 import json
 from collections import defaultdict
 from pathlib import Path
+import subprocess
 
 
 def _read_container_from_inspect(path):
@@ -108,6 +109,116 @@ def _safe_rate(numerator, denominator):
     except (TypeError, ValueError, ZeroDivisionError):
         return 0.0
 
+
+def _current_git_head():
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if head.returncode == 0:
+            return (head.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return ""
+
+
+def _cohort_label(git_head, current_head):
+    git_head = str(git_head or "").strip()
+    if not git_head:
+        return "unknown"
+    if not str(current_head or "").strip():
+        return "unknown"
+    if git_head == str(current_head or ""):
+        return "current_head"
+    return "legacy"
+
+
+def _new_m6_11_cohort_summary():
+    return {
+        "total_bundles": 0,
+        "bundle_type_counts": defaultdict(int),
+        "relevant_bundles": 0,
+        "compiler_bundles": 0,
+        "off_schema_count": 0,
+        "refusal_count": 0,
+        "refusal_by_type": defaultdict(int),
+        "dominant_bundle_type": "",
+        "dominant_bundle_share": 0.0,
+        "malformed_bundle_count": 0,
+        "malformed_relevant_bundle_count": 0,
+        "malformed_bundle_counts": defaultdict(int),
+        "thresholds": {
+            "off_schema_rate_max": 0.05,
+            "off_schema_rate_ok": True,
+            "refusal_rate_max": 0.03,
+            "refusal_rate_ok": True,
+            "failure_mode_concentration_max": 0.4,
+            "failure_mode_concentration_ok": True,
+            "malformed_relevant_bundles_ok": True,
+            "has_bundles": False,
+            "has_relevant_bundles": False,
+        },
+    }
+
+
+def _finalize_m6_11_cohort_summary(cohort):
+    total_bundles = int(cohort.get("total_bundles", 0))
+    relevant_bundles = int(cohort.get("relevant_bundles", 0))
+    compiler_bundles = int(cohort.get("compiler_bundles", 0))
+    off_schema_count = int(cohort.get("off_schema_count", 0))
+    refusal_count = int(cohort.get("refusal_count", 0))
+    malformed_bundle_count = int(cohort.get("malformed_bundle_count", 0))
+    malformed_relevant_bundle_count = int(cohort.get("malformed_relevant_bundle_count", 0))
+
+    bundle_type_counts = defaultdict(int, cohort.get("bundle_type_counts", {}))
+    dominant_bundle_type = ""
+    dominant_bundle_count = 0
+    if bundle_type_counts:
+        dominant_bundle_type, dominant_bundle_count = max(
+            bundle_type_counts.items(),
+            key=lambda item: item[1],
+        )
+    dominant_bundle_share = _safe_rate(dominant_bundle_count, total_bundles)
+    off_schema_rate = _safe_rate(off_schema_count, compiler_bundles)
+    refusal_rate = _safe_rate(refusal_count, total_bundles)
+    dominant_share_ok = total_bundles == 0 or dominant_bundle_share <= 0.4
+    malformed_relevant_ok = malformed_relevant_bundle_count == 0
+
+    return {
+        "total_bundles": total_bundles,
+        "bundle_type_counts": dict(bundle_type_counts),
+        "relevant_bundles": relevant_bundles,
+        "compiler_bundles": compiler_bundles,
+        "off_schema_count": off_schema_count,
+        "off_schema_rate": off_schema_rate,
+        "off_schema_denominator": compiler_bundles,
+        "refusal_count": refusal_count,
+        "refusal_rate": refusal_rate,
+        "refusal_by_type": dict(defaultdict(int, cohort.get("refusal_by_type", {}))),
+        "dominant_bundle_type": dominant_bundle_type,
+        "dominant_bundle_share": dominant_bundle_share,
+        "malformed_bundle_count": malformed_bundle_count,
+        "malformed_relevant_bundle_count": malformed_relevant_bundle_count,
+        "malformed_bundle_counts": dict(
+            defaultdict(int, cohort.get("malformed_bundle_counts", {}))
+        ),
+        "thresholds": {
+            "off_schema_rate_max": 0.05,
+            "off_schema_rate_ok": off_schema_rate <= 0.05,
+            "refusal_rate_max": 0.03,
+            "refusal_rate_ok": refusal_rate <= 0.03,
+            "failure_mode_concentration_max": 0.4,
+            "failure_mode_concentration_ok": dominant_share_ok,
+            "malformed_relevant_bundles_ok": malformed_relevant_ok,
+            "has_bundles": total_bundles > 0,
+            "has_relevant_bundles": relevant_bundles > 0,
+        },
+    }
+
 def _read_validator_result_code(metadata_path, metadata):
     files = metadata.get("files") if isinstance(metadata.get("files"), dict) else {}
     validator_file = files.get("validator_result")
@@ -146,6 +257,9 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
         "calibration_bundle_type": "patch_draft_compiler.other",
         "off_schema": False,
         "refusal": False,
+        "git_head": "",
+        "bucket_tag": "",
+        "blocker_code": "",
         "errors": [],
     }
     try:
@@ -161,6 +275,9 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
     bundle_name = metadata.get("bundle")
     if isinstance(bundle_name, str) and bundle_name.strip():
         summary["bundle_type"] = bundle_name.strip()
+    summary["git_head"] = str(metadata.get("git_head") or "")
+    summary["bucket_tag"] = str(metadata.get("bucket_tag") or "")
+    summary["blocker_code"] = str(metadata.get("blocker_code") or "")
 
     code = _read_validator_result_code(metadata_path, metadata)
     if code is None:
@@ -178,6 +295,9 @@ def _summarize_model_failure_bundle(report_path):
         "calibration_bundle_type": "work-loop-model-failure.other",
         "off_schema": False,
         "refusal": False,
+        "git_head": "",
+        "bucket_tag": "",
+        "blocker_code": "",
         "errors": [],
     }
     try:
@@ -193,6 +313,9 @@ def _summarize_model_failure_bundle(report_path):
     bundle_name = report.get("bundle")
     if isinstance(bundle_name, str) and bundle_name.strip():
         summary["bundle_type"] = bundle_name.strip()
+    summary["git_head"] = str(report.get("git_head") or "")
+    summary["bucket_tag"] = str(report.get("bucket_tag") or "")
+    summary["blocker_code"] = str(report.get("blocker_code") or "")
     failure = report.get("failure") if isinstance(report.get("failure"), dict) else {}
     summary["calibration_bundle_type"] = _calibration_model_failure_type(failure.get("code"))
     summary["refusal"] = str(failure.get("code") or "") == "model_refused"
@@ -217,20 +340,35 @@ def summarize_m6_11_replay_calibration(replay_root):
     compiler_bundles = 0
     relevant_bundles = 0
 
+    cohort_summaries = {
+        "current_head": _new_m6_11_cohort_summary(),
+        "legacy": _new_m6_11_cohort_summary(),
+        "unknown": _new_m6_11_cohort_summary(),
+    }
+    current_head = _current_git_head()
+
     for metadata_path in sorted(replay_path.rglob("replay_metadata.json")):
         if not metadata_path.is_file():
             continue
         bundle_summary = _summarize_patch_draft_compiler_bundle(metadata_path)
         bundle_type = bundle_summary.get("bundle_type") or "patch_draft_compiler"
+        cohort_name = _cohort_label(bundle_summary.get("git_head"), current_head)
+        cohort_summary = cohort_summaries[cohort_name]
         if bundle_type != "patch_draft_compiler":
             malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
             malformed_bundle_count += 1
+            cohort_summary["malformed_bundle_count"] += 1
+            cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
             continue
         relevant_bundles += 1
+        cohort_summary["relevant_bundles"] += 1
         if bundle_summary.get("errors"):
             malformed_bundle_counts[bundle_type] += 1
             malformed_bundle_count += 1
             malformed_relevant_bundle_count += 1
+            cohort_summary["malformed_bundle_count"] += 1
+            cohort_summary["malformed_relevant_bundle_count"] += 1
+            cohort_summary["malformed_bundle_counts"][bundle_type] += 1
             for error in bundle_summary.get("errors") or []:
                 errors.append(error)
             continue
@@ -238,35 +376,53 @@ def summarize_m6_11_replay_calibration(replay_root):
         total_bundles += 1
         compiler_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
+        cohort_summary["total_bundles"] += 1
+        cohort_summary["compiler_bundles"] += 1
+        cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
         if bundle_summary.get("off_schema"):
             off_schema_count += 1
+            cohort_summary["off_schema_count"] += 1
         if bundle_summary.get("refusal"):
             refusal_count += 1
+            cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
+            cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
 
     for report_path in sorted(replay_path.rglob("report.json")):
         if not report_path.is_file():
             continue
         bundle_summary = _summarize_model_failure_bundle(report_path)
         bundle_type = bundle_summary.get("bundle_type") or "work-loop-model-failure"
+        cohort_name = _cohort_label(bundle_summary.get("git_head"), current_head)
+        cohort_summary = cohort_summaries[cohort_name]
         if bundle_type != "work-loop-model-failure":
             malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
             malformed_bundle_count += 1
+            cohort_summary["malformed_bundle_count"] += 1
+            cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
             continue
         relevant_bundles += 1
+        cohort_summary["relevant_bundles"] += 1
         if bundle_summary.get("errors"):
             malformed_bundle_counts[bundle_type] += 1
             malformed_bundle_count += 1
             malformed_relevant_bundle_count += 1
+            cohort_summary["malformed_bundle_count"] += 1
+            cohort_summary["malformed_relevant_bundle_count"] += 1
+            cohort_summary["malformed_bundle_counts"][bundle_type] += 1
             for error in bundle_summary.get("errors") or []:
                 errors.append(error)
             continue
         calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "work-loop-model-failure.other"
         total_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
+        cohort_summary["total_bundles"] += 1
+        cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
         if bundle_summary.get("refusal"):
             refusal_count += 1
+            cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
+            cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
         for error in bundle_summary.get("errors") or []:
             errors.append(error)
 
@@ -327,6 +483,13 @@ def summarize_m6_11_replay_calibration(replay_root):
             "malformed_bundle_count": malformed_bundle_count,
             "malformed_relevant_bundle_count": malformed_relevant_bundle_count,
             "malformed_bundle_counts": dict(malformed_bundle_counts),
+            "cohorts": {
+                "current_head": _finalize_m6_11_cohort_summary(
+                    cohort_summaries["current_head"]
+                ),
+                "legacy": _finalize_m6_11_cohort_summary(cohort_summaries["legacy"]),
+                "unknown": _finalize_m6_11_cohort_summary(cohort_summaries["unknown"]),
+            },
             "thresholds": thresholds,
         },
     }
@@ -553,6 +716,39 @@ def format_proof_summary(summary):
                 )
             ),
         ]
+        cohorts = calibration.get("cohorts") or {}
+        for cohort_name in ("current_head", "legacy", "unknown"):
+            cohort = cohorts.get(cohort_name) or {}
+            refusal_by_type = cohort.get("refusal_by_type") or {}
+            refusal_breakdown = ", ".join(
+                f"{key}={value}" for key, value in sorted(refusal_by_type.items())
+            )
+            bundle_types = ", ".join(
+                f"{key}={value}" for key, value in sorted((cohort.get("bundle_type_counts") or {}).items())
+            )
+            lines.append(
+                f"cohort[{cohort_name}]: total={cohort.get('total_bundles', 0)} dominant={cohort.get('dominant_bundle_type', '')} share={cohort.get('dominant_bundle_share', 0.0):.4f} bundles={bundle_types or 'none'}"
+            )
+            lines.append(
+                (
+                    f"cohort[{cohort_name}]_rates: "
+                    f"off_schema={cohort.get('off_schema_rate', 0.0):.4f} "
+                    f"({cohort.get('off_schema_count', 0)}/{cohort.get('off_schema_denominator', 0)}) "
+                    f"refusal={cohort.get('refusal_rate', 0.0):.4f} "
+                    f"({cohort.get('refusal_count', 0)}/{cohort.get('total_bundles', 0)}) "
+                    f"refusal_breakdown={refusal_breakdown or 'none'}"
+                )
+            )
+            lines.append(
+                (
+                    f"cohort[{cohort_name}]_thresholds: "
+                    f"off_schema_ok={cohort.get('thresholds', {}).get('off_schema_rate_ok', False)} "
+                    f"refusal_ok={cohort.get('thresholds', {}).get('refusal_rate_ok', False)} "
+                    f"failure_mode_concentration_ok={cohort.get('thresholds', {}).get('failure_mode_concentration_ok', False)} "
+                    f"malformed_relevant_ok={cohort.get('thresholds', {}).get('malformed_relevant_bundles_ok', False)} "
+                    f"has_bundles={cohort.get('thresholds', {}).get('has_bundles', False)}"
+                )
+            )
         for error in summary.get("errors") or []:
             lines.append(f"error: {error}")
         return "\n".join(lines)

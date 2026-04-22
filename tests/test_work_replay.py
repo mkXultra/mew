@@ -8,6 +8,7 @@ from unittest.mock import patch
 from mew.patch_draft import compile_patch_draft
 from mew.work_replay import (
     REPLAYS_ROOT,
+    write_work_model_failure_replay,
     write_patch_draft_compiler_replay,
 )
 
@@ -142,6 +143,207 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["files"]["live_files"], "live_files.json")
                 self.assertEqual(metadata["files"]["allowed_write_roots"], "allowed_write_roots.json")
                 self.assertEqual(metadata["files"]["validator_result"], "validator_result.json")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_work_model_failure_replay_persists_cohort_fields(self):
+        session = {
+            "id": 13,
+            "active_work_todo": {"id": "todo-13"},
+        }
+        model_turn = {
+            "id": 77,
+            "summary": "model failed during tiny preview",
+            "model_metrics": {
+                "write_ready_fast_path": True,
+                "draft_prompt_contract_version": "v3",
+                "tiny_write_ready_draft_prompt_contract_version": "v4",
+                "tiny_write_ready_draft_exit_stage": "compiler_fallback",
+                "tiny_write_ready_draft_fallback_reason": "timeout",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        with patch(
+                            "mew.work_replay._current_git_head",
+                            return_value="1111111111111111111111111111111111111111",
+                        ):
+                            report_path = write_work_model_failure_replay(
+                                session=session,
+                                model_turn=model_turn,
+                                exc=RuntimeError("timeout"),
+                            )
+
+                self.assertTrue(report_path)
+                report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                self.assertEqual(
+                    report["git_head"],
+                    "1111111111111111111111111111111111111111",
+                )
+                self.assertEqual(
+                    report["bucket_tag"],
+                    "contract=v3/tiny=v4/exit=compiler_fallback",
+                )
+                self.assertEqual(report["blocker_code"], "timeout")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_patch_draft_compiler_replay_persists_cohort_fields(self):
+        session_id = "s-11"
+        todo_id = "todo-11-1"
+        todo = {
+            "id": todo_id,
+            "draft_prompt_contract_version": "v3",
+            "tiny_write_ready_draft_prompt_contract_version": "v4",
+        }
+        proposal = {"kind": "patch_request"}
+        validator_result = {"kind": "patch_draft", "code": "patch_blocker"}
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        with patch(
+                            "mew.work_replay._current_git_head",
+                            return_value="2222222222222222222222222222222222222222",
+                        ):
+                            metadata_path = write_patch_draft_compiler_replay(
+                                session_id=session_id,
+                                todo_id=todo_id,
+                                todo=todo,
+                                proposal=proposal,
+                                cached_windows=cached_windows,
+                                live_files=live_files,
+                                allowed_write_roots=allowed_write_roots,
+                                validator_result=validator_result,
+                            )
+
+                self.assertTrue(metadata_path)
+                metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+                self.assertEqual(metadata["git_head"], "2222222222222222222222222222222222222222")
+                self.assertEqual(
+                    metadata["bucket_tag"],
+                    "code=patch_blocker/contract=v3/tiny=v4",
+                )
+                self.assertEqual(metadata["blocker_code"], "patch_blocker")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_work_model_failure_replay_non_git_head_fallback(self):
+        session = {
+            "id": 14,
+            "active_work_todo": {"id": "todo-14"},
+        }
+        model_turn = {
+            "id": 88,
+            "summary": "model failed with non-git fallback",
+            "model_metrics": {
+                "write_ready_fast_path": True,
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        with patch(
+                            "mew.work_replay.subprocess.run",
+                            side_effect=OSError("not a git repo"),
+                        ):
+                            report_path = write_work_model_failure_replay(
+                                session=session,
+                                model_turn=model_turn,
+                                exc=RuntimeError("timeout"),
+                            )
+
+                self.assertTrue(report_path)
+                report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                self.assertEqual(report["git_head"], "")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_patch_draft_compiler_replay_bucket_tag_without_contracts_is_code_only(self):
+        session_id = "s-12"
+        todo_id = "todo-12-1"
+        todo = {
+            "id": todo_id,
+        }
+        proposal = {"kind": "patch_request"}
+        validator_result = {"kind": "patch_draft", "code": "patch_blocker"}
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        metadata_path = write_patch_draft_compiler_replay(
+                            session_id=session_id,
+                            todo_id=todo_id,
+                            todo=todo,
+                            proposal=proposal,
+                            cached_windows=cached_windows,
+                            live_files=live_files,
+                            allowed_write_roots=allowed_write_roots,
+                            validator_result=validator_result,
+                        )
+
+                self.assertTrue(metadata_path)
+                metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+                self.assertEqual(metadata["bucket_tag"], "code=patch_blocker")
+
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_patch_draft_compiler_replay_non_git_head_fallback(self):
+        session_id = "s-13"
+        todo_id = "todo-13-1"
+        todo = {"id": todo_id}
+        proposal = {"kind": "patch_request"}
+        validator_result = {"kind": "patch_draft", "code": "patch_blocker"}
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        with patch(
+                            "mew.work_replay.subprocess.run",
+                            side_effect=OSError("not a git repo"),
+                        ):
+                            metadata_path = write_patch_draft_compiler_replay(
+                                session_id=session_id,
+                                todo_id=todo_id,
+                                todo=todo,
+                                proposal=proposal,
+                                cached_windows=cached_windows,
+                                live_files=live_files,
+                                allowed_write_roots=allowed_write_roots,
+                                validator_result=validator_result,
+                            )
+
+                self.assertTrue(metadata_path)
+                metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+                self.assertEqual(metadata["git_head"], "")
             finally:
                 os.chdir(old_cwd)
 

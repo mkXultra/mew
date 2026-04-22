@@ -1998,6 +1998,14 @@ Missing proof:
   populated, but the current sample is still `100% request_timed_out`, so the
   calibration gate is failing on concentration before any compiler bundles are
   produced
+- Strengthen-Iter-B is now landed: both replay bundle families stamp additive
+  cohort fields (`git_head`, honest `bucket_tag`, `blocker_code`), and
+  `mew proof-summary --m6_11-phase2-calibration` now reports additive
+  `current_head` / `legacy` / `unknown` cohort summaries without changing the
+  top-level threshold math. The existing mixed session-392 root stays honestly
+  red at the top level and currently lands under `cohort[unknown]`, which means
+  the measurement gap is now narrowed to collecting fresh current-HEAD bundles
+  rather than guessing from stale mixed-history calibration.
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -2062,9 +2070,11 @@ Next action:
 - keep the Phase 2/3 calibration checkpoint active and move from Phase 4
   surface parity into close-gate evidence collection:
   with the full `m6_11-*` dogfood subset now green, start the bounded live
-  incidence gate against `#399/#401`, using the now-
-  authoritative follow-status surface to measure whether timeout concentration
-  and combined `#399/#401` incidence are actually dropping
+  incidence gate against `#399/#401`; use the new cohort-aware replay summaries
+  to collect fresh current-HEAD bundles first, then rerun
+  `./mew proof-summary .mew/replays/work-loop --m6_11-phase2-calibration`
+  and measure whether current-head timeout concentration and combined
+  `#399/#401` incidence are actually dropping
 - if live evidence still shows the stale-timeout `latest_model_failure` field
   obscuring blocker-backed recovery despite `resume_source=session_overlay`,
   cut one more bounded operator-surface slice before starting Phase 5/6 work

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mew.cli import build_parser
 from mew.proof_summary import (
@@ -44,6 +45,7 @@ class ProofSummaryTests(unittest.TestCase):
                 {
                     "bundle": "work-loop-model-failure",
                     "failure": {"code": "model_failed_timeout"},
+                    "git_head": "",
                 },
             )
 
@@ -59,34 +61,68 @@ class ProofSummaryTests(unittest.TestCase):
             )
 
     @staticmethod
-    def _write_relevant_compiler_bundle(attempt_root, attempt, code):
+    def _write_relevant_compiler_bundle(
+        attempt_root,
+        attempt,
+        code,
+        *,
+        git_head="",
+        bucket_tag=None,
+        blocker_code=None,
+    ):
         attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
+        metadata = {
+            "bundle": "patch_draft_compiler",
+            "files": {"validator_result": "validator_result.json"},
+        }
+        if git_head is not None:
+            metadata["git_head"] = git_head
+        if bucket_tag is not None:
+            metadata["bucket_tag"] = bucket_tag
+        if blocker_code is not None:
+            metadata["blocker_code"] = blocker_code
         ProofSummaryTests._write_json(
             attempt_dir / "validator_result.json",
             {"code": code},
         )
+        ProofSummaryTests._write_json(attempt_dir / "replay_metadata.json", metadata)
+
+    @staticmethod
+    def _write_model_failure_bundle(
+        attempt_root,
+        attempt,
+        code="model_failed_timeout",
+        *,
+        git_head="",
+        bucket_tag=None,
+        blocker_code=None,
+    ):
+        attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
+        payload = {
+            "bundle": "work-loop-model-failure",
+            "failure": {"code": code},
+        }
+        if git_head is not None:
+            payload["git_head"] = git_head
+        if bucket_tag is not None:
+            payload["bucket_tag"] = bucket_tag
+        if blocker_code is not None:
+            payload["blocker_code"] = blocker_code
         ProofSummaryTests._write_json(
-            attempt_dir / "replay_metadata.json",
-            {
-                "bundle": "patch_draft_compiler",
-                "files": {"validator_result": "validator_result.json"},
-            },
+            attempt_dir / "report.json",
+            payload,
         )
 
     @staticmethod
-    def _write_model_failure_bundle(attempt_root, attempt, code="model_failed_timeout"):
+    def _write_legacy_report_bundle(
+        attempt_root,
+        attempt,
+        bundle_name="legacy-work-loop-failure",
+    ):
         attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
         ProofSummaryTests._write_json(
             attempt_dir / "report.json",
-            {"bundle": "work-loop-model-failure", "failure": {"code": code}},
-        )
-
-    @staticmethod
-    def _write_legacy_report_bundle(attempt_root, attempt, bundle_name="legacy-work-loop-failure"):
-        attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
-        ProofSummaryTests._write_json(
-            attempt_dir / "report.json",
-            {"bundle": bundle_name, "failure": {"code": "model_failed_timeout"}},
+            {"bundle": bundle_name, "failure": {"code": "model_failed_timeout"}, "git_head": "legacy"},
         )
 
     def test_summarize_resident_loop_artifacts(self):
@@ -465,6 +501,160 @@ class ProofSummaryTests(unittest.TestCase):
             calibration["malformed_bundle_counts"],
         )
 
+    def test_summarize_m6_11_calibration_splits_by_cohort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            with patch("mew.proof_summary._current_git_head", return_value="HEAD-CURRENT"):
+                for attempt in range(1, 5):
+                    self._write_relevant_compiler_bundle(
+                        replay_root / "current_head_compiler",
+                        attempt,
+                        "patch_valid",
+                        git_head="HEAD-CURRENT",
+                    )
+                for attempt in range(1, 3):
+                    self._write_model_failure_bundle(
+                        replay_root / "current_head_timeout",
+                        attempt,
+                        "model_failed_timeout",
+                        git_head="HEAD-CURRENT",
+                    )
+                self._write_model_failure_bundle(
+                    replay_root / "legacy_timeout",
+                    1,
+                    "model_failed_timeout",
+                    git_head="HEAD-LEGACY",
+                )
+                self._write_relevant_compiler_bundle(
+                    replay_root / "unknown_compiler",
+                    1,
+                    "patch_valid",
+                    git_head="",
+                )
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 8)
+        cohorts = calibration["cohorts"]
+        self.assertEqual(cohorts["current_head"]["total_bundles"], 6)
+        self.assertEqual(cohorts["legacy"]["total_bundles"], 1)
+        self.assertEqual(cohorts["unknown"]["total_bundles"], 1)
+        self.assertEqual(
+            cohorts["current_head"]["bundle_type_counts"],
+            {
+                "patch_draft_compiler.other": 4,
+                "work-loop-model-failure.model_failed_timeout": 2,
+            },
+        )
+        self.assertEqual(
+            cohorts["legacy"]["bundle_type_counts"],
+            {"work-loop-model-failure.model_failed_timeout": 1},
+        )
+        self.assertEqual(
+            cohorts["unknown"]["bundle_type_counts"],
+            {"patch_draft_compiler.other": 1},
+        )
+
+    def test_summarize_m6_11_calibration_unknown_when_summary_head_lookup_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                1,
+                "patch_valid",
+                git_head="SAVED-HEAD",
+            )
+            self._write_model_failure_bundle(
+                replay_root / "failure",
+                1,
+                "model_failed_timeout",
+                git_head="SAVED-HEAD",
+            )
+            with patch("mew.proof_summary._current_git_head", return_value=""):
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["cohorts"]["unknown"]["total_bundles"], 2)
+        self.assertEqual(calibration["cohorts"]["legacy"]["total_bundles"], 0)
+        self.assertEqual(calibration["cohorts"]["current_head"]["total_bundles"], 0)
+
+    def test_summarize_m6_11_calibration_non_git_head_lookup_fallback_is_non_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                1,
+                "patch_valid",
+                git_head="SAVED-HEAD",
+            )
+            with patch(
+                "mew.proof_summary.subprocess.run",
+                side_effect=OSError("not a git repo"),
+            ):
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["cohorts"]["unknown"]["total_bundles"], 1)
+
+    def test_summarize_m6_11_calibration_current_head_matches_top_level_threshold_math(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            with patch("mew.proof_summary._current_git_head", return_value="HEAD-ONLY"):
+                for attempt in range(1, 3):
+                    self._write_relevant_compiler_bundle(
+                        replay_root / "compiler",
+                        attempt,
+                        "patch_valid",
+                        git_head="HEAD-ONLY",
+                    )
+                for attempt in range(1, 4):
+                    self._write_model_failure_bundle(
+                        replay_root / "failure_timeout",
+                        attempt,
+                        "model_failed_timeout",
+                        git_head="HEAD-ONLY",
+                    )
+                for attempt in range(1, 4):
+                    self._write_model_failure_bundle(
+                        replay_root / "failure_refused",
+                        attempt,
+                        "model_input_rejected",
+                        git_head="HEAD-ONLY",
+                    )
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        current_head = calibration["cohorts"]["current_head"]
+        self.assertEqual(calibration["total_bundles"], current_head["total_bundles"])
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {
+                "patch_draft_compiler.other": 2,
+                "work-loop-model-failure.model_failed_timeout": 3,
+                "work-loop-model-failure.model_input_rejected": 3,
+            },
+        )
+        self.assertEqual(
+            calibration["dominant_bundle_type"],
+            current_head["dominant_bundle_type"],
+        )
+        self.assertAlmostEqual(
+            calibration["dominant_bundle_share"],
+            current_head["dominant_bundle_share"],
+        )
+        self.assertEqual(
+            calibration["thresholds"]["off_schema_rate_ok"],
+            current_head["thresholds"]["off_schema_rate_ok"],
+        )
+        self.assertEqual(
+            calibration["thresholds"]["refusal_rate_ok"],
+            current_head["thresholds"]["refusal_rate_ok"],
+        )
+        self.assertEqual(
+            calibration["thresholds"]["failure_mode_concentration_ok"],
+            current_head["thresholds"]["failure_mode_concentration_ok"],
+        )
+
     def test_summarize_m6_11_calibration_off_schema_uses_compiler_denom(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)
@@ -551,6 +741,11 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertIn("failure_mode_concentration_ok=True", rendered)
         self.assertIn("malformed_relevant_ok=True", rendered)
         self.assertIn("malformed_bundles:", rendered)
+        self.assertIn("cohort[current_head]:", rendered)
+        self.assertIn("cohort[legacy]:", rendered)
+        self.assertIn("cohort[unknown]:", rendered)
+        self.assertIn("cohort[current_head]_rates:", rendered)
+        self.assertIn("cohort[current_head]_thresholds:", rendered)
 
     def test_format_m6_11_calibration_refusal_breakdown_uses_real_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
