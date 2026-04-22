@@ -13593,6 +13593,92 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_reject_pending_write_marks_patch_draft_replay_non_counted(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.work_replay import write_patch_draft_compiler_replay
+
+                target = Path("notes.md")
+                target.write_text("before\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                                "--allow-write",
+                                ".",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                dry_run = json.loads(stdout.getvalue())
+                tool_call_id = dry_run["tool_call"]["id"]
+                replay_path = write_patch_draft_compiler_replay(
+                    session_id="1",
+                    todo_id="todo-1",
+                    todo={"id": "todo-1"},
+                    proposal={"kind": "patch_request"},
+                    cached_windows={},
+                    live_files={},
+                    allowed_write_roots=["."],
+                    validator_result={"kind": "patch_draft", "status": "validated"},
+                )
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    session.setdefault("model_turns", []).append(
+                        {
+                            "id": (session.get("last_model_turn_id") or 0) + 1,
+                            "tool_call_id": tool_call_id,
+                            "status": "completed",
+                            "model_metrics": {"patch_draft_compiler_replay_path": replay_path},
+                        }
+                    )
+                    session["last_model_turn_id"] = (session.get("model_turns") or [{}])[-1]["id"]
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--reject-tool",
+                                str(tool_call_id),
+                                "--reject-reason",
+                                "reviewer rejected",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                rejected = json.loads(stdout.getvalue())
+                self.assertEqual(rejected["rejected_tool_call"]["approval_status"], "rejected")
+                metadata = json.loads(Path(replay_path).read_text(encoding="utf-8"))
+                self.assertFalse(metadata["calibration_counted"])
+                self.assertEqual(metadata["calibration_exclusion_reason"], "reviewer rejected")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_resume_cli_controls_lead_with_pending_approvals(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

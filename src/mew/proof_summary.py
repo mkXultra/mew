@@ -140,6 +140,8 @@ def _cohort_label(git_head, current_head):
 def _new_m6_11_cohort_summary():
     return {
         "total_bundles": 0,
+        "non_counted_bundle_count": 0,
+        "non_counted_bundle_reasons": defaultdict(int),
         "bundle_type_counts": defaultdict(int),
         "blocker_code_counts": defaultdict(int),
         "relevant_bundles": 0,
@@ -191,6 +193,10 @@ def _finalize_m6_11_cohort_summary(cohort):
 
     return {
         "total_bundles": total_bundles,
+        "non_counted_bundle_count": int(cohort.get("non_counted_bundle_count", 0)),
+        "non_counted_bundle_reasons": dict(
+            defaultdict(int, cohort.get("non_counted_bundle_reasons", {}))
+        ),
         "bundle_type_counts": dict(bundle_type_counts),
         "blocker_code_counts": dict(
             defaultdict(int, cohort.get("blocker_code_counts", {}))
@@ -223,7 +229,11 @@ def _finalize_m6_11_cohort_summary(cohort):
         },
     }
 
-def _read_validator_result_code(metadata_path, metadata):
+def _coerce_calibration_counted(value, default=True):
+    return value if isinstance(value, bool) else default
+
+
+def _read_validator_result(metadata_path, metadata):
     files = metadata.get("files") if isinstance(metadata.get("files"), dict) else {}
     validator_file = files.get("validator_result")
     validator_path = metadata_path.parent / (
@@ -235,7 +245,7 @@ def _read_validator_result_code(metadata_path, metadata):
         return None
     if not isinstance(validator, dict):
         return None
-    return validator.get("code")
+    return validator
 
 
 def _calibration_compiler_type(code):
@@ -259,6 +269,8 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
     summary = {
         "bundle_type": "patch_draft_compiler",
         "calibration_bundle_type": "patch_draft_compiler.other",
+        "calibration_counted": True,
+        "calibration_exclusion_reason": "",
         "off_schema": False,
         "refusal": False,
         "git_head": "",
@@ -276,6 +288,13 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
         summary["errors"].append(f"invalid compiler metadata payload: {metadata_path}")
         return summary
 
+    summary["calibration_counted"] = _coerce_calibration_counted(
+        metadata.get("calibration_counted"), default=True
+    )
+    summary["calibration_exclusion_reason"] = str(
+        metadata.get("calibration_exclusion_reason") or ""
+    )
+
     bundle_name = metadata.get("bundle")
     if isinstance(bundle_name, str) and bundle_name.strip():
         summary["bundle_type"] = bundle_name.strip()
@@ -283,10 +302,21 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
     summary["bucket_tag"] = str(metadata.get("bucket_tag") or "")
     summary["blocker_code"] = str(metadata.get("blocker_code") or "")
 
-    code = _read_validator_result_code(metadata_path, metadata)
-    if code is None:
+    validator = _read_validator_result(metadata_path, metadata)
+    if not isinstance(validator, dict):
         summary["errors"].append(f"missing or invalid validator_result JSON for {metadata_path}")
         return summary
+    code = validator.get("code")
+    if code is None:
+        validator_kind = str(validator.get("kind") or "").strip()
+        validator_status = str(validator.get("status") or "").strip()
+        if not (validator_kind == "patch_draft" and validator_status == "validated"):
+            summary["errors"].append(
+                f"missing or invalid validator_result JSON for {metadata_path}"
+            )
+            return summary
+        code = ""
+    code = str(code or "").strip()
     summary["calibration_bundle_type"] = _calibration_compiler_type(code)
     summary["off_schema"] = code == "model_returned_non_schema"
     summary["refusal"] = code == "model_returned_refusal"
@@ -344,6 +374,8 @@ def summarize_m6_11_replay_calibration(replay_root):
     refusal_by_type = defaultdict(int)
     compiler_bundles = 0
     relevant_bundles = 0
+    non_counted_bundle_count = 0
+    non_counted_bundle_reasons = defaultdict(int)
 
     cohort_summaries = {
         "current_head": _new_m6_11_cohort_summary(),
@@ -365,18 +397,35 @@ def summarize_m6_11_replay_calibration(replay_root):
             cohort_summary["malformed_bundle_count"] += 1
             cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
             continue
-        relevant_bundles += 1
-        cohort_summary["relevant_bundles"] += 1
+        calibration_counted = _coerce_calibration_counted(
+            bundle_summary.get("calibration_counted"),
+            default=True,
+        )
+        if not calibration_counted:
+            reason = str(bundle_summary.get("calibration_exclusion_reason") or "").strip()
+            if not reason:
+                reason = "unspecified"
+            non_counted_bundle_count += 1
+            non_counted_bundle_reasons[reason] += 1
+            cohort_summary["non_counted_bundle_count"] += 1
+            cohort_summary["non_counted_bundle_reasons"][reason] += 1
+            continue
+
         if bundle_summary.get("errors"):
             malformed_bundle_counts[bundle_type] += 1
             malformed_bundle_count += 1
-            malformed_relevant_bundle_count += 1
             cohort_summary["malformed_bundle_count"] += 1
-            cohort_summary["malformed_relevant_bundle_count"] += 1
             cohort_summary["malformed_bundle_counts"][bundle_type] += 1
             for error in bundle_summary.get("errors") or []:
                 errors.append(error)
+
+        relevant_bundles += 1
+        cohort_summary["relevant_bundles"] += 1
+        if bundle_summary.get("errors"):
+            malformed_relevant_bundle_count += 1
+            cohort_summary["malformed_relevant_bundle_count"] += 1
             continue
+
         calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "patch_draft_compiler.other"
         total_bundles += 1
         compiler_bundles += 1
@@ -482,6 +531,8 @@ def summarize_m6_11_replay_calibration(replay_root):
         "errors": errors,
         "calibration": {
             "total_bundles": total_bundles,
+            "non_counted_bundle_count": non_counted_bundle_count,
+            "non_counted_bundle_reasons": dict(non_counted_bundle_reasons),
             "bundle_type_counts": dict(bundle_type_counts),
             "relevant_bundles": relevant_bundles,
             "compiler_bundles": compiler_bundles,
@@ -682,6 +733,10 @@ def format_proof_summary(summary):
         refusal_breakdown = ", ".join(
             f"{key}={value}" for key, value in sorted(refusal_by_type.items())
         )
+        non_counted_reasons = calibration.get("non_counted_bundle_reasons") or {}
+        non_counted_breakdown = ", ".join(
+            f"{key}={value}" for key, value in sorted(non_counted_reasons.items())
+        )
         blocker_code_by_type = calibration.get("blocker_code_counts") or {}
         blocker_code_breakdown = ", ".join(
             f"{key}={value}" for key, value in sorted(blocker_code_by_type.items())
@@ -711,6 +766,7 @@ def format_proof_summary(summary):
             f"status: {'pass' if summary.get('ok') else 'review'}",
             "mode: m6.11 phase2/phase3 calibration",
             f"calibration_bundles: total={calibration.get('total_bundles', 0)}",
+            f"calibration_non_counted_bundles: total={calibration.get('non_counted_bundle_count', 0)} reasons={non_counted_breakdown or 'none'}",
             f"calibration_bundle_types: {counts or 'none'}",
             f"calibration_rates: {', '.join(rates)}",
             (
@@ -738,6 +794,10 @@ def format_proof_summary(summary):
         cohorts = calibration.get("cohorts") or {}
         for cohort_name in ("current_head", "legacy", "unknown"):
             cohort = cohorts.get(cohort_name) or {}
+            non_counted_by_type = cohort.get("non_counted_bundle_reasons") or {}
+            non_counted_breakdown = ", ".join(
+                f"{key}={value}" for key, value in sorted(non_counted_by_type.items())
+            )
             refusal_by_type = cohort.get("refusal_by_type") or {}
             refusal_breakdown = ", ".join(
                 f"{key}={value}" for key, value in sorted(refusal_by_type.items())
@@ -751,6 +811,13 @@ def format_proof_summary(summary):
             )
             lines.append(
                 f"cohort[{cohort_name}]: total={cohort.get('total_bundles', 0)} dominant={cohort.get('dominant_bundle_type', '')} share={cohort.get('dominant_bundle_share', 0.0):.4f} bundles={bundle_types or 'none'}"
+            )
+            lines.append(
+                (
+                    f"cohort[{cohort_name}]_non_counted: "
+                    f"total={cohort.get('non_counted_bundle_count', 0)} "
+                    f"reasons={non_counted_breakdown or 'none'}"
+                )
             )
             lines.append(
                 (

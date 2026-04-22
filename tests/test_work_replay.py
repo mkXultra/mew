@@ -8,6 +8,7 @@ from unittest.mock import patch
 from mew.patch_draft import compile_patch_draft
 from mew.work_replay import (
     REPLAYS_ROOT,
+    mark_patch_draft_compiler_replay_non_counted,
     write_work_model_failure_replay,
     write_patch_draft_compiler_replay,
 )
@@ -135,6 +136,8 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["bundle"], "patch_draft_compiler")
                 self.assertEqual(metadata["session_id"], str(session_id))
                 self.assertEqual(metadata["todo_id"], todo_id)
+                self.assertTrue(metadata["calibration_counted"])
+                self.assertEqual(metadata["calibration_exclusion_reason"], "")
                 self.assertEqual(metadata["attempt"], 1)
                 self.assertEqual(metadata["captured_at"], "2026-04-22T10:00:00Z")
                 self.assertEqual(metadata["files"]["todo"], "todo.json")
@@ -143,6 +146,41 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["files"]["live_files"], "live_files.json")
                 self.assertEqual(metadata["files"]["allowed_write_roots"], "allowed_write_roots.json")
                 self.assertEqual(metadata["files"]["validator_result"], "validator_result.json")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_mark_patch_draft_compiler_replay_non_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                metadata_path = Path(tmp) / "replay_metadata.json"
+                metadata_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "bundle": "patch_draft_compiler",
+                            "calibration_counted": True,
+                            "calibration_exclusion_reason": "",
+                            "files": {"validator_result": "validator_result.json"},
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                Path(tmp, "validator_result.json").write_text(
+                    json.dumps({"kind": "patch_draft", "status": "validated"}),
+                    encoding="utf-8",
+                )
+
+                updated = mark_patch_draft_compiler_replay_non_counted(
+                    metadata_path,
+                    reason="reviewer rejected",
+                )
+                self.assertTrue(updated)
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                self.assertFalse(metadata["calibration_counted"])
+                self.assertEqual(metadata["calibration_exclusion_reason"], "reviewer rejected")
             finally:
                 os.chdir(old_cwd)
 

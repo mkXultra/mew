@@ -459,6 +459,60 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertIn("work-loop-model-failure.model_failed_timeout", calibration["bundle_type_counts"])
         self.assertTrue(calibration["thresholds"]["malformed_relevant_bundles_ok"])
 
+    def test_summarize_m6_11_calibration_patch_draft_compiler_validated_without_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            compiler_root = replay_root / "compiler"
+            compiler_root.mkdir(parents=True)
+            attempt_dir = compiler_root / "attempt-1"
+            ProofSummaryTests._write_json(
+                attempt_dir / "validator_result.json",
+                {"kind": "patch_draft", "status": "validated"},
+            )
+            ProofSummaryTests._write_json(
+                attempt_dir / "replay_metadata.json",
+                {"bundle": "patch_draft_compiler", "files": {"validator_result": "validator_result.json"}},
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 1)
+        self.assertEqual(calibration["bundle_type_counts"], {"patch_draft_compiler.other": 1})
+        self.assertEqual(calibration["malformed_bundle_count"], 0)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 0)
+        self.assertEqual(len(summary["errors"]), 0)
+
+    def test_summarize_m6_11_calibration_non_counted_compiler_bundle_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(replay_root / "counted", 1, "patch_valid")
+            non_counted_root = replay_root / "non_counted" / "attempt-1"
+            non_counted_root.parent.mkdir(parents=True, exist_ok=True)
+            ProofSummaryTests._write_json(
+                non_counted_root / "replay_metadata.json",
+                {
+                    "bundle": "patch_draft_compiler",
+                    "files": {"validator_result": "validator_result.json"},
+                    "calibration_counted": False,
+                    "calibration_exclusion_reason": "reviewer rejected",
+                },
+            )
+            (non_counted_root / "validator_result.json").write_text(
+                "{",
+                encoding="utf-8",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 1)
+        self.assertEqual(calibration["compiler_bundles"], 1)
+        self.assertEqual(calibration["relevant_bundles"], 1)
+        self.assertEqual(calibration["malformed_bundle_count"], 0)
+        self.assertEqual(calibration["malformed_relevant_bundle_count"], 0)
+        self.assertEqual(len(summary["errors"]), 0)
+        self.assertEqual(calibration["thresholds"]["malformed_relevant_bundles_ok"], True)
+        self.assertEqual(calibration["non_counted_bundle_count"], 1)
+        self.assertEqual(calibration["non_counted_bundle_reasons"], {"reviewer rejected": 1})
     def test_summarize_m6_11_calibration_legacy_bundles_are_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)

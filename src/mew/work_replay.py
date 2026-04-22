@@ -331,6 +331,8 @@ def write_patch_draft_compiler_replay(
     metadata = {
         "schema_version": 1,
         "bundle": "patch_draft_compiler",
+        "calibration_counted": True,
+        "calibration_exclusion_reason": "",
         "git_head": _current_git_head(),
         "bucket_tag": _derive_compiler_bucket_tag(validator_result, todo),
         "session_id": normalized_session_id,
@@ -352,3 +354,31 @@ def write_patch_draft_compiler_replay(
     metadata_path = attempt_dir / "replay_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
     return str(metadata_path)
+
+
+def mark_patch_draft_compiler_replay_non_counted(metadata_path, reason=""):
+    if not metadata_path:
+        return False
+    path = Path(metadata_path)
+    if not path.is_file():
+        return False
+    try:
+        metadata_text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    try:
+        metadata = json.loads(metadata_text) if metadata_text.strip() else None
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(metadata, dict):
+        return False
+    metadata["calibration_counted"] = False
+    metadata["calibration_exclusion_reason"] = str(reason or "")
+    try:
+        path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    except OSError:
+        return False
+    return True

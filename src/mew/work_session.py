@@ -1509,6 +1509,16 @@ def find_work_model_turn(session, turn_id):
     return None
 
 
+def find_model_turn_for_tool_call(session, tool_call_id):
+    if not session or tool_call_id is None:
+        return None
+    target = str(tool_call_id)
+    for turn in reversed(session.get("model_turns") or []):
+        if any(str(value) == target for value in _turn_tool_call_ids(turn)):
+            return turn
+    return None
+
+
 def work_turn_guidance_snapshot(turn):
     return clip_inline_text((turn or {}).get("guidance_snapshot") or (turn or {}).get("guidance") or "", 1000)
 

@@ -251,6 +251,7 @@ from .work_session import (
     request_work_session_stop,
     select_work_recovery_plan_item,
     start_work_model_turn,
+    find_model_turn_for_tool_call,
     work_tool_result_error,
     start_work_tool_call,
     broad_read_after_search_miss_guard,
@@ -274,7 +275,10 @@ from .work_session import (
     work_write_pairing_status,
 )
 from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
-from .work_replay import write_work_model_failure_replay
+from .work_replay import (
+    mark_patch_draft_compiler_replay_non_counted,
+    write_work_model_failure_replay,
+)
 from .work_cells import build_work_session_cells, format_work_cells, format_work_session_cells
 from .work_world import build_work_world_state
 from .write_tools import resolve_allowed_write_path
@@ -5716,10 +5720,22 @@ def cmd_work_reject_tool(args):
             print(f"mew: {reject_error}", file=sys.stderr)
             return 1
         reject_work_tool_call(session, source_call, getattr(args, "reject_reason", None) or "")
+        reason = (getattr(args, "reject_reason", None) or "").strip()
+        model_turn = find_model_turn_for_tool_call(session, source_call.get("id"))
+        replay_path = None
+        if model_turn:
+            replay_path = (model_turn.get("model_metrics") or {}).get(
+                "patch_draft_compiler_replay_path"
+            )
+        if replay_path:
+            mark_patch_draft_compiler_replay_non_counted(
+                replay_path,
+                reason=reason,
+            )
         resolve_work_approval_elicitation(
             state,
             source_call,
-            f"Rejected work tool #{args.reject_tool}: {getattr(args, 'reject_reason', None) or ''}".strip(),
+            f"Rejected work tool #{args.reject_tool}: {reason}".strip(),
         )
         save_state(state)
     if args.json:
