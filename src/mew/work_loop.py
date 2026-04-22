@@ -1686,6 +1686,27 @@ def _attempt_write_ready_tiny_draft_turn(
     compiler_kind = str(validator_result.get("kind") or "").strip()
     if compiler_kind != "patch_draft":
         code = str(validator_result.get("code") or "").strip()
+        if compiler_kind == "patch_blocker" and code and code != "model_returned_non_schema":
+            action = {
+                "type": "wait",
+                "reason": _stable_write_ready_tiny_draft_blocker_reason(validator_result),
+            }
+            action_plan = {
+                "summary": decision_plan.get("summary") or validator_result.get("detail") or action["reason"],
+                "action": action,
+                "act_mode": "tiny_write_ready_draft",
+            }
+            metrics["tiny_write_ready_draft_outcome"] = "blocker"
+            metrics["tiny_write_ready_draft_exit_stage"] = "compiler_blocker"
+            return {
+                "status": "blocker",
+                "decision_plan": decision_plan,
+                "action_plan": action_plan,
+                "action": action,
+                "metrics": metrics,
+                "elapsed_seconds": _finalize_tiny_draft_metrics("compiler_blocker"),
+                "compiler_observed": compiler_observed,
+            }
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = (
             "invalid_shape" if code == "model_returned_non_schema" else f"compiler_{code or 'unusable_output'}"
